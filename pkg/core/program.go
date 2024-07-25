@@ -6,13 +6,13 @@ import (
 	"reflect"
 )
 
-// Program represents a complete DSPy pipeline or workflow
+// Program represents a complete DSPy pipeline or workflow.
 type Program struct {
 	Modules map[string]Module
 	Forward func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error)
 }
 
-// NewProgram creates a new Program with the given modules and forward function
+// NewProgram creates a new Program with the given modules and forward function.
 func NewProgram(modules map[string]Module, forward func(context.Context, map[string]interface{}) (map[string]interface{}, error)) Program {
 	return Program{
 		Modules: modules,
@@ -20,7 +20,7 @@ func NewProgram(modules map[string]Module, forward func(context.Context, map[str
 	}
 }
 
-// Execute runs the program with the given inputs
+// Execute runs the program with the given inputs.
 func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
 	if p.Forward == nil {
 		return nil, errors.New("forward function is not defined")
@@ -29,7 +29,7 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 }
 
 // GetSignature returns the overall signature of the program
-// This would need to be defined based on the Forward function's expected inputs and outputs
+// This would need to be defined based on the Forward function's expected inputs and outputs.
 func (p Program) GetSignature() Signature {
 	var inputs []InputField
 	var outputs []OutputField
@@ -45,7 +45,7 @@ func (p Program) GetSignature() Signature {
 	return NewSignature(inputs, outputs)
 }
 
-// Clone creates a deep copy of the Program
+// Clone creates a deep copy of the Program.
 func (p Program) Clone() Program {
 	modulesCopy := make(map[string]Module)
 	for name, module := range p.Modules {
@@ -58,7 +58,7 @@ func (p Program) Clone() Program {
 	}
 }
 
-// Equal checks if two Programs are equivalent
+// Equal checks if two Programs are equivalent.
 func (p Program) Equal(other Program) bool {
 	if p.Forward == nil && other.Forward != nil || p.Forward != nil && other.Forward == nil {
 		return false
@@ -78,12 +78,12 @@ func (p Program) Equal(other Program) bool {
 	return true
 }
 
-// AddModule adds a new module to the Program
+// AddModule adds a new module to the Program.
 func (p *Program) AddModule(name string, module Module) {
 	p.Modules[name] = module
 }
 
-// SetForward sets the forward function for the Program
+// SetForward sets the forward function for the Program.
 func (p *Program) SetForward(forward func(context.Context, map[string]interface{}) (map[string]interface{}, error)) {
 	p.Forward = forward
 }

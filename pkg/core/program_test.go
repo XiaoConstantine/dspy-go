@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestProgram tests the Program struct and its methods
+// TestProgram tests the Program struct and its methods.
 func TestProgram(t *testing.T) {
 	modules := map[string]Module{
 		"module1": NewModule(NewSignature(

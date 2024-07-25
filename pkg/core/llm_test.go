@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestLLMRegistry tests the LLMRegistry
+// TestLLMRegistry tests the LLMRegistry.
 func TestLLMRegistry(t *testing.T) {
 	registry := NewLLMRegistry()
 
@@ -30,7 +30,7 @@ func TestLLMRegistry(t *testing.T) {
 	}
 }
 
-// TestGenerateOptions tests the GenerateOptions and related functions
+// TestGenerateOptions tests the GenerateOptions and related functions.
 func TestGenerateOptions(t *testing.T) {
 	opts := &GenerateOptions{}
 
@@ -65,7 +65,7 @@ func TestGenerateOptions(t *testing.T) {
 	}
 }
 
-// TestMockLLM tests the MockLLM implementation
+// TestMockLLM tests the MockLLM implementation.
 func TestMockLLM(t *testing.T) {
 	llm := &MockLLM{}
 

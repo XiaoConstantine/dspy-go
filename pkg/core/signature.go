@@ -5,31 +5,31 @@ import (
 	"strings"
 )
 
-// Field represents a single field in a signature
+// Field represents a single field in a signature.
 type Field struct {
 	Name        string
 	Description string
 	Prefix      string
 }
 
-// InputField represents an input field
+// InputField represents an input field.
 type InputField struct {
 	Field
 }
 
-// OutputField represents an output field
+// OutputField represents an output field.
 type OutputField struct {
 	Field
 }
 
-// Signature represents the input and output specification of a module
+// Signature represents the input and output specification of a module.
 type Signature struct {
 	Inputs      []InputField
 	Outputs     []OutputField
 	Instruction string
 }
 
-// NewSignature creates a new Signature with the given inputs and outputs
+// NewSignature creates a new Signature with the given inputs and outputs.
 func NewSignature(inputs []InputField, outputs []OutputField) Signature {
 	return Signature{
 		Inputs:  inputs,
@@ -37,13 +37,13 @@ func NewSignature(inputs []InputField, outputs []OutputField) Signature {
 	}
 }
 
-// WithInstruction adds an instruction to the Signature
+// WithInstruction adds an instruction to the Signature.
 func (s Signature) WithInstruction(instruction string) Signature {
 	s.Instruction = instruction
 	return s
 }
 
-// String returns a string representation of the Signature
+// String returns a string representation of the Signature.
 func (s Signature) String() string {
 	var sb strings.Builder
 	sb.WriteString("Inputs:\n")
@@ -60,7 +60,7 @@ func (s Signature) String() string {
 	return sb.String()
 }
 
-// ParseSignature parses a signature string into a Signature struct
+// ParseSignature parses a signature string into a Signature struct.
 func ParseSignature(signatureStr string) (Signature, error) {
 	parts := strings.Split(signatureStr, "->")
 	if len(parts) != 2 {
@@ -93,7 +93,7 @@ func parseOutputFields(fieldsStr string) []OutputField {
 	return fields
 }
 
-// ShorthandNotation creates a Signature from a shorthand notation string
+// ShorthandNotation creates a Signature from a shorthand notation string.
 func ShorthandNotation(notation string) (Signature, error) {
 	return ParseSignature(notation)
 }

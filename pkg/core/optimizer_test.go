@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestOptimizerRegistry tests the OptimizerRegistry
+// TestOptimizerRegistry tests the OptimizerRegistry.
 func TestOptimizerRegistry(t *testing.T) {
 	registry := NewOptimizerRegistry()
 
@@ -30,7 +30,7 @@ func TestOptimizerRegistry(t *testing.T) {
 	}
 }
 
-// TestCompileOptions tests the CompileOptions and related functions
+// TestCompileOptions tests the CompileOptions and related functions.
 func TestCompileOptions(t *testing.T) {
 	opts := &CompileOptions{}
 
@@ -64,7 +64,7 @@ func TestCompileOptions(t *testing.T) {
 	}
 }
 
-// TestBootstrapFewShot tests the BootstrapFewShot optimizer
+// TestBootstrapFewShot tests the BootstrapFewShot optimizer.
 func TestBootstrapFewShot(t *testing.T) {
 	optimizer := NewBootstrapFewShot(5)
 
@@ -98,14 +98,14 @@ func TestBootstrapFewShot(t *testing.T) {
 	}
 }
 
-// MockOptimizer is a mock implementation of the Optimizer interface for testing
+// MockOptimizer is a mock implementation of the Optimizer interface for testing.
 type MockOptimizer struct{}
 
 func (m *MockOptimizer) Compile(ctx context.Context, program Program, dataset Dataset, metric Metric) (Program, error) {
 	return program, nil
 }
 
-// MockDataset is a mock implementation of the Dataset interface for testing
+// MockDataset is a mock implementation of the Dataset interface for testing.
 type MockDataset struct {
 	data  []Example
 	index int

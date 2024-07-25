@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// MockLLM is a mock implementation of the LLM interface for testing
+// MockLLM is a mock implementation of the LLM interface for testing.
 type MockLLM struct{}
 
 func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...GenerateOption) (string, error) {
@@ -17,7 +17,7 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options .
 	return map[string]interface{}{"response": "mock response"}, nil
 }
 
-// TestBaseModule tests the BaseModule struct and its methods
+// TestBaseModule tests the BaseModule struct and its methods.
 func TestBaseModule(t *testing.T) {
 	sig := NewSignature(
 		[]InputField{{Field: Field{Name: "input"}}},
@@ -46,7 +46,7 @@ func TestBaseModule(t *testing.T) {
 	}
 }
 
-// TestModuleChain tests the ModuleChain struct and its methods
+// TestModuleChain tests the ModuleChain struct and its methods.
 func TestModuleChain(t *testing.T) {
 	module1 := NewModule(NewSignature(
 		[]InputField{{Field: Field{Name: "input1"}}},

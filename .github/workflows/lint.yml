@@ -1,0 +1,30 @@
+name: Lint
+on:
+  push:
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+  pull_request:
+    paths:
+      - "**.go"
+      - go.mod
+      - go.sum
+
+env:
+  GO111MODULE: on
+
+jobs:
+  golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - uses: actions/checkout@v4
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --verbose
