@@ -1,5 +1,3 @@
-// modules/chainofthought.go
-
 package modules
 
 import (

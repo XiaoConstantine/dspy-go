@@ -13,7 +13,11 @@ import (
 type Predict struct {
 	core.BaseModule
 	Demos []core.Example
+	LLM   core.LLM
 }
+
+// Ensure Predict implements core.Module.
+var _ core.Module = (*Predict)(nil)
 
 func NewPredict(signature core.Signature) *Predict {
 	return &Predict{
@@ -22,29 +26,50 @@ func NewPredict(signature core.Signature) *Predict {
 	}
 }
 
-func (p *Predict) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	tracing := ctx.Value("tracing")
+	var trace *core.Trace
+	if tracing != nil && tracing.(bool) {
+		trace = core.NewTrace("Predict", "Predict", "")
+		trace.SetInputs(inputs)
+	}
+
 	if err := p.ValidateInputs(inputs); err != nil {
 		return nil, err
 	}
 
-	prompt := formatPrompt(p.Signature, p.Demos, inputs)
+	signature := p.GetSignature()
+	prompt := formatPrompt(signature, p.Demos, inputs)
 	completion, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
 
-	outputs := parseCompletion(completion, p.Signature)
-	return p.FormatOutputs(outputs), nil
+	outputs := parseCompletion(completion, signature)
+	formattedOutputs := p.FormatOutputs(outputs)
+
+	if tracing != nil && tracing.(bool) {
+		trace.SetOutputs(formattedOutputs)
+		traces := ctx.Value("traces").(*[]core.Trace)
+		*traces = append(*traces, *trace)
+		// ctx = context.WithValue(ctx, "traces", traces)
+	}
+
+	return formattedOutputs, nil
 }
 
 func (p *Predict) Clone() core.Module {
 	return &Predict{
 		BaseModule: *p.BaseModule.Clone().(*core.BaseModule),
 		Demos:      append([]core.Example{}, p.Demos...),
+		LLM:        p.LLM,
 	}
 }
 
-// Helper functions (to be implemented).
+func (p *Predict) GetDemos() []core.Example {
+	return p.Demos
+}
+
 func formatPrompt(signature core.Signature, demos []core.Example, inputs map[string]any) string {
 	var sb strings.Builder
 
@@ -118,4 +143,36 @@ func outputFieldsToFields(outputs []core.OutputField) []core.Field {
 		fields[i] = output.Field
 	}
 	return fields
+}
+
+func (p *Predict) FormatOutputs(outputs map[string]interface{}) map[string]interface{} {
+	formattedOutputs := make(map[string]interface{})
+	for _, field := range p.GetSignature().Outputs {
+		if value, ok := outputs[field.Name]; ok {
+			formattedOutputs[field.Name] = value
+		}
+	}
+	return formattedOutputs
+}
+
+func (p *Predict) GetSignature() core.Signature {
+	return p.BaseModule.GetSignature()
+}
+
+func (p *Predict) ValidateInputs(inputs map[string]interface{}) error {
+	signature := p.GetSignature()
+	for _, field := range signature.Inputs {
+		if _, ok := inputs[field.Name]; !ok {
+			return fmt.Errorf("missing required input: %s", field.Name)
+		}
+	}
+	return nil
+}
+
+func (p *Predict) SetDemos(demos []core.Example) {
+	p.Demos = demos
+}
+
+func (p *Predict) SetLLM(llm core.LLM) {
+	p.LLM = llm
 }

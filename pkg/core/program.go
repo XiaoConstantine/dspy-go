@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // Program represents a complete DSPy pipeline or workflow.
@@ -25,7 +27,26 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 	if p.Forward == nil {
 		return nil, errors.New("forward function is not defined")
 	}
-	return p.Forward(ctx, inputs)
+
+	tracing := ctx.Value("tracing")
+	var programTrace *Trace
+	if tracing != nil && tracing.(bool) {
+		programTrace = NewTrace("Program", "Program", "")
+		programTrace.SetInputs(inputs)
+
+		ctx = context.WithValue(ctx, utils.CurrentTraceKey, programTrace)
+	}
+
+	outputs, err := p.Forward(ctx, inputs)
+
+	if tracing != nil && tracing.(bool) {
+		programTrace.SetOutputs(outputs)
+		traces := ctx.Value("traces").(*[]Trace)
+		*traces = append(*traces, *programTrace)
+		// ctx = context.WithValue(ctx, "traces", traces)
+	}
+
+	return outputs, err
 }
 
 // GetSignature returns the overall signature of the program
