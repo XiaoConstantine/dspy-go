@@ -6,6 +6,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,7 +28,7 @@ func createProgram() core.Program {
 		if err != nil {
 			return nil, err
 		}
-		traces, ok := ctx.Value("traces").(*[]core.Trace)
+		traces, ok := ctx.Value(utils.TracesContextKey).(*[]core.Trace)
 		if ok && traces != nil {
 			trace := core.NewTrace("Predict", "Predict", "")
 			trace.SetInputs(inputs)

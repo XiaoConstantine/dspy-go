@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 type BootstrapFewShot struct {
@@ -29,7 +30,7 @@ func (b *BootstrapFewShot) Compile(student, teacher core.Program, trainset []map
 		}
 
 		traces := &[]core.Trace{}
-		ctx := context.WithValue(context.Background(), "traces", traces)
+		ctx := context.WithValue(context.Background(), utils.TracesContextKey, traces)
 
 		prediction, err := teacher.Execute(ctx, example)
 		if err != nil {

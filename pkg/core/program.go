@@ -28,13 +28,13 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 		return nil, errors.New("forward function is not defined")
 	}
 
-	traces, ok := ctx.Value("traces").(*[]Trace)
+	traces, ok := ctx.Value(utils.TracesContextKey).(*[]Trace)
 	if !ok || traces == nil {
 		return nil, errors.New("traces not found in context")
 	}
 	programTrace := NewTrace("Program", "Program", "")
 	programTrace.SetInputs(inputs)
-	ctxWithTrace := context.WithValue(ctx, utils.CurrentTraceKey, programTrace)
+	ctxWithTrace := context.WithValue(ctx, utils.TracesContextKey, programTrace)
 
 	outputs, err := p.Forward(ctxWithTrace, inputs)
 	if err != nil {

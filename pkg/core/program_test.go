@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"testing"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // TestProgram tests the Program struct and its methods.
@@ -25,7 +27,7 @@ func TestProgram(t *testing.T) {
 	}
 	// Create a context with the traces slice
 	traces := &[]Trace{}
-	ctx := context.WithValue(context.Background(), "traces", traces)
+	ctx := context.WithValue(context.Background(), utils.TracesContextKey, traces)
 
 	result, err := program.Execute(ctx, map[string]interface{}{"input": "test"})
 	if err != nil {

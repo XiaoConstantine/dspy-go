@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 type Predict struct {
@@ -49,7 +50,7 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	if tracing != nil && tracing.(bool) {
 		trace.SetOutputs(formattedOutputs)
-		if traces, ok := ctx.Value("traces").(*[]core.Trace); ok && traces != nil {
+		if traces, ok := ctx.Value(utils.TracesContextKey).(*[]core.Trace); ok && traces != nil {
 			*traces = append(*traces, *trace)
 		}
 	}
