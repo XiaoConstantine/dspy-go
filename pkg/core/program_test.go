@@ -23,8 +23,11 @@ func TestProgram(t *testing.T) {
 	if len(program.Modules) != 1 {
 		t.Errorf("Expected 1 module in program, got %d", len(program.Modules))
 	}
+	// Create a context with the traces slice
+	traces := &[]Trace{}
+	ctx := context.WithValue(context.Background(), "traces", traces)
 
-	result, err := program.Execute(context.Background(), map[string]interface{}{"input": "test"})
+	result, err := program.Execute(ctx, map[string]interface{}{"input": "test"})
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}

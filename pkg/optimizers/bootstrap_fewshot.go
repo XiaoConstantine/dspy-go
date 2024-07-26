@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 type BootstrapFewShot struct {
@@ -25,12 +24,12 @@ func (b *BootstrapFewShot) Compile(student, teacher core.Program, trainset []map
 
 	for _, example := range trainset {
 		if b.enoughBootstrappedDemos(compiledStudent) {
+
 			break
 		}
 
-		ctx := context.WithValue(context.Background(), utils.CurrentTraceKey, true)
 		traces := &[]core.Trace{}
-		ctx = context.WithValue(ctx, utils.CurrentTraceKey, traces)
+		ctx := context.WithValue(context.Background(), "traces", traces)
 
 		prediction, err := teacher.Execute(ctx, example)
 		if err != nil {
@@ -66,6 +65,7 @@ func (b *BootstrapFewShot) addDemonstrations(program core.Program, traces *[]cor
 				SetDemos([]core.Example)
 			}); ok {
 				demos := predictor.GetDemos()
+
 				if len(demos) < b.MaxBootstrapped {
 					demo := core.Example{
 						Inputs:  trace.Inputs,
@@ -73,6 +73,8 @@ func (b *BootstrapFewShot) addDemonstrations(program core.Program, traces *[]cor
 					}
 					demos = append(demos, demo)
 					predictor.SetDemos(demos)
+					return nil
+
 				} else {
 					return fmt.Errorf("max demonstrations reached for module %s", moduleName)
 				}

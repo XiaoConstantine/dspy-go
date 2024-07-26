@@ -30,10 +30,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 	tracing := ctx.Value("tracing")
 	var trace *core.Trace
 	if tracing != nil && tracing.(bool) {
-		trace = core.NewTrace("Predict", "Predict", "")
+		trace := core.NewTrace("Predict", "Predict", "")
 		trace.SetInputs(inputs)
 	}
-
 	if err := p.ValidateInputs(inputs); err != nil {
 		return nil, err
 	}
@@ -50,9 +49,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	if tracing != nil && tracing.(bool) {
 		trace.SetOutputs(formattedOutputs)
-		traces := ctx.Value("traces").(*[]core.Trace)
-		*traces = append(*traces, *trace)
-		// ctx = context.WithValue(ctx, "traces", traces)
+		if traces, ok := ctx.Value("traces").(*[]core.Trace); ok && traces != nil {
+			*traces = append(*traces, *trace)
+		}
 	}
 
 	return formattedOutputs, nil

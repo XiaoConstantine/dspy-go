@@ -28,25 +28,22 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 		return nil, errors.New("forward function is not defined")
 	}
 
-	tracing := ctx.Value("tracing")
-	var programTrace *Trace
-	if tracing != nil && tracing.(bool) {
-		programTrace = NewTrace("Program", "Program", "")
-		programTrace.SetInputs(inputs)
-
-		ctx = context.WithValue(ctx, utils.CurrentTraceKey, programTrace)
+	traces, ok := ctx.Value("traces").(*[]Trace)
+	if !ok || traces == nil {
+		return nil, errors.New("traces not found in context")
 	}
+	programTrace := NewTrace("Program", "Program", "")
+	programTrace.SetInputs(inputs)
+	ctxWithTrace := context.WithValue(ctx, utils.CurrentTraceKey, programTrace)
 
-	outputs, err := p.Forward(ctx, inputs)
-
-	if tracing != nil && tracing.(bool) {
-		programTrace.SetOutputs(outputs)
-		traces := ctx.Value("traces").(*[]Trace)
-		*traces = append(*traces, *programTrace)
-		// ctx = context.WithValue(ctx, "traces", traces)
+	outputs, err := p.Forward(ctxWithTrace, inputs)
+	if err != nil {
+		return nil, err
 	}
+	programTrace.SetOutputs(outputs)
+	*traces = append(*traces, *programTrace)
 
-	return outputs, err
+	return outputs, nil
 }
 
 // GetSignature returns the overall signature of the program

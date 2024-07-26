@@ -9,50 +9,40 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBootstrapFewShot(t *testing.T) {
-	// Create a mock LLM for testing
-	mockLLM := &MockLLM{
-		generateFunc: func(ctx context.Context, prompt string, options ...core.GenerateOption) (string, error) {
-			return "answer: Paris", nil
-		},
-	}
+var mockLLM = &MockLLM{
+	generateFunc: func(ctx context.Context, prompt string, options ...core.GenerateOption) (string, error) {
+		return "answer: Paris", nil
+	},
+}
 
-	// Create student and teacher programs
-	studentPredict := modules.NewPredict(core.NewSignature(
+func createProgram() core.Program {
+	predict := modules.NewPredict(core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
 	))
-	studentPredict.LLM = mockLLM
-	student := core.NewProgram(map[string]core.Module{"predict": studentPredict}, nil)
-
-	teacherPredict := modules.NewPredict(core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
-	))
-	teacherPredict.LLM = mockLLM
-	teacher := core.NewProgram(map[string]core.Module{"predict": teacherPredict}, nil)
+	predict.LLM = mockLLM
 
 	forwardFunc := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-		module := teacher.Modules["predict"].(*modules.Predict)
-		outputs, err := module.Process(ctx, inputs)
+		outputs, err := predict.Process(ctx, inputs)
 		if err != nil {
 			return nil, err
 		}
-
-		// Simulate adding a trace
-		if tracing, ok := ctx.Value("tracing").(bool); ok && tracing {
+		traces, ok := ctx.Value("traces").(*[]core.Trace)
+		if ok && traces != nil {
 			trace := core.NewTrace("Predict", "Predict", "")
 			trace.SetInputs(inputs)
 			trace.SetOutputs(outputs)
-			traces := ctx.Value("traces").(*[]core.Trace)
 			*traces = append(*traces, *trace)
 		}
-
 		return outputs, nil
 	}
-	student.Forward = forwardFunc
-	teacher.Forward = forwardFunc
 
+	return core.NewProgram(map[string]core.Module{"predict": predict}, forwardFunc)
+}
+
+func TestBootstrapFewShot(t *testing.T) {
+	student := createProgram()
+	teacher := createProgram()
 	// Create training set
 	trainset := []map[string]interface{}{
 		{"question": "What is the capital of France?"},
@@ -60,7 +50,6 @@ func TestBootstrapFewShot(t *testing.T) {
 		{"question": "What is the capital of Italy?"},
 	}
 
-	// Define metric function
 	// Define metric function
 	metric := func(example, prediction map[string]interface{}, traces *[]core.Trace) bool {
 		return true // Always return true for this test
@@ -101,20 +90,6 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options .
 }
 
 func TestBootstrapFewShotEdgeCases(t *testing.T) {
-	mockLLM := &MockLLM{
-		generateFunc: func(ctx context.Context, prompt string, options ...core.GenerateOption) (string, error) {
-			return "answer: Test", nil
-		},
-	}
-
-	createProgram := func() core.Program {
-		predict := modules.NewPredict(core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "question"}}},
-			[]core.OutputField{{Field: core.Field{Name: "answer"}}},
-		))
-		predict.LLM = mockLLM
-		return core.NewProgram(map[string]core.Module{"predict": predict}, nil)
-	}
 
 	trainset := []map[string]interface{}{
 		{"question": "Q1"},
@@ -124,15 +99,22 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 
 	t.Run("MaxBootstrapped Zero", func(t *testing.T) {
 		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *[]core.Trace) bool { return true }, 0)
-		optimized, _ := optimizer.Compile(createProgram(), createProgram(), trainset)
+		optimized, err := optimizer.Compile(createProgram(), createProgram(), trainset)
+		assert.NoError(t, err)
 		assert.Equal(t, 0, len(optimized.Modules["predict"].(*modules.Predict).Demos))
 	})
 
-	// t.Run("MaxBootstrapped Large", func(t *testing.T) {
-	// 	optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *[]core.Trace) bool { return true }, 100)
-	// 	optimized, _ := optimizer.Compile(createProgram(), createProgram(), trainset)
-	// 	assert.Equal(t, len(trainset), len(optimized.Modules["predict"].(*modules.Predict).Demos))
-	// })
+	t.Run("MaxBootstrapped Large", func(t *testing.T) {
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *[]core.Trace) bool {
+			return true
+		}, 100)
+		optimized, err := optimizer.Compile(createProgram(), createProgram(), trainset)
+		if err != nil {
+			t.Fatalf("Compilation failed: %v", err)
+		}
+		demoCount := len(optimized.Modules["predict"].(*modules.Predict).Demos)
+		assert.Equal(t, len(trainset), demoCount)
+	})
 
 	t.Run("Metric Rejects All", func(t *testing.T) {
 		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *[]core.Trace) bool { return false }, 2)
