@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -27,7 +28,9 @@ func TestChainOfThought(t *testing.T) {
 	cot.SetLLM(mockLLM)
 
 	// Test the Process method
-	ctx := context.Background()
+	traces := &[]core.Trace{}
+	ctx := context.WithValue(context.Background(), utils.TracesContextKey, traces)
+
 	inputs := map[string]any{"question": "What is the meaning of life?"}
 	outputs, err := cot.Process(ctx, inputs)
 

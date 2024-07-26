@@ -1,5 +1,3 @@
-// modules/predict.go
-
 package modules
 
 import (
@@ -8,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 type Predict struct {
@@ -27,10 +26,12 @@ func NewPredict(signature core.Signature) *Predict {
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	tracing := ctx.Value("tracing")
+	traces, ok := ctx.Value(utils.TracesContextKey).(*[]core.Trace)
+	tracing := ok && traces != nil
+
 	var trace *core.Trace
-	if tracing != nil && tracing.(bool) {
-		trace := core.NewTrace("Predict", "Predict", "")
+	if tracing {
+		trace = core.NewTrace("Predict", "Predict", "")
 		trace.SetInputs(inputs)
 	}
 	if err := p.ValidateInputs(inputs); err != nil {
@@ -46,12 +47,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	outputs := parseCompletion(completion, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
-
-	if tracing != nil && tracing.(bool) {
+	if tracing {
 		trace.SetOutputs(formattedOutputs)
-		if traces, ok := ctx.Value("traces").(*[]core.Trace); ok && traces != nil {
-			*traces = append(*traces, *trace)
-		}
+		*traces = append(*traces, *trace)
 	}
 
 	return formattedOutputs, nil
