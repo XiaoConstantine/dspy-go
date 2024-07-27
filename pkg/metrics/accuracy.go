@@ -93,7 +93,7 @@ func F1Score(expected, actual map[string]interface{}) float64 {
 	return totalF1 / float64(count)
 }
 
-// Helper functions
+// Helper functions.
 func tokenize(s string) []string {
 	return strings.Fields(s)
 }
@@ -114,20 +114,20 @@ func intersection(a, b []string) []string {
 	return result
 }
 
-// MetricFunc is a type alias for metric functions
+// MetricFunc is a type alias for metric functions.
 type MetricFunc func(expected, actual map[string]interface{}) float64
 
-// Accuracy is a struct that can be used to create customizable accuracy metrics
+// Accuracy is a struct that can be used to create customizable accuracy metrics.
 type Accuracy struct {
 	MetricFunc MetricFunc
 }
 
-// NewAccuracy creates a new Accuracy metric with the specified metric function
+// NewAccuracy creates a new Accuracy metric with the specified metric function.
 func NewAccuracy(metricFunc MetricFunc) *Accuracy {
 	return &Accuracy{MetricFunc: metricFunc}
 }
 
-// Evaluate applies the metric function to the expected and actual outputs
+// Evaluate applies the metric function to the expected and actual outputs.
 func (a *Accuracy) Evaluate(expected, actual map[string]interface{}) float64 {
 	return a.MetricFunc(expected, actual)
 }
