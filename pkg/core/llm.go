@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+
+	"github.com/XiaoConstantine/anthropic-go/anthropic"
 )
 
 // LLM represents an interface for language models.
@@ -25,6 +27,14 @@ type GenerateOptions struct {
 	PresencePenalty  float64
 	FrequencyPenalty float64
 	Stop             []string
+}
+
+// NewGenerateOptions creates a new GenerateOptions with default values.
+func NewGenerateOptions() *GenerateOptions {
+	return &GenerateOptions{
+		MaxTokens:   2048, // Default max tokens
+		Temperature: 0.5,  // Default temperature
+	}
 }
 
 // WithMaxTokens sets the maximum number of tokens to generate.
@@ -120,3 +130,13 @@ var DefaultLLM LLM
 func SetDefaultLLM(llm LLM) {
 	DefaultLLM = llm
 }
+
+// ModelID represents the available model IDs.
+type ModelID string
+
+const (
+	// Anthropic models.
+	ModelAnthropicHaiku  ModelID = ModelID(anthropic.ModelHaiku)
+	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelSonnet)
+	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelOpus)
+)

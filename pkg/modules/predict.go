@@ -1,3 +1,5 @@
+// modules/predict.go
+
 package modules
 
 import (
@@ -5,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 type Predict struct {
@@ -22,16 +24,15 @@ func NewPredict(signature core.Signature) *Predict {
 	return &Predict{
 		BaseModule: *core.NewModule(signature),
 		Demos:      []core.Example{},
+		LLM:        config.GetDefaultLLM(),
 	}
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	traces, ok := ctx.Value(utils.TracesContextKey).(*[]core.Trace)
-	tracing := ok && traces != nil
-
+	tracing := ctx.Value("tracing")
 	var trace *core.Trace
-	if tracing {
-		trace = core.NewTrace("Predict", "Predict", "")
+	if tracing != nil && tracing.(bool) {
+		trace := core.NewTrace("Predict", "Predict", "")
 		trace.SetInputs(inputs)
 	}
 	if err := p.ValidateInputs(inputs); err != nil {
@@ -47,9 +48,12 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	outputs := parseCompletion(completion, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
-	if tracing {
+
+	if tracing != nil && tracing.(bool) {
 		trace.SetOutputs(formattedOutputs)
-		*traces = append(*traces, *trace)
+		if traces, ok := ctx.Value("traces").(*[]core.Trace); ok && traces != nil {
+			*traces = append(*traces, *trace)
+		}
 	}
 
 	return formattedOutputs, nil

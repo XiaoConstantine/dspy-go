@@ -1,3 +1,5 @@
+github.com/XiaoConstantine/anthropic-go v0.0.4 h1:8zrAJEtHmTZk0K/kP/di/Pt4vrvIL7LOa+AXU4MRjPg=
+github.com/XiaoConstantine/anthropic-go v0.0.4/go.mod h1:ARxRchhwI8HCfEFJtFCIRET3K2QqoyGyuvMra/6nfoI=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
