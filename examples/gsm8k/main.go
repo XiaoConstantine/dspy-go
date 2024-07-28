@@ -23,6 +23,7 @@ func RunGSM8KExample(apiKey string) {
 		log.Fatalf("Failed to load GSM8K dataset: %v", err)
 	}
 
+	utils.SetupLLM(apiKey, core.ModelAnthropicSonnet)
 	// Create signature for ChainOfThought
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},

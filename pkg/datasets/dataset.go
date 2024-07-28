@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	GSM8KDatasetURL    = "https://huggingface.co/datasets/gsm8k/raw/main/test.jsonl"
+	GSM8KDatasetURL    = "https://huggingface.co/datasets/openai/gsm8k/resolve/main/main/test-00000-of-00001.parquet"
 	HotPotQADatasetURL = "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json"
 )
 
@@ -18,13 +18,21 @@ func EnsureDataset(datasetName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
-
+	var suffix string
+	switch datasetName {
+	case "gsm8k":
+		suffix = ".parquet"
+	case "hotpotqa":
+		suffix = ".json"
+	default:
+		suffix = ".parquet"
+	}
 	datasetDir := filepath.Join(homeDir, ".dspy-go", "datasets")
 	if err := os.MkdirAll(datasetDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create dataset directory: %w", err)
 	}
 
-	datasetPath := filepath.Join(datasetDir, datasetName+".json")
+	datasetPath := filepath.Join(datasetDir, datasetName+suffix)
 
 	if _, err := os.Stat(datasetPath); os.IsNotExist(err) {
 		fmt.Printf("Dataset %s not found locally. Downloading from Hugging Face...\n", datasetName)
