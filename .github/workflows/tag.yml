@@ -1,0 +1,93 @@
+name: Automated Semantic Versioning
+
+on:
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+  schedule:
+    - cron: "0 0 * * *" # Run daily at midnight UTC
+  push:
+    branches:
+      - main # Adjust this as necessary
+    paths:
+      - "**.go"
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for all tags
+
+      - name: Fetch latest tags
+        run: git fetch --tags origin
+
+      - name: Determine New Tag
+        id: newtag
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Extract major, minor, patch
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST_TAG#v}"
+
+          # Check commit messages since last tag
+          COMMITS=$(git log $LATEST_TAG..HEAD --pretty=format:"%s")
+          if echo "$COMMITS" | grep -qE "^BREAKING CHANGE"; then
+            NEW_MAJOR=$((MAJOR + 1))
+            NEW_MINOR=0
+            NEW_PATCH=0
+          elif echo "$COMMITS" | grep -qE "^feat:"; then
+            NEW_MAJOR=$MAJOR
+            NEW_MINOR=$((MINOR + 1))
+            NEW_PATCH=0
+          elif echo "$COMMITS" | grep -qE "^fix:"; then
+            NEW_MAJOR=$MAJOR
+            NEW_MINOR=$MINOR
+            NEW_PATCH=$((PATCH + 1))
+          else
+            echo "No version bump needed"
+            exit 0
+          fi
+
+          NEW_TAG="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+          echo "New tag: $NEW_TAG"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        id: check_tag
+        if: env.NEW_TAG != ''
+        run: |
+          if git rev-parse ${{ env.NEW_TAG }} >/dev/null 2>&1; then
+            echo "Tag ${{ env.NEW_TAG }} already exists"
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create and Push New Tag
+        if: env.NEW_TAG != '' && env.TAG_EXISTS == 'false'
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag -a ${{ env.NEW_TAG }} -m "Release ${{ env.NEW_TAG }}"
+          git push origin ${{ env.NEW_TAG }}
+          echo "TAG_CREATED=true" >> $GITHUB_ENV
+
+      - name: Trigger Release Workflow
+        if: env.TAG_CREATED == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: trigger-release
+          client-payload: '{"tag": "${{ env.NEW_TAG }}"}'
+
+      - name: Notify on Skipped Tag
+        if: env.NEW_TAG == '' || env.TAG_EXISTS == 'true'
+        run: |
+          if [ -z "${{ env.NEW_TAG }}" ]; then
+            echo "No new tag was created as no version bump was needed."
+          else
+            echo "Tag ${{ env.NEW_TAG }} already exists. Skipping tag creation."
+          fi

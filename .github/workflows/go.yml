@@ -28,3 +28,9 @@ jobs:
 
       - name: Run unit tests
         run: go test -race -v ./... -coverprofile ./coverage.txt
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4.5.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
