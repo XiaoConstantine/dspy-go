@@ -60,8 +60,6 @@ func RunGSM8KExample(apiKey string) {
 
 	// Test the compiled program
 	for _, ex := range examples[10:15] {
-		// traces := &[]core.Trace{}
-		// ctx := context.WithValue(context.Background(), coreUtils.TracesContextKey, traces)
 		result, err := compiledProgram.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
 		if err != nil {
 			log.Printf("Error executing program: %v", err)
