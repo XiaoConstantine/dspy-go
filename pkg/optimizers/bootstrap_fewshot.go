@@ -42,20 +42,6 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 
 	total := len(trainset)
 	var processed int32 = 0
-	// Start a goroutine to periodically report progress
-	// go func() {
-	// 	ticker := time.NewTicker(time.Second * 10)
-	// 	defer ticker.Stop()
-	// 	for {
-	// 		select {
-	// 		case <-ctx.Done():
-	// 			return
-	// 		case <-ticker.C:
-	// 			current := atomic.LoadInt32(&processed)
-	// 			fmt.Printf("Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
-	// 		}
-	// 	}
-	// }()
 
 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
 	for _, example := range trainset {

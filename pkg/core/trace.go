@@ -17,6 +17,7 @@ type Trace struct {
 	Duration   time.Duration
 	Subtraces  []*Trace
 	Parent     *Trace
+	mu         sync.Mutex
 
 	Error error
 }
@@ -35,17 +36,23 @@ func NewTrace(moduleName, moduleType string) *Trace {
 
 // SetInputs sets the inputs for the trace.
 func (t *Trace) SetInputs(inputs map[string]interface{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.Inputs = inputs
 }
 
 // SetOutputs sets the outputs for the trace and calculates the duration.
 func (t *Trace) SetOutputs(outputs map[string]interface{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.Outputs = outputs
 	t.Duration = time.Since(t.StartTime)
 }
 
 // AddSubtrace adds a subtrace to the current trace.
 func (t *Trace) AddSubtrace(subtrace *Trace) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	subtrace.Parent = t
 	t.Subtraces = append(t.Subtraces, subtrace)
 }
