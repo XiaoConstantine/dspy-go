@@ -1,0 +1,25 @@
+coverage:
+  status:
+    project:
+      default:
+        # Define the overall project coverage status
+        target: auto
+        threshold: 1%
+        paths:
+          - "pkg/"
+    patch:
+      default:
+        # Define the patch coverage status (for pull requests)
+        target: auto
+        threshold: 1%
+        paths:
+          - "pkg/"
+
+# Ignore coverage for files outside of pkg/
+ignore:
+  - "**/*"
+  - "!pkg/**/*"
+
+# Configure Codecov to only comment on pull requests if coverage decreases
+comment:
+  require_changes: false
