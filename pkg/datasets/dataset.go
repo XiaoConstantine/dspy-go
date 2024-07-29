@@ -8,10 +8,16 @@ import (
 	"path/filepath"
 )
 
-const (
-	GSM8KDatasetURL    = "https://huggingface.co/datasets/openai/gsm8k/resolve/main/main/test-00000-of-00001.parquet"
-	HotPotQADatasetURL = "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json"
+var (
+	gsm8kDatasetURL    = "https://huggingface.co/datasets/openai/gsm8k/resolve/main/main/test-00000-of-00001.parquet"
+	hotPotQADatasetURL = "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json"
 )
+
+// For testing purposes
+func setTestURLs(gsm8k, hotpotqa string) {
+	gsm8kDatasetURL = gsm8k
+	hotPotQADatasetURL = hotpotqa
+}
 
 func EnsureDataset(datasetName string) (string, error) {
 	homeDir, err := os.UserHomeDir()
@@ -48,9 +54,9 @@ func downloadDataset(datasetName, datasetPath string) error {
 	var url string
 	switch datasetName {
 	case "gsm8k":
-		url = GSM8KDatasetURL
+		url = gsm8kDatasetURL
 	case "hotpotqa":
-		url = HotPotQADatasetURL
+		url = hotPotQADatasetURL
 	default:
 		return fmt.Errorf("unknown dataset: %s", datasetName)
 	}
@@ -60,7 +66,10 @@ func downloadDataset(datasetName, datasetPath string) error {
 		return fmt.Errorf("failed to download dataset: %w", err)
 	}
 	defer resp.Body.Close()
-
+	// Check for non-200 status codes
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned non-200 status code: %d", resp.StatusCode)
+	}
 	out, err := os.Create(datasetPath)
 	if err != nil {
 		return fmt.Errorf("failed to create dataset file: %w", err)
