@@ -17,8 +17,15 @@ coverage:
 
 # Ignore coverage for files outside of pkg/
 ignore:
-  - "**/*"
-  - "!pkg/**/*"
+  - "examples/**"
+  - "cmd/**"
+  - "internal/**"
+  - "test/**"
+  - "*.md"
+  - "*.yml"
+  - "*.yaml"
+  - "Makefile"
+  - "LICENSE"
 
 # Configure Codecov to only comment on pull requests if coverage decreases
 comment:
