@@ -107,3 +107,7 @@ func (bfs *BootstrapFewShot) Compile(ctx context.Context, program Program, datas
 	// This is a placeholder and should be implemented based on the DSPy paper's description
 	return program, nil
 }
+
+type ProgressReporter interface {
+	Report(stage string, processed, total int)
+}

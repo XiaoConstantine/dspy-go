@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/examples/utils"
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
@@ -14,6 +15,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
+	"github.com/sourcegraph/conc/pool"
 )
 
 func computeF1(prediction, ground_truth string) float64 {
@@ -46,31 +48,49 @@ func computeF1(prediction, ground_truth string) float64 {
 
 func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (float64, float64) {
 	var totalF1, exactMatch float64
-	var validExamples int
+	var validExamples int32
 
+	results := make(chan struct {
+		f1         float64
+		exactMatch float64
+	}, len(examples))
+
+	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
 	for _, ex := range examples {
-		result, err := program.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
-		if err != nil {
-			log.Printf("Error executing program: %v", err)
-			continue
-		}
+		example := ex
+		p.Go(func() {
+			result, err := program.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
+			if err != nil {
+				log.Printf("Error executing program: %v", err)
+				return
+			}
 
-		predictedAnswer, ok := result["answer"].(string)
-		if !ok {
-			log.Printf("Error: predicted answer is not a string or is nil")
-			continue
-		}
+			predictedAnswer, ok := result["answer"].(string)
+			if !ok {
+				log.Printf("Error: predicted answer is not a string or is nil")
+				return
+			}
 
-		f1 := computeF1(predictedAnswer, ex.Answer)
-		totalF1 += f1
-
-		if predictedAnswer == ex.Answer {
-			exactMatch++
-		}
-
-		validExamples++
+			f1 := computeF1(predictedAnswer, example.Answer)
+			exactMatch := 0.0
+			if predictedAnswer == example.Answer {
+				exactMatch = 1.0
+			}
+			results <- struct {
+				f1         float64
+				exactMatch float64
+			}{f1: f1, exactMatch: exactMatch}
+		})
 	}
-
+	go func() {
+		p.Wait()
+		close(results)
+	}()
+	for result := range results {
+		totalF1 += result.f1
+		exactMatch += result.exactMatch
+		atomic.AddInt32(&validExamples, 1)
+	}
 	if validExamples == 0 {
 		log.Printf("Warning: No valid examples processed")
 		return 0, 0
@@ -85,7 +105,8 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 func RunHotPotQAExample(apiKey string) {
 	utils.SetupLLM(apiKey, core.ModelAnthropicSonnet)
 
-	config.SetConcurrencyOptions(20)
+	// Set concurrency level
+	config.SetConcurrencyOptions(10)
 	examples, err := datasets.LoadHotpotQA()
 	if err != nil {
 		log.Fatalf("Failed to load HotPotQA dataset: %v", err)
@@ -93,7 +114,7 @@ func RunHotPotQAExample(apiKey string) {
 
 	rand.Shuffle(len(examples), func(i, j int) { examples[i], examples[j] = examples[j], examples[i] })
 
-	trainSize := int(0.3 * float64(len(examples)))
+	trainSize := int(0.025 * float64(len(examples)))
 	valSize := int(0.1 * float64(len(examples)))
 	trainExamples := examples[:trainSize]
 	valExamples := examples[trainSize : trainSize+valSize]

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync/atomic"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -39,6 +41,23 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 		trace *core.Trace
 	}, len(trainset))
 
+	total := len(trainset)
+	var processed int32 = 0
+	// Start a goroutine to periodically report progress
+	go func() {
+		ticker := time.NewTicker(time.Second * 10)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				current := atomic.LoadInt32(&processed)
+				fmt.Printf("Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
+			}
+		}
+	}()
+
 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
 	for _, example := range trainset {
 		if b.enoughBootstrappedDemos(compiledStudent) {
@@ -48,6 +67,8 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 
 		ex := example // Create a new variable to avoid closure issues
 		p.Go(func() {
+			fmt.Println("New goroutine")
+
 			exampleTrace := tm.StartTrace("Example", "Example")
 			exampleTrace.SetInputs(ex)
 
@@ -71,6 +92,8 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 					trace: exampleTrace,
 				}
 			}
+			oldValue := atomic.AddInt32(&processed, 1)
+			fmt.Printf("Processed example %d\n", oldValue)
 
 			tm.EndTrace() // End the example trace
 		})
@@ -90,37 +113,11 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 			break
 		}
 	}
-	// for _, example := range trainset {
 
-	// 	if b.enoughBootstrappedDemos(compiledStudent) {
-	// 		log.Println("Enough bootstrapped demos, breaking loop")
+	current := atomic.LoadInt32(&processed)
 
-	// 		break
-	// 	}
-	// 	exampleTrace := tm.StartTrace("Example", "Example")
-	// 	exampleTrace.SetInputs(example) // Set the inputs on the example trace
+	fmt.Printf("Final Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
 
-	// 	// Use the teacher LLM for prediction
-	// 	prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, example)
-	// 	if err != nil {
-	// 		exampleTrace.SetError(err)
-	// 		tm.EndTrace()
-	// 		compilationTrace.SetError(err)
-	// 		return compiledStudent, fmt.Errorf("error executing teacher: %w", err)
-	// 	}
-	// 	exampleTrace.SetOutputs(prediction) // Set the outputs on the example trace
-
-	// 	if b.Metric(example, prediction, exampleTrace) {
-	// 		if err := b.addDemonstrations(compiledStudent, exampleTrace); err != nil {
-	// 			exampleTrace.SetError(err)
-	// 			tm.EndTrace()
-	// 			compilationTrace.SetError(err)
-
-	// 			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
-	// 		}
-	// 	}
-	// 	tm.EndTrace() // End the example trace
-	// }
 	compilationTrace.SetOutputs(map[string]interface{}{
 		"compiledStudent": compiledStudent,
 	})
