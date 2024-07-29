@@ -28,6 +28,9 @@ func LoadGSM8K() ([]GSM8KExample, error) {
 	}
 	defer reader.Close()
 	arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	if err != nil {
+		return nil, err
+	}
 
 	// Get the schema
 	schema, _ := arrowReader.Schema()
