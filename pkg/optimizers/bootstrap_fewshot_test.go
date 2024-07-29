@@ -27,6 +27,7 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options .
 func init() {
 	config.GlobalConfig.DefaultLLM = &MockLLM{}
 	config.GlobalConfig.TeacherLLM = &MockLLM{}
+	config.GlobalConfig.ConcurrencyLevel = 1
 }
 
 func createProgram() core.Program {
