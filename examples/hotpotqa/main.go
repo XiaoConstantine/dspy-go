@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/examples/utils"
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
@@ -49,16 +50,36 @@ func computeF1(prediction, ground_truth string) float64 {
 func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (float64, float64) {
 	var totalF1, exactMatch float64
 	var validExamples int32
+	ctx := context.Background()
 
 	results := make(chan struct {
 		f1         float64
 		exactMatch float64
 	}, len(examples))
 
+	total := len(examples)
+	var processed int32 = 0
+
+	// Start a goroutine to periodically report progress
+	go func() {
+		ticker := time.NewTicker(time.Second * 10)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				current := atomic.LoadInt32(&processed)
+				fmt.Printf("Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
+			}
+		}
+	}()
+
 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
 	for _, ex := range examples {
 		example := ex
 		p.Go(func() {
+			fmt.Println("Starting new corotine")
 			result, err := program.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
 			if err != nil {
 				log.Printf("Error executing program: %v", err)
@@ -80,6 +101,7 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 				f1         float64
 				exactMatch float64
 			}{f1: f1, exactMatch: exactMatch}
+			atomic.AddInt32(&processed, 1)
 		})
 	}
 	go func() {
@@ -103,7 +125,7 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 }
 
 func RunHotPotQAExample(apiKey string) {
-	utils.SetupLLM(apiKey, core.ModelAnthropicSonnet)
+	utils.SetupLLM(apiKey, core.ModelID("ollama:mistral"))
 
 	// Set concurrency level
 	config.SetConcurrencyOptions(10)
