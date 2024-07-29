@@ -2,7 +2,6 @@ package datasets
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,8 +55,12 @@ func TestEnsureDataset(t *testing.T) {
 			datasetName:    "existing",
 			expectedSuffix: ".parquet",
 			setupFunc: func() {
-				os.MkdirAll(datasetDir, 0755)
-				ioutil.WriteFile(filepath.Join(datasetDir, "existing.parquet"), []byte("test"), 0644)
+				if err := os.MkdirAll(datasetDir, 0755); err != nil {
+					return
+				}
+				if err := os.WriteFile(filepath.Join(datasetDir, "existing.parquet"), []byte("test"), 0644); err != nil {
+					return
+				}
 			},
 			cleanupFunc: func() {
 				os.RemoveAll(datasetDir)
@@ -73,7 +76,9 @@ func TestEnsureDataset(t *testing.T) {
 			// Mock HTTP server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("mock dataset content"))
+				if _, err := w.Write([]byte("mock dataset content")); err != nil {
+					return
+				}
 			}))
 			defer server.Close()
 			setTestURLs(server.URL, server.URL)
@@ -122,7 +127,9 @@ func TestDownloadDataset(t *testing.T) {
 			setupServer: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("mock gsm8k content"))
+					if _, err := w.Write([]byte("mock gsm8k content")); err != nil {
+						return
+					}
 				}))
 			},
 			expectError: false,
@@ -133,7 +140,9 @@ func TestDownloadDataset(t *testing.T) {
 			setupServer: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("mock hotpotqa content"))
+					if _, err := w.Write([]byte("mock hotpotqa content")); err != nil {
+						return
+					}
 				}))
 			},
 			expectError: false,
@@ -179,7 +188,7 @@ func TestDownloadDataset(t *testing.T) {
 					t.Errorf("Unexpected error: %v", err)
 				}
 
-				content, err := ioutil.ReadFile(datasetPath)
+				content, err := os.ReadFile(datasetPath)
 				if err != nil {
 					t.Errorf("Failed to read downloaded file: %v", err)
 				}

@@ -13,7 +13,7 @@ var (
 	hotPotQADatasetURL = "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json"
 )
 
-// For testing purposes
+// For testing purposes.
 func setTestURLs(gsm8k, hotpotqa string) {
 	gsm8kDatasetURL = gsm8k
 	hotPotQADatasetURL = hotpotqa
