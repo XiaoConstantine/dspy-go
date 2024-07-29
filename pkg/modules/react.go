@@ -39,6 +39,11 @@ func (r *ReAct) SetLLM(llm core.LLM) {
 }
 
 func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+	tm := core.GetTraceManager(ctx)
+	trace := tm.StartTrace("ReAct", "ReAct")
+	defer tm.EndTrace()
+	trace.SetInputs(inputs)
+
 	for i := 0; i < r.MaxIters; i++ {
 		prediction, err := r.Predict.Process(ctx, inputs)
 		if err != nil {
@@ -47,10 +52,13 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]
 
 		action, ok := prediction["action"].(string)
 		if !ok {
-			return nil, errors.New("invalid action in prediction")
+			err := errors.New("invalid action in prediction")
+			trace.SetError(err)
+			return nil, err
 		}
 
 		if action == "Finish" {
+			trace.SetOutputs(prediction)
 			return prediction, nil
 		}
 
@@ -58,6 +66,8 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]
 			if tool.CanHandle(action) {
 				observation, err := tool.Execute(ctx, action)
 				if err != nil {
+					trace.SetError(err)
+
 					return nil, err
 				}
 				inputs["observation"] = observation
@@ -65,8 +75,10 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]
 			}
 		}
 	}
+	err := errors.New("max iterations reached")
+	trace.SetError(err)
 
-	return nil, errors.New("max iterations reached")
+	return nil, err
 }
 
 func (r *ReAct) Clone() core.Module {

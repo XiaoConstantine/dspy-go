@@ -41,7 +41,7 @@ func RunHotPotQAExample(apiKey string) {
 	})
 
 	// Create optimizer
-	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]interface{}, traces *[]core.Trace) bool {
+	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]interface{}, trace *core.Trace) bool {
 		return example["answer"] == prediction["answer"]
 	}, 5)
 
@@ -55,7 +55,7 @@ func RunHotPotQAExample(apiKey string) {
 	}
 
 	// Compile the program
-	compiledProgram, err := optimizer.Compile(program, program, trainset)
+	compiledProgram, err := optimizer.Compile(context.Background(), program, program, trainset)
 	if err != nil {
 		log.Fatalf("Failed to compile program: %v", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -43,8 +42,7 @@ func TestPredict(t *testing.T) {
 	predict.SetLLM(mockLLM)
 
 	// Test the Process method
-	traces := &[]core.Trace{}
-	ctx := context.WithValue(context.Background(), utils.TracesContextKey, traces)
+	ctx := core.WithTraceManager(context.Background())
 
 	inputs := map[string]any{"question": "What is the meaning of life?"}
 	outputs, err := predict.Process(ctx, inputs)
@@ -55,4 +53,13 @@ func TestPredict(t *testing.T) {
 
 	// Verify that the mock was called as expected
 	mockLLM.AssertExpectations(t)
+	// Verify traces
+	tm := core.GetTraceManager(ctx)
+	rootTrace := tm.RootTrace
+	assert.Equal(t, "Predict", rootTrace.ModuleName)
+	assert.Equal(t, "Predict", rootTrace.ModuleType)
+	assert.Equal(t, inputs, rootTrace.Inputs)
+	assert.Equal(t, outputs, rootTrace.Outputs)
+	assert.Nil(t, rootTrace.Error)
+	assert.True(t, rootTrace.Duration > 0)
 }
