@@ -8,11 +8,15 @@ import (
 )
 
 type Config struct {
-	DefaultLLM core.LLM
-	TeacherLLM core.LLM
+	DefaultLLM       core.LLM
+	TeacherLLM       core.LLM
+	ConcurrencyLevel int
 }
 
-var GlobalConfig = &Config{}
+var GlobalConfig = &Config{
+	// default concurrency 1
+	ConcurrencyLevel: 1,
+}
 
 // ConfigureDefaultLLM sets up the default LLM to be used across the package.
 func ConfigureDefaultLLM(apiKey string, modelID core.ModelID) error {
@@ -42,4 +46,10 @@ func GetDefaultLLM() core.LLM {
 // GetTeacherLLM returns the teacher LLM.
 func GetTeacherLLM() core.LLM {
 	return GlobalConfig.TeacherLLM
+}
+
+func SetConcurrencyOptions(level int) {
+	if level > 0 {
+		GlobalConfig.ConcurrencyLevel = level
+	}
 }

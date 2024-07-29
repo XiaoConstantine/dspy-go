@@ -8,6 +8,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
+	"github.com/sourcegraph/conc/pool"
 )
 
 type BootstrapFewShot struct {
@@ -33,37 +34,93 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 	tm := core.GetTraceManager(ctx)
 	compilationTrace := tm.StartTrace("Compilation", "Compilation")
 	defer tm.EndTrace()
-	for _, example := range trainset {
+	results := make(chan struct {
+		demo  core.Example
+		trace *core.Trace
+	}, len(trainset))
 
+	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
+	for _, example := range trainset {
 		if b.enoughBootstrappedDemos(compiledStudent) {
 			log.Println("Enough bootstrapped demos, breaking loop")
-
 			break
 		}
-		exampleTrace := tm.StartTrace("Example", "Example")
-		exampleTrace.SetInputs(example) // Set the inputs on the example trace
 
-		// Use the teacher LLM for prediction
-		prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, example)
-		if err != nil {
-			exampleTrace.SetError(err)
-			tm.EndTrace()
-			compilationTrace.SetError(err)
-			return compiledStudent, fmt.Errorf("error executing teacher: %w", err)
-		}
-		exampleTrace.SetOutputs(prediction) // Set the outputs on the example trace
+		ex := example // Create a new variable to avoid closure issues
+		p.Go(func() {
+			exampleTrace := tm.StartTrace("Example", "Example")
+			exampleTrace.SetInputs(ex)
 
-		if b.Metric(example, prediction, exampleTrace) {
-			if err := b.addDemonstrations(compiledStudent, exampleTrace); err != nil {
+			prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, ex)
+			if err != nil {
 				exampleTrace.SetError(err)
 				tm.EndTrace()
-				compilationTrace.SetError(err)
-
-				return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
+				return
 			}
-		}
-		tm.EndTrace() // End the example trace
+			exampleTrace.SetOutputs(prediction)
+
+			if b.Metric(ex, prediction, exampleTrace) {
+				results <- struct {
+					demo  core.Example
+					trace *core.Trace
+				}{
+					demo: core.Example{
+						Inputs:  ex,
+						Outputs: prediction,
+					},
+					trace: exampleTrace,
+				}
+			}
+
+			tm.EndTrace() // End the example trace
+		})
 	}
+
+	go func() {
+		p.Wait()
+		close(results)
+	}()
+
+	for result := range results {
+		if err := b.addDemonstrations(compiledStudent, result.trace); err != nil {
+			compilationTrace.SetError(err)
+			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
+		}
+		if b.enoughBootstrappedDemos(compiledStudent) {
+			break
+		}
+	}
+	// for _, example := range trainset {
+
+	// 	if b.enoughBootstrappedDemos(compiledStudent) {
+	// 		log.Println("Enough bootstrapped demos, breaking loop")
+
+	// 		break
+	// 	}
+	// 	exampleTrace := tm.StartTrace("Example", "Example")
+	// 	exampleTrace.SetInputs(example) // Set the inputs on the example trace
+
+	// 	// Use the teacher LLM for prediction
+	// 	prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, example)
+	// 	if err != nil {
+	// 		exampleTrace.SetError(err)
+	// 		tm.EndTrace()
+	// 		compilationTrace.SetError(err)
+	// 		return compiledStudent, fmt.Errorf("error executing teacher: %w", err)
+	// 	}
+	// 	exampleTrace.SetOutputs(prediction) // Set the outputs on the example trace
+
+	// 	if b.Metric(example, prediction, exampleTrace) {
+	// 		if err := b.addDemonstrations(compiledStudent, exampleTrace); err != nil {
+	// 			exampleTrace.SetError(err)
+	// 			tm.EndTrace()
+	// 			compilationTrace.SetError(err)
+
+	// 			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
+	// 		}
+	// 	}
+	// 	tm.EndTrace() // End the example trace
+	// }
 	compilationTrace.SetOutputs(map[string]interface{}{
 		"compiledStudent": compiledStudent,
 	})

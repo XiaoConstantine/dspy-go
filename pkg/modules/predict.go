@@ -48,9 +48,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 		return nil, err
 	}
-
 	outputs := parseCompletion(completion, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
+
 	trace.SetOutputs(formattedOutputs)
 
 	return formattedOutputs, nil
@@ -105,7 +105,8 @@ func parseCompletion(completion string, signature core.Signature) map[string]any
 	for _, line := range lines {
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
+			// lower case
+			key := strings.ToLower(strings.TrimSpace(parts[0]))
 			value := strings.TrimSpace(parts[1])
 			for _, field := range signature.Outputs {
 				if field.Name == key {
