@@ -11,6 +11,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
+	coreUtils "github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 func RunHotPotQAExample(apiKey string) {
@@ -61,7 +62,10 @@ func RunHotPotQAExample(apiKey string) {
 
 	// Test the compiled program
 	for _, ex := range examples[10:15] {
-		result, err := compiledProgram.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
+		traces := &[]core.Trace{}
+		ctx := context.WithValue(context.Background(), coreUtils.TracesContextKey, traces)
+
+		result, err := compiledProgram.Execute(ctx, map[string]interface{}{"question": ex.Question})
 		if err != nil {
 			log.Printf("Error executing program: %v", err)
 			continue
