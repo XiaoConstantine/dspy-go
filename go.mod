@@ -3,7 +3,7 @@ module github.com/XiaoConstantine/dspy-go
 go 1.22.5
 
 require (
-	github.com/XiaoConstantine/anthropic-go v0.0.4
+	github.com/XiaoConstantine/anthropic-go v0.0.5
 	github.com/apache/arrow/go/v13 v13.0.0
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.9.0
