@@ -18,7 +18,19 @@ func NewChainOfThought(signature core.Signature) *ChainOfThought {
 }
 
 func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-	return c.Predict.Process(ctx, inputs)
+	tm := core.GetTraceManager(ctx)
+	trace := tm.StartTrace("ChainOfThought", "ChainOfThought")
+	defer tm.EndTrace()
+
+	trace.SetInputs(inputs)
+	outputs, err := c.Predict.Process(ctx, inputs)
+	if err != nil {
+		trace.SetError(err)
+		return nil, err
+	}
+	trace.SetOutputs(outputs)
+
+	return outputs, nil
 }
 
 func (c *ChainOfThought) GetSignature() core.Signature {

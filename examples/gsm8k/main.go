@@ -11,7 +11,6 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
-	coreUtils "github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 func RunGSM8KExample(apiKey string) {
@@ -40,7 +39,7 @@ func RunGSM8KExample(apiKey string) {
 	})
 
 	// Create optimizer
-	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]interface{}, traces *[]core.Trace) bool {
+	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]interface{}, trace *core.Trace) bool {
 		return example["answer"] == prediction["answer"]
 	}, 5)
 
@@ -54,16 +53,16 @@ func RunGSM8KExample(apiKey string) {
 	}
 
 	// Compile the program
-	compiledProgram, err := optimizer.Compile(program, program, trainset)
+	compiledProgram, err := optimizer.Compile(context.Background(), program, program, trainset)
 	if err != nil {
 		log.Fatalf("Failed to compile program: %v", err)
 	}
 
 	// Test the compiled program
 	for _, ex := range examples[10:15] {
-		traces := &[]core.Trace{}
-		ctx := context.WithValue(context.Background(), coreUtils.TracesContextKey, traces)
-		result, err := compiledProgram.Execute(ctx, map[string]interface{}{"question": ex.Question})
+		// traces := &[]core.Trace{}
+		// ctx := context.WithValue(context.Background(), coreUtils.TracesContextKey, traces)
+		result, err := compiledProgram.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
 		if err != nil {
 			log.Printf("Error executing program: %v", err)
 			continue

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -49,8 +48,7 @@ func TestReAct(t *testing.T) {
 	react.SetLLM(mockLLM)
 
 	// Test the Process method
-	traces := &[]core.Trace{}
-	ctx := context.WithValue(context.Background(), utils.TracesContextKey, traces)
+	ctx := core.WithTraceManager(context.Background())
 
 	inputs := map[string]any{"question": "What is the meaning of life?"}
 	outputs, err := react.Process(ctx, inputs)
@@ -62,4 +60,13 @@ func TestReAct(t *testing.T) {
 	// Verify that the mocks were called as expected
 	mockLLM.AssertExpectations(t)
 	mockTool.AssertExpectations(t)
+	// Verify traces
+	tm := core.GetTraceManager(ctx)
+	rootTrace := tm.RootTrace
+	assert.Equal(t, "ReAct", rootTrace.ModuleName)
+	assert.Equal(t, "ReAct", rootTrace.ModuleType)
+	assert.Equal(t, inputs, rootTrace.Inputs)
+	assert.Equal(t, outputs, rootTrace.Outputs)
+	assert.Nil(t, rootTrace.Error)
+	assert.True(t, rootTrace.Duration > 0)
 }

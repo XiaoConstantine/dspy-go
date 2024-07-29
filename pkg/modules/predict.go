@@ -29,13 +29,14 @@ func NewPredict(signature core.Signature) *Predict {
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	tracing := ctx.Value("tracing")
-	var trace *core.Trace
-	if tracing != nil && tracing.(bool) {
-		trace := core.NewTrace("Predict", "Predict", "")
-		trace.SetInputs(inputs)
-	}
+	tm := core.GetTraceManager(ctx)
+	trace := tm.StartTrace("Predict", "Predict")
+	defer tm.EndTrace()
+
+	trace.SetInputs(inputs)
+
 	if err := p.ValidateInputs(inputs); err != nil {
+		trace.SetError(err)
 		return nil, err
 	}
 
@@ -43,18 +44,14 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 	prompt := formatPrompt(signature, p.Demos, inputs)
 	completion, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
+		trace.SetError(err)
+
 		return nil, err
 	}
 
 	outputs := parseCompletion(completion, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
-
-	if tracing != nil && tracing.(bool) {
-		trace.SetOutputs(formattedOutputs)
-		if traces, ok := ctx.Value("traces").(*[]core.Trace); ok && traces != nil {
-			*traces = append(*traces, *trace)
-		}
-	}
+	trace.SetOutputs(formattedOutputs)
 
 	return formattedOutputs, nil
 }

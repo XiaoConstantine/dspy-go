@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // Program represents a complete DSPy pipeline or workflow.
@@ -28,20 +26,18 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 		return nil, errors.New("forward function is not defined")
 	}
 
-	traces, ok := ctx.Value(utils.TracesContextKey).(*[]Trace)
-	if !ok || traces == nil {
-		return nil, errors.New("traces not found in context")
-	}
-	programTrace := NewTrace("Program", "Program", "")
-	programTrace.SetInputs(inputs)
-	ctxWithTrace := context.WithValue(ctx, utils.TracesContextKey, programTrace)
+	ctx = WithTraceManager(ctx)
+	tm := GetTraceManager(ctx)
+	trace := tm.StartTrace("Program", "Program")
+	defer tm.EndTrace()
 
-	outputs, err := p.Forward(ctxWithTrace, inputs)
+	trace.SetInputs(inputs)
+	outputs, err := p.Forward(ctx, inputs)
 	if err != nil {
+		trace.SetError(err)
 		return nil, err
 	}
-	programTrace.SetOutputs(outputs)
-	*traces = append(*traces, *programTrace)
+	trace.SetOutputs(outputs)
 
 	return outputs, nil
 }
