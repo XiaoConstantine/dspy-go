@@ -52,7 +52,6 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 
 		ex := example // Create a new variable to avoid closure issues
 		p.Go(func() {
-			fmt.Println("New goroutine")
 
 			exampleTrace := tm.StartTrace("Example", "Example")
 			exampleTrace.SetInputs(ex)
@@ -77,8 +76,7 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 					trace: exampleTrace,
 				}
 			}
-			oldValue := atomic.AddInt32(&processed, 1)
-			fmt.Printf("Processed example %d\n", oldValue)
+			atomic.AddInt32(&processed, 1)
 
 			tm.EndTrace() // End the example trace
 		})
