@@ -83,6 +83,8 @@ func (bm *BaseModule) FormatOutputs(outputs map[string]any) map[string]any {
 type Composable interface {
 	Module
 	Compose(next Module) Module
+	GetSubModules() []Module
+	SetSubModules([]Module)
 }
 
 // ModuleChain represents a chain of modules.

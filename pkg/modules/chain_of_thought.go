@@ -10,6 +10,9 @@ type ChainOfThought struct {
 	Predict *Predict
 }
 
+// Ensure ChainOfThought implements Composable.
+var _ core.Composable = (*ChainOfThought)(nil)
+
 func NewChainOfThought(signature core.Signature) *ChainOfThought {
 	modifiedSignature := appendRationaleField(signature)
 	return &ChainOfThought{
@@ -46,7 +49,23 @@ func (c *ChainOfThought) Clone() core.Module {
 		Predict: c.Predict.Clone().(*Predict),
 	}
 }
+func (c *ChainOfThought) Compose(next core.Module) core.Module {
+	return &core.ModuleChain{
+		Modules: []core.Module{c, next},
+	}
+}
 
+func (c *ChainOfThought) GetSubModules() []core.Module {
+	return []core.Module{c.Predict}
+}
+
+func (c *ChainOfThought) SetSubModules(modules []core.Module) {
+	if len(modules) > 0 {
+		if predict, ok := modules[0].(*Predict); ok {
+			c.Predict = predict
+		}
+	}
+}
 func appendRationaleField(signature core.Signature) core.Signature {
 	newSignature := signature
 	newSignature.Outputs = append([]core.OutputField{{Field: core.Field{Name: "rationale", Prefix: "Reasoning: Let's think step by step."}}}, newSignature.Outputs...)
