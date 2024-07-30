@@ -86,7 +86,6 @@ func (tm *TraceManager) StartTrace(moduleName, moduleType string) *Trace {
 	} else {
 		tm.CurrentTrace.AddSubtrace(trace)
 		tm.CurrentTrace = trace
-		// log.Println("Added as subtrace")
 	}
 	return trace
 }
