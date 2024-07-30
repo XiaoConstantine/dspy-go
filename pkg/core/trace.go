@@ -126,3 +126,10 @@ func GetTraceManager(ctx context.Context) *TraceManager {
 	}
 	return tm
 }
+
+// GetTraceManagerFromContext retrieves the TraceManager from the context.
+// The second return value is false if no TraceManager is found in the context.
+func GetTraceManagerFromContext(ctx context.Context) (*TraceManager, bool) {
+	tm, ok := ctx.Value(traceKey{}).(*TraceManager)
+	return tm, ok
+}

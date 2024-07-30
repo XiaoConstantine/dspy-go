@@ -31,8 +31,13 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 	if teacherLLM == nil {
 		teacherLLM = config.GetDefaultLLM()
 	}
-	ctx = core.WithTraceManager(ctx)
-	tm := core.GetTraceManager(ctx)
+	// Check if the context already has a TraceManager
+	tm, ok := core.GetTraceManagerFromContext(ctx)
+	if !ok {
+		// If not, create a new context with a TraceManager
+		ctx = core.WithTraceManager(ctx)
+		tm = core.GetTraceManager(ctx)
+	}
 	compilationTrace := tm.StartTrace("Compilation", "Compilation")
 	defer tm.EndTrace()
 	results := make(chan struct {
@@ -40,7 +45,7 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 		trace *core.Trace
 	}, len(trainset))
 
-	total := len(trainset)
+	_ = len(trainset)
 	var processed int32 = 0
 
 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
@@ -96,10 +101,6 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 			break
 		}
 	}
-
-	current := atomic.LoadInt32(&processed)
-
-	fmt.Printf("Final Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
 
 	compilationTrace.SetOutputs(map[string]interface{}{
 		"compiledStudent": compiledStudent,

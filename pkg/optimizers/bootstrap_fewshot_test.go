@@ -2,7 +2,7 @@ package optimizers
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
@@ -73,6 +73,7 @@ func TestBootstrapFewShot(t *testing.T) {
 	maxBootstrapped := 2
 	optimizer := NewBootstrapFewShot(metric, maxBootstrapped)
 	ctx := core.WithTraceManager(context.Background())
+
 	// Compile the program
 	optimizedProgram, _ := optimizer.Compile(ctx, student, teacher, trainset)
 
@@ -82,45 +83,40 @@ func TestBootstrapFewShot(t *testing.T) {
 	assert.Equal(t, maxBootstrapped, len(optimizedPredict.Demos))
 
 	// Check if the demonstrations are correct
-	for i, demo := range optimizedPredict.Demos {
-		fmt.Printf("Demo %d - Inputs: %v, Outputs: %v", i+1, demo.Inputs, demo.Outputs)
-
+	for _, demo := range optimizedPredict.Demos {
 		assert.Contains(t, demo.Inputs, "question")
 		assert.Contains(t, demo.Outputs, "answer")
 		assert.Equal(t, "Paris", demo.Outputs["answer"])
 	}
 	// Verify the trace structure
-	// TODO: fix this
-	// tm := core.GetTraceManager(ctx)
-	// rootTrace := tm.GetRootTrace()
-	// fmt.Println(rootTrace)
-	// if assert.NotNil(t, rootTrace) {
-	// 	assert.Equal(t, "Compilation", rootTrace.ModuleName)
-	// 	assert.Equal(t, "Compilation", rootTrace.ModuleType)
-	// 	assert.Len(t, rootTrace.Subtraces, maxBootstrapped) // Should have 2 example traces
+	tm := core.GetTraceManager(ctx)
+	rootTrace := tm.GetRootTrace()
+	if assert.NotNil(t, rootTrace) {
+		assert.Equal(t, "Compilation", rootTrace.ModuleName)
+		assert.Equal(t, "Compilation", rootTrace.ModuleType)
+		assert.Len(t, rootTrace.Subtraces, maxBootstrapped+1) // Should have 2 example traces + 1 compliation trace
 
-	// 	for i, subtrace := range rootTrace.Subtraces {
-	// 		assert.Equal(t, "Example", subtrace.ModuleName)
-	// 		assert.Equal(t, "Example", subtrace.ModuleType)
-	// 		assert.Contains(t, subtrace.Inputs, "question")
-	// 		assert.Contains(t, subtrace.Outputs, "answer")
-	// 		assert.Equal(t, "Paris", subtrace.Outputs["answer"])
-	// 		assert.Len(t, subtrace.Subtraces, 1) // Should have 1 TeacherPrediction subtrace
+		for i, subtrace := range rootTrace.Subtraces {
+			assert.Equal(t, "Example", subtrace.ModuleName)
+			assert.Equal(t, "Example", subtrace.ModuleType)
+			assert.Contains(t, subtrace.Inputs, "question")
+			assert.Contains(t, subtrace.Outputs, "answer")
+			assert.Equal(t, "Paris", subtrace.Outputs["answer"])
+			assert.Len(t, subtrace.Subtraces, 1) // Should have 1 TeacherPrediction subtrace
 
-	// 		predictionTrace := subtrace.Subtraces[0]
-	// 		assert.Equal(t, "TeacherPrediction", predictionTrace.ModuleName)
-	// 		assert.Equal(t, "Prediction", predictionTrace.ModuleType)
-	// 		assert.Contains(t, predictionTrace.Inputs, "question")
-	// 		assert.Contains(t, predictionTrace.Outputs, "answer")
-	// 		assert.Equal(t, "Paris", predictionTrace.Outputs["answer"])
+			predictionTrace := subtrace.Subtraces[0]
+			assert.Equal(t, "TeacherPrediction", predictionTrace.ModuleName)
+			assert.Equal(t, "Prediction", predictionTrace.ModuleType)
+			assert.Contains(t, predictionTrace.Inputs, "question")
+			assert.Contains(t, predictionTrace.Outputs, "answer")
+			assert.Equal(t, "Paris", predictionTrace.Outputs["answer"])
 
-	// 		log.Printf("Example %d - Inputs: %v, Outputs: %v", i+1, subtrace.Inputs, subtrace.Outputs)
-	// 	}
+			log.Printf("Example %d - Inputs: %v, Outputs: %v", i+1, subtrace.Inputs, subtrace.Outputs)
+		}
 
-	// 	// Verify the final outputs of the compilation trace
-	// 	assert.Contains(t, rootTrace.Outputs, "compiledStudent")
-	// 	assert.Equal(t, optimizedProgram, rootTrace.Outputs["compiledStudent"])
-	// }
+		// Verify the final outputs of the compilation trace
+		assert.Contains(t, rootTrace.Outputs, "compiledStudent")
+	}
 }
 
 func TestBootstrapFewShotEdgeCases(t *testing.T) {
