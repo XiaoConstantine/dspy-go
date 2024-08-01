@@ -101,3 +101,11 @@ func (p *Program) AddModule(name string, module Module) {
 func (p *Program) SetForward(forward func(context.Context, map[string]interface{}) (map[string]interface{}, error)) {
 	p.Forward = forward
 }
+
+func (p *Program) GetModules() []Module {
+	modules := make([]Module, 0, len(p.Modules))
+	for _, module := range p.Modules {
+		modules = append(modules, module)
+	}
+	return modules
+}

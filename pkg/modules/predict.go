@@ -1,5 +1,3 @@
-// modules/predict.go
-
 package modules
 
 import (

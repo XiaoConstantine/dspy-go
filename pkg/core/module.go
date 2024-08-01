@@ -36,6 +36,10 @@ func (bm *BaseModule) SetLLM(llm LLM) {
 	bm.LLM = llm
 }
 
+func (bm *BaseModule) SetSignature(signature Signature) {
+	bm.Signature = signature
+}
+
 // Process is a placeholder implementation and should be overridden by specific modules.
 func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 	return nil, errors.New("Process method not implemented")
