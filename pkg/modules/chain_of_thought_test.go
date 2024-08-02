@@ -1,5 +1,3 @@
-// modules/chainofthought_test.go
-
 package modules
 
 import (

@@ -1,4 +1,3 @@
-// modules/react_test.go
 package modules
 
 import (
