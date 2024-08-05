@@ -7,14 +7,14 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockDataset is a mock implementation of core.Dataset
+// MockDataset is a mock implementation of core.Dataset.
 type MockDataset struct {
 	mock.Mock
 	Examples []core.Example
 	Index    int
 }
 
-// Next returns the next example in the dataset
+// Next returns the next example in the dataset.
 func (m *MockDataset) Next() (core.Example, bool) {
 	args := m.Called()
 	if args.Get(0) != nil {
@@ -30,13 +30,13 @@ func (m *MockDataset) Next() (core.Example, bool) {
 	return example, true
 }
 
-// Reset resets the dataset iterator
+// Reset resets the dataset iterator.
 func (m *MockDataset) Reset() {
 	m.Called()
 	m.Index = 0
 }
 
-// NewMockDataset creates a new MockDataset with the given examples
+// NewMockDataset creates a new MockDataset with the given examples.
 func NewMockDataset(examples []core.Example) *MockDataset {
 	return &MockDataset{
 		Examples: examples,
@@ -44,7 +44,7 @@ func NewMockDataset(examples []core.Example) *MockDataset {
 }
 
 
-// MockLLM is a mock implementation of core.LLM
+// MockLLM is a mock implementation of core.LLM.
 type MockLLM struct {
     mock.Mock
 }
