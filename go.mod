@@ -3,8 +3,9 @@ module github.com/XiaoConstantine/dspy-go
 go 1.22.5
 
 require (
-	github.com/XiaoConstantine/anthropic-go v0.0.5
+	github.com/XiaoConstantine/anthropic-go v0.0.6
 	github.com/apache/arrow/go/v13 v13.0.0
+	github.com/golang/mock v1.6.0
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.9.0
 )
@@ -15,7 +16,6 @@ require (
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
-	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
