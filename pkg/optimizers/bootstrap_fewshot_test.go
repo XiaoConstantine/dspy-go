@@ -5,28 +5,21 @@ import (
 	"log"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-// MockLLM is a mock implementation of the LLM interface for testing.
-type MockLLM struct {
-}
-
-func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (string, error) {
-	return "answer: Paris", nil
-}
-
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
-	// This method is not used in this test, so we'll leave it empty
-	return map[string]interface{}{"answer": "Paris"}, nil
-}
-
 func init() {
-	config.GlobalConfig.DefaultLLM = &MockLLM{}
-	config.GlobalConfig.TeacherLLM = &MockLLM{}
+	mockLLM := new(testutil.MockLLM)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("answer: Paris", nil)
+	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"answer": "Paris"}, nil)
+
+	config.GlobalConfig.DefaultLLM = mockLLM
+	config.GlobalConfig.TeacherLLM = mockLLM
 	config.GlobalConfig.ConcurrencyLevel = 1
 }
 

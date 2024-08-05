@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
@@ -44,25 +45,11 @@ func (m *MockOptimizer) Compile(ctx context.Context, program core.Program, datas
 	return args.Get(0).(core.Program), args.Error(1)
 }
 
-// MockDataset is a mock implementation of core.Dataset.
-type MockDataset struct {
-	mock.Mock
-}
-
-func (m *MockDataset) Next() (core.Example, bool) {
-	args := m.Called()
-	return args.Get(0).(core.Example), args.Bool(1)
-}
-
-func (m *MockDataset) Reset() {
-	m.Called()
-}
-
 func TestCoproCompile(t *testing.T) {
 	// Create mock objects
 	mockModule := new(MockModule)
 	mockSubOptimizer := new(MockOptimizer)
-	mockDataset := new(MockDataset)
+	mockDataset := new(testutil.MockDataset)
 
 	// Create a test program
 	testProgram := core.Program{
@@ -104,7 +91,7 @@ func TestCoproCompileWithPredict(t *testing.T) {
 	// Create mock objects
 	mockPredict := modules.NewPredict(core.Signature{})
 	mockSubOptimizer := new(MockOptimizer)
-	mockDataset := new(MockDataset)
+	mockDataset := new(testutil.MockDataset)
 
 	// Create a test program
 	testProgram := core.Program{
@@ -141,7 +128,7 @@ func TestCoproCompileWithPredict(t *testing.T) {
 func TestCoproCompileError(t *testing.T) {
 	// Create mock objects
 	mockSubOptimizer := new(MockOptimizer)
-	mockDataset := new(MockDataset)
+	mockDataset := new(testutil.MockDataset)
 
 	// Create a test program
 	testProgram := core.Program{
