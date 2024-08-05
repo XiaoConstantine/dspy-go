@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
@@ -24,40 +25,126 @@ func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction 
 	}
 }
 
+// func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
+// 	compiledStudent := student.Clone()
+// 	// Use the teacher LLM if available, otherwise use the default LLM
+// 	teacherLLM := config.GetTeacherLLM()
+// 	if teacherLLM == nil {
+// 		teacherLLM = config.GetDefaultLLM()
+// 	}
+// 	// Check if the context already has a TraceManager
+// 	tm, ok := core.GetTraceManagerFromContext(ctx)
+// 	if !ok {
+// 		// If not, create a new context with a TraceManager
+// 		ctx = core.WithTraceManager(ctx)
+// 		tm = core.GetTraceManager(ctx)
+// 	}
+// 	compilationTrace := tm.StartTrace("Compilation", "Compilation")
+// 	defer tm.EndTrace()
+// 	results := make(chan struct {
+// 		demo  core.Example
+// 		trace *core.Trace
+// 	}, len(trainset))
+
+// 	_ = len(trainset)
+// 	var processed int32 = 0
+
+// 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
+// 	for _, example := range trainset {
+// 		if b.enoughBootstrappedDemos(compiledStudent) {
+// 			log.Println("Enough bootstrapped demos, breaking loop")
+// 			break
+// 		}
+
+// 		ex := example // Create a new variable to avoid closure issues
+// 		p.Go(func() {
+
+// 			exampleTrace := tm.StartTrace("Example", "Example")
+// 			exampleTrace.SetInputs(ex)
+
+// 			prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, ex)
+// 			if err != nil {
+// 				exampleTrace.SetError(err)
+// 				tm.EndTrace()
+// 				return
+// 			}
+// 			exampleTrace.SetOutputs(prediction)
+
+// 			if b.Metric(ex, prediction, exampleTrace) {
+// 				results <- struct {
+// 					demo  core.Example
+// 					trace *core.Trace
+// 				}{
+// 					demo: core.Example{
+// 						Inputs:  ex,
+// 						Outputs: prediction,
+// 					},
+// 					trace: exampleTrace,
+// 				}
+// 			}
+// 			atomic.AddInt32(&processed, 1)
+
+// 			tm.EndTrace() // End the example trace
+// 		})
+// 	}
+
+// 	go func() {
+// 		p.Wait()
+// 		close(results)
+// 	}()
+
+// 	for result := range results {
+// 		if err := b.addDemonstrations(compiledStudent, result.trace); err != nil {
+// 			compilationTrace.SetError(err)
+// 			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
+// 		}
+// 		if b.enoughBootstrappedDemos(compiledStudent) {
+// 			break
+// 		}
+// 	}
+
+// 	compilationTrace.SetOutputs(map[string]interface{}{
+// 		"compiledStudent": compiledStudent,
+// 	})
+// 	return compiledStudent, nil
+// }
+
 func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
 	compiledStudent := student.Clone()
-	// Use the teacher LLM if available, otherwise use the default LLM
 	teacherLLM := config.GetTeacherLLM()
 	if teacherLLM == nil {
 		teacherLLM = config.GetDefaultLLM()
 	}
-	// Check if the context already has a TraceManager
+
 	tm, ok := core.GetTraceManagerFromContext(ctx)
 	if !ok {
-		// If not, create a new context with a TraceManager
 		ctx = core.WithTraceManager(ctx)
 		tm = core.GetTraceManager(ctx)
 	}
+
 	compilationTrace := tm.StartTrace("Compilation", "Compilation")
 	defer tm.EndTrace()
-	results := make(chan struct {
-		demo  core.Example
-		trace *core.Trace
-	}, len(trainset))
 
-	_ = len(trainset)
-	var processed int32 = 0
+	var (
+		resultsMu sync.Mutex
+		results   []struct {
+			demo  core.Example
+			trace *core.Trace
+		}
+		processed int32
+		errCh     = make(chan error, 1)
+	)
 
 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
+
 	for _, example := range trainset {
 		if b.enoughBootstrappedDemos(compiledStudent) {
 			log.Println("Enough bootstrapped demos, breaking loop")
 			break
 		}
 
-		ex := example // Create a new variable to avoid closure issues
+		ex := example
 		p.Go(func() {
-
 			exampleTrace := tm.StartTrace("Example", "Example")
 			exampleTrace.SetInputs(ex)
 
@@ -65,12 +152,17 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 			if err != nil {
 				exampleTrace.SetError(err)
 				tm.EndTrace()
+				select {
+				case errCh <- err:
+				default:
+				}
 				return
 			}
 			exampleTrace.SetOutputs(prediction)
 
 			if b.Metric(ex, prediction, exampleTrace) {
-				results <- struct {
+				resultsMu.Lock()
+				results = append(results, struct {
 					demo  core.Example
 					trace *core.Trace
 				}{
@@ -79,20 +171,25 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 						Outputs: prediction,
 					},
 					trace: exampleTrace,
-				}
+				})
+				resultsMu.Unlock()
 			}
-			atomic.AddInt32(&processed, 1)
 
-			tm.EndTrace() // End the example trace
+			atomic.AddInt32(&processed, 1)
+			tm.EndTrace()
 		})
 	}
 
-	go func() {
-		p.Wait()
-		close(results)
-	}()
+	p.Wait()
 
-	for result := range results {
+	select {
+	case err := <-errCh:
+		compilationTrace.SetError(err)
+		return compiledStudent, fmt.Errorf("error during compilation: %w", err)
+	default:
+	}
+
+	for _, result := range results {
 		if err := b.addDemonstrations(compiledStudent, result.trace); err != nil {
 			compilationTrace.SetError(err)
 			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
