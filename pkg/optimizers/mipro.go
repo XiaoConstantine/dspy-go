@@ -22,19 +22,59 @@ type MIPRO struct {
 	Verbose              bool
 }
 
-func NewMIPROv2(metric func(example, prediction map[string]interface{}, trace *core.Trace) float64, numCandidates, maxBootstrappedDemos, maxLabeledDemos, numTrials int, promptModel, taskModel core.LLM, miniBatchSize, fullEvalSteps int, verbose bool) *MIPRO {
-	return &MIPRO{
+func NewMIPRO(metric func(example, prediction map[string]interface{}, trace *core.Trace) float64, opts ...MIPROOption) *MIPRO {
+	m := &MIPRO{
 		Metric:               metric,
-		NumCandidates:        numCandidates,
-		MaxBootstrappedDemos: maxBootstrappedDemos,
-		MaxLabeledDemos:      maxLabeledDemos,
-		NumTrials:            numTrials,
-		PromptModel:          promptModel,
-		TaskModel:            taskModel,
-		MiniBatchSize:        miniBatchSize,
-		FullEvalSteps:        fullEvalSteps,
-		Verbose:              verbose,
+		NumCandidates:        10,
+		MaxBootstrappedDemos: 5,
+		MaxLabeledDemos:      5,
+		NumTrials:            100,
+		MiniBatchSize:        32,
+		FullEvalSteps:        10,
+		Verbose:              false,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+type MIPROOption func(*MIPRO)
+
+func WithNumCandidates(n int) MIPROOption {
+	return func(m *MIPRO) { m.NumCandidates = n }
+}
+
+func WithMaxBootstrappedDemos(n int) MIPROOption {
+	return func(m *MIPRO) { m.MaxBootstrappedDemos = n }
+}
+
+func WithMaxLabeledDemos(n int) MIPROOption {
+	return func(m *MIPRO) { m.MaxLabeledDemos = n }
+}
+
+func WithNumTrials(n int) MIPROOption {
+	return func(m *MIPRO) { m.NumTrials = n }
+}
+
+func WithPromptModel(model core.LLM) MIPROOption {
+	return func(m *MIPRO) { m.PromptModel = model }
+}
+
+func WithTaskModel(model core.LLM) MIPROOption {
+	return func(m *MIPRO) { m.TaskModel = model }
+}
+
+func WithMiniBatchSize(n int) MIPROOption {
+	return func(m *MIPRO) { m.MiniBatchSize = n }
+}
+
+func WithFullEvalSteps(n int) MIPROOption {
+	return func(m *MIPRO) { m.FullEvalSteps = n }
+}
+
+func WithVerbose(v bool) MIPROOption {
+	return func(m *MIPRO) { m.Verbose = v }
 }
 
 type Trial struct {
@@ -45,22 +85,23 @@ type Trial struct {
 func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
 	instructionCandidates, err := m.generateInstructionCandidates(ctx, program, dataset)
 	if err != nil {
-		return program, err
+		return program, fmt.Errorf("failed to generate instruction candidates: %w", err)
 	}
 
-	demoCandidates, err := m.generateDemoCandidates(ctx, program, dataset)
+	demoCandidates, err := m.generateDemoCandidates(program, dataset)
 	if err != nil {
-		return program, err
+		return program, fmt.Errorf("failed to generate demo candidates: %w", err)
 	}
 
 	var bestTrial Trial
 	for i := 0; i < m.NumTrials; i++ {
+		dataset.Reset()
 		trial := m.generateTrial(program.GetModules(), len(instructionCandidates), len(demoCandidates))
 		candidateProgram := m.constructProgram(program, trial, instructionCandidates, demoCandidates)
 
 		score, err := m.evaluateProgram(ctx, candidateProgram, dataset, metric)
 		if err != nil {
-			return program, err
+			return core.Program{}, fmt.Errorf("failed to evaluate program in trial %d: %w", i, err)
 		}
 
 		trial.Score = score
@@ -73,6 +114,9 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 		}
 	}
 
+	if bestTrial.Params == nil {
+		return program, fmt.Errorf("no successful trials")
+	}
 	return m.constructProgram(program, bestTrial, instructionCandidates, demoCandidates), nil
 }
 
@@ -105,26 +149,32 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 
 	for i := 0; i < m.MiniBatchSize; i++ {
 		example, ok := dataset.Next()
+
 		if !ok {
+			if i == 0 {
+				return 0, fmt.Errorf("no examples available from dataset")
+			}
 			break
 		}
 
 		prediction, err := program.Execute(ctx, example.Inputs)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to evaluate program: error executing program: %w", err)
 		}
 
 		trace := core.GetTraceManager(ctx).CurrentTrace
 		score := m.Metric(example.Inputs, prediction, trace)
 		totalScore += score
 		count++
+
 	}
 
 	if count == 0 {
-		return 0, fmt.Errorf("no examples evaluated")
+		return 0, fmt.Errorf("failed to evaluate program: no examples evaluated")
 	}
+	averageScore := totalScore / float64(count)
 
-	return totalScore / float64(count), nil
+	return averageScore, nil
 }
 
 func (m *MIPRO) logTrialResult(trialNum int, trial Trial) {
@@ -148,7 +198,7 @@ func (m *MIPRO) generateInstructionCandidates(ctx context.Context, program core.
 	return candidates, nil
 }
 
-func (m *MIPRO) generateDemoCandidates(ctx context.Context, program core.Program, dataset core.Dataset) ([][][]core.Example, error) {
+func (m *MIPRO) generateDemoCandidates(program core.Program, dataset core.Dataset) ([][][]core.Example, error) {
 	candidates := make([][][]core.Example, len(program.GetModules()))
 	for i, module := range program.GetModules() {
 		if _, ok := module.(*modules.Predict); ok {
@@ -163,7 +213,6 @@ func (m *MIPRO) generateDemoCandidates(ctx context.Context, program core.Program
 					}
 					demos[k] = example
 				}
-				// For simplicity, we're not implementing labeled demos here
 				candidates[i][j] = demos
 			}
 		}
