@@ -37,7 +37,7 @@ func TestNewMIPRO(t *testing.T) {
 }
 
 func TestMIPRO_Compile(t *testing.T) {
-	ctx := context.Background()
+	ctx := core.WithTraceManager(context.Background())
 	mockLLM := new(testutil.MockLLM)
 	mockDataset := &testutil.MockDataset{
 		Examples: []core.Example{
@@ -221,21 +221,18 @@ func TestMIPRO_constructProgram(t *testing.T) {
 		},
 		nil,
 	)
-
 	trial := Trial{
 		Params: map[string]int{
 			"instruction_0": 0,
-			"instruction_1": 1,
 			"demo_0":        0,
+			"instruction_1": 1,
 			"demo_1":        1,
 		},
 	}
-
 	instructionCandidates := [][]string{
 		{"Instruction1", "Instruction2"},
 		{"Instruction3", "Instruction4"},
 	}
-
 	demoCandidates := [][][]core.Example{
 		{
 			{
@@ -254,17 +251,26 @@ func TestMIPRO_constructProgram(t *testing.T) {
 			},
 		},
 	}
-
 	constructedProgram := mipro.constructProgram(baseProgram, trial, instructionCandidates, demoCandidates)
-
 	assert.NotNil(t, constructedProgram)
-	predict1 := constructedProgram.GetModules()[0].(*modules.Predict)
-	predict2 := constructedProgram.GetModules()[1].(*modules.Predict)
 
-	assert.Equal(t, "Instruction1", predict1.GetSignature().Instruction)
-	assert.Equal(t, "Instruction4", predict2.GetSignature().Instruction)
-	assert.Equal(t, demoCandidates[0][0], predict1.GetDemos())
-	assert.Equal(t, demoCandidates[1][1], predict2.GetDemos())
+	cm := constructedProgram.GetModules()
+	assert.Equal(t, 2, len(cm), "Expected 2 modules")
+
+	checkModule := func(i int, expectedInstruction string, expectedDemos []core.Example) {
+		t.Logf("Checking module %d", i)
+		if predictor, ok := cm[i].(*modules.Predict); ok {
+			t.Logf("Module %d instruction: %s", i, predictor.GetSignature().Instruction)
+			t.Logf("Module %d demos: %+v", i, predictor.GetDemos())
+			assert.Equal(t, expectedInstruction, predictor.GetSignature().Instruction, "Unexpected instruction for module %d", i)
+			assert.Equal(t, expectedDemos, predictor.GetDemos(), "Unexpected demos for module %d", i)
+		} else {
+			t.Errorf("Module %d is not a *modules.Predict", i)
+		}
+	}
+
+	checkModule(0, "Instruction1", demoCandidates[0][0])
+	checkModule(1, "Instruction4", demoCandidates[1][1])
 }
 
 func TestMIPRO_logTrialResult(t *testing.T) {

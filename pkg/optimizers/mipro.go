@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -94,6 +95,8 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	}
 
 	var bestTrial Trial
+	var compilationError error
+
 	for i := 0; i < m.NumTrials; i++ {
 		dataset.Reset()
 		trial := m.generateTrial(program.GetModules(), len(instructionCandidates), len(demoCandidates))
@@ -101,7 +104,11 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 
 		score, err := m.evaluateProgram(ctx, candidateProgram, dataset, metric)
 		if err != nil {
-			return core.Program{}, fmt.Errorf("failed to evaluate program in trial %d: %w", i, err)
+			log.Printf("Error evaluating program in trial %d: %v", i, err)
+			compilationError = err
+			continue
+
+			// return core.Program{}, fmt.Errorf("failed to evaluate program in trial %d: %w", i, err)
 		}
 
 		trial.Score = score
@@ -115,6 +122,9 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	}
 
 	if bestTrial.Params == nil {
+		if compilationError != nil {
+			return program, fmt.Errorf("compilation failed: %w", compilationError)
+		}
 		return program, fmt.Errorf("no successful trials")
 	}
 	return m.constructProgram(program, bestTrial, instructionCandidates, demoCandidates), nil
@@ -136,8 +146,14 @@ func (m *MIPRO) constructProgram(baseProgram core.Program, trial Trial, instruct
 			instructionIdx := trial.Params[fmt.Sprintf("instruction_%d", i)]
 			demoIdx := trial.Params[fmt.Sprintf("demo_%d", i)]
 
-			predictor.SetSignature(predictor.GetSignature().WithInstruction(instructionCandidates[i][instructionIdx]))
-			predictor.SetDemos(demoCandidates[i][demoIdx])
+			// Ensure we're using the correct index for instructionCandidates and demoCandidates
+			if i < len(instructionCandidates) && instructionIdx < len(instructionCandidates[i]) {
+				predictor.SetSignature(predictor.GetSignature().WithInstruction(instructionCandidates[i][instructionIdx]))
+			}
+
+			if i < len(demoCandidates) && demoIdx < len(demoCandidates[i]) {
+				predictor.SetDemos(demoCandidates[i][demoIdx])
+			}
 		}
 	}
 	return program
@@ -149,7 +165,11 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 
 	for i := 0; i < m.MiniBatchSize; i++ {
 		example, ok := dataset.Next()
-
+		traceManager := core.GetTraceManager(ctx)
+		var trace *core.Trace
+		if traceManager != nil {
+			trace = traceManager.CurrentTrace
+		}
 		if !ok {
 			if i == 0 {
 				return 0, fmt.Errorf("no examples available from dataset")
@@ -162,7 +182,6 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 			return 0, fmt.Errorf("failed to evaluate program: error executing program: %w", err)
 		}
 
-		trace := core.GetTraceManager(ctx).CurrentTrace
 		score := m.Metric(example.Inputs, prediction, trace)
 		totalScore += score
 		count++
