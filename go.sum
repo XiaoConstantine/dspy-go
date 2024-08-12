@@ -1,7 +1,7 @@
 github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c h1:RGWPOewvKIROun94nF7v2cua9qP+thov/7M50KEoeSU=
 github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c/go.mod h1:X0CRv0ky0k6m906ixxpzmDRLvX58TFUKS2eePweuyxk=
-github.com/XiaoConstantine/anthropic-go v0.0.6 h1:KIfJT71HRYrenPhrmIk6/i2PcsmPlKH6ERF9awv4HPI=
-github.com/XiaoConstantine/anthropic-go v0.0.6/go.mod h1:ARxRchhwI8HCfEFJtFCIRET3K2QqoyGyuvMra/6nfoI=
+github.com/XiaoConstantine/anthropic-go v0.0.7 h1:rHTZeyKH0Eq8jDzcIrW1ZPSRybEQ6ePLlEcBwSIgmD0=
+github.com/XiaoConstantine/anthropic-go v0.0.7/go.mod h1:ARxRchhwI8HCfEFJtFCIRET3K2QqoyGyuvMra/6nfoI=
 github.com/andybalholm/brotli v1.0.4 h1:V7DdXeJtZscaqfNuAdSRuRFzuiKlHSC/Zh3zl9qY3JY=
 github.com/andybalholm/brotli v1.0.4/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHGRSepvi9Eig=
 github.com/apache/arrow/go/v13 v13.0.0 h1:kELrvDQuKZo8csdWYqBQfyi431x6Zs/YJTEgUuSVcWk=
