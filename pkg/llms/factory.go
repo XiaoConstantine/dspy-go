@@ -19,6 +19,8 @@ func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
 			return nil, fmt.Errorf("invalid Ollama model ID format. Use 'ollama:<model_name>'")
 		}
 		return NewOllamaLLM("http://localhost:11434", parts[1])
+	case strings.HasPrefix(string(modelID), "llamacpp:"):
+		return NewLlamacppLLM("http://localhost:8080")
 	default:
 		return nil, fmt.Errorf("unsupported model ID: %s", modelID)
 	}

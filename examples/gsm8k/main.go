@@ -15,7 +15,7 @@ import (
 
 func RunGSM8KExample(apiKey string) {
 	// Setup LLM
-	utils.SetupLLM(apiKey, core.ModelAnthropicSonnet)
+	utils.SetupLLM(apiKey, "llamacpp:local")
 
 	// Load GSM8K dataset
 	examples, err := datasets.LoadGSM8K()
@@ -23,7 +23,6 @@ func RunGSM8KExample(apiKey string) {
 		log.Fatalf("Failed to load GSM8K dataset: %v", err)
 	}
 
-	utils.SetupLLM(apiKey, core.ModelAnthropicSonnet)
 	// Create signature for ChainOfThought
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
