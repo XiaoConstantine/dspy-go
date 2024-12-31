@@ -20,7 +20,7 @@ func NewChainWorkflow(memory agents.Memory) *ChainWorkflow {
 	}
 }
 
-// Execute runs steps sequentially, passing state from one step to the next
+// Execute runs steps sequentially, passing state from one step to the next.
 func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
 	// Initialize workflow state with input values
 	state := make(map[string]interface{})
@@ -30,16 +30,21 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 
 	// Execute steps in sequence
 	for _, step := range w.steps {
+		signature := step.Module.GetSignature()
+
 		// Create subset of state containing only the fields this step needs
 		stepInputs := make(map[string]interface{})
-		for _, field := range step.InputFields {
-			if val, ok := state[field]; ok {
-				stepInputs[field] = val
+		for _, field := range signature.Inputs {
+			if val, ok := state[field.Name]; ok {
+				stepInputs[field.Name] = val
 			}
 		}
+		fmt.Printf("Step: %s with input: %s\n", step.ID, stepInputs)
 
 		// Execute the step
 		result, err := step.Execute(ctx, stepInputs)
+
+		fmt.Printf("Step: %s with output: %s\n", step.ID, result)
 		if err != nil {
 			return nil, fmt.Errorf("step %s failed: %w", step.ID, err)
 		}
@@ -52,4 +57,3 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 
 	return state, nil
 }
-

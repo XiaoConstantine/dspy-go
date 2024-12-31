@@ -19,14 +19,6 @@ type Step struct {
 	// This could be a Predict, ChainOfThought, or any other DSPy module type
 	Module core.Module
 
-	// InputFields defines what data this step expects from previous steps or initial input
-	// These must match the input fields defined in the module's signature
-	InputFields []string
-
-	// OutputFields defines what data this step produces
-	// These must match the output fields defined in the module's signature
-	OutputFields []string
-
 	// NextSteps contains the IDs of steps that should execute after this one
 	// This allows us to define branching and conditional execution paths
 	NextSteps []string
@@ -65,8 +57,10 @@ type StepResult struct {
 
 // Execute runs the step's DSPy module with the provided inputs.
 func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
+	signature := s.Module.GetSignature()
+
 	// First validate that we have all required inputs
-	if err := s.validateInputs(inputs); err != nil {
+	if err := s.validateInputs(inputs, signature); err != nil {
 		return nil, fmt.Errorf("input validation failed: %w", err)
 	}
 
@@ -90,7 +84,7 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 	}
 
 	// Validate outputs match expected fields
-	if err := s.validateOutputs(result.Outputs); err != nil {
+	if err := s.validateOutputs(result.Outputs, signature); err != nil {
 		return nil, fmt.Errorf("output validation failed: %w", err)
 	}
 
@@ -100,7 +94,11 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 // executeOnce performs a single execution attempt of the step.
 func (s *Step) executeOnce(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
 	// Execute the underlying DSPy module
+
+	fmt.Printf("Step %s executing with inputs: %+v\n", s.ID, inputs)
 	outputs, err := s.Module.Process(ctx, inputs)
+	fmt.Printf("Step %s module outputs: %+v\n", s.ID, outputs)
+
 	if err != nil {
 		return nil, err
 	}
@@ -137,9 +135,9 @@ func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]interface
 }
 
 // validateInputs checks if all required input fields are present.
-func (s *Step) validateInputs(inputs map[string]interface{}) error {
-	for _, field := range s.InputFields {
-		if _, ok := inputs[field]; !ok {
+func (s *Step) validateInputs(inputs map[string]interface{}, signature core.Signature) error {
+	for _, field := range signature.Inputs {
+		if _, ok := inputs[field.Name]; !ok {
 			return fmt.Errorf("missing required input field: %s", field)
 		}
 	}
@@ -147,9 +145,9 @@ func (s *Step) validateInputs(inputs map[string]interface{}) error {
 }
 
 // validateOutputs checks if all expected output fields are present.
-func (s *Step) validateOutputs(outputs map[string]interface{}) error {
-	for _, field := range s.OutputFields {
-		if _, ok := outputs[field]; !ok {
+func (s *Step) validateOutputs(outputs map[string]interface{}, signature core.Signature) error {
+	for _, field := range signature.Outputs {
+		if _, ok := outputs[field.Name]; !ok {
 			return fmt.Errorf("missing required output field: %s", field)
 		}
 	}

@@ -48,9 +48,11 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]interf
 
 			// Prepare inputs for this step
 			stepInputs := make(map[string]interface{})
-			for _, field := range s.InputFields {
-				if val, ok := inputs[field]; ok {
-					stepInputs[field] = val
+			signature := step.Module.GetSignature()
+
+			for _, field := range signature.Inputs {
+				if val, ok := inputs[field.Name]; ok {
+					stepInputs[field.Name] = val
 				}
 			}
 

@@ -25,7 +25,7 @@ func NewRouterWorkflow(memory agents.Memory, classifierStep *Step) *RouterWorkfl
 	}
 }
 
-// AddRoute associates a classification value with a sequence of steps
+// AddRoute associates a classification value with a sequence of steps.
 func (w *RouterWorkflow) AddRoute(classification string, steps []*Step) error {
 	// Validate steps exist in workflow
 	for _, step := range steps {
@@ -64,10 +64,12 @@ func (w *RouterWorkflow) Execute(ctx context.Context, inputs map[string]interfac
 
 	// Execute steps in the selected route
 	for _, step := range route {
+		signature := step.Module.GetSignature()
+
 		stepInputs := make(map[string]interface{})
-		for _, field := range step.InputFields {
-			if val, ok := state[field]; ok {
-				stepInputs[field] = val
+		for _, field := range signature.Inputs {
+			if val, ok := state[field.Name]; ok {
+				stepInputs[field.Name] = val
 			}
 		}
 
