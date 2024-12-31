@@ -56,9 +56,6 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 		[]core.OutputField{{Field: core.Field{Name: "sorted_values", Prefix: "sorted_values:"}}},
 	).WithInstruction(`Sort all lines in descending order by numerical value.
                 Keep the format 'value: metric' on each line.
-		Example format:
-		sorted_values:
-		92%: customer satisfaction
 		`)
 	sortStep := &workflows.Step{
 		ID:     "sort_values",

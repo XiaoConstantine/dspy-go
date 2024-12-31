@@ -94,10 +94,7 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 // executeOnce performs a single execution attempt of the step.
 func (s *Step) executeOnce(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
 	// Execute the underlying DSPy module
-
-	fmt.Printf("Step %s executing with inputs: %+v\n", s.ID, inputs)
 	outputs, err := s.Module.Process(ctx, inputs)
-	fmt.Printf("Step %s module outputs: %+v\n", s.ID, outputs)
 
 	if err != nil {
 		return nil, err

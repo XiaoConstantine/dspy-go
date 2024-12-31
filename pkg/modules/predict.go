@@ -27,8 +27,6 @@ func NewPredict(signature core.Signature) *Predict {
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	fmt.Printf("Predict Process inputs: %+v\n", inputs)
-
 	tm := core.GetTraceManager(ctx)
 	trace := tm.StartTrace("Predict", "Predict")
 	defer tm.EndTrace()
@@ -42,7 +40,6 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	signature := p.GetSignature()
 	prompt := formatPrompt(signature, p.Demos, inputs)
-	fmt.Printf("Generated prompt: %s\n", prompt)
 
 	completion, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
@@ -50,11 +47,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 		return nil, err
 	}
-	fmt.Printf("LLM completion: %s\n", completion)
 
 	outputs := parseCompletion(completion, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
-	fmt.Printf("Parsed outputs: %+v\n", outputs)
 
 	trace.SetOutputs(formattedOutputs)
 

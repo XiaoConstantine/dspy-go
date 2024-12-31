@@ -39,12 +39,10 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 				stepInputs[field.Name] = val
 			}
 		}
-		fmt.Printf("Step: %s with input: %s\n", step.ID, stepInputs)
 
 		// Execute the step
 		result, err := step.Execute(ctx, stepInputs)
 
-		fmt.Printf("Step: %s with output: %s\n", step.ID, result)
 		if err != nil {
 			return nil, fmt.Errorf("step %s failed: %w", step.ID, err)
 		}
