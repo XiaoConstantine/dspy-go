@@ -12,6 +12,46 @@ type Field struct {
 	Prefix      string
 }
 
+// NewField creates a new Field with smart defaults.
+func NewField(name string, opts ...FieldOption) Field {
+	// Start with sensible defaults
+	f := Field{
+		Name:   name,
+		Prefix: name + ":", // Default prefix is the field name with colon
+	}
+
+	// Apply any custom options
+	for _, opt := range opts {
+		opt(&f)
+	}
+
+	return f
+}
+
+// FieldOption allows customization of Field creation.
+type FieldOption func(*Field)
+
+// WithDescription sets a custom description.
+func WithDescription(desc string) FieldOption {
+	return func(f *Field) {
+		f.Description = desc
+	}
+}
+
+// WithCustomPrefix overrides the default prefix.
+func WithCustomPrefix(prefix string) FieldOption {
+	return func(f *Field) {
+		f.Prefix = prefix
+	}
+}
+
+// WithNoPrefix removes the prefix entirely.
+func WithNoPrefix() FieldOption {
+	return func(f *Field) {
+		f.Prefix = ""
+	}
+}
+
 // InputField represents an input field.
 type InputField struct {
 	Field

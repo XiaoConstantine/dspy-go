@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -24,8 +25,7 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 		[]core.OutputField{{Field: core.Field{Name: "extracted_values", Prefix: "extracted_values:"}}},
 	).WithInstruction(`Extract only the numerical values and their associated metrics from the text.
         Format each as 'value: metric' on a new line.
-        Example format:
-	extracter_values:
+		Example: extracted_values:
         92: customer satisfaction
         45%: revenue growth`)
 	extractStep := &workflows.Step{
@@ -65,10 +65,14 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 	// Step 4: Format as table
 	tableSignature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "sorted_values"}}},
-		[]core.OutputField{{Field: core.Field{Name: "markdown_table", Prefix: "markdown"}}},
-	).WithInstruction(`Format the sorted values as a markdown table.
-Your response must start with "markdown_table:" followed by the table.
-Do not include any other text.`)
+		[]core.OutputField{{Field: core.Field{Name: "markdown_table", Prefix: "markdown_table:"}}},
+	).WithInstruction(`Format the sorted values as a markdown table with two columns:
+    - First column: Metric
+    - Second column: Value
+Format example:
+| Metric | Value |
+|--------|-------|
+| Customer Satisfaction | 92% |`)
 	tableStep := &workflows.Step{
 		ID:     "format_table",
 		Module: modules.NewPredict(tableSignature),
@@ -112,5 +116,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Data processing failed: %v", err)
 	}
-	fmt.Println(result["markdown_table"])
+	// Format the output nicely
+	if table, ok := result["markdown_table"].(string); ok {
+		// Clean up any extra whitespace
+		lines := strings.Split(strings.TrimSpace(table), "\n")
+		for _, line := range lines {
+			fmt.Println(strings.TrimSpace(line))
+		}
+	} else {
+		log.Fatal("Invalid table format in result")
+	}
 }
