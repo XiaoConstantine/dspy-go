@@ -101,64 +101,44 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	return sb.String()
 }
 
-//	func parseCompletion(completion string, signature core.Signature) map[string]any {
-//		outputs := make(map[string]any)
-//		lines := strings.Split(strings.TrimSpace(completion), "\n")
+// func parseCompletion(completion string, signature core.Signature) map[string]any {
+// 	outputs := make(map[string]any)
+// 	lines := strings.Split(strings.TrimSpace(completion), "\n")
 //
-//		var currentField string
-//		var currentContent []string
+// 	var currentField *core.OutputField
+// 	var currentValue strings.Builder
 //
-//		// Helper function to store accumulated content
-//		storeContent := func() {
-//			if currentField != "" && len(currentContent) > 0 {
-//				outputs[currentField] = strings.Join(currentContent, "\n")
-//			}
-//		}
+// 	for _, line := range lines {
+// 		line = strings.TrimSpace(line)
+// 		if line == "" {
+// 			continue
+// 		}
 //
-//		for _, line := range lines {
-//			line = strings.TrimSpace(line)
-//			if line == "" {
-//				continue
-//			}
+// 		for _, field := range signature.Outputs {
+// 			if field.Prefix != "" && strings.HasPrefix(line, field.Prefix) {
+// 				currentField = &field
+// 				continue
+// 			}
+// 		}
+// 		if currentField != nil {
+// 			// Skip the line with just the prefix
+// 			if strings.HasPrefix(line, currentField.Prefix) {
+// 				continue
+// 			}
+// 			currentValue.WriteString(line)
+// 			currentValue.WriteString("\n")
+// 		}
+// 	}
+// 	if currentField != nil && currentValue.Len() > 0 {
+// 		outputs[currentField.Name] = strings.TrimSpace(currentValue.String())
+// 	}
 //
-//			// Check for field headers
-//			foundNewField := false
-//			for _, field := range signature.Outputs {
-//				prefix := field.Name + ":"
-//				if strings.HasPrefix(line, prefix) {
-//					// Store any existing content before switching fields
-//					storeContent()
-//
-//					// Start new field
-//					currentField = field.Name
-//					currentContent = nil
-//					foundNewField = true
-//					break
-//				}
-//			}
-//
-//			// If this wasn't a field header and we have a current field
-//			if !foundNewField && currentField != "" {
-//				// Handle both bullet points and regular lines
-//				content := line
-//				if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "•") {
-//					content = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "-"), "•"))
-//				}
-//				if content != "" {
-//					currentContent = append(currentContent, content)
-//				}
-//			}
-//		}
-//
-//		// Don't forget to store the last field's content
-//		storeContent()
-//
-//		return outputs
-//	}
+// 	return outputs
+// }
+
 func parseCompletion(completion string, signature core.Signature) map[string]any {
 	outputs := make(map[string]any)
 	lines := strings.Split(strings.TrimSpace(completion), "\n")
-	// Track which field we're currently collecting content for
 
 	var currentField *core.OutputField
 	var currentValue strings.Builder
@@ -169,55 +149,64 @@ func parseCompletion(completion string, signature core.Signature) map[string]any
 			continue
 		}
 
+		// First try to match fields with prefixes
+		prefixFound := false
 		for _, field := range signature.Outputs {
 			if field.Prefix != "" && strings.HasPrefix(line, field.Prefix) {
+				if currentField != nil && currentValue.Len() > 0 {
+					// Store previous field's content before switching
+					outputs[currentField.Name] = strings.TrimSpace(currentValue.String())
+					currentValue.Reset()
+				}
 				currentField = &field
-				continue
+				prefixFound = true
+				break
 			}
 		}
-		if currentField != nil {
-			// Skip the line with just the prefix
-			if strings.HasPrefix(line, currentField.Prefix) {
-				continue
+
+		if prefixFound {
+			continue
+		}
+
+		// If no prefix match, try simple key:value parsing
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+
+			// Check if this key matches any output field
+			for _, field := range signature.Outputs {
+				if field.Name == key {
+					// Store previous field's content if any
+					if currentField != nil && currentValue.Len() > 0 {
+						outputs[currentField.Name] = strings.TrimSpace(currentValue.String())
+						currentValue.Reset()
+					}
+					// Store this key-value pair directly
+					outputs[key] = value
+					currentField = nil // Reset current field
+					break
+				}
 			}
-			currentValue.WriteString(line)
-			currentValue.WriteString("\n")
+			continue
+		}
+
+		// If we have a current field, accumulate content
+		if currentField != nil {
+			if !strings.HasPrefix(line, currentField.Prefix) {
+				currentValue.WriteString(line)
+				currentValue.WriteString("\n")
+			}
 		}
 	}
+
+	// Store any remaining content
 	if currentField != nil && currentValue.Len() > 0 {
 		outputs[currentField.Name] = strings.TrimSpace(currentValue.String())
 	}
 
 	return outputs
 }
-
-// func parseCompletion(completion string, signature core.Signature) map[string]interface{} {
-// 	// Initialize empty map to store results
-// 	outputs := make(map[string]interface{})
-//
-// 	// Split completion into lines, trimming whitespace
-// 	lines := strings.Split(strings.TrimSpace(completion), "\n")
-//
-// 	// Iterate through each line looking for key:value pairs
-// 	for _, line := range lines {
-// 		// Split line at first colon
-// 		parts := strings.SplitN(line, ":", 2)
-// 		if len(parts) == 2 {
-// 			key := strings.TrimSpace(parts[0])
-// 			value := strings.TrimSpace(parts[1])
-//
-// 			// Check if key matches any output field names
-// 			for _, field := range signature.Outputs {
-// 				if field.Name == key {
-// 					outputs[key] = value
-// 					break
-// 				}
-// 			}
-// 		}
-// 	}
-//
-// 	return outputs
-// }
 
 func joinFieldNames(fields []core.Field) string {
 	names := make([]string, len(fields))
