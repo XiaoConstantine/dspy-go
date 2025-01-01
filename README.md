@@ -85,5 +85,41 @@ Programs in DSPy-Go represent complete AI workflows. They combine multiple modul
 Optimizers help improve the performance of your DSPy-Go programs by automatically tuning prompts and module parameters. The BootstrapFewShot optimizer is currently implemented.
 
 
+#### Agents
+Use dspy's core concepts as building blocks, impl [Building Effective Agents](https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents)
+
+```go
+// Chain
+workflow := workflows.NewChainWorkflow(store)
+workflow.AddStep(&workflows.Step{
+    ID: "step1",
+    Module: modules.NewPredict(signature1),
+})
+workflow.AddStep(&workflows.Step{
+    ID: "step2", 
+    Module: modules.NewPredict(signature2),
+})
+```
+Each workflow step can be configured with:
+* Retry logic with exponential backoff
+* Conditional execution based on workflow state
+* Custom error handling
+
+```go
+
+step := &workflows.Step{
+    ID: "retry_example",
+    Module: myModule,
+    RetryConfig: &workflows.RetryConfig{
+        MaxAttempts: 3,
+        BackoffMultiplier: 2.0,
+    },
+    Condition: func(state map[string]interface{}) bool {
+        return someCondition(state)
+    },
+}
+```
+
+
 ### License
 DSPy-Go is released under the MIT License. See the LICENSE file for details.
