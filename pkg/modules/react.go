@@ -93,9 +93,9 @@ func (r *ReAct) Clone() core.Module {
 func appendReActFields(signature core.Signature) core.Signature {
 	newSignature := signature
 	newFields := []core.OutputField{
-		{Field: core.Field{Name: "thought", Prefix: "Thought:"}},
-		{Field: core.Field{Name: "action", Prefix: "Action:"}},
-		{Field: core.Field{Name: "observation", Prefix: "Observation:"}},
+		{Field: core.NewField("thought")},
+		{Field: core.NewField("action")},
+		{Field: core.NewField("observation")},
 	}
 	newSignature.Outputs = append(newFields, newSignature.Outputs...)
 	return newSignature

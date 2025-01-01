@@ -8,8 +8,8 @@ import (
 )
 
 func SetupLLM(apiKey string, modelID core.ModelID) {
-    err := config.ConfigureDefaultLLM(apiKey, modelID)
-    if err != nil {
-        log.Fatalf("Failed to configure default LLM: %v", err)
-    }
+	err := config.ConfigureDefaultLLM(apiKey, modelID)
+	if err != nil {
+		log.Fatalf("Failed to configure default LLM: %v", err)
+	}
 }

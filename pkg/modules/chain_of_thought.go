@@ -68,6 +68,13 @@ func (c *ChainOfThought) SetSubModules(modules []core.Module) {
 }
 func appendRationaleField(signature core.Signature) core.Signature {
 	newSignature := signature
-	newSignature.Outputs = append([]core.OutputField{{Field: core.Field{Name: "rationale", Prefix: "Reasoning: Let's think step by step."}}}, newSignature.Outputs...)
+	rationaleField := core.OutputField{
+		Field: core.NewField("rationale",
+			core.WithDescription("Step-by-step reasoning process"),
+			//		core.WithCustomPrefix("Reasoning: Let's think step by step."),
+		),
+	}
+	newSignature.Outputs = append([]core.OutputField{rationaleField}, newSignature.Outputs...)
+
 	return newSignature
 }

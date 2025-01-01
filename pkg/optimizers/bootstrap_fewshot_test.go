@@ -15,7 +15,8 @@ import (
 
 func init() {
 	mockLLM := new(testutil.MockLLM)
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("answer: Paris", nil)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`answer: 
+	Paris`, nil)
 	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"answer": "Paris"}, nil)
 
 	config.GlobalConfig.DefaultLLM = mockLLM
@@ -26,7 +27,7 @@ func init() {
 func createProgram() core.Program {
 	predict := modules.NewPredict(core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	))
 
 	forwardFunc := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {

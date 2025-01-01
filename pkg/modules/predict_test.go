@@ -28,13 +28,16 @@ func TestPredict(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(MockLLM)
 
+	expectedResponse := `answer:
+	42
+	`
 	// Set up the expected behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("answer: 42", nil)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(expectedResponse, nil)
 
 	// Create a Predict module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
 	predict.SetLLM(mockLLM)

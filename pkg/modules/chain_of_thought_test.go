@@ -14,12 +14,17 @@ func TestChainOfThought(t *testing.T) {
 	mockLLM := new(MockLLM)
 
 	// Set up the expected behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("rationale: Step 1, Step 2, Step 3\nanswer: 42", nil)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`
+rationale:
+Step 1, Step 2, Step 3
 
+answer:
+42
+`, nil)
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
 	cot.SetLLM(mockLLM)

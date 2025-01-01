@@ -32,16 +32,31 @@ func TestReAct(t *testing.T) {
 	mockTool := new(MockTool)
 
 	// Set up the expected behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("thought: I should use the tool\naction: use_tool\n", nil).Once()
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("thought: I have the answer\naction: Finish\nanswer: 42", nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`
+	thought:
+	I should use the tool
 
+	action:
+	use_tool
+	`, nil).Once()
+
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`
+	thought:
+	I have the answer
+
+	action:
+	Finish
+
+	answer:
+	42
+	`, nil).Once()
 	mockTool.On("CanHandle", "use_tool").Return(true)
 	mockTool.On("Execute", mock.Anything, "use_tool").Return("Tool output", nil)
 
 	// Create a ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, []Tool{mockTool}, 5)
 	react.SetLLM(mockLLM)
