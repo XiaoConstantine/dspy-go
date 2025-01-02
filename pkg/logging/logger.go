@@ -12,10 +12,10 @@ import (
 
 var (
 	defaultLogger *Logger
-	mu            sync.RWmutex
+	mu            sync.RWMutex
 )
 
-// Logger provides the core logging functionality
+// Logger provides the core logging functionality.
 type Logger struct {
 	mu         sync.Mutex
 	severity   Severity
@@ -24,14 +24,14 @@ type Logger struct {
 	fields     map[string]interface{} // Default fields for all logs
 }
 
-// Output interface allows for different logging destinations
+// Output interface allows for different logging destinations.
 type Output interface {
 	Write(LogEntry) error
 	Sync() error
 	Close() error
 }
 
-// Config allows flexible logger configuration
+// Config allows flexible logger configuration.
 type Config struct {
 	Severity      Severity
 	Outputs       []Output
@@ -39,7 +39,7 @@ type Config struct {
 	DefaultFields map[string]interface{}
 }
 
-// NewLogger creates a new logger with the given configuration
+// NewLogger creates a new logger with the given configuration.
 func NewLogger(cfg Config) *Logger {
 	return &Logger{
 		severity:   cfg.Severity,
@@ -49,7 +49,7 @@ func NewLogger(cfg Config) *Logger {
 	}
 }
 
-// logf is the core logging function that handles all severity levels
+// logf is the core logging function that handles all severity levels.
 func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...interface{}) {
 	// Early severity check for performance
 	if s < l.severity {
@@ -73,11 +73,12 @@ func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...in
 
 	// Add context values if present
 	if ctx != nil {
-		if modelID := ctx.Value(ModelIDKey); modelID != nil {
-			entry.ModelID = modelID.(string)
+		if modelID, ok := GetModelID(ctx); ok {
+			entry.ModelID = string(modelID)
 		}
-		if tokenInfo := ctx.Value(TokenInfoKey); tokenInfo != nil {
-			entry.TokenInfo = tokenInfo.(*TokenInfo)
+
+		if tokenInfo, ok := GetTokenInfo(ctx); ok {
+			entry.TokenInfo = tokenInfo
 		}
 	}
 
@@ -99,20 +100,20 @@ func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...in
 	}
 }
 
-// LLM-specific logging methods
+// LLM-specific logging methods.
 func (l *Logger) PromptCompletion(ctx context.Context, prompt, completion string, tokenInfo *TokenInfo) {
 	if l.severity > DEBUG {
 		return
 	}
 
-	l.Debug(ctx, "LLM Interaction",
-		"prompt", prompt,
-		"completion", completion,
-		"token_info", tokenInfo,
+	l.Debug(ctx, "LLM Interaction: prompt: %s, completion: %v, token_info: %v",
+		prompt,
+		completion,
+		tokenInfo,
 	)
 }
 
-// Regular severity-based logging methods
+// Regular severity-based logging methods.
 func (l *Logger) Debug(ctx context.Context, format string, args ...interface{}) {
 	l.logf(ctx, DEBUG, format, args...)
 }
@@ -127,4 +128,38 @@ func (l *Logger) Warn(ctx context.Context, format string, args ...interface{}) {
 
 func (l *Logger) Error(ctx context.Context, format string, args ...interface{}) {
 	l.logf(ctx, ERROR, format, args...)
+}
+
+// GetLogger returns the global logger instance.
+func GetLogger() *Logger {
+	// First try reading without a write lock
+	mu.RLock()
+	if l := defaultLogger; l != nil {
+		mu.RUnlock()
+		return l
+	}
+	mu.RUnlock()
+
+	// If no logger exists, create one with write lock
+	mu.Lock()
+	defer mu.Unlock()
+
+	if defaultLogger == nil {
+		// Create default logger with reasonable defaults
+		defaultLogger = NewLogger(Config{
+			Severity: INFO,
+			Outputs: []Output{
+				NewConsoleOutput(false),
+			},
+		})
+	}
+
+	return defaultLogger
+}
+
+// SetLogger allows setting a custom configured logger as the global instance.
+func SetLogger(l *Logger) {
+	mu.Lock()
+	defaultLogger = l
+	mu.Unlock()
 }

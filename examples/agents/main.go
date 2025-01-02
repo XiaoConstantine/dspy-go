@@ -13,6 +13,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
 func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
@@ -96,6 +97,13 @@ Format example:
 }
 
 func main() {
+	output := logging.NewConsoleOutput(true, logging.WithColor(true))
+
+	logger := logging.NewLogger(logging.Config{
+		Severity: logging.DEBUG,
+		Outputs:  []logging.Output{output},
+	})
+	logging.SetLogger(logger)
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
 
 	err := config.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)

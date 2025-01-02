@@ -7,6 +7,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
 type Predict struct {
@@ -28,13 +29,13 @@ func NewPredict(signature core.Signature) *Predict {
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
 	tm := core.GetTraceManager(ctx)
-	logger := GetLogger()
+	logger := logging.GetLogger()
 
 	trace := tm.StartTrace("Predict", "Predict")
 	defer tm.EndTrace()
 
 	trace.SetInputs(inputs)
-	logger.Debug(ctx, "Processing inputs", "inputs", inputs)
+	logger.Debug(ctx, "Processing inputs: %v", inputs)
 
 	if err := p.ValidateInputs(inputs); err != nil {
 		trace.SetError(err)
@@ -43,10 +44,8 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	signature := p.GetSignature()
 	prompt := formatPrompt(signature, p.Demos, inputs)
-	// logger.Debug(ctx, "Generated prompt",
-	// 	"prompt_tokens", promptTokens,
-	// 	"prompt", prompt,
-	// )
+
+	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
 	completion, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
@@ -55,8 +54,11 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 		return nil, err
 	}
 
+	logger.Debug(ctx, "LLM Completion: %v", completion)
+
 	outputs := parseCompletion(completion, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
+	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 
 	trace.SetOutputs(formattedOutputs)
 
