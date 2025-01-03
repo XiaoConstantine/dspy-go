@@ -141,24 +141,24 @@ func main() {
 	logger.Info(ctx, "============ Example 2: Parallelization workflow for stakeholder impact analysis ==============")
 	stakeholders := []string{
 		`customers:
-        - price sensitive
-        - want better tech
-        - environmental concerns`,
+	       - price sensitive
+	       - want better tech
+	       - environmental concerns`,
 
 		`employees:
-        - job security worries
-        - need new skills
-        - want clear direction`,
+	       - job security worries
+	       - need new skills
+	       - want clear direction`,
 
 		`investors:
-        - expect growth
-        - want cost control
-        - risk concerns`,
+	       - expect growth
+	       - want cost control
+	       - risk concerns`,
 
 		`suppliers:
-        - capacity constraints
-        - price pressures
-        - tech transitions`,
+	       - capacity constraints
+	       - price pressures
+	       - tech transitions`,
 	}
 	workflow, inputs, err := CreateParallelWorkflow(stakeholders)
 	logger.Info(ctx, "Inputs: %v", inputs)
@@ -175,6 +175,139 @@ func main() {
 		}
 	}
 	logger.Info(ctx, "=================================================")
+
+	logger.Info(ctx, "============ Example 3: Route workflow for customer support ticket handling ==============")
+
+	supportRoutes := map[string]string{
+		"billing": `You are a billing support specialist. Follow these guidelines:
+            1. Always start with "Billing Support Response:"
+            2. First acknowledge the specific billing issue
+            3. Explain any charges or discrepancies clearly
+            4. List concrete next steps with timeline
+            5. End with payment options if relevant
+            
+            Keep responses professional but friendly.,
+	    Input:`,
+
+		"technical": `You are a technical support engineer. Follow these guidelines:
+            1. Always start with "Technical Support Response:"
+            2. List exact steps to resolve the issue
+            3. Include system requirements if relevant
+            4. Provide workarounds for common problems
+            5. End with escalation path if needed
+            
+            Use clear, numbered steps and technical details.
+		Input:`,
+		"account": `You are an account security specialist. Follow these guidelines:
+		1. Always start with "Account Support Response:"
+		2. Prioritize account security and verification
+	        3. Provide clear steps for account recovery/changes
+	        4. Include security tips and warnings
+		5. Set clear expectations for resolution time
+    
+		Maintain a serious, security-focused tone.
+		Input:`,
+		"product": `You are a product specialist. Follow these guidelines:
+    1. Always start with "Product Support Response:"
+    2. Focus on feature education and best practices
+    3. Include specific examples of usage
+    4. Link to relevant documentation sections
+    5. Suggest related features that might help
+    
+    Be educational and encouraging in tone.
+		Input:`,
+	}
+	tickets := []string{
+		`Subject: Can't access my account
+        Message: Hi, I've been trying to log in for the past hour but keep getting an 'invalid password' error. 
+        I'm sure I'm using the right password. Can you help me regain access? This is urgent as I need to 
+        submit a report by end of day.
+        - John`,
+		`Subject: Unexpected charge on my card
+    Message: Hello, I just noticed a charge of $49.99 on my credit card from your company, but I thought
+    I was on the $29.99 plan. Can you explain this charge and adjust it if it's a mistake?
+    Thanks,
+    Sarah`,
+		`Subject: How to export data?
+		Message: I need to export all my project data to Excel. I've looked through the docs but can't
+		figure out how to do a bulk export. Is this possible? If so, could you walk me through the steps?:
+		Best regards,
+		Mike`,
+	}
+	router := CreateRouterWorkflow()
+
+	for routeType, prompt := range supportRoutes {
+		routeStep := createHandlerStep(routeType, prompt)
+		if err := router.AddStep(routeStep); err != nil {
+			logger.Error(ctx, "Failed to add step %s: %v", routeType, err)
+			continue
+		}
+		if err := router.AddRoute(routeType, []*workflows.Step{routeStep}); err != nil {
+			logger.Error(ctx, "Failed to add route %s: %v", routeType, err)
+		}
+	}
+	logger.Info(ctx, "Processing support tickets...\n")
+	for i, ticket := range tickets {
+		logger.Info(ctx, "\nTicket %d:\n", i+1)
+		logger.Info(ctx, strings.Repeat("-", 40))
+		logger.Info(ctx, ticket)
+		logger.Info(ctx, "\nResponse:")
+		logger.Info(ctx, strings.Repeat("-", 40))
+
+		response, err := router.Execute(ctx, map[string]interface{}{"input": ticket})
+		if err != nil {
+			logger.Info(ctx, "Error processing ticket %d: %v", i+1, err)
+			continue
+		}
+		logger.Info(ctx, response["response"].(string))
+	}
+	logger.Info(ctx, "=================================================")
+}
+
+func createClassifierStep() *workflows.Step {
+	// Create a signature for classification that captures reasoning and selection
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.Field{Name: "input"}},
+		},
+		[]core.OutputField{
+			{Field: core.Field{Name: "reasoning", Prefix: "reasoning"}},
+			{Field: core.Field{Name: "selection", Prefix: "selection"}},
+			{Field: core.Field{Name: "classification", Prefix: "classification"}}, // Required by RouterWorkflow
+		},
+	).WithInstruction(`Analyze the input and select the most appropriate support team.
+    First explain your reasoning, then provide your selection.
+    You must classify the ticket into exactly one of these categories: "billing", "technical", "account", or "product".
+    Do not use any other classification values.`)
+	// Create a specialized predict module that formats the response correctly
+	predictModule := modules.NewPredict(signature)
+
+	return &workflows.Step{
+		ID:     "support_classifier",
+		Module: predictModule,
+	}
+}
+
+func createHandlerStep(routeType string, prompt string) *workflows.Step {
+	// Create signature for handling tickets
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.Field{Name: "input"}},
+		},
+		[]core.OutputField{
+			{Field: core.Field{Name: "response"}},
+		},
+	).WithInstruction(prompt)
+
+	return &workflows.Step{
+		ID:     fmt.Sprintf("%s_handler", routeType),
+		Module: modules.NewPredict(signature),
+	}
+}
+
+func CreateRouterWorkflow() *workflows.RouterWorkflow {
+	routerWorkflow := workflows.NewRouterWorkflow(agents.NewInMemoryStore(), createClassifierStep())
+	return routerWorkflow
 }
 
 func CreateParallelWorkflow(stakeholders []string) (*workflows.ParallelWorkflow, map[string]interface{}, error) {
