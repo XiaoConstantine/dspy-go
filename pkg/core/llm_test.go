@@ -73,8 +73,8 @@ func TestMockLLM(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	if response != "mock response" {
-		t.Errorf("Expected 'mock response', got '%s'", response)
+	if response.Content != "mock response" {
+		t.Errorf("Expected 'mock response', got '%s'", response.Content)
 	}
 
 	jsonResponse, err := llm.GenerateWithJSON(context.Background(), "test prompt")

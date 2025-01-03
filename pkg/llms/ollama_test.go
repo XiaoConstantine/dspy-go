@@ -109,7 +109,7 @@ func TestOllamaLLM_Generate(t *testing.T) {
 					assert.Error(t, err)
 				} else {
 					assert.NoError(t, err)
-					assert.Equal(t, tt.serverResponse.Response, response)
+					assert.Equal(t, tt.serverResponse.Response, response.Content)
 				}
 			}
 		})

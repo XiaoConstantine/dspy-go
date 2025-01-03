@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 var (
@@ -101,7 +103,7 @@ func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...in
 }
 
 // LLM-specific logging methods.
-func (l *Logger) PromptCompletion(ctx context.Context, prompt, completion string, tokenInfo *TokenInfo) {
+func (l *Logger) PromptCompletion(ctx context.Context, prompt, completion string, tokenInfo *core.TokenInfo) {
 	if l.severity > DEBUG {
 		return
 	}

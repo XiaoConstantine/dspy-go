@@ -7,10 +7,21 @@ import (
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
 )
 
+type TokenInfo struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+type LLMResponse struct {
+	Content string
+	Usage   *TokenInfo
+}
+
 // LLM represents an interface for language models.
 type LLM interface {
 	// Generate produces text completions based on the given prompt
-	Generate(ctx context.Context, prompt string, options ...GenerateOption) (string, error)
+	Generate(ctx context.Context, prompt string, options ...GenerateOption) (*LLMResponse, error)
 
 	// GenerateWithJSON produces structured JSON output based on the given prompt
 	GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error)

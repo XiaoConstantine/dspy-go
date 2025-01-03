@@ -210,7 +210,7 @@ func (m *MIPRO) generateInstructionCandidates(ctx context.Context, program core.
 				if err != nil {
 					return nil, err
 				}
-				candidates[i][j] = instruction
+				candidates[i][j] = instruction.Content
 			}
 		}
 	}

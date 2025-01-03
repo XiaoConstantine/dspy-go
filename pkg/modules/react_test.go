@@ -31,16 +31,22 @@ func TestReAct(t *testing.T) {
 	// Create a mock Tool
 	mockTool := new(MockTool)
 
-	// Set up the expected behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`
+	resp1Content := `
 	thought:
 	I should use the tool
 
 	action:
 	use_tool
-	`, nil).Once()
+	`
+	resp1 := &core.LLMResponse{
+		Content: resp1Content,
+		Usage: &core.TokenInfo{
+			PromptTokens:     10,
+			CompletionTokens: 20,
+			TotalTokens:      30,
+		}}
 
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`
+	resp2Content := `
 	thought:
 	I have the answer
 
@@ -49,7 +55,20 @@ func TestReAct(t *testing.T) {
 
 	answer:
 	42
-	`, nil).Once()
+	`
+	resp2 := &core.LLMResponse{
+		Content: resp2Content,
+		Usage: &core.TokenInfo{
+			PromptTokens:     10,
+			CompletionTokens: 20,
+			TotalTokens:      30,
+		},
+	}
+
+	// Set up the expected behavior
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp1, nil).Once()
+
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp2, nil).Once()
 	mockTool.On("CanHandle", "use_tool").Return(true)
 	mockTool.On("Execute", mock.Anything, "use_tool").Return("Tool output", nil)
 

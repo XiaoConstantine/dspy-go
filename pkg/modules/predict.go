@@ -47,16 +47,20 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
-	completion, err := p.LLM.Generate(ctx, prompt)
+	resp, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
 		trace.SetError(err)
 
 		return nil, err
 	}
 
-	logger.Debug(ctx, "LLM Completion: %v", completion)
+	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
 
-	outputs := parseCompletion(completion, signature)
+	if resp.Usage != nil {
+		logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d", resp.Usage.TotalTokens, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	}
+
+	outputs := parseCompletion(resp.Content, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
 	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 

@@ -29,7 +29,7 @@ func NewAnthropicLLM(apiKey string, model anthropic.ModelID) (*AnthropicLLM, err
 }
 
 // Generate implements the core.LLM interface.
-func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (string, error) {
+func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -53,11 +53,16 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 	}
 
 	message, err := a.client.Messages().Create(ctx, params)
+	usage := &core.TokenInfo{
+		PromptTokens:     message.Usage.InputTokens,
+		CompletionTokens: message.Usage.OutputTokens,
+		TotalTokens:      message.Usage.InputTokens + message.Usage.OutputTokens}
+
 	if err != nil {
-		return "", fmt.Errorf("failed to generate response: %w", err)
+		return &core.LLMResponse{Usage: usage}, fmt.Errorf("failed to generate response: %w", err)
 	}
 
-	return message.Content[0].Text, nil
+	return &core.LLMResponse{Content: message.Content[0].Text, Usage: usage}, nil
 }
 
 // GenerateWithJSON implements the core.LLM interface.
@@ -69,5 +74,5 @@ func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, opti
 		return nil, err
 	}
 
-	return utils.ParseJSONResponse(response)
+	return utils.ParseJSONResponse(response.Content)
 }

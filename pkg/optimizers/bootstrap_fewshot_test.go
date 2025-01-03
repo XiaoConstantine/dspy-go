@@ -15,8 +15,9 @@ import (
 
 func init() {
 	mockLLM := new(testutil.MockLLM)
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`answer: 
-	Paris`, nil)
+
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: `answer: 
+	Paris`}, nil)
 	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"answer": "Paris"}, nil)
 
 	config.GlobalConfig.DefaultLLM = mockLLM

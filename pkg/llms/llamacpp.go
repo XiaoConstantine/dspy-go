@@ -45,7 +45,7 @@ type llamacppResponse struct {
 }
 
 // Generate implements the core.LLM interface.
-func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (string, error) {
+func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -60,37 +60,38 @@ func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...co
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request body: %w", err)
+		return &core.LLMResponse{}, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", o.endpoint+"/completion", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return &core.LLMResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
+		return &core.LLMResponse{}, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
+		return &core.LLMResponse{}, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
+		return &core.LLMResponse{}, fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
 	}
 
 	var llamacppResp llamacppResponse
 	err = json.Unmarshal(body, &llamacppResp)
 	if err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+		return &core.LLMResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return llamacppResp.Response, nil
+	// TODO: add token usage
+	return &core.LLMResponse{Content: llamacppResp.Response}, nil
 }
 
 // GenerateWithJSON implements the core.LLM interface.
@@ -100,5 +101,5 @@ func (o *LlamacppLLM) GenerateWithJSON(ctx context.Context, prompt string, optio
 		return nil, err
 	}
 
-	return utils.ParseJSONResponse(response)
+	return utils.ParseJSONResponse(response.Content)
 }

@@ -1,7 +1,10 @@
 package logging
 
-import "context"
-import "github.com/XiaoConstantine/dspy-go/pkg/core"
+import (
+	"context"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
+)
 
 // contextKey is a custom type for context keys to avoid collisions.
 type contextKey string
@@ -25,20 +28,13 @@ type LogEntry struct {
 	Function string
 
 	// LLM-specific fields
-	ModelID   string     // The LLM model being used
-	TokenInfo *TokenInfo // Token usage information
-	Latency   int64      // Operation duration in milliseconds
-	Cost      float64    // Operation cost in dollars
+	ModelID   string          // The LLM model being used
+	TokenInfo *core.TokenInfo // Token usage information
+	Latency   int64           // Operation duration in milliseconds
+	Cost      float64         // Operation cost in dollars
 
 	// General structured data
 	Fields map[string]interface{}
-}
-
-// TokenInfo tracks token usage for cost and performance monitoring.
-type TokenInfo struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
 }
 
 // WithModelID adds a ModelID to the context.
@@ -57,14 +53,14 @@ func GetModelID(ctx context.Context) (core.ModelID, bool) {
 }
 
 // WithTokenInfo adds TokenInfo to the context.
-func WithTokenInfo(ctx context.Context, info *TokenInfo) context.Context {
+func WithTokenInfo(ctx context.Context, info *core.TokenInfo) context.Context {
 	return context.WithValue(ctx, TokenInfoKey, info)
 }
 
 // GetTokenInfo retrieves TokenInfo from context.
-func GetTokenInfo(ctx context.Context) (*TokenInfo, bool) {
+func GetTokenInfo(ctx context.Context) (*core.TokenInfo, bool) {
 	if v := ctx.Value(TokenInfoKey); v != nil {
-		if ti, ok := v.(*TokenInfo); ok {
+		if ti, ok := v.(*core.TokenInfo); ok {
 			return ti, true
 		}
 	}

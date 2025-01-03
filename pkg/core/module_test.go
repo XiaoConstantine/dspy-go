@@ -9,8 +9,8 @@ import (
 // MockLLM is a mock implementation of the LLM interface for testing.
 type MockLLM struct{}
 
-func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...GenerateOption) (string, error) {
-	return "mock response", nil
+func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...GenerateOption) (*LLMResponse, error) {
+	return &LLMResponse{Content: "mock response"}, nil
 }
 
 func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
