@@ -1,4 +1,3 @@
-// pkg/agents/workflows/chain.go
 package workflows
 
 import (

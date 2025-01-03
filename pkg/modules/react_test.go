@@ -44,7 +44,8 @@ func TestReAct(t *testing.T) {
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
-		}}
+		},
+	}
 
 	resp2Content := `
 	thought:
