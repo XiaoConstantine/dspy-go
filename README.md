@@ -88,6 +88,9 @@ Optimizers help improve the performance of your DSPy-Go programs by automaticall
 #### Agents
 Use dspy's core concepts as building blocks, impl [Building Effective Agents](https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents)
 
+See [agent examples](/examples/agents/main.go)
+
+
 ```go
 // Chain
 workflow := workflows.NewChainWorkflow(store)
