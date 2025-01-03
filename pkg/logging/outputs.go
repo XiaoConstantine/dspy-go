@@ -97,11 +97,12 @@ func (o *ConsoleOutput) Write(e LogEntry) error {
 	}
 
 	// Format for easy reading
-	basic := fmt.Sprintf("%s %s%-5s%s [%s:%d] %s",
+	basic := fmt.Sprintf("%s %s%-5s%s [trace=%s] [%s:%d] %s",
 		timestamp,
 		levelColor,
 		e.Severity,
 		resetColor,
+		e.TraceID,
 		e.File,
 		e.Line,
 		e.Message,

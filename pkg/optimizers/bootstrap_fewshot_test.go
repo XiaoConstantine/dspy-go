@@ -2,7 +2,6 @@ package optimizers
 
 import (
 	"context"
-	"log"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -11,6 +10,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func init() {
@@ -32,17 +32,16 @@ func createProgram() core.Program {
 	))
 
 	forwardFunc := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-		tm := core.GetTraceManager(ctx)
-		trace := tm.StartTrace("Program", "Program")
-		defer tm.EndTrace()
 
-		trace.SetInputs(inputs)
+		ctx, span := core.StartSpan(ctx, "Forward")
+		defer core.EndSpan(ctx)
+		span.WithAnnotation("inputs", inputs)
 		outputs, err := predict.Process(ctx, inputs)
 		if err != nil {
-			trace.SetError(err)
+			span.WithError(err)
 			return nil, err
 		}
-		trace.SetOutputs(outputs)
+		span.WithAnnotation("outputs", outputs)
 		return outputs, nil
 	}
 
@@ -60,14 +59,15 @@ func TestBootstrapFewShot(t *testing.T) {
 	}
 
 	// Define metric function
-	metric := func(example, prediction map[string]interface{}, trace *core.Trace) bool {
+	metric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
 		return true // Always return true for this test
 	}
 
 	// Create BootstrapFewShot optimizer
 	maxBootstrapped := 2
 	optimizer := NewBootstrapFewShot(metric, maxBootstrapped)
-	ctx := core.WithTraceManager(context.Background())
+
+	ctx := core.WithExecutionState(context.Background())
 
 	// Compile the program
 	optimizedProgram, _ := optimizer.Compile(ctx, student, teacher, trainset)
@@ -84,34 +84,34 @@ func TestBootstrapFewShot(t *testing.T) {
 		assert.Equal(t, "Paris", demo.Outputs["answer"])
 	}
 	// Verify the trace structure
-	tm := core.GetTraceManager(ctx)
-	rootTrace := tm.GetRootTrace()
-	if assert.NotNil(t, rootTrace) {
-		assert.Equal(t, "Compilation", rootTrace.ModuleName)
-		assert.Equal(t, "Compilation", rootTrace.ModuleType)
-		assert.Len(t, rootTrace.Subtraces, maxBootstrapped+1) // Should have 2 example traces + 1 compliation trace
+	spans := core.CollectSpans(ctx)
+	require.NotEmpty(t, spans, "Expected spans to be recorded")
+	rootSpan := spans[0]
+	assert.Equal(t, "Compilation", rootSpan.Operation, "Expected Compilation as root span")
 
-		for i, subtrace := range rootTrace.Subtraces {
-			assert.Equal(t, "Example", subtrace.ModuleName)
-			assert.Equal(t, "Example", subtrace.ModuleType)
-			assert.Contains(t, subtrace.Inputs, "question")
-			assert.Contains(t, subtrace.Outputs, "answer")
-			assert.Equal(t, "Paris", subtrace.Outputs["answer"])
-			assert.Len(t, subtrace.Subtraces, 1) // Should have 1 TeacherPrediction subtrace
-
-			predictionTrace := subtrace.Subtraces[0]
-			assert.Equal(t, "TeacherPrediction", predictionTrace.ModuleName)
-			assert.Equal(t, "Prediction", predictionTrace.ModuleType)
-			assert.Contains(t, predictionTrace.Inputs, "question")
-			assert.Contains(t, predictionTrace.Outputs, "answer")
-			assert.Equal(t, "Paris", predictionTrace.Outputs["answer"])
-
-			log.Printf("Example %d - Inputs: %v, Outputs: %v", i+1, subtrace.Inputs, subtrace.Outputs)
+	// Find Example spans (should be direct children of Compilation)
+	var exampleSpans []*core.Span
+	for _, span := range spans {
+		if span.Operation == "Example" {
+			exampleSpans = append(exampleSpans, span)
 		}
-
-		// Verify the final outputs of the compilation trace
-		assert.Contains(t, rootTrace.Outputs, "compiledStudent")
 	}
+	assert.Equal(t, maxBootstrapped, len(exampleSpans),
+		"Expected number of Example spans to match maxBootstrapped")
+
+	// Verify span structure and content
+	var compilationSpan *core.Span
+	for _, span := range spans {
+		if span.Operation == "Compilation" {
+			compilationSpan = span
+		}
+	}
+
+	// Verify compilation span
+	require.NotNil(t, compilationSpan, "Expected to find compilation span")
+	assert.NotZero(t, compilationSpan.StartTime)
+	assert.Nil(t, compilationSpan.Error)
+
 }
 
 func TestBootstrapFewShotEdgeCases(t *testing.T) {
@@ -123,8 +123,8 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 	}
 
 	t.Run("MaxBootstrapped Zero", func(t *testing.T) {
-		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *core.Trace) bool { return true }, 0)
-		ctx := core.WithTraceManager(context.Background())
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ context.Context) bool { return true }, 0)
+		ctx := context.Background()
 
 		optimized, err := optimizer.Compile(ctx, createProgram(), createProgram(), trainset)
 		assert.NoError(t, err)
@@ -132,10 +132,10 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 	})
 
 	t.Run("MaxBootstrapped Large", func(t *testing.T) {
-		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *core.Trace) bool {
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ context.Context) bool {
 			return true
 		}, 100)
-		ctx := core.WithTraceManager(context.Background())
+		ctx := context.Background()
 
 		optimized, err := optimizer.Compile(ctx, createProgram(), createProgram(), trainset)
 		if err != nil {
@@ -146,8 +146,8 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Metric Rejects All", func(t *testing.T) {
-		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ *core.Trace) bool { return false }, 2)
-		ctx := core.WithTraceManager(context.Background())
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ context.Context) bool { return false }, 2)
+		ctx := context.Background()
 		optimized, _ := optimizer.Compile(ctx, createProgram(), createProgram(), trainset)
 		assert.Equal(t, 0, len(optimized.Modules["predict"].(*modules.Predict).Demos))
 	})

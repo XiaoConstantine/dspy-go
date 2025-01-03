@@ -28,17 +28,15 @@ func NewPredict(signature core.Signature) *Predict {
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	tm := core.GetTraceManager(ctx)
 	logger := logging.GetLogger()
 
-	trace := tm.StartTrace("Predict", "Predict")
-	defer tm.EndTrace()
-
-	trace.SetInputs(inputs)
+	ctx, span := core.StartSpan(ctx, "Predict")
+	defer core.EndSpan(ctx)
 	logger.Debug(ctx, "Processing inputs: %v", inputs)
+	span.WithAnnotation("inputs", inputs)
 
 	if err := p.ValidateInputs(inputs); err != nil {
-		trace.SetError(err)
+		span.WithError(err)
 		return nil, err
 	}
 
@@ -49,7 +47,7 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	resp, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
-		trace.SetError(err)
+		span.WithError(err)
 
 		return nil, err
 	}
@@ -57,6 +55,13 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
 
 	if resp.Usage != nil {
+		if state := core.GetExecutionState(ctx); state != nil {
+			state.WithTokenUsage(&core.TokenUsage{
+				PromptTokens:     resp.Usage.PromptTokens,
+				CompletionTokens: resp.Usage.CompletionTokens,
+				TotalTokens:      resp.Usage.TotalTokens,
+			})
+		}
 		logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d", resp.Usage.TotalTokens, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
 
@@ -64,7 +69,7 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 	formattedOutputs := p.FormatOutputs(outputs)
 	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 
-	trace.SetOutputs(formattedOutputs)
+	span.WithAnnotation("outputs", formattedOutputs)
 
 	return formattedOutputs, nil
 }

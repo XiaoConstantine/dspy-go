@@ -14,11 +14,11 @@ import (
 )
 
 type BootstrapFewShot struct {
-	Metric          func(example map[string]interface{}, prediction map[string]interface{}, trace *core.Trace) bool
+	Metric          func(example map[string]interface{}, prediction map[string]interface{}, ctx context.Context) bool
 	MaxBootstrapped int
 }
 
-func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction map[string]interface{}, trace *core.Trace) bool, maxBootstrapped int) *BootstrapFewShot {
+func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction map[string]interface{}, ctx context.Context) bool, maxBootstrapped int) *BootstrapFewShot {
 	return &BootstrapFewShot{
 		Metric:          metric,
 		MaxBootstrapped: maxBootstrapped,
@@ -31,68 +31,73 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 	if teacherLLM == nil {
 		teacherLLM = config.GetDefaultLLM()
 	}
-
-	tm, ok := core.GetTraceManagerFromContext(ctx)
-	if !ok {
-		ctx = core.WithTraceManager(ctx)
-		tm = core.GetTraceManager(ctx)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if core.GetExecutionState(ctx) == nil {
+		ctx = core.WithExecutionState(ctx)
 	}
 
-	compilationTrace := tm.StartTrace("Compilation", "Compilation")
-	defer tm.EndTrace()
+	ctx = core.WithExecutionState(ctx)
+	ctx, span := core.StartSpan(ctx, "Compilation")
+
+	defer core.EndSpan(ctx)
 
 	var (
 		resultsMu sync.Mutex
 		results   []struct {
-			demo  core.Example
-			trace *core.Trace
+			demo core.Example
+			ctx  context.Context
 		}
 		processed int32
 		errCh     = make(chan error, 1)
 	)
+	examplesNeeded := b.MaxBootstrapped
+	if examplesNeeded > len(trainset) {
+		examplesNeeded = len(trainset)
+	}
 
 	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
 
-	for _, example := range trainset {
+	for i := 0; i < examplesNeeded; i++ {
 		if b.enoughBootstrappedDemos(compiledStudent) {
 			log.Println("Enough bootstrapped demos, breaking loop")
 			break
 		}
 
-		ex := example
+		ex := trainset[i]
 		p.Go(func() {
-			exampleTrace := tm.StartTrace("Example", "Example")
-			exampleTrace.SetInputs(ex)
+			exampleCtx, exampleSpan := core.StartSpan(ctx, "Example")
+			defer core.EndSpan(exampleCtx)
 
+			exampleSpan.WithAnnotation("Example", ex)
 			prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, ex)
 			if err != nil {
-				exampleTrace.SetError(err)
-				tm.EndTrace()
+				exampleSpan.WithError(err)
 				select {
 				case errCh <- err:
 				default:
 				}
 				return
 			}
-			exampleTrace.SetOutputs(prediction)
+			exampleSpan.WithAnnotation("prediction", prediction)
 
-			if b.Metric(ex, prediction, exampleTrace) {
+			if b.Metric(ex, prediction, exampleCtx) {
 				resultsMu.Lock()
 				results = append(results, struct {
-					demo  core.Example
-					trace *core.Trace
+					demo core.Example
+					ctx  context.Context
 				}{
 					demo: core.Example{
 						Inputs:  ex,
 						Outputs: prediction,
 					},
-					trace: exampleTrace,
+					ctx: exampleCtx,
 				})
 				resultsMu.Unlock()
 			}
 
 			atomic.AddInt32(&processed, 1)
-			tm.EndTrace()
 		})
 	}
 
@@ -100,14 +105,14 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 
 	select {
 	case err := <-errCh:
-		compilationTrace.SetError(err)
+		span.WithError(err)
 		return compiledStudent, fmt.Errorf("error during compilation: %w", err)
 	default:
 	}
 
 	for _, result := range results {
-		if err := b.addDemonstrations(compiledStudent, result.trace); err != nil {
-			compilationTrace.SetError(err)
+		if err := b.addDemonstrations(compiledStudent, result.demo, result.ctx); err != nil {
+			span.WithError(err)
 			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
 		}
 		if b.enoughBootstrappedDemos(compiledStudent) {
@@ -115,9 +120,7 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 		}
 	}
 
-	compilationTrace.SetOutputs(map[string]interface{}{
-		"compiledStudent": compiledStudent,
-	})
+	span.WithAnnotation("compiledStudent", compiledStudent)
 	return compiledStudent, nil
 }
 
@@ -129,18 +132,22 @@ func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.
 			predictor.SetLLM(teacherLLM)
 		}
 	}
-	tm := core.GetTraceManager(ctx)
-	trace := tm.StartTrace("TeacherPrediction", "Prediction")
-	defer tm.EndTrace()
-	trace.SetInputs(example) // Set the inputs on the trace
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
+	ctx = core.WithExecutionState(ctx)
+	ctx, span := core.StartSpan(ctx, "TeacherPrediction")
+	defer core.EndSpan(ctx)
+
+	span.WithAnnotation("Example", example)
 	outputs, err := teacherClone.Execute(ctx, example)
 	if err != nil {
-		trace.SetError(err)
+		span.WithError(err)
 		return nil, err
 	}
 
-	trace.SetOutputs(outputs)
+	span.WithAnnotation("outputs", outputs)
 	return outputs, nil
 
 }
@@ -156,29 +163,34 @@ func (b *BootstrapFewShot) enoughBootstrappedDemos(program core.Program) bool {
 	return true
 }
 
-func (b *BootstrapFewShot) addDemonstrations(program core.Program, trace *core.Trace) error {
-	if trace == nil {
-		return fmt.Errorf("trace is nil")
+func (b *BootstrapFewShot) addDemonstrations(program core.Program, demo core.Example, ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("cannot add demonstrations: context is nil")
+
 	}
 
+	ctx, span := core.StartSpan(ctx, "AddDemonstrations")
+	defer core.EndSpan(ctx)
+	span.WithAnnotation("demo_inputs", demo.Inputs)
+	span.WithAnnotation("demo_outputs", demo.Outputs)
 	for moduleName, module := range program.Modules {
 		predictor, ok := module.(*modules.Predict)
 		if !ok {
 			continue
 		}
 
-		demos := predictor.GetDemos()
+		currentDemos := predictor.GetDemos()
 
-		if len(demos) < b.MaxBootstrapped {
-			demo := core.Example{
-				Inputs:  trace.Inputs,
-				Outputs: trace.Outputs,
-			}
-			demos = append(demos, demo)
-			predictor.SetDemos(demos)
+		if len(currentDemos) < b.MaxBootstrapped {
 
+			newDemos := append(currentDemos, demo)
+			predictor.SetDemos(newDemos)
+			span.WithAnnotation("added_to_module", moduleName)
+			span.WithAnnotation("total_demos", len(newDemos))
 			return nil
 		} else {
+			span.WithAnnotation("skipped_module", moduleName)
+			span.WithAnnotation("reason", "max_demos_reached")
 			return fmt.Errorf("max demonstrations reached for module %s", moduleName)
 		}
 	}

@@ -153,7 +153,7 @@ func RunHotPotQAExample(apiKey string) {
 		return cot.Process(ctx, inputs)
 	})
 
-	metric := func(example, prediction map[string]interface{}, trace *core.Trace) bool {
+	metric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
 		return computeF1(prediction["answer"].(string), example["answer"].(string)) > 0.5
 	}
 

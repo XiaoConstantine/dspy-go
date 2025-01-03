@@ -7,6 +7,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockTool is a mock implementation of the Tool interface.
@@ -82,7 +83,8 @@ func TestReAct(t *testing.T) {
 	react.SetLLM(mockLLM)
 
 	// Test the Process method
-	ctx := core.WithTraceManager(context.Background())
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
 
 	inputs := map[string]any{"question": "What is the meaning of life?"}
 	outputs, err := react.Process(ctx, inputs)
@@ -95,12 +97,7 @@ func TestReAct(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 	mockTool.AssertExpectations(t)
 	// Verify traces
-	tm := core.GetTraceManager(ctx)
-	rootTrace := tm.RootTrace
-	assert.Equal(t, "ReAct", rootTrace.ModuleName)
-	assert.Equal(t, "ReAct", rootTrace.ModuleType)
-	assert.Equal(t, inputs, rootTrace.Inputs)
-	assert.Equal(t, outputs, rootTrace.Outputs)
-	assert.Nil(t, rootTrace.Error)
-	assert.True(t, rootTrace.Duration > 0)
+	spans := core.CollectSpans(ctx)
+	require.Len(t, spans, 3)
+	assert.Equal(t, "ReAct", spans[0].Operation)
 }

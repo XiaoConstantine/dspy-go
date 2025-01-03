@@ -16,7 +16,7 @@ import (
 )
 
 func TestNewMIPRO(t *testing.T) {
-	metric := func(example, prediction map[string]interface{}, trace *core.Trace) float64 { return 0 }
+	metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 { return 0 }
 	mipro := NewMIPRO(metric,
 		WithNumCandidates(20),
 		WithMaxBootstrappedDemos(10),
@@ -37,7 +37,7 @@ func TestNewMIPRO(t *testing.T) {
 }
 
 func TestMIPRO_Compile(t *testing.T) {
-	ctx := core.WithTraceManager(context.Background())
+	ctx := core.WithExecutionState(context.Background())
 	mockLLM := new(testutil.MockLLM)
 	mockDataset := &testutil.MockDataset{
 		Examples: []core.Example{
@@ -53,7 +53,7 @@ func TestMIPRO_Compile(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("Instruction", nil)
 	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"output": "result"}, nil)
 
-	metric := func(example, prediction map[string]interface{}, trace *core.Trace) float64 { return 1.0 }
+	metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 { return 1.0 }
 	metricWrapper := func(expected, actual map[string]interface{}) float64 {
 		return metric(expected, actual, nil)
 	}
@@ -161,7 +161,7 @@ func TestMIPRO_CompileErrors(t *testing.T) {
 }
 
 func setupMIPRO(mockLLM *testutil.MockLLM) *MIPRO {
-	metric := func(example, prediction map[string]interface{}, trace *core.Trace) float64 { return 1.0 }
+	metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 { return 1.0 }
 	return NewMIPRO(metric,
 		WithNumCandidates(1),
 		WithMaxBootstrappedDemos(1),

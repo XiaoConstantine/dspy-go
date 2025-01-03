@@ -26,6 +26,7 @@ type LogEntry struct {
 	File     string
 	Line     int
 	Function string
+	TraceID  string // Added trace ID field
 
 	// LLM-specific fields
 	ModelID   string          // The LLM model being used

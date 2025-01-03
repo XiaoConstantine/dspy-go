@@ -60,7 +60,7 @@ func TestCoproCompile(t *testing.T) {
 
 	// Create a Copro instance
 	copro := NewCopro(
-		func(example, prediction map[string]interface{}, trace *core.Trace) bool { return true },
+		func(example, prediction map[string]interface{}, ctx context.Context) bool { return true },
 		5,
 		mockSubOptimizer,
 	)
@@ -71,7 +71,7 @@ func TestCoproCompile(t *testing.T) {
 	// mockSubOptimizer.On("Compile", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(testProgram, nil)
 
 	// Create a context with trace manager
-	ctx := core.WithTraceManager(context.Background())
+	ctx := core.WithExecutionState(context.Background())
 
 	// Call Compile
 	compiledProgram, err := copro.Compile(ctx, testProgram, mockDataset, nil)
@@ -102,7 +102,7 @@ func TestCoproCompileWithPredict(t *testing.T) {
 
 	// Create a Copro instance
 	copro := NewCopro(
-		func(example, prediction map[string]interface{}, trace *core.Trace) bool { return true },
+		func(example, prediction map[string]interface{}, ctx context.Context) bool { return true },
 		5,
 		mockSubOptimizer,
 	)
@@ -111,7 +111,7 @@ func TestCoproCompileWithPredict(t *testing.T) {
 	mockSubOptimizer.On("Compile", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(testProgram, nil)
 
 	// Create a context with trace manager
-	ctx := core.WithTraceManager(context.Background())
+	ctx := core.WithExecutionState(context.Background())
 
 	// Call Compile
 	compiledProgram, err := copro.Compile(ctx, testProgram, mockDataset, nil)
@@ -139,7 +139,7 @@ func TestCoproCompileError(t *testing.T) {
 
 	// Create a Copro instance
 	copro := NewCopro(
-		func(example, prediction map[string]interface{}, trace *core.Trace) bool { return true },
+		func(example, prediction map[string]interface{}, ctx context.Context) bool { return true },
 		5,
 		mockSubOptimizer,
 	)
@@ -148,7 +148,7 @@ func TestCoproCompileError(t *testing.T) {
 	mockSubOptimizer.On("Compile", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(core.Program{}, assert.AnError)
 
 	// Create a context with trace manager
-	ctx := core.WithTraceManager(context.Background())
+	ctx := core.WithExecutionState(context.Background())
 
 	// Call Compile
 	_, err := copro.Compile(ctx, testProgram, mockDataset, nil)
