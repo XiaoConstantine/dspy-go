@@ -39,10 +39,10 @@ func (r *ReAct) SetLLM(llm core.LLM) {
 }
 
 func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-	tm := core.GetTraceManager(ctx)
-	trace := tm.StartTrace("ReAct", "ReAct")
-	defer tm.EndTrace()
-	trace.SetInputs(inputs)
+	ctx, span := core.StartSpan(ctx, "ReAct")
+	defer core.EndSpan(ctx)
+
+	span.WithAnnotation("inputs", inputs)
 
 	for i := 0; i < r.MaxIters; i++ {
 		prediction, err := r.Predict.Process(ctx, inputs)
@@ -53,12 +53,12 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]
 		action, ok := prediction["action"].(string)
 		if !ok {
 			err := errors.New("invalid action in prediction")
-			trace.SetError(err)
+			span.WithError(err)
 			return nil, err
 		}
 
 		if action == "Finish" {
-			trace.SetOutputs(prediction)
+			span.WithAnnotation("prediction", prediction)
 			return prediction, nil
 		}
 
@@ -66,7 +66,7 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]
 			if tool.CanHandle(action) {
 				observation, err := tool.Execute(ctx, action)
 				if err != nil {
-					trace.SetError(err)
+					span.WithError(err)
 
 					return nil, err
 				}
@@ -76,7 +76,7 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any) (map[string]
 		}
 	}
 	err := errors.New("max iterations reached")
-	trace.SetError(err)
+	span.WithError(err)
 
 	return nil, err
 }

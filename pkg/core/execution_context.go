@@ -4,12 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// ExecutionState holds the mutable state for an execution context
+// ExecutionState holds the mutable state for an execution context.
 type ExecutionState struct {
 	mu sync.RWMutex
 
@@ -26,7 +27,7 @@ type ExecutionState struct {
 	annotations map[string]interface{}
 }
 
-// Span represents a single operation within the execution
+// Span represents a single operation within the execution.
 type Span struct {
 	ID          string
 	ParentID    string
@@ -37,7 +38,7 @@ type Span struct {
 	Annotations map[string]interface{}
 }
 
-// TokenUsage tracks token consumption
+// TokenUsage tracks token consumption.
 type TokenUsage struct {
 	PromptTokens     int
 	CompletionTokens int
@@ -52,7 +53,7 @@ type spanIDGenerator struct {
 	lastTimestamp int64
 }
 
-// ExecutionContextKey is the type for context keys specific to dspy-go
+// ExecutionContextKey is the type for context keys specific to dspy-go.
 type ExecutionContextKey struct {
 	name string
 }
@@ -62,18 +63,19 @@ var (
 	defaultGenerator = &spanIDGenerator{}
 )
 
-// WithExecutionState creates a new context with dspy-go execution state
+// WithExecutionState creates a new context with dspy-go execution state.
 func WithExecutionState(ctx context.Context) context.Context {
 	if GetExecutionState(ctx) != nil {
 		return ctx // State already exists
 	}
 	return context.WithValue(ctx, stateKey, &ExecutionState{
+		traceID:     generateTraceID(),
 		annotations: make(map[string]interface{}),
 		spans:       make([]*Span, 0),
 	})
 }
 
-// GetExecutionState retrieves the execution state from a context
+// GetExecutionState retrieves the execution state from a context.
 func GetExecutionState(ctx context.Context) *ExecutionState {
 	if state, ok := ctx.Value(stateKey).(*ExecutionState); ok {
 		return state
@@ -81,7 +83,7 @@ func GetExecutionState(ctx context.Context) *ExecutionState {
 	return nil
 }
 
-// StartSpan begins a new operation span
+// StartSpan begins a new operation span.
 func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
 	state := GetExecutionState(ctx)
 	if state == nil {
@@ -109,7 +111,7 @@ func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
 	return ctx, span
 }
 
-// EndSpan completes the current span
+// EndSpan completes the current span.
 func EndSpan(ctx context.Context) {
 	if state := GetExecutionState(ctx); state != nil {
 		state.mu.Lock()
@@ -122,7 +124,7 @@ func EndSpan(ctx context.Context) {
 	}
 }
 
-// State modification methods
+// State modification methods.
 func (s *ExecutionState) WithModelID(modelID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -135,7 +137,7 @@ func (s *ExecutionState) WithTokenUsage(usage *TokenUsage) {
 	s.tokenUsage = usage
 }
 
-// State access methods
+// State access methods.
 func (s *ExecutionState) GetModelID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -148,7 +150,7 @@ func (s *ExecutionState) GetTokenUsage() *TokenUsage {
 	return s.tokenUsage
 }
 
-// Span methods
+// Span methods.
 func (s *Span) WithError(err error) {
 	s.Error = err
 }
@@ -157,7 +159,7 @@ func (s *Span) WithAnnotation(key string, value interface{}) {
 	s.Annotations[key] = value
 }
 
-// Helper method to collect all spans
+// Helper method to collect all spans.
 func CollectSpans(ctx context.Context) []*Span {
 	if state := GetExecutionState(ctx); state != nil {
 		state.mu.RLock()
@@ -184,7 +186,7 @@ func CollectSpans(ctx context.Context) []*Span {
 // 63f51a2a01ab9c8d
 // │        │  └─┴─ Random component (2 bytes)
 // │        └─┴─ Counter (2 bytes)
-// └─┴─┴─┴─ Timestamp (4 bytes)
+// └─┴─┴─┴─ Timestamp (4 bytes).
 func generateSpanID() string {
 	// Get current timestamp
 	now := time.Now().Unix()
@@ -216,8 +218,33 @@ func generateSpanID() string {
 	return hex.EncodeToString(id)
 }
 
-// For testing and debugging
+// For testing and debugging.
 func resetSpanIDGenerator() {
 	atomic.StoreUint64(&defaultGenerator.counter, 0)
 	defaultGenerator.lastTimestamp = 0
+}
+
+func (s *ExecutionState) GetCurrentSpan() *Span {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.activeSpan
+}
+
+func generateTraceID() string {
+	// Generate 16 random bytes for trace ID
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if random generation fails
+		now := time.Now().UnixNano()
+		return fmt.Sprintf("trace-%d", now)
+	}
+
+	// Format as hex string
+	return hex.EncodeToString(b)
+}
+
+func (s *ExecutionState) GetTraceID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.traceID
 }

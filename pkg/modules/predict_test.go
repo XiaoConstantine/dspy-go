@@ -7,6 +7,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // MockLLM is a mock implementation of core.LLM.
@@ -48,7 +49,8 @@ func TestPredict(t *testing.T) {
 	predict.SetLLM(mockLLM)
 
 	// Test the Process method
-	ctx := core.WithTraceManager(context.Background())
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
 
 	inputs := map[string]any{"question": "What is the meaning of life?"}
 	outputs, err := predict.Process(ctx, inputs)
@@ -60,12 +62,16 @@ func TestPredict(t *testing.T) {
 	// Verify that the mock was called as expected
 	mockLLM.AssertExpectations(t)
 	// Verify traces
-	tm := core.GetTraceManager(ctx)
-	rootTrace := tm.RootTrace
-	assert.Equal(t, "Predict", rootTrace.ModuleName)
-	assert.Equal(t, "Predict", rootTrace.ModuleType)
-	assert.Equal(t, inputs, rootTrace.Inputs)
-	assert.Equal(t, outputs, rootTrace.Outputs)
-	assert.Nil(t, rootTrace.Error)
-	assert.True(t, rootTrace.Duration > 0)
+	spans := core.CollectSpans(ctx)
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	inputsMap, _ := span.Annotations["inputs"].(map[string]interface{})
+	question, _ := inputsMap["question"].(string)
+
+	outputsMap, _ := span.Annotations["outputs"].(map[string]interface{})
+	answer, _ := outputsMap["answer"].(string)
+
+	assert.Contains(t, question, "What is the meaning of life?")
+	assert.Contains(t, answer, "4")
 }

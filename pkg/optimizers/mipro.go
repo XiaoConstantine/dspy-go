@@ -3,7 +3,6 @@ package optimizers
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -11,7 +10,7 @@ import (
 )
 
 type MIPRO struct {
-	Metric               func(example, prediction map[string]interface{}, trace *core.Trace) float64
+	Metric               func(example, prediction map[string]interface{}, ctx context.Context) float64
 	NumCandidates        int
 	MaxBootstrappedDemos int
 	MaxLabeledDemos      int
@@ -23,7 +22,7 @@ type MIPRO struct {
 	Verbose              bool
 }
 
-func NewMIPRO(metric func(example, prediction map[string]interface{}, trace *core.Trace) float64, opts ...MIPROOption) *MIPRO {
+func NewMIPRO(metric func(example, prediction map[string]interface{}, ctx context.Context) float64, opts ...MIPROOption) *MIPRO {
 	m := &MIPRO{
 		Metric:               metric,
 		NumCandidates:        10,
@@ -84,50 +83,75 @@ type Trial struct {
 }
 
 func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
+
+	if core.GetExecutionState(ctx) == nil {
+		ctx = core.WithExecutionState(ctx)
+	}
+	ctx, compilationSpan := core.StartSpan(ctx, "MIPROCompilation")
+	defer core.EndSpan(ctx)
+
 	instructionCandidates, err := m.generateInstructionCandidates(ctx, program, dataset)
 	if err != nil {
+
+		compilationSpan.WithError(err)
 		return program, fmt.Errorf("failed to generate instruction candidates: %w", err)
 	}
 
 	demoCandidates, err := m.generateDemoCandidates(program, dataset)
 	if err != nil {
+
+		compilationSpan.WithError(err)
 		return program, fmt.Errorf("failed to generate demo candidates: %w", err)
 	}
 
 	var bestTrial Trial
+	var bestScore float64
 	var compilationError error
-
+	trialsCtx, trialsSpan := core.StartSpan(ctx, "OptimizationTrials")
+	defer core.EndSpan(trialsCtx)
 	for i := 0; i < m.NumTrials; i++ {
+
+		trialCtx, trialSpan := core.StartSpan(trialsCtx, fmt.Sprintf("Trial_%d", i))
 		dataset.Reset()
 		trial := m.generateTrial(program.GetModules(), len(instructionCandidates), len(demoCandidates))
 		candidateProgram := m.constructProgram(program, trial, instructionCandidates, demoCandidates)
 
 		score, err := m.evaluateProgram(ctx, candidateProgram, dataset, metric)
 		if err != nil {
-			log.Printf("Error evaluating program in trial %d: %v", i, err)
+			trialSpan.WithError(err)
 			compilationError = err
+			core.EndSpan(trialCtx)
 			continue
-
-			// return core.Program{}, fmt.Errorf("failed to evaluate program in trial %d: %w", i, err)
 		}
 
 		trial.Score = score
+		trialSpan.WithAnnotation("score", score)
+
 		if score > bestTrial.Score || i == 0 {
 			bestTrial = trial
+			bestScore = score
+			trialSpan.WithAnnotation("new_best", true)
 		}
 
 		if m.Verbose {
 			m.logTrialResult(i, trial)
 		}
+		core.EndSpan(trialCtx)
+
 	}
+	trialsSpan.WithAnnotation("best_score", bestScore)
 
 	if bestTrial.Params == nil {
 		if compilationError != nil {
+			compilationSpan.WithError(compilationError)
 			return program, fmt.Errorf("compilation failed: %w", compilationError)
 		}
 		return program, fmt.Errorf("no successful trials")
 	}
-	return m.constructProgram(program, bestTrial, instructionCandidates, demoCandidates), nil
+	result := m.constructProgram(program, bestTrial, instructionCandidates, demoCandidates)
+	compilationSpan.WithAnnotation("final_score", bestScore)
+	return result, nil
+
 }
 
 func (m *MIPRO) generateTrial(modules []core.Module, numInstructions, numDemos int) Trial {
@@ -164,14 +188,12 @@ func (m *MIPRO) constructProgram(baseProgram core.Program, trial Trial, instruct
 func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (float64, error) {
 	totalScore := 0.0
 	count := 0
-
+	ctx = core.WithExecutionState(ctx)
+	ctx, evalSpan := core.StartSpan(ctx, "EvaluateProgram")
+	defer core.EndSpan(ctx)
 	for i := 0; i < m.MiniBatchSize; i++ {
 		example, ok := dataset.Next()
-		traceManager := core.GetTraceManager(ctx)
-		var trace *core.Trace
-		if traceManager != nil {
-			trace = traceManager.CurrentTrace
-		}
+
 		if !ok {
 			if i == 0 {
 				return 0, fmt.Errorf("no examples available from dataset")
@@ -179,14 +201,23 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 			break
 		}
 
+		// Create a context for each example evaluation
+		exampleCtx, exampleSpan := core.StartSpan(ctx, "EvaluateExample")
+		exampleSpan.WithAnnotation("example_inputs", example.Inputs)
 		prediction, err := program.Execute(ctx, example.Inputs)
 		if err != nil {
+			exampleSpan.WithError(err)
+			core.EndSpan(exampleCtx)
 			return 0, fmt.Errorf("failed to evaluate program: error executing program: %w", err)
 		}
-
-		score := m.Metric(example.Inputs, prediction, trace)
+		exampleSpan.WithAnnotation("prediction", prediction)
+		metricCtx, metricSpan := core.StartSpan(exampleCtx, "MetricEvaluation")
+		score := m.Metric(example.Inputs, prediction, metricCtx)
+		metricSpan.WithAnnotation("score", score)
+		core.EndSpan(metricCtx)
 		totalScore += score
 		count++
+		core.EndSpan(exampleCtx)
 
 	}
 
@@ -194,7 +225,8 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 		return 0, fmt.Errorf("failed to evaluate program: no examples evaluated")
 	}
 	averageScore := totalScore / float64(count)
-
+	evalSpan.WithAnnotation("average_score", averageScore)
+	evalSpan.WithAnnotation("examples_evaluated", count)
 	return averageScore, nil
 }
 

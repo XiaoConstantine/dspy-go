@@ -3,8 +3,6 @@ package core
 import (
 	"context"
 	"testing"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // TestProgram tests the Program struct and its methods.
@@ -26,8 +24,7 @@ func TestProgram(t *testing.T) {
 		t.Errorf("Expected 1 module in program, got %d", len(program.Modules))
 	}
 	// Create a context with the traces slice
-	traces := &[]Trace{}
-	ctx := context.WithValue(context.Background(), utils.TracesContextKey, traces)
+	ctx := WithExecutionState(context.Background())
 
 	result, err := program.Execute(ctx, map[string]interface{}{"input": "test"})
 	if err != nil {
@@ -37,6 +34,11 @@ func TestProgram(t *testing.T) {
 		t.Errorf("Expected output 'test', got '%v'", result["output"])
 	}
 
+	// Verify spans were created
+	spans := CollectSpans(ctx)
+	if len(spans) == 0 {
+		t.Error("No spans were created during execution")
+	}
 	clone := program.Clone()
 	if !program.Equal(clone) {
 		t.Error("Cloned program is not equal to original program")

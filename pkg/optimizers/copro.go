@@ -9,12 +9,12 @@ import (
 )
 
 type Copro struct {
-	Metric          func(example, prediction map[string]interface{}, trace *core.Trace) bool
+	Metric          func(example, prediction map[string]interface{}, ctx context.Context) bool
 	MaxBootstrapped int
 	SubOptimizer    core.Optimizer
 }
 
-func NewCopro(metric func(example, prediction map[string]interface{}, trace *core.Trace) bool, maxBootstrapped int, subOptimizer core.Optimizer) *Copro {
+func NewCopro(metric func(example, prediction map[string]interface{}, ctx context.Context) bool, maxBootstrapped int, subOptimizer core.Optimizer) *Copro {
 	return &Copro{
 		Metric:          metric,
 		MaxBootstrapped: maxBootstrapped,
@@ -23,38 +23,51 @@ func NewCopro(metric func(example, prediction map[string]interface{}, trace *cor
 }
 func (c *Copro) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
 	compiledProgram := program.Clone()
-	ctx = core.WithTraceManager(ctx)
-	tm := core.GetTraceManager(ctx)
-	compilationTrace := tm.StartTrace("CoproCompilation", "Compilation")
-	defer tm.EndTrace()
+	// Ensure execution state exists
+	if core.GetExecutionState(ctx) == nil {
+		ctx = core.WithExecutionState(ctx)
+	}
+
+	ctx, compilationSpan := core.StartSpan(ctx, "CoproCompilation")
+	defer core.EndSpan(ctx)
 
 	wrappedMetric := func(expected, actual map[string]interface{}) float64 {
-		// Get the current trace from the context
-		tm := core.GetTraceManager(ctx)
-		currentTrace := tm.CurrentTrace
+		metricCtx, metricSpan := core.StartSpan(ctx, "MetricEvaluation")
+		defer core.EndSpan(metricCtx)
 
-		if c.Metric(expected, actual, currentTrace) {
+		metricSpan.WithAnnotation("expected", expected)
+		metricSpan.WithAnnotation("actual", actual)
+
+		// Use the context-based metric
+		if c.Metric(expected, actual, metricCtx) {
+			metricSpan.WithAnnotation("result", 1.0)
 			return 1.0
 		}
+
+		metricSpan.WithAnnotation("result", 0.0)
+
 		return 0.0
 	}
 	for moduleName, module := range compiledProgram.Modules {
-		moduleTrace := tm.StartTrace(fmt.Sprintf("Module_%s", moduleName), "ModuleCompilation")
+		moduleCtx, moduleSpan := core.StartSpan(ctx, fmt.Sprintf("Module_%s", moduleName))
 
 		compiledModule, err := c.compileModule(ctx, module, dataset, wrappedMetric)
 		if err != nil {
-			moduleTrace.SetError(err)
-			tm.EndTrace()
-			compilationTrace.SetError(err)
+			moduleSpan.WithError(err)
+			core.EndSpan(moduleCtx)
+			compilationSpan.WithError(err)
+
 			return compiledProgram, fmt.Errorf("error compiling module %s: %w", moduleName, err)
 		}
 
 		compiledProgram.Modules[moduleName] = compiledModule
-		moduleTrace.SetOutputs(map[string]interface{}{"compiledModule": compiledModule})
-		tm.EndTrace()
+		moduleSpan.WithAnnotation("compiledModule", compiledModule)
+		core.EndSpan(moduleCtx)
+
 	}
 
-	compilationTrace.SetOutputs(map[string]interface{}{"compiledProgram": compiledProgram})
+	compilationSpan.WithAnnotation("compiledProgram", compiledProgram)
+
 	return compiledProgram, nil
 }
 

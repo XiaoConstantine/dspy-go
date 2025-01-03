@@ -38,7 +38,7 @@ func RunGSM8KExample(apiKey string) {
 	})
 
 	// Create optimizer
-	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]interface{}, trace *core.Trace) bool {
+	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]interface{}, ctx context.Context) bool {
 		return example["answer"] == prediction["answer"]
 	}, 5)
 

@@ -83,12 +83,23 @@ func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...in
 			entry.TokenInfo = tokenInfo
 		}
 	}
+	if state := core.GetExecutionState(ctx); state != nil {
+		entry.TraceID = state.GetTraceID()
+	}
 
 	// Add default fields
 	for k, v := range l.fields {
 		if _, exists := entry.Fields[k]; !exists {
 			entry.Fields[k] = v
 		}
+	}
+	// Add execution context information if available
+	if state := core.GetExecutionState(ctx); state != nil {
+		entry.Fields["model_id"] = state.GetModelID()
+		if usage := state.GetTokenUsage(); usage != nil {
+			entry.Fields["token_usage"] = usage
+		}
+		entry.Fields["spans"] = core.CollectSpans(ctx)
 	}
 
 	// Write to all outputs

@@ -26,20 +26,22 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 	if p.Forward == nil {
 		return nil, errors.New("forward function is not defined")
 	}
+	// Ensure we have execution state
+	if GetExecutionState(ctx) == nil {
+		ctx = WithExecutionState(ctx)
+	}
 
-	ctx = WithTraceManager(ctx)
-	tm := GetTraceManager(ctx)
-	trace := tm.StartTrace("Program", "Program")
-	defer tm.EndTrace()
+	ctx, span := StartSpan(ctx, "Program")
+	defer EndSpan(ctx)
 
-	trace.SetInputs(inputs)
+	span.WithAnnotation("inputs", inputs)
 	outputs, err := p.Forward(ctx, inputs)
 	if err != nil {
-		trace.SetError(err)
+		span.WithError(err)
 		return nil, err
 	}
-	trace.SetOutputs(outputs)
 
+	span.WithAnnotation("outputs", outputs)
 	return outputs, nil
 }
 
