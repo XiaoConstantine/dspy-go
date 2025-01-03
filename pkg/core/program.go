@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sort"
 )
 
 // Program represents a complete DSPy pipeline or workflow.
@@ -103,9 +104,17 @@ func (p *Program) SetForward(forward func(context.Context, map[string]interface{
 }
 
 func (p *Program) GetModules() []Module {
-	modules := make([]Module, 0, len(p.Modules))
-	for _, module := range p.Modules {
-		modules = append(modules, module)
+	moduleNames := make([]string, 0, len(p.Modules))
+	for name := range p.Modules {
+		moduleNames = append(moduleNames, name)
+	}
+	sort.Strings(moduleNames)
+
+	// Build ordered module slice
+	modules := make([]Module, len(moduleNames))
+	for i, name := range moduleNames {
+		modules[i] = p.Modules[name]
 	}
 	return modules
+
 }

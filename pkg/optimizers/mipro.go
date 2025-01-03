@@ -141,7 +141,9 @@ func (m *MIPRO) generateTrial(modules []core.Module, numInstructions, numDemos i
 
 func (m *MIPRO) constructProgram(baseProgram core.Program, trial Trial, instructionCandidates [][]string, demoCandidates [][][]core.Example) core.Program {
 	program := baseProgram.Clone()
-	for i, module := range program.GetModules() {
+	modulesList := program.GetModules()
+
+	for i, module := range modulesList {
 		if predictor, ok := module.(*modules.Predict); ok {
 			instructionIdx := trial.Params[fmt.Sprintf("instruction_%d", i)]
 			demoIdx := trial.Params[fmt.Sprintf("demo_%d", i)]
