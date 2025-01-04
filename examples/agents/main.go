@@ -8,6 +8,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 
 	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -170,6 +171,94 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
 
 }
 
+func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
+	// Create signature for our task - simpler now that we don't need dataset support
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.Field{Name: "task"}},
+		},
+		[]core.OutputField{
+			{Field: core.Field{Name: "solution", Prefix: "solution"}},
+		},
+	).WithInstruction(`
+        Your task is to implement the requested data structure.
+        Consider time and space complexity.
+        Provide a complete, correct implementation in Go.
+        If context is provided, learn from previous attempts and feedback.
+    `)
+
+	// Create predict module with the signature
+	predict := modules.NewPredict(signature)
+
+	// Create program that uses predict module
+	program := core.NewProgram(
+		map[string]core.Module{"predict": predict},
+		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			return predict.Process(ctx, inputs)
+		},
+	)
+
+	// Create evaluation metric that matches Python implementation
+	metric := func(ctx context.Context, result map[string]interface{}) (bool, string) {
+		solution, ok := result["solution"].(string)
+		if !ok {
+			return false, "No solution provided"
+		}
+
+		// Check implementation quality
+		issues := make([]string, 0)
+
+		if !strings.Contains(solution, "type MinStack struct") {
+			issues = append(issues, "Missing MinStack struct definition")
+		}
+
+		if !strings.Contains(solution, "min []int") && !strings.Contains(solution, "minStack []int") {
+			issues = append(issues, "Need a way to track minimum values")
+		}
+
+		if strings.Contains(solution, "for") || strings.Contains(solution, "range") {
+			issues = append(issues, "Operations should be O(1) - avoid loops")
+		}
+
+		if !strings.Contains(solution, "func (s *MinStack) GetMin()") {
+			issues = append(issues, "Missing GetMin() method")
+		}
+
+		// Pass only if no issues found
+		if len(issues) == 0 {
+			return true, "Implementation meets all requirements"
+		}
+
+		return false, strings.Join(issues, ". ")
+	}
+
+	ctx = core.WithExecutionState(ctx)
+	// Create and use PromptingOptimizer
+	optimizer := NewPromptingOptimizer(metric, 5) // Allow 5 attempts
+
+	logger.Info(ctx, "Starting optimization process...")
+	optimizedProgram, err := optimizer.Compile(ctx, program, nil, nil)
+	if err != nil {
+		logger.Error(ctx, "Optimization failed: %v", err)
+		return
+	}
+
+	// Test the optimized program
+	result, err := optimizedProgram.Execute(ctx, map[string]interface{}{
+		"task": "Implement MinStack with O(1) operations for push, pop, and getMin",
+	})
+	if err != nil {
+		logger.Error(ctx, "Final execution failed: %v", err)
+		return
+	}
+
+	if solution, ok := result["solution"].(string); ok {
+		logger.Info(ctx, "Final MinStack Implementation:\n%s", solution)
+	} else {
+		logger.Error(ctx, "No solution in final result")
+	}
+}
+
 func main() {
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))
 
@@ -185,7 +274,8 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	RunChainExample(ctx, logger)
-	RunParallelExample(ctx, logger)
-	RunRouteExample(ctx, logger)
+	// RunChainExample(ctx, logger)
+	// RunParallelExample(ctx, logger)
+	// RunRouteExample(ctx, logger)
+	RunEvalutorOptimizerExample(ctx, logger)
 }

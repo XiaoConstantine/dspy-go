@@ -177,3 +177,95 @@ Format example:
 
 	return workflow, nil
 }
+
+// A simple optimizer following the pattern from the Python implementation.
+type PromptingOptimizer struct {
+	// Metric evaluates solution quality and returns PASS/FAIL with feedback
+	Metric      func(ctx context.Context, solution map[string]interface{}) (pass bool, feedback string)
+	MaxAttempts int
+	Memory      []string // Track previous attempts like Python version
+	Logger      *logging.Logger
+}
+
+func NewPromptingOptimizer(
+	metric func(ctx context.Context, solution map[string]interface{}) (bool, string),
+	maxAttempts int,
+) *PromptingOptimizer {
+	return &PromptingOptimizer{
+		Metric:      metric,
+		MaxAttempts: maxAttempts,
+		Memory:      make([]string, 0),
+		Logger:      logging.GetLogger(),
+	}
+}
+
+func (o *PromptingOptimizer) Compile(
+	ctx context.Context,
+	program core.Program,
+	dataset core.Dataset, // Kept for interface compatibility but not used
+	metric core.Metric, // Kept for interface compatibility but not used
+) (core.Program, error) {
+	ctx, span := core.StartSpan(ctx, "PromptingOptimization")
+	defer core.EndSpan(ctx)
+
+	// Initial attempt without context
+	o.Logger.Info(ctx, "Making initial attempt...")
+	result, err := program.Execute(ctx, map[string]interface{}{
+		"task": "Implement MinStack with O(1) operations",
+	})
+	if err != nil {
+		span.WithError(err)
+		return program, fmt.Errorf("initial attempt failed: %w", err)
+	}
+
+	// Store first attempt
+	if solution, ok := result["solution"].(string); ok {
+		o.Memory = append(o.Memory, solution)
+		o.Logger.Debug(ctx, "Initial solution:\n%s", solution)
+	}
+
+	// Improvement loop
+	for attempt := 0; attempt < o.MaxAttempts; attempt++ {
+		attemptCtx, attemptSpan := core.StartSpan(ctx, fmt.Sprintf("Attempt_%d", attempt))
+
+		// Evaluate current solution
+		pass, feedback := o.Metric(attemptCtx, result)
+		attemptSpan.WithAnnotation("feedback", feedback)
+		attemptSpan.WithAnnotation("pass", pass)
+
+		o.Logger.Info(ctx, "Attempt %d evaluation - Pass: %v, Feedback: %s", attempt, pass, feedback)
+
+		if pass {
+			o.Logger.Info(ctx, "Found satisfactory solution on attempt %d", attempt)
+			core.EndSpan(attemptCtx)
+			return program, nil
+		}
+
+		// Build context from memory like Python version
+		context := "Previous attempts:\n"
+		for _, m := range o.Memory {
+			context += fmt.Sprintf("- %s\n", m)
+		}
+		context += fmt.Sprintf("\nFeedback: %s", feedback)
+
+		// Try again with feedback
+		result, err = program.Execute(attemptCtx, map[string]interface{}{
+			"task":    "Implement MinStack with O(1) operations",
+			"context": context,
+		})
+		if err != nil {
+			core.EndSpan(attemptCtx)
+			return program, fmt.Errorf("attempt %d failed: %w", attempt, err)
+		}
+
+		// Store this attempt
+		if solution, ok := result["solution"].(string); ok {
+			o.Memory = append(o.Memory, solution)
+			o.Logger.Debug(ctx, "Attempt %d solution:\n%s", attempt, solution)
+		}
+
+		core.EndSpan(attemptCtx)
+	}
+
+	return program, fmt.Errorf("failed to find satisfactory solution in %d attempts", o.MaxAttempts)
+}
