@@ -274,8 +274,8 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	// RunChainExample(ctx, logger)
-	// RunParallelExample(ctx, logger)
-	// RunRouteExample(ctx, logger)
+	RunChainExample(ctx, logger)
+	RunParallelExample(ctx, logger)
+	RunRouteExample(ctx, logger)
 	RunEvalutorOptimizerExample(ctx, logger)
 }
