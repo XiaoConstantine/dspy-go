@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
+	"sort"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
@@ -268,4 +270,230 @@ func (o *PromptingOptimizer) Compile(
 	}
 
 	return program, fmt.Errorf("failed to find satisfactory solution in %d attempts", o.MaxAttempts)
+}
+
+// Custom impl for orchestrator worker example
+// XMLTaskParser parses tasks from XML format
+type XMLTaskParser struct {
+	// Configuration for XML parsing
+	RequiredFields []string
+}
+
+// XMLTask represents the XML structure of a task
+type XMLTask struct {
+	XMLName       xml.Name    `xml:"task"`
+	ID            string      `xml:"id,attr"`
+	Type          string      `xml:"type"`
+	ProcessorType string      `xml:"processor"`
+	Description   string      `xml:"description"`
+	Priority      int         `xml:"priority,attr"`
+	Dependencies  []string    `xml:"dependencies>task"`
+	Metadata      XMLMetadata `xml:"metadata"`
+}
+
+type XMLMetadata struct {
+	Items []XMLMetadataItem `xml:"item"`
+}
+
+type XMLMetadataItem struct {
+	Key   string `xml:"key,attr"`
+	Value string `xml:",chardata"`
+}
+
+func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]agents.Task, error) {
+	tasksXML, ok := analyzerOutput["tasks"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid tasks format in analyzer output")
+	}
+
+	// Parse XML tasks
+	var xmlTasks struct {
+		Tasks []XMLTask `xml:"task"`
+	}
+	if err := xml.Unmarshal([]byte(tasksXML), &xmlTasks); err != nil {
+		return nil, fmt.Errorf("failed to parse XML tasks: %w", err)
+	}
+
+	// Convert to Task objects
+	tasks := make([]agents.Task, len(xmlTasks.Tasks))
+	for i, xmlTask := range xmlTasks.Tasks {
+		// Validate required fields
+		if err := p.validateTask(xmlTask); err != nil {
+			return nil, fmt.Errorf("invalid task %s: %w", xmlTask.ID, err)
+		}
+
+		// Convert metadata to map
+		metadata := make(map[string]interface{})
+		for _, item := range xmlTask.Metadata.Items {
+			metadata[item.Key] = item.Value
+		}
+
+		tasks[i] = agents.Task{
+			ID:            xmlTask.ID,
+			Type:          xmlTask.Type,
+			ProcessorType: xmlTask.ProcessorType,
+			Dependencies:  xmlTask.Dependencies,
+			Priority:      xmlTask.Priority,
+			Metadata:      metadata,
+		}
+	}
+
+	return tasks, nil
+}
+
+func (p *XMLTaskParser) validateTask(task XMLTask) error {
+	if task.ID == "" {
+		return fmt.Errorf("missing task ID")
+	}
+	if task.Type == "" {
+		return fmt.Errorf("missing task type")
+	}
+	if task.ProcessorType == "" {
+		return fmt.Errorf("missing processor type")
+	}
+	return nil
+}
+
+// DependencyPlanCreator creates execution plans based on task dependencies
+type DependencyPlanCreator struct {
+	// Optional configuration for planning
+	MaxTasksPerPhase int
+}
+
+func NewDependencyPlanCreator(maxTasksPerPhase int) *DependencyPlanCreator {
+	if maxTasksPerPhase <= 0 {
+		maxTasksPerPhase = 10 // Default value
+	}
+	return &DependencyPlanCreator{
+		MaxTasksPerPhase: maxTasksPerPhase,
+	}
+}
+
+func (p *DependencyPlanCreator) CreatePlan(tasks []agents.Task) ([][]agents.Task, error) {
+	// Build dependency graph
+	graph := buildDependencyGraph(tasks)
+
+	// Detect cycles
+	if err := detectCycles(graph); err != nil {
+		return nil, fmt.Errorf("invalid task dependencies: %w", err)
+	}
+
+	// Create phases based on dependencies
+	phases := [][]agents.Task{}
+	remaining := make(map[string]agents.Task)
+	completed := make(map[string]bool)
+
+	// Initialize remaining tasks
+	for _, task := range tasks {
+		remaining[task.ID] = task
+	}
+
+	// Create phases until all tasks are allocated
+	for len(remaining) > 0 {
+		phase := []agents.Task{}
+
+		// Find tasks with satisfied dependencies
+		for _, task := range remaining {
+			if canExecute(task, completed) {
+				phase = append(phase, task)
+				delete(remaining, task.ID)
+
+				// Respect max tasks per phase
+				if len(phase) >= p.MaxTasksPerPhase {
+					break
+				}
+			}
+		}
+
+		// If no tasks can be executed, we have a problem
+		if len(phase) == 0 {
+			return nil, fmt.Errorf("circular dependency or missing dependency detected")
+		}
+
+		// Sort phase by priority
+		sort.Slice(phase, func(i, j int) bool {
+			return phase[i].Priority < phase[j].Priority
+		})
+
+		phases = append(phases, phase)
+
+		// Mark phase tasks as completed
+		for _, task := range phase {
+			completed[task.ID] = true
+		}
+	}
+
+	return phases, nil
+}
+
+// Helper function to build dependency graph
+func buildDependencyGraph(tasks []agents.Task) map[string][]string {
+	graph := make(map[string][]string)
+	for _, task := range tasks {
+		graph[task.ID] = task.Dependencies
+	}
+	return graph
+}
+
+// Helper function to detect cycles in the dependency graph
+func detectCycles(graph map[string][]string) error {
+	visited := make(map[string]bool)
+	path := make(map[string]bool)
+
+	var checkCycle func(string) error
+	checkCycle = func(node string) error {
+		visited[node] = true
+		path[node] = true
+
+		for _, dep := range graph[node] {
+			if !visited[dep] {
+				if err := checkCycle(dep); err != nil {
+					return err
+				}
+			} else if path[dep] {
+				return fmt.Errorf("cycle detected involving task %s", node)
+			}
+		}
+
+		path[node] = false
+		return nil
+	}
+
+	for node := range graph {
+		if !visited[node] {
+			if err := checkCycle(node); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// Helper function to check if a task can be executed
+func canExecute(task agents.Task, completed map[string]bool) bool {
+	for _, dep := range task.Dependencies {
+		if !completed[dep] {
+			return false
+		}
+	}
+	return true
+}
+
+// Example processor implementation
+type ExampleProcessor struct{}
+
+func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, context map[string]interface{}) (interface{}, error) {
+	// Process the task based on its type and metadata
+	switch task.Type {
+	case "example_type":
+		return p.handleExampleTask(task, context)
+	default:
+		return nil, fmt.Errorf("unsupported task type: %s", task.Type)
+	}
+}
+
+func (p *ExampleProcessor) handleExampleTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+	// Implement your task handling logic here
+	return task.Type, nil
 }

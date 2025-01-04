@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
@@ -259,6 +261,51 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
 	}
 }
 
+func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
+	parser := &XMLTaskParser{
+		RequiredFields: []string{"id", "type", "processor"},
+	}
+
+	planner := NewDependencyPlanCreator(5) // Max 5 tasks per phase
+
+	// Create orchestrator configuration
+	config := agents.OrchestrationConfig{
+		MaxConcurrent:  3,
+		DefaultTimeout: 30 * time.Second,
+		RetryConfig: &agents.RetryConfig{
+			MaxAttempts:       3,
+			BackoffMultiplier: 2.0,
+		},
+		// Use custom parser and planner
+		TaskParser:  parser,
+		PlanCreator: planner,
+		// Add your custom processors
+		CustomProcessors: map[string]agents.TaskProcessor{
+			"example": &ExampleProcessor{},
+		},
+	}
+
+	// Create orchestrator
+	orchestrator := agents.NewFlexibleOrchestrator(agents.NewInMemoryStore(), config)
+
+	// The analyzer will return tasks in XML format that our parser understands
+	task := "Your high-level task description"
+	context := map[string]interface{}{
+		"key": "value",
+	}
+
+	// Process the task
+	ctx = core.WithExecutionState(ctx)
+	result, err := orchestrator.Process(ctx, task, context)
+	if err != nil {
+		logger.Error(ctx, "Orchestration failed: %v", err)
+	}
+
+	// Handle results
+	logger.Info(ctx, "Orchestration completed with %d successful tasks and %d failures\n",
+		len(result.CompletedTasks), len(result.FailedTasks))
+}
+
 func main() {
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))
 
@@ -278,4 +325,5 @@ func main() {
 	RunParallelExample(ctx, logger)
 	RunRouteExample(ctx, logger)
 	RunEvalutorOptimizerExample(ctx, logger)
+	RunOrchestratorExample(ctx, logger)
 }
