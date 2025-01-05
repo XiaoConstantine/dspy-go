@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockTool implements Tool interface for testing
+// MockTool implements Tool interface for testing.
 type MockTool struct {
 	mock.Mock
 }
@@ -33,7 +33,7 @@ func (m *MockTool) ValidateParams(params map[string]interface{}) error {
 	return args.Error(0)
 }
 
-// MockAgent implements Agent interface for testing
+// MockAgent implements Agent interface for testing.
 type MockAgent struct {
 	mock.Mock
 }
