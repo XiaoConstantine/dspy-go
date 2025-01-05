@@ -83,7 +83,7 @@ type OrchestrationConfig struct {
 	AnalyzerConfig AnalyzerConfig
 }
 
-// New type to encapsulate analyzer-specific configuration
+// New type to encapsulate analyzer-specific configuration.
 type AnalyzerConfig struct {
 	// The base instruction for task analysis
 	BaseInstruction string
