@@ -79,6 +79,18 @@ type OrchestrationConfig struct {
 	CustomProcessors map[string]TaskProcessor
 	TaskParser       TaskParser
 	PlanCreator      PlanCreator
+
+	AnalyzerConfig AnalyzerConfig
+}
+
+// New type to encapsulate analyzer-specific configuration
+type AnalyzerConfig struct {
+	// The base instruction for task analysis
+	BaseInstruction string
+	// Additional formatting instructions specific to the implementation
+	FormatInstructions string
+	// Any extra considerations for task analysis
+	Considerations []string
 }
 
 // RetryConfig specifies retry behavior.
@@ -115,6 +127,24 @@ type FlexibleOrchestrator struct {
 
 // NewFlexibleOrchestrator creates a new orchestrator instance.
 func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *FlexibleOrchestrator {
+	if config.AnalyzerConfig.BaseInstruction == "" {
+		config.AnalyzerConfig.BaseInstruction = `Analyze the given task and break it down into well-defined subtasks.
+        Consider:
+        - Task dependencies and optimal execution order
+        - Opportunities for parallel execution
+        - Required processor types for each task
+        - Task priorities and resource requirementsAnalyze the given task and break it down into well-defined subtasks.`
+	}
+	instruction := config.AnalyzerConfig.BaseInstruction
+	if config.AnalyzerConfig.FormatInstructions != "" {
+		instruction += "\n" + config.AnalyzerConfig.FormatInstructions
+	}
+	if len(config.AnalyzerConfig.Considerations) > 0 {
+		instruction += "\nConsider:\n"
+		for _, consideration := range config.AnalyzerConfig.Considerations {
+			instruction += fmt.Sprintf("- %s\n", consideration)
+		}
+	}
 
 	if config.TaskParser == nil {
 		config.TaskParser = &DefaultTaskParser{}
@@ -132,18 +162,15 @@ func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *Flexibl
 			{Field: core.NewField("analysis")},
 			{Field: core.NewField("tasks")},
 		},
-	).WithInstruction(`Analyze the given task and break it down into well-defined subtasks.
-        Consider:
-        - Task dependencies and optimal execution order
-        - Opportunities for parallel execution
-        - Required processor types for each task
-        - Task priorities and resource requirements`)
+	).WithInstruction(instruction)
 
 	orchestrator := &FlexibleOrchestrator{
 		memory:     memory,
 		config:     config,
 		analyzer:   modules.NewPredict(analyzerSig),
 		processors: make(map[string]TaskProcessor),
+		parser:     config.TaskParser,  // Add this line
+		planner:    config.PlanCreator, // And this line
 	}
 
 	// Register custom processors

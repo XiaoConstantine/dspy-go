@@ -262,6 +262,16 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
 }
 
 func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
+	xmlFormat := `Format the tasks section in XML with the following structure:
+    <tasks>
+        <task id="task_1" type="analysis" processor="example" priority="1">
+            <description>Task description here</description>
+            <dependencies></dependencies>
+            <metadata>
+                <item key="resource">cpu</item>
+            </metadata>
+        </task>
+    </tasks>`
 	parser := &XMLTaskParser{
 		RequiredFields: []string{"id", "type", "processor"},
 	}
@@ -281,7 +291,16 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 		PlanCreator: planner,
 		// Add your custom processors
 		CustomProcessors: map[string]agents.TaskProcessor{
-			"example": &ExampleProcessor{},
+			"general": &ExampleProcessor{},
+		},
+		AnalyzerConfig: agents.AnalyzerConfig{
+			FormatInstructions: xmlFormat,
+			Considerations: []string{
+				"Task dependencies and optimal execution order",
+				"Opportunities for parallel execution",
+				"Required processor types for each task",
+				"Task priorities and resource requirements",
+			},
 		},
 	}
 
@@ -299,6 +318,14 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 	result, err := orchestrator.Process(ctx, task, context)
 	if err != nil {
 		logger.Error(ctx, "Orchestration failed: %v", err)
+		// Log more details about failed tasks
+		for taskID, taskErr := range result.FailedTasks {
+			logger.Error(ctx, "Task %s failed: %v", taskID, taskErr)
+		}
+	}
+	// Log successful tasks with details
+	for taskID, taskResult := range result.CompletedTasks {
+		logger.Info(ctx, "Task %s completed successfully with result: %v", taskID, taskResult)
 	}
 
 	// Handle results
@@ -321,9 +348,9 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	RunChainExample(ctx, logger)
-	RunParallelExample(ctx, logger)
-	RunRouteExample(ctx, logger)
-	RunEvalutorOptimizerExample(ctx, logger)
+	// RunChainExample(ctx, logger)
+	// RunParallelExample(ctx, logger)
+	// RunRouteExample(ctx, logger)
+	// RunEvalutorOptimizerExample(ctx, logger)
 	RunOrchestratorExample(ctx, logger)
 }

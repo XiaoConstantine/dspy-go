@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
@@ -279,15 +280,14 @@ type XMLTaskParser struct {
 	RequiredFields []string
 }
 
-// XMLTask represents the XML structure of a task
 type XMLTask struct {
 	XMLName       xml.Name    `xml:"task"`
 	ID            string      `xml:"id,attr"`
-	Type          string      `xml:"type"`
-	ProcessorType string      `xml:"processor"`
-	Description   string      `xml:"description"`
+	Type          string      `xml:"type,attr"`      // Make sure this maps to the type attribute
+	ProcessorType string      `xml:"processor,attr"` // Make sure this maps to the processor attribute
 	Priority      int         `xml:"priority,attr"`
-	Dependencies  []string    `xml:"dependencies>task"`
+	Description   string      `xml:"description"`
+	Dependencies  []string    `xml:"dependencies>dep"` // This maps to the <dependencies><dep>...</dep></dependencies> structure
 	Metadata      XMLMetadata `xml:"metadata"`
 }
 
@@ -310,6 +310,13 @@ func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]agents.T
 	var xmlTasks struct {
 		Tasks []XMLTask `xml:"task"`
 	}
+
+	xmlStart := strings.Index(tasksXML, "<tasks>")
+	if xmlStart == -1 {
+		return nil, fmt.Errorf("no valid XML tasks found in output")
+	}
+	tasksXML = tasksXML[xmlStart:]
+
 	if err := xml.Unmarshal([]byte(tasksXML), &xmlTasks); err != nil {
 		return nil, fmt.Errorf("failed to parse XML tasks: %w", err)
 	}
@@ -484,16 +491,44 @@ func canExecute(task agents.Task, completed map[string]bool) bool {
 type ExampleProcessor struct{}
 
 func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, context map[string]interface{}) (interface{}, error) {
-	// Process the task based on its type and metadata
+	// Create a logger to help us understand what's happening
+	logger := logging.GetLogger()
+	logger.Info(ctx, "Processing task: %s (Type: %s)", task.ID, task.Type)
+
+	// Process different task types
 	switch task.Type {
-	case "example_type":
-		return p.handleExampleTask(task, context)
+	case "analysis":
+		return p.handleAnalysisTask(task, context)
+	case "decomposition":
+		return p.handleDecompositionTask(task, context)
+	case "formatting":
+		return p.handleFormattingTask(task, context)
 	default:
-		return nil, fmt.Errorf("unsupported task type: %s", task.Type)
+		// Instead of returning an error, let's handle any task type
+		return p.handleGenericTask(task, context)
 	}
 }
 
-func (p *ExampleProcessor) handleExampleTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
-	// Implement your task handling logic here
-	return task.Type, nil
+func (p *ExampleProcessor) handleAnalysisTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+	// Simulate analysis work
+	result := fmt.Sprintf("Completed analysis for: %s", task.Metadata)
+	return result, nil
+}
+
+func (p *ExampleProcessor) handleDecompositionTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+	// Simulate decomposition work
+	result := fmt.Sprintf("Decomposed task: %s", task.Metadata)
+	return result, nil
+}
+
+func (p *ExampleProcessor) handleFormattingTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+	// Simulate formatting work
+	result := fmt.Sprintf("Formatted output for: %s", task.Metadata)
+	return result, nil
+}
+
+func (p *ExampleProcessor) handleGenericTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+	// Handle any other task type
+	result := fmt.Sprintf("Processed task %s: %s", task.ID, task.Metadata)
+	return result, nil
 }
