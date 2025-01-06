@@ -93,13 +93,18 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 
 // executeOnce performs a single execution attempt of the step.
 func (s *Step) executeOnce(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
+	if err := checkCtxErr(ctx); err != nil {
+		return nil, err
+	}
 	// Execute the underlying DSPy module
 	outputs, err := s.Module.Process(ctx, inputs)
 
 	if err != nil {
 		return nil, err
 	}
-
+	if err := checkCtxErr(ctx); err != nil {
+		return nil, err
+	}
 	return &StepResult{
 		StepID:    s.ID,
 		Outputs:   outputs,
@@ -112,6 +117,10 @@ func (s *Step) executeOnce(ctx context.Context, inputs map[string]interface{}) (
 func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
 	var lastErr error
 	for attempt := 0; attempt < s.RetryConfig.MaxAttempts; attempt++ {
+
+		if err := checkCtxErr(ctx); err != nil {
+			return nil, err
+		}
 		result, err := s.executeOnce(ctx, inputs)
 		if err == nil {
 			return result, nil
@@ -149,4 +158,13 @@ func (s *Step) validateOutputs(outputs map[string]interface{}, signature core.Si
 		}
 	}
 	return nil
+}
+
+func checkCtxErr(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
