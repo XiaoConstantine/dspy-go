@@ -128,45 +128,9 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	return sb.String()
 }
 
-// func parseCompletion(completion string, signature core.Signature) map[string]any {
-// 	outputs := make(map[string]any)
-// 	lines := strings.Split(strings.TrimSpace(completion), "\n")
-//
-// 	var currentField *core.OutputField
-// 	var currentValue strings.Builder
-//
-// 	for _, line := range lines {
-// 		line = strings.TrimSpace(line)
-// 		if line == "" {
-// 			continue
-// 		}
-//
-// 		for _, field := range signature.Outputs {
-// 			if field.Prefix != "" && strings.HasPrefix(line, field.Prefix) {
-// 				currentField = &field
-// 				continue
-// 			}
-// 		}
-// 		if currentField != nil {
-// 			// Skip the line with just the prefix
-// 			if strings.HasPrefix(line, currentField.Prefix) {
-// 				continue
-// 			}
-// 			currentValue.WriteString(line)
-// 			currentValue.WriteString("\n")
-// 		}
-// 	}
-// 	if currentField != nil && currentValue.Len() > 0 {
-// 		outputs[currentField.Name] = strings.TrimSpace(currentValue.String())
-// 	}
-//
-// 	return outputs
-// }
-
 func parseCompletion(completion string, signature core.Signature) map[string]any {
 	outputs := make(map[string]any)
 	lines := strings.Split(strings.TrimSpace(completion), "\n")
-
 	var currentField *core.OutputField
 	var contentLines []string
 
@@ -188,6 +152,10 @@ func parseCompletion(completion string, signature core.Signature) map[string]any
 				// Start collecting content for this new field
 				currentField = &field
 				contentLines = nil
+				content := strings.TrimPrefix(line, field.Prefix)
+				if content != "" {
+					contentLines = append(contentLines, content)
+				}
 				continue
 			}
 		}

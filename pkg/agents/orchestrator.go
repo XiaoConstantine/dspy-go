@@ -112,6 +112,7 @@ type OrchestratorResult struct {
 
 	// Metadata holds additional orchestration information
 	Metadata map[string]interface{}
+	mu       sync.RWMutex
 }
 
 // FlexibleOrchestrator coordinates intelligent task decomposition and execution.
@@ -204,12 +205,20 @@ func (f *FlexibleOrchestrator) getProcessor(processorType string) (TaskProcessor
 func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context map[string]interface{}) (*OrchestratorResult, error) {
 	ctx, span := core.StartSpan(ctx, "FlexibleOrchestrator.Process")
 	defer core.EndSpan(ctx)
+	// Add context check at the start
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// Analyze and break down the task
 	tasks, analysis, err := f.analyzeTasks(ctx, task, context)
 	if err != nil {
 		span.WithError(err)
 		return nil, fmt.Errorf("task analysis failed: %w", err)
+	}
+	// Check context again after analysis
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Create execution plan based on dependencies
@@ -220,6 +229,10 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 
 	}
 
+	// Check context before execution
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Execute tasks according to plan
 	result := &OrchestratorResult{
 		CompletedTasks: make(map[string]interface{}),
@@ -246,6 +259,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		"task":    task,
 		"context": context,
 	})
+
 	if err != nil {
 		span.WithError(err)
 		return nil, "", err
@@ -317,7 +331,9 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, c
 func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, context map[string]interface{}, result *OrchestratorResult) error {
 	processor, err := f.getProcessor(task.ProcessorType)
 	if err != nil {
+		result.mu.Lock()
 		result.FailedTasks[task.ID] = err
+		result.mu.Unlock()
 		return err
 	}
 
@@ -331,7 +347,9 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, conte
 	for i := 0; i < attempts; i++ {
 		taskResult, err := processor.Process(ctx, task, context)
 		if err == nil {
+			result.mu.Lock()
 			result.CompletedTasks[task.ID] = taskResult
+			result.mu.Unlock()
 			return nil
 		}
 		lastErr = err
@@ -344,6 +362,8 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, conte
 		}
 	}
 
+	result.mu.Lock()
 	result.FailedTasks[task.ID] = lastErr
+	result.mu.Unlock()
 	return lastErr
 }
