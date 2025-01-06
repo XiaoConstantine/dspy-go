@@ -490,7 +490,7 @@ func canExecute(task agents.Task, completed map[string]bool) bool {
 // Example processor implementation
 type ExampleProcessor struct{}
 
-func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, context map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
 	// Create a logger to help us understand what's happening
 	logger := logging.GetLogger()
 	logger.Info(ctx, "Processing task: %s (Type: %s)", task.ID, task.Type)
@@ -498,36 +498,36 @@ func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, contex
 	// Process different task types
 	switch task.Type {
 	case "analysis":
-		return p.handleAnalysisTask(task, context)
+		return p.handleAnalysisTask(task, taskContext)
 	case "decomposition":
-		return p.handleDecompositionTask(task, context)
+		return p.handleDecompositionTask(task, taskContext)
 	case "formatting":
-		return p.handleFormattingTask(task, context)
+		return p.handleFormattingTask(task, taskContext)
 	default:
 		// Instead of returning an error, let's handle any task type
-		return p.handleGenericTask(task, context)
+		return p.handleGenericTask(task, taskContext)
 	}
 }
 
-func (p *ExampleProcessor) handleAnalysisTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleAnalysisTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
 	// Simulate analysis work
 	result := fmt.Sprintf("Completed analysis for: %s", task.Metadata)
 	return result, nil
 }
 
-func (p *ExampleProcessor) handleDecompositionTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleDecompositionTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
 	// Simulate decomposition work
 	result := fmt.Sprintf("Decomposed task: %s", task.Metadata)
 	return result, nil
 }
 
-func (p *ExampleProcessor) handleFormattingTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleFormattingTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
 	// Simulate formatting work
 	result := fmt.Sprintf("Formatted output for: %s", task.Metadata)
 	return result, nil
 }
 
-func (p *ExampleProcessor) handleGenericTask(task agents.Task, context map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleGenericTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
 	// Handle any other task type
 	result := fmt.Sprintf("Processed task %s: %s", task.ID, task.Metadata)
 	return result, nil
