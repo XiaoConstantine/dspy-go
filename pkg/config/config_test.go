@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockLLM is a mock implementation of core.LLM for testing
+// MockLLM is a mock implementation of core.LLM for testing.
 type MockLLM struct {
 	mock.Mock
 }
@@ -24,7 +24,7 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options .
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
-// TestConfigureDefaultLLM tests the configuration of the default LLM
+// TestConfigureDefaultLLM tests the configuration of the default LLM.
 func TestConfigureDefaultLLM(t *testing.T) {
 	// Reset GlobalConfig before each test
 	GlobalConfig = &Config{ConcurrencyLevel: 1}
@@ -43,7 +43,7 @@ func TestConfigureDefaultLLM(t *testing.T) {
 	})
 }
 
-// TestConfigureTeacherLLM tests the configuration of the teacher LLM
+// TestConfigureTeacherLLM tests the configuration of the teacher LLM.
 func TestConfigureTeacherLLM(t *testing.T) {
 	// Reset GlobalConfig before each test
 	GlobalConfig = &Config{ConcurrencyLevel: 1}
@@ -61,7 +61,7 @@ func TestConfigureTeacherLLM(t *testing.T) {
 	})
 }
 
-// TestGetDefaultLLM tests retrieving the default LLM
+// TestGetDefaultLLM tests retrieving the default LLM.
 func TestGetDefaultLLM(t *testing.T) {
 	// Reset GlobalConfig before each test
 	GlobalConfig = &Config{ConcurrencyLevel: 1}
@@ -82,7 +82,7 @@ func TestGetDefaultLLM(t *testing.T) {
 	})
 }
 
-// TestGetTeacherLLM tests retrieving the teacher LLM
+// TestGetTeacherLLM tests retrieving the teacher LLM.
 func TestGetTeacherLLM(t *testing.T) {
 	// Reset GlobalConfig before each test
 	GlobalConfig = &Config{ConcurrencyLevel: 1}
@@ -103,7 +103,7 @@ func TestGetTeacherLLM(t *testing.T) {
 	})
 }
 
-// TestSetConcurrencyOptions tests setting concurrency options
+// TestSetConcurrencyOptions tests setting concurrency options.
 func TestSetConcurrencyOptions(t *testing.T) {
 	// Reset GlobalConfig before each test
 	GlobalConfig = &Config{ConcurrencyLevel: 1}
