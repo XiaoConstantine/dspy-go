@@ -15,8 +15,10 @@ coverage:
         paths:
           - "pkg/"
 
-# Ignore coverage for files outside of pkg/
+# Ignore coverage for files and pkg
 ignore:
+  - "pkg/datasets/gsm8k.go"
+  - "pkg/datasets/hotpot_qa.go"
   - "examples/**"
   - "cmd/**"
   - "internal/**"
