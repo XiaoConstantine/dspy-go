@@ -282,6 +282,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 func (f *FlexibleOrchestrator) createExecutionPlan(tasks []Task) ([][]Task, error) {
 	return f.planner.CreatePlan(tasks)
 }
+
 func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
 	// We'll use a top-level pool to manage overall concurrency
 	masterPool := pool.New().WithContext(ctx).WithCancelOnError().WithMaxGoroutines(f.config.MaxConcurrent)
@@ -293,7 +294,7 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 		currentPhaseIdx := phaseIdx
 
 		// Add phase processing to master pool
-		masterPool.Go(func(phaseCtx context.Context) error {
+		masterPool.Go(func(ctx context.Context) error {
 			phaseCtx, span := core.StartSpan(ctx, fmt.Sprintf("Phase_%d", currentPhaseIdx))
 			defer core.EndSpan(phaseCtx)
 
@@ -303,7 +304,6 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 			for _, task := range currentPhase {
 				t := task // Capture task for closure
 
-				// Note: conc's Go() expects func() error, not func(context.Context) error
 				phasePool.Go(func(tCtx context.Context) error {
 					// Execute task with proper context handling
 					if err := f.executeTask(phaseCtx, t, taskContext, result); err != nil {
@@ -367,121 +367,3 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 	result.mu.Unlock()
 	return lastErr
 }
-
-// TODO:: address this later, it causing retry unit test failing
-
-// func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
-// 	taskCtx, span := core.StartSpan(ctx, fmt.Sprintf("Task_%s", task.ID))
-// 	defer core.EndSpan(taskCtx)
-//
-// 	processor, err := f.getProcessor(task.ProcessorType)
-// 	if err != nil {
-// 		span.WithError(err)
-// 		result.mu.Lock()
-// 		result.FailedTasks[task.ID] = err
-// 		result.mu.Unlock()
-// 		return err
-// 	}
-//
-// 	attempts := 1
-// 	if f.config.RetryConfig != nil {
-// 		attempts = f.config.RetryConfig.MaxAttempts
-// 	}
-//
-// 	type attemptResult struct {
-// 		output interface{}
-// 		err    error
-// 	}
-// 	resultChan := make(chan attemptResult, 1)
-//
-// 	taskPool := pool.New().
-// 		WithContext(taskCtx).
-// 		WithCancelOnError().
-// 		WithMaxGoroutines(1)
-//
-// 	var lastErr error
-//
-// 	// Launch retry attempts
-// 	for i := 0; i < attempts; i++ {
-// 		if taskCtx.Err() != nil {
-// 			break
-// 		}
-//
-// 		currentAttempt := i
-// 		taskPool.Go(func(attemptCtx context.Context) error {
-// 			attemptCtx, attemptSpan := core.StartSpan(taskCtx, fmt.Sprintf("Attempt_%d", currentAttempt))
-// 			defer core.EndSpan(attemptCtx)
-//
-// 			// Handle backoff for retries
-// 			if currentAttempt > 0 {
-// 				backoff := time.Duration(float64(time.Second) *
-// 					math.Pow(f.config.RetryConfig.BackoffMultiplier, float64(currentAttempt-1)))
-//
-// 				timer := time.NewTimer(backoff)
-// 				defer timer.Stop()
-//
-// 				select {
-// 				case <-timer.C:
-// 				case <-attemptCtx.Done():
-// 					return attemptCtx.Err()
-// 				}
-// 			}
-//
-// 			taskResult, err := processor.Process(attemptCtx, task, taskContext)
-// 			if err != nil {
-// 				attemptSpan.WithError(err)
-// 				lastErr = err
-// 				// Don't store temporary failures in FailedTasks yet
-// 				return err
-// 			}
-//
-// 			// Success! Send the result
-// 			select {
-// 			case resultChan <- attemptResult{output: taskResult}:
-// 			default:
-// 			}
-// 			return nil
-// 		})
-// 	}
-//
-// 	// Wait for task pool completion
-// 	if poolErr := taskPool.Wait(); poolErr != nil {
-// 		// If pool error is due to context cancellation, return that directly
-// 		if poolErr == context.Canceled || poolErr == context.DeadlineExceeded {
-// 			span.WithError(poolErr)
-// 			return poolErr
-// 		}
-//
-// 		// Otherwise, if we have a lastErr, that's more informative about what actually failed
-// 		if lastErr != nil {
-// 			span.WithError(lastErr)
-// 			result.mu.Lock()
-// 			result.FailedTasks[task.ID] = lastErr
-// 			result.mu.Unlock()
-// 			return fmt.Errorf("task %s failed after %d attempts: %w", task.ID, attempts, lastErr)
-// 		}
-//
-// 		// If we have a pool error but no lastErr, something unexpected happened
-// 		span.WithError(poolErr)
-// 		result.mu.Lock()
-// 		result.FailedTasks[task.ID] = poolErr
-// 		result.mu.Unlock()
-// 		return fmt.Errorf("task %s failed with unexpected error: %w", task.ID, poolErr)
-// 	}
-// 	// Check for successful result
-// 	select {
-// 	case res := <-resultChan:
-// 		// On success, remove from FailedTasks if it was there and add to CompletedTasks
-// 		result.mu.Lock()
-// 		delete(result.FailedTasks, task.ID) // Remove any previous failure record
-// 		result.CompletedTasks[task.ID] = res.output
-// 		result.mu.Unlock()
-// 		return nil
-// 	default:
-// 		// All attempts failed
-// 		result.mu.Lock()
-// 		result.FailedTasks[task.ID] = lastErr
-// 		result.mu.Unlock()
-// 		return fmt.Errorf("task %s failed after %d attempts: %w", task.ID, attempts, lastErr)
-// 	}
-// }
