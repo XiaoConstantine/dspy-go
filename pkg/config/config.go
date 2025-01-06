@@ -51,5 +51,7 @@ func GetTeacherLLM() core.LLM {
 func SetConcurrencyOptions(level int) {
 	if level > 0 {
 		GlobalConfig.ConcurrencyLevel = level
+	} else {
+		GlobalConfig.ConcurrencyLevel = 1 // Reset to default value for invalid inputs
 	}
 }
