@@ -245,6 +245,7 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 	// Execute tasks with controlled concurrency
 	if err := f.executePlan(ctx, plan, context, result); err != nil {
 		result.Metadata["error"] = err.Error()
+		return result, err
 	}
 
 	return result, nil

@@ -350,8 +350,6 @@ tasks:<tasks>
 	})
 
 	t.Run("Context Cancellation", func(t *testing.T) {
-		t.Skip("Skipping context cancellation test temporarily")
-
 		orchestrator, mockProcessor, mockParser, mockPlanner, mockLLM := setupTestOrchestrator()
 
 		// Test data
@@ -359,7 +357,7 @@ tasks:<tasks>
 
 		// Setup expectations
 		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
-			Return(&core.LLMResponse{Content: `{"analysis": "Task analyzed"}`, Usage: &core.TokenInfo{}}, nil)
+			Return(&core.LLMResponse{Content: "analysis: Task analyzed\ntasks: <tasks><task>test task</task></tasks>", Usage: &core.TokenInfo{}}, nil)
 		mockParser.On("Parse", mock.Anything).Return(tasks, nil)
 		mockPlanner.On("CreatePlan", tasks).Return([][]Task{tasks}, nil)
 
@@ -379,11 +377,10 @@ tasks:<tasks>
 			}).Return(nil, context.Canceled)
 
 		// Execute
-		result, err := orchestrator.Process(ctx, "Test context cancellation", nil)
+		_, err := orchestrator.Process(ctx, "Test context cancellation", nil)
 
 		// Verify
 		assert.Error(t, err)
-		assert.Nil(t, result)
 		assert.True(t, errors.Is(err, context.Canceled))
 	})
 }
