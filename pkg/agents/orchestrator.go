@@ -9,6 +9,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
+	"github.com/sourcegraph/conc/pool"
 )
 
 // TaskParser defines how to parse tasks from analyzer output.
@@ -40,7 +41,7 @@ func (p *DefaultPlanCreator) CreatePlan(tasks []Task) ([][]Task, error) {
 // TaskProcessor defines how to process individual tasks.
 type TaskProcessor interface {
 	// Process handles a single task execution
-	Process(ctx context.Context, task Task, context map[string]interface{}) (interface{}, error)
+	Process(ctx context.Context, task Task, taskContext map[string]interface{}) (interface{}, error)
 }
 
 // Task represents a unit of work identified by the orchestrator.
@@ -244,6 +245,7 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 	// Execute tasks with controlled concurrency
 	if err := f.executePlan(ctx, plan, context, result); err != nil {
 		result.Metadata["error"] = err.Error()
+		return result, err
 	}
 
 	return result, nil
@@ -282,53 +284,52 @@ func (f *FlexibleOrchestrator) createExecutionPlan(tasks []Task) ([][]Task, erro
 	return f.planner.CreatePlan(tasks)
 }
 
-// executePlan runs tasks according to the execution plan.
-func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, context map[string]interface{}, result *OrchestratorResult) error {
+func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
+	// We'll use a top-level pool to manage overall concurrency
+	masterPool := pool.New().WithContext(ctx).WithCancelOnError().WithMaxGoroutines(f.config.MaxConcurrent)
+
+	// Process each phase using the master pool
 	for phaseIdx, phase := range plan {
-		phaseCtx, _ := core.StartSpan(ctx, fmt.Sprintf("Phase_%d", phaseIdx))
+		// Capture phase variables for closure
+		currentPhase := phase
+		currentPhaseIdx := phaseIdx
 
-		// Execute tasks in this phase concurrently
-		var wg sync.WaitGroup
-		errors := make(chan error, len(phase))
+		// Add phase processing to master pool
+		masterPool.Go(func(ctx context.Context) error {
+			phaseCtx, span := core.StartSpan(ctx, fmt.Sprintf("Phase_%d", currentPhaseIdx))
+			defer core.EndSpan(phaseCtx)
 
-		// Create semaphore for concurrency control
-		sem := make(chan struct{}, f.config.MaxConcurrent)
+			// Create a phase-specific pool
+			phasePool := pool.New().WithContext(phaseCtx).WithCancelOnError()
+			// Process tasks in this phase
+			for _, task := range currentPhase {
+				t := task // Capture task for closure
 
-		for _, task := range phase {
-			wg.Add(1)
-			go func(t Task) {
-				defer wg.Done()
-
-				// Acquire semaphore
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				if err := f.executeTask(phaseCtx, t, context, result); err != nil {
-					errors <- fmt.Errorf("task %s failed: %w", t.ID, err)
-				}
-			}(task)
-		}
-
-		wg.Wait()
-		close(errors)
-
-		defer core.EndSpan(phaseCtx)
-
-		// Check for phase errors
-		if len(errors) > 0 {
-			var errs []error
-			for err := range errors {
-				errs = append(errs, err)
+				phasePool.Go(func(tCtx context.Context) error {
+					// Execute task with proper context handling
+					if err := f.executeTask(phaseCtx, t, taskContext, result); err != nil {
+						span.WithError(err)
+						return fmt.Errorf("task %s failed: %w", t.ID, err)
+					}
+					return nil
+				})
 			}
-			return fmt.Errorf("phase %d had %d errors: %v", phaseIdx, len(errs), errs)
-		}
+
+			// Wait for all tasks in this phase and handle errors
+			if err := phasePool.Wait(); err != nil {
+				return fmt.Errorf("phase %d failed: %w", currentPhaseIdx, err)
+			}
+
+			return nil
+		})
 	}
 
-	return nil
+	// Wait for all phases to complete
+	return masterPool.Wait()
 }
 
 // executeTask handles single task execution with retries.
-func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, context map[string]interface{}, result *OrchestratorResult) error {
+func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
 	processor, err := f.getProcessor(task.ProcessorType)
 	if err != nil {
 		result.mu.Lock()
@@ -345,7 +346,7 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, conte
 	}
 
 	for i := 0; i < attempts; i++ {
-		taskResult, err := processor.Process(ctx, task, context)
+		taskResult, err := processor.Process(ctx, task, taskContext)
 		if err == nil {
 			result.mu.Lock()
 			result.CompletedTasks[task.ID] = taskResult

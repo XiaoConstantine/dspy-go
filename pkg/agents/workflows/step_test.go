@@ -187,7 +187,6 @@ func TestStep(t *testing.T) {
 	})
 
 	t.Run("Context cancellation", func(t *testing.T) {
-		t.Skip("Skip context cancellation for now")
 		step, module := setupStep()
 
 		// Create cancellable context
