@@ -2,9 +2,9 @@ package core
 
 import (
 	"context"
-	"errors"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 type TokenInfo struct {
@@ -97,12 +97,12 @@ type BaseLLM struct {
 
 // Generate is a placeholder implementation and should be overridden by specific LLM implementations.
 func (b *BaseLLM) Generate(ctx context.Context, prompt string, options ...GenerateOption) (string, error) {
-	return "", errors.New("Generate method not implemented")
+	return "", errors.New(errors.Unknown, "Generate method not implemented")
 }
 
 // GenerateWithJSON is a placeholder implementation and should be overridden by specific LLM implementations.
 func (b *BaseLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
-	return nil, errors.New("GenerateWithJSON method not implemented")
+	return nil, errors.New(errors.Unknown, "GenerateWithJSON method not implemented")
 }
 
 // LLMFactory is a function type for creating LLM instances.
@@ -129,7 +129,7 @@ func (r *LLMRegistry) Register(name string, factory LLMFactory) {
 func (r *LLMRegistry) Create(name string) (LLM, error) {
 	factory, exists := r.factories[name]
 	if !exists {
-		return nil, errors.New("unknown LLM type: " + name)
+		return nil, errors.New(errors.Unknown, "unknown LLM type: "+name)
 	}
 	return factory()
 }

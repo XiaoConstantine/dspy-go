@@ -4,7 +4,10 @@ import (
 	"context"
 	"testing"
 
+	stderrors "errors" // Import standard errors package with an alias
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -193,7 +196,18 @@ func TestRouterWorkflow(t *testing.T) {
 		})
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "step handler failed")
+
+		var stepErr *errors.Error
+		assert.True(t, stderrors.As(err, &stepErr),
+			"Expected error to be *errors.Error")
+
+		// Check error code
+		assert.Equal(t, errors.StepExecutionFailed, stepErr.Code())
+
+		// Check fields
+		fields := stepErr.Fields()
+		assert.Equal(t, "handler", fields["step_id"])
+
 		classifier.AssertExpectations(t)
 		handler.AssertExpectations(t)
 	})

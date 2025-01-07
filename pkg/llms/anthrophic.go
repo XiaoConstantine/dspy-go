@@ -2,10 +2,10 @@ package llms
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
@@ -19,7 +19,7 @@ type AnthropicLLM struct {
 func NewAnthropicLLM(apiKey string, model anthropic.ModelID) (*AnthropicLLM, error) {
 	client, err := anthropic.NewClient(anthropic.WithAPIKey(apiKey))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Anthropic client: %w", err)
+		return nil, errors.Wrap(err, errors.Unknown, "failed to create Anthropic client")
 	}
 
 	return &AnthropicLLM{
@@ -59,7 +59,12 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 		TotalTokens:      message.Usage.InputTokens + message.Usage.OutputTokens}
 
 	if err != nil {
-		return &core.LLMResponse{Usage: usage}, fmt.Errorf("failed to generate response: %w", err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate response"),
+			errors.Fields{
+				"model":      string(a.model),
+				"max_tokens": opts.MaxTokens,
+			})
 	}
 
 	return &core.LLMResponse{Content: message.Content[0].Text, Usage: usage}, nil

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // RouterWorkflow directs inputs to different processing paths based on
@@ -47,19 +49,33 @@ func (w *RouterWorkflow) Execute(ctx context.Context, inputs map[string]interfac
 	// Execute classifier step
 	result, err := w.classifierStep.Execute(ctx, inputs)
 	if err != nil {
-		return nil, fmt.Errorf("classifier step failed: %w", err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.WorkflowExecutionFailed, "classifier step failed"),
+			errors.Fields{
+				"step_id": w.classifierStep.ID,
+				"inputs":  inputs,
+			})
 	}
 
 	// Get classification from result
 	classification, ok := result.Outputs["classification"].(string)
 	if !ok {
-		return nil, fmt.Errorf("classifier did not return a string classification")
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "classifier did not return a string classification"),
+			errors.Fields{
+				"actual_type": fmt.Sprintf("%T", result.Outputs["classification"]),
+			})
 	}
 
 	// Get route for this classification
 	route, exists := w.routes[classification]
 	if !exists {
-		return nil, fmt.Errorf("no route defined for classification: %s", classification)
+		return nil, errors.WithFields(
+			errors.New(errors.ResourceNotFound, "no route defined for classification"),
+			errors.Fields{
+				"classification": classification,
+			})
+
 	}
 
 	// Execute steps in the selected route
@@ -75,7 +91,12 @@ func (w *RouterWorkflow) Execute(ctx context.Context, inputs map[string]interfac
 
 		result, err := step.Execute(ctx, stepInputs)
 		if err != nil {
-			return nil, fmt.Errorf("step %s failed: %w", step.ID, err)
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.StepExecutionFailed, "step execution failed"),
+				errors.Fields{
+					"step_id": step.ID,
+					"inputs":  stepInputs,
+				})
 		}
 
 		for k, v := range result.Outputs {

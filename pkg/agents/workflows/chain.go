@@ -2,9 +2,9 @@ package workflows
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // ChainWorkflow executes steps in a linear sequence, where each step's output
@@ -43,7 +43,12 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 		result, err := step.Execute(ctx, stepInputs)
 
 		if err != nil {
-			return nil, fmt.Errorf("step %s failed: %w", step.ID, err)
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.StepExecutionFailed, "step execution failed"),
+				errors.Fields{
+					"step_id": step.ID,
+					"inputs":  stepInputs,
+				})
 		}
 
 		// Update state with step outputs

@@ -8,6 +8,8 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 type Predict struct {
@@ -37,7 +39,12 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	if err := p.ValidateInputs(inputs); err != nil {
 		span.WithError(err)
-		return nil, err
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "input validation failed"),
+			errors.Fields{
+				"module": "Predict",
+				"inputs": inputs,
+			})
 	}
 
 	signature := p.GetSignature()
@@ -48,10 +55,14 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 	resp, err := p.LLM.Generate(ctx, prompt)
 	if err != nil {
 		span.WithError(err)
-
-		return nil, err
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate prediction"),
+			errors.Fields{
+				"module": "Predict",
+				"prompt": prompt,
+				"model":  p.LLM,
+			})
 	}
-
 	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
 
 	if resp.Usage != nil {
