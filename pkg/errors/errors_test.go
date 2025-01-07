@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNewError tests the basic creation of errors.
@@ -194,4 +195,85 @@ func TestErrorString(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestErrorFields(t *testing.T) {
+	t.Run("Empty fields", func(t *testing.T) {
+		err := New(ValidationFailed, "error")
+		customErr := err.(*Error)
+		assert.Empty(t, customErr.Fields())
+	})
+
+	t.Run("Add fields", func(t *testing.T) {
+		fields := Fields{
+			"string": "value",
+			"int":    42,
+			"bool":   true,
+		}
+		err := WithFields(New(ValidationFailed, "error"), fields)
+		customErr := err.(*Error)
+		assert.Equal(t, fields, customErr.Fields())
+	})
+
+	t.Run("Merge fields", func(t *testing.T) {
+		err := WithFields(New(ValidationFailed, "error"), Fields{"a": 1})
+		err = WithFields(err, Fields{"b": 2})
+		customErr := err.(*Error)
+		assert.Len(t, customErr.Fields(), 2)
+		assert.Equal(t, 1, customErr.Fields()["a"])
+		assert.Equal(t, 2, customErr.Fields()["b"])
+	})
+}
+
+func TestErrorCodeString(t *testing.T) {
+	tests := []struct {
+		code    ErrorCode
+		message string
+	}{
+		{Unknown, "Unknown"},
+		{InvalidInput, "InvalidInput"},
+		{ValidationFailed, "ValidationFailed"},
+		{ResourceNotFound, "ResourceNotFound"},
+		{Timeout, "Timeout"},
+		{RateLimitExceeded, "RateLimitExceeded"},
+		{LLMGenerationFailed, "LLMGenerationFailed"},
+		{TokenLimitExceeded, "TokenLimitExceeded"},
+		{InvalidResponse, "InvalidResponse"},
+		{WorkflowExecutionFailed, "WorkflowExecutionFailed"},
+		{StepExecutionFailed, "StepExecutionFailed"},
+		{InvalidWorkflowState, "InvalidWorkflowState"},
+		{ErrorCode(999), "ErrorCode(999)"}, // Test unknown code
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.message, func(t *testing.T) {
+			err := New(tt.code, tt.message)
+			customErr, ok := err.(*Error)
+			require.True(t, ok)
+			assert.Equal(t, tt.code, customErr.Code())
+			assert.Equal(t, tt.message, customErr.Error())
+		})
+	}
+}
+
+func TestErrorCreation(t *testing.T) {
+	t.Run("New error", func(t *testing.T) {
+		err := New(ValidationFailed, "validation error")
+		customErr, ok := err.(*Error)
+		require.True(t, ok)
+		assert.Equal(t, ValidationFailed, customErr.Code())
+		assert.Equal(t, "validation error", customErr.Error())
+		assert.Nil(t, customErr.Unwrap())
+	})
+
+	t.Run("With fields", func(t *testing.T) {
+		fields := Fields{"key": "value"}
+		err := WithFields(
+			New(ValidationFailed, "validation error"),
+			fields,
+		)
+		customErr, ok := err.(*Error)
+		require.True(t, ok)
+		assert.Equal(t, fields["key"], customErr.Fields()["key"])
+	})
 }
