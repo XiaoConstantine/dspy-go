@@ -45,6 +45,9 @@ type MockLLM struct {
 func (m *MockLLM) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
 	args := m.Called(ctx, prompt, opts)
 	// Handle both string and struct returns
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	if response, ok := args.Get(0).(*core.LLMResponse); ok {
 		return response, args.Error(1)
 	}
@@ -59,4 +62,22 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...c
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(map[string]interface{}), args.Error(1)
+}
+
+// GetModelID mocks the GetModelID method from the LLM interface.
+func (m *MockLLM) GetModelID() string {
+	args := m.Called()
+
+	ret0, _ := args.Get(0).(string)
+
+	return ret0
+}
+
+// GetProviderName mocks the GetProviderName method from the LLM interface.
+func (m *MockLLM) GetProviderName() string {
+	args := m.Called()
+
+	ret0, _ := args.Get(0).(string)
+
+	return ret0
 }

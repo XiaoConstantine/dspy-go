@@ -2,64 +2,72 @@ package llms
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"testing"
 
-	mock_anthropic "github.com/XiaoConstantine/dspy-go/mocks"
+	stdErr "errors"
+
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/golang/mock/gomock"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestAnthropicLLM_Generate(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockLLM := mock_anthropic.NewMockLLM(ctrl)
-
+	prompt := "example prompt"
 	ctx := context.Background()
-	prompt := "Test prompt"
-
 	tests := []struct {
 		name        string
-		setupMock   func()
+		setupMock   func(*testutil.MockLLM)
 		options     []core.GenerateOption
-		wantResp    string
+		wantResp    *core.LLMResponse
 		wantErr     bool
 		expectedErr string
 	}{
 		{
 			name: "Successful generation",
-			setupMock: func() {
-				mockLLM.EXPECT().Generate(gomock.Any(), prompt, gomock.Any()).Return("Generated response", nil)
+			setupMock: func(mockLLM *testutil.MockLLM) {
+				mockLLM.On("Generate", mock.Anything, prompt, mock.Anything).Return(&core.LLMResponse{Content: "Generated response"}, nil)
 			},
 			options:  []core.GenerateOption{core.WithMaxTokens(100), core.WithTemperature(0.7)},
-			wantResp: "Generated response",
+			wantResp: &core.LLMResponse{Content: "Generated response"},
 			wantErr:  false,
 		},
 		{
 			name: "API error",
-			setupMock: func() {
-				mockLLM.EXPECT().Generate(gomock.Any(), prompt, gomock.Any()).Return("", errors.New("API error"))
+			setupMock: func(mockLLM *testutil.MockLLM) {
+				mockLLM.On("Generate", mock.Anything, prompt, mock.Anything).Return(nil, errors.WithFields(
+					errors.Wrap(stdErr.New("API error"), errors.LLMGenerationFailed, "failed to generate response"),
+					errors.Fields{},
+				))
 			},
 			wantErr:     true,
-			expectedErr: "API error",
+			expectedErr: "failed to generate response: API error",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupMock()
+
+			mockLLM := new(testutil.MockLLM)
+			tt.setupMock(mockLLM)
 
 			resp, err := mockLLM.Generate(ctx, prompt, tt.options...)
 
 			if tt.wantErr {
 				assert.Error(t, err)
-				assert.Equal(t, tt.expectedErr, err.Error())
+				if customErr, ok := err.(*errors.Error); ok {
+					assert.Equal(t, tt.expectedErr, customErr.Error())
+				} else {
+					t.Errorf("expected error of type *errors.Error, got %T", err)
+				}
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.wantResp, resp)
 			}
+			mockLLM.AssertExpectations(t)
+
 		})
 	}
 }
