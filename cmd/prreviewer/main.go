@@ -264,23 +264,29 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 
 	// Configure the analyzer for PR review tasks
 	analyzerConfig := agents.AnalyzerConfig{
-		BaseInstruction: `Analyze the PR changes and break down the review into focused tasks.
+		BaseInstruction: `Analyze the PR changes and break down the code review into focused tasks.
+		For each file that needs review, create a separate task that examines:
 		Consider:
-		- Code quality and style
-		- Potential bugs and edge cases
-		- Security implications
-		- Performance considerations
-		- Testing coverage`,
-		FormatInstructions: `Format tasks in XML with clear dependencies and metadata:
-		<tasks>
-			<task id="task_1" type="review" processor="code_review" priority="1">
-				<description>Review file for code quality and style</description>
-				<metadata>
-					<item key="file_path">{file_path}</item>
-					<item key="category">style</item>
-				</metadata>
-			</task>
-		</tasks>`,
+		- Code style and readability
+		- Function and variable naming
+		- Code organization
+		- Error handling patterns
+		- Documentation quality
+
+		Each file should be reviewed independently, with higher priority given to files
+    with more changes or core functionality.`,
+		FormatInstructions: `Format tasks in XML with one task per file:
+    <tasks>
+        <task id="review_{file_path}" type="code_review" processor="code_review" priority="1">
+            <description>Review {file_path} for code quality</description>
+            <metadata>
+                <item key="file_path">{file_path}</item>
+                <item key="file_content">{file_content}</item>
+                <item key="changes">{changes}</item>
+                <item key="category">code_review</item>
+            </metadata>
+        </task>
+    </tasks>`,
 	}
 
 	config := agents.OrchestrationConfig{
@@ -304,8 +310,15 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 // ReviewPR reviews a complete pull request.
 func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]PRReviewComment, error) {
 	// Create review context
+	fileData := make(map[string]map[string]interface{})
+	for _, task := range tasks {
+		fileData[task.FilePath] = map[string]interface{}{
+			"file_content": task.FileContent,
+			"changes":      task.Changes,
+		}
+	}
 	reviewContext := map[string]interface{}{
-		"tasks":       tasks,
+		"files":       fileData,
 		"review_type": "pull_request",
 	}
 
@@ -344,12 +357,32 @@ func (p *CodeReviewProcessor) Process(ctx context.Context, task agents.Task, con
 			{Field: core.Field{Name: "summary"}},
 		},
 	).WithInstruction(`Review the code changes and provide specific, actionable feedback.
-	Consider:
-	- Code style and formatting
-	- Function and variable naming
-	- Code organization and structure
-	- Error handling
-	- Documentation completeness
+    Analyze the code for:
+    1. Code Style and Readability:
+       - Clear and consistent formatting
+       - Meaningful variable and function names
+       - Code complexity and readability
+    
+    2. Code Structure:
+       - Function size and responsibility
+       - Code organization and modularity
+       - Interface design and abstraction
+    
+    3. Error Handling:
+       - Comprehensive error cases
+       - Proper error propagation
+       - Meaningful error messages
+    
+    4. Documentation:
+       - Function and type documentation
+       - Important logic explanation
+       - Usage examples where needed
+
+    Provide comments in this format:
+    - Each comment should be specific and actionable
+    - Include line numbers where applicable
+    - Suggest improvements with example code when helpful
+    - Prioritize major issues over minor style concerns
 	`)
 
 	// Create predict module for review
@@ -359,7 +392,9 @@ func (p *CodeReviewProcessor) Process(ctx context.Context, task agents.Task, con
 	if err != nil {
 		return nil, fmt.Errorf("task %s: %w", task.ID, err)
 	}
-
+	if metadata.FileContent == "" && metadata.Changes == "" {
+		return nil, fmt.Errorf("both file content and changes cannot be empty for file %s", metadata.FilePath)
+	}
 	logger.Debug(ctx, "Extracted metadata for task %s: file_path=%s, content_length=%d",
 		task.ID, metadata.FilePath, len(metadata.FileContent))
 	// Process the review
@@ -368,7 +403,7 @@ func (p *CodeReviewProcessor) Process(ctx context.Context, task agents.Task, con
 		"changes":      metadata.Changes,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("prediction failed: %w", err)
 	}
 
 	// Parse and format comments
@@ -504,16 +539,16 @@ func main() {
 	})
 	logging.SetLogger(logger)
 
-	// err := VerifyTokenPermissions(ctx, *githubToken, *owner, *repo)
-	// if err != nil {
-	// 	logger.Error(ctx, "Token permission verification failed: %v", err)
-	// 	os.Exit(1)
-	// }
+	err := VerifyTokenPermissions(ctx, *githubToken, *owner, *repo)
+	if err != nil {
+		logger.Error(ctx, "Token permission verification failed: %v", err)
+		os.Exit(1)
+	}
 
 	if *verifyOnly {
 		os.Exit(0)
 	}
-	err := config.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)
+	err = config.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
@@ -526,6 +561,10 @@ func main() {
 	githubTools := NewGitHubTools(*githubToken, *owner, *repo)
 	logger.Info(ctx, "Fetching changes for PR #%d", *prNumber)
 	changes, err := githubTools.GetPullRequestChanges(ctx, *prNumber)
+	if err != nil {
+		logger.Error(ctx, "Failed to get PR changes: %v", err)
+		os.Exit(1)
+	}
 	tasks := make([]PRReviewTask, 0, len(changes.Files))
 	for _, file := range changes.Files {
 		// Log file being processed

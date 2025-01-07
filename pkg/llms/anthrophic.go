@@ -56,7 +56,8 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 	usage := &core.TokenInfo{
 		PromptTokens:     message.Usage.InputTokens,
 		CompletionTokens: message.Usage.OutputTokens,
-		TotalTokens:      message.Usage.InputTokens + message.Usage.OutputTokens}
+		TotalTokens:      message.Usage.InputTokens + message.Usage.OutputTokens,
+	}
 
 	if err != nil {
 		return nil, errors.WithFields(

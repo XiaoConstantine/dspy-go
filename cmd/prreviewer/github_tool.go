@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/google/go-github/v68/github"
 	"golang.org/x/oauth2"
 )
@@ -50,37 +51,57 @@ type PRFileChange struct {
 // GetPullRequestChanges retrieves the changes from a pull request.
 func (g *GitHubTools) GetPullRequestChanges(ctx context.Context, prNumber int) (*PRChanges, error) {
 	// Get the list of files changed in the PR
+	logger := logging.GetLogger()
 	files, _, err := g.client.PullRequests.ListFiles(ctx, g.owner, g.repo, prNumber, &github.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list PR files: %w", err)
 	}
 
+	logger.Debug(ctx, "Retrieved %d files from PR", len(files))
 	changes := &PRChanges{
 		Files: make([]PRFileChange, 0, len(files)),
 	}
 
 	for _, file := range files {
 		// Skip files we don't want to review (like dependencies or generated files)
-		if shouldSkipFile(file.GetFilename()) {
+		filename := file.GetFilename()
+		logger.Debug(ctx, "Processing file: %s", filename)
+
+		if shouldSkipFile(filename) {
+			logger.Debug(ctx, "Skipping file: %s (matched skip criteria)", filename)
+
 			continue
 		}
+		var fileContent string
 
-		// Get the file content
-		content, _, _, err := g.client.Repositories.GetContents(
-			ctx,
-			g.owner,
-			g.repo,
-			file.GetFilename(),
-			&github.RepositoryContentGetOptions{},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get file content for %s: %w", file.GetFilename(), err)
-		}
+		if file.GetStatus() != "removed" {
+			opts := &github.RepositoryContentGetOptions{
+				Ref: fmt.Sprintf("pull/%d/head", prNumber), // This is crucial!
+			}
+			// Get the file content
+			content, _, resp, err := g.client.Repositories.GetContents(
+				ctx,
+				g.owner,
+				g.repo,
+				file.GetFilename(),
+				opts,
+			)
+			logger.Debug(ctx, "Getting file: %s", content)
 
-		// Decode file content
-		fileContent, err := content.GetContent()
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode content for %s: %w", file.GetFilename(), err)
+			if err != nil {
+				if resp != nil && resp.StatusCode == 404 {
+					// File might have been deleted or moved
+					continue
+				}
+				// For other errors, log but continue
+				fileContent = fmt.Sprintf("Error getting content: %v", err)
+			} else if content != nil {
+				// Only try to get content if the content object is not nil
+				if fc, err := content.GetContent(); err == nil {
+					fileContent = fc
+				}
+			}
+
 		}
 
 		changes.Files = append(changes.Files, PRFileChange{
@@ -92,6 +113,9 @@ func (g *GitHubTools) GetPullRequestChanges(ctx context.Context, prNumber int) (
 		})
 	}
 
+	if len(changes.Files) == 0 {
+		return nil, fmt.Errorf("no reviewable files found in PR #%d", prNumber)
+	}
 	return changes, nil
 }
 
@@ -112,7 +136,7 @@ func (g *GitHubTools) CreateReviewComments(ctx context.Context, prNumber int, co
 
 		ghComments = append(ghComments, &github.DraftReviewComment{
 			Path:     &comment.FilePath,
-			Position: github.Int(position),
+			Position: github.Ptr(position),
 			Body:     &body,
 		})
 	}
@@ -120,8 +144,8 @@ func (g *GitHubTools) CreateReviewComments(ctx context.Context, prNumber int, co
 	// Create the review
 	review := &github.PullRequestReviewRequest{
 		CommitID: nil, // Will use the latest commit
-		Body:     github.String("Code Review Comments"),
-		Event:    github.String("COMMENT"),
+		Body:     github.Ptr("Code Review Comments"),
+		Event:    github.Ptr("COMMENT"),
 		Comments: ghComments,
 	}
 
@@ -279,10 +303,10 @@ func VerifyTokenPermissions(ctx context.Context, token, owner, repo string) erro
 			check: func() error {
 				// Try to create a draft review to check write permissions
 				// We'll delete it right after
-				review, _, err := client.PullRequests.CreateReview(ctx, owner, repo, 1,
+				_, _, err := client.PullRequests.CreateReview(ctx, owner, repo, 1,
 					&github.PullRequestReviewRequest{
-						Body:  github.String("Permission check - please ignore"),
-						Event: github.String("COMMENT"),
+						Body:  github.Ptr("Permission check - please ignore"),
+						Event: github.Ptr("COMMENT"),
 					})
 				if err != nil {
 					if strings.Contains(err.Error(), "403") {
@@ -294,14 +318,6 @@ func VerifyTokenPermissions(ctx context.Context, token, owner, repo string) erro
 					}
 				}
 
-				// If we created a review, clean it up
-				if review != nil && review.ID != nil {
-					// 	_, err = client.PullRequests.DeleteReview(ctx, owner, repo, 1, *review.ID)
-					// 	if err != nil {
-					// 		fmt.Printf("Warning: Could not delete test review: %v\n", err)
-					// 	}
-					// }
-				}
 				return nil
 			},
 		},
