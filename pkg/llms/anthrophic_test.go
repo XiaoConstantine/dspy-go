@@ -2,7 +2,6 @@ package llms
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	stdErr "errors"
