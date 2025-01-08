@@ -129,7 +129,6 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 		bytes.NewBuffer(jsonData),
 	)
 
-	fmt.Println("Request URL:", fmt.Sprintf("%s?key=%s", g.endpoint, g.apiKey))
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
