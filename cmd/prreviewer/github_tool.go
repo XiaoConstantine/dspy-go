@@ -86,7 +86,6 @@ func (g *GitHubTools) GetPullRequestChanges(ctx context.Context, prNumber int) (
 				file.GetFilename(),
 				opts,
 			)
-			logger.Debug(ctx, "Getting file: %s", content)
 
 			if err != nil {
 				if resp != nil && resp.StatusCode == 404 {

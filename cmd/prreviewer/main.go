@@ -454,7 +454,9 @@ func determineReviewType(category string) string {
 }
 
 func extractReviewMetadata(metadata map[string]interface{}) (*ReviewMetadata, error) {
+	logger := logging.GetLogger()
 	rm := &ReviewMetadata{}
+	logger.Info(context.Background(), "Meta: %v", metadata)
 
 	// Extract category (always required)
 	categoryRaw, exists := metadata["category"]
@@ -467,38 +469,32 @@ func extractReviewMetadata(metadata map[string]interface{}) (*ReviewMetadata, er
 	}
 	rm.Category = category
 
-	// Determine review type based on category
-	rm.ReviewType = determineReviewType(category)
+	filePathRaw, exists := metadata["file_path"]
+	if !exists {
+		return nil, fmt.Errorf("missing required field 'file_path' for file review")
+	}
+	filePath, ok := filePathRaw.(string)
+	if !ok {
+		return nil, fmt.Errorf("field 'file_path' must be string, got %T", filePathRaw)
+	}
+	rm.FilePath = filePath
 
-	// For file-specific reviews
-	if rm.ReviewType == "file" {
-		// Extract file path (required for file reviews)
-		filePathRaw, exists := metadata["file_path"]
-		if !exists {
-			return nil, fmt.Errorf("missing required field 'file_path' for file review")
-		}
-		filePath, ok := filePathRaw.(string)
-		if !ok {
-			return nil, fmt.Errorf("field 'file_path' must be string, got %T", filePathRaw)
-		}
-		rm.FilePath = filePath
+	// Extract changes (required for file reviews)
+	changesRaw, exists := metadata["changes"]
+	if !exists {
+		return nil, fmt.Errorf("missing required field 'changes' for file review")
+	}
+	changes, ok := changesRaw.(string)
+	if !ok {
+		return nil, fmt.Errorf("field 'changes' must be string, got %T", changesRaw)
+	}
+	rm.Changes = changes
 
-		// Extract changes (required for file reviews)
-		changesRaw, exists := metadata["changes"]
-		if !exists {
-			return nil, fmt.Errorf("missing required field 'changes' for file review")
-		}
-		changes, ok := changesRaw.(string)
-		if !ok {
-			return nil, fmt.Errorf("field 'changes' must be string, got %T", changesRaw)
-		}
-		rm.Changes = changes
+	if fileContent, ok := metadata["file_content"]; ok {
+		if str, ok := fileContent.(string); ok {
 
-		// Extract file content (optional but recommended for file reviews)
-		if fileContent, ok := metadata["file_content"]; ok {
-			if str, ok := fileContent.(string); ok {
-				rm.FileContent = str
-			}
+			logger.Info(context.Background(), "file content: %v", str)
+			rm.FileContent = str
 		}
 	}
 
@@ -586,6 +582,8 @@ func main() {
 	}
 
 	logger.Info(ctx, "Starting code review for %d files", len(tasks))
+	//logger.Info(ctx, "tasks: %v", tasks)
+
 	comments, err := agent.ReviewPR(ctx, tasks)
 	if err != nil {
 		logger.Error(ctx, "Failed to review PR: %v", err)

@@ -2,10 +2,12 @@ package llms
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
@@ -53,10 +55,24 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 	}
 
 	message, err := a.client.Messages().Create(ctx, params)
-	usage := &core.TokenInfo{
-		PromptTokens:     message.Usage.InputTokens,
-		CompletionTokens: message.Usage.OutputTokens,
-		TotalTokens:      message.Usage.InputTokens + message.Usage.OutputTokens,
+	if message == nil {
+		return nil, errors.New(errors.LLMGenerationFailed, "Received nil response from Anthropic API")
+	}
+
+	if len(message.Content) == 0 {
+		return nil, errors.New(errors.LLMGenerationFailed, "Received empty content from Anthropic API")
+	}
+
+	usage := &core.TokenInfo{}
+	logger := logging.GetLogger()
+	logger.Info(ctx, "Message: %v", message)
+
+	if !reflect.ValueOf(message.Usage).IsZero() {
+		usage = &core.TokenInfo{
+			PromptTokens:     message.Usage.InputTokens,
+			CompletionTokens: message.Usage.OutputTokens,
+			TotalTokens:      message.Usage.InputTokens + message.Usage.OutputTokens,
+		}
 	}
 
 	if err != nil {
