@@ -292,18 +292,17 @@ func (s *SQLiteStore) StoreWithTTL(ctx context.Context, key string, value interf
 		)
 	}
 
-	// Calculate expiration time
-	expiresAt := time.Now().Add(ttl)
-
 	query := `
     INSERT INTO memory_store (key, value, created_at, updated_at) 
-    VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+    VALUES (?, ?, CURRENT_TIMESTAMP, datetime('now', ?))
     ON CONFLICT(key) DO UPDATE SET 
         value = excluded.value,
         updated_at = excluded.updated_at
     `
 
-	_, err = s.db.ExecContext(ctx, query, key, string(jsonValue), expiresAt)
+	interval := fmt.Sprintf("+%d seconds", int(ttl.Seconds()))
+	fmt.Printf("%v\n", interval)
+	_, err = s.db.ExecContext(ctx, query, key, string(jsonValue), interval)
 	if err != nil {
 		return errors.WithFields(
 			errors.Wrap(err, errors.Unknown, "failed to store value with TTL"),
@@ -321,7 +320,8 @@ func (s *SQLiteStore) CleanExpired(ctx context.Context) (int64, error) {
 
 	query := `
     DELETE FROM memory_store 
-    WHERE updated_at < datetime('now', '-1 second')
+        WHERE updated_at IS NOT NULL 
+        AND datetime(updated_at) < datetime('now')
     `
 
 	result, err := s.db.ExecContext(ctx, query)

@@ -129,17 +129,18 @@ func TestSQLiteStore(t *testing.T) {
 		ctx := context.Background()
 
 		// Store with short TTL
-		err := store.StoreWithTTL(ctx, "ttl_key", "ttl_value", 100*time.Millisecond)
+		err := store.StoreWithTTL(ctx, "ttl_key", "ttl_value", 1*time.Second)
 		require.NoError(t, err)
 
 		// Verify value exists
 		value, err := store.Retrieve("ttl_key")
 		assert.NoError(t, err)
 		assert.Equal(t, "ttl_value", value)
-		currentTime := time.Now().Format(time.RFC3339)
-		t.Logf("Current time (UTC): %s", currentTime)
+		t.Logf("Current time (UTC): %s\n", time.Now().UTC().Format(time.RFC3339))
 		// Wait for TTL to expire
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(3 * time.Second)
+		t.Logf("Current time (UTC): %s\n", time.Now().UTC().Format(time.RFC3339))
+
 		cleaned, err := store.CleanExpired(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), cleaned, "Expected one entry to be cleaned")
