@@ -43,7 +43,7 @@ type GenerateOptions struct {
 // NewGenerateOptions creates a new GenerateOptions with default values.
 func NewGenerateOptions() *GenerateOptions {
 	return &GenerateOptions{
-		MaxTokens:   2048, // Default max tokens
+		MaxTokens:   4096, // Default max tokens
 		Temperature: 0.5,  // Default temperature
 	}
 }
