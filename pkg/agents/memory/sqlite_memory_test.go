@@ -136,9 +136,10 @@ func TestSQLiteStore(t *testing.T) {
 		value, err := store.Retrieve("ttl_key")
 		assert.NoError(t, err)
 		assert.Equal(t, "ttl_value", value)
-
+		currentTime := time.Now().Format(time.RFC3339)
+		t.Logf("Current time (UTC): %s", currentTime)
 		// Wait for TTL to expire
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 		cleaned, err := store.CleanExpired(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1), cleaned, "Expected one entry to be cleaned")
@@ -169,4 +170,3 @@ func TestSQLiteStore(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
-
