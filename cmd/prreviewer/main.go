@@ -440,18 +440,6 @@ func extractComments(result map[string]interface{}, filePath string) ([]PRReview
 
 	return parseReviewComments(filePath, commentsStr)
 }
-func determineReviewType(category string) string {
-	// Categories that require file-specific review
-	fileReviewCategories := map[string]bool{
-		"style": true,
-		"bugs":  true,
-	}
-
-	if fileReviewCategories[category] {
-		return "file"
-	}
-	return "general"
-}
 
 func extractReviewMetadata(metadata map[string]interface{}) (*ReviewMetadata, error) {
 	logger := logging.GetLogger()
