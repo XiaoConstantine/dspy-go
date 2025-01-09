@@ -14,9 +14,9 @@ import (
 
 // OllamaLLM implements the core.LLM interface for Ollama-hosted models.
 type OllamaLLM struct {
-	client   *http.Client
+	client *http.Client
+	*core.BaseLLM
 	endpoint string
-	model    string
 }
 
 // NewOllamaLLM creates a new OllamaLLM instance.
@@ -24,11 +24,16 @@ func NewOllamaLLM(endpoint, model string) (*OllamaLLM, error) {
 	if endpoint == "" {
 		endpoint = "http://localhost:11434" // Default Ollama endpoint
 	}
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
 
 	return &OllamaLLM{
 		client:   &http.Client{},
 		endpoint: endpoint,
-		model:    model,
+		BaseLLM:  core.NewBaseLLM("ollama", core.ModelID(model), capabilities),
 	}, nil
 }
 
@@ -54,7 +59,7 @@ func (o *OllamaLLM) Generate(ctx context.Context, prompt string, options ...core
 	}
 
 	reqBody := ollamaRequest{
-		Model:       o.model,
+		Model:       o.ModelID(),
 		Prompt:      prompt,
 		Stream:      false,
 		MaxTokens:   opts.MaxTokens,

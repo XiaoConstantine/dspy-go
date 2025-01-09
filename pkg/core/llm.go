@@ -18,6 +18,20 @@ type LLMResponse struct {
 	Usage   *TokenInfo
 }
 
+type Capability string
+
+const (
+	// Core capabilities.
+	CapabilityCompletion Capability = "completion"
+	CapabilityChat       Capability = "chat"
+	CapabilityEmbedding  Capability = "embedding"
+
+	// Advanced capabilities.
+	CapabilityJSON        Capability = "json"
+	CapabilityStreaming   Capability = "streaming"
+	CapabilityToolCalling Capability = "tool-calling"
+)
+
 // LLM represents an interface for language models.
 type LLM interface {
 	// Generate produces text completions based on the given prompt
@@ -25,6 +39,10 @@ type LLM interface {
 
 	// GenerateWithJSON produces structured JSON output based on the given prompt
 	GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error)
+
+	ProviderName() string
+	ModelID() string
+	Capabilities() []Capability
 }
 
 // GenerateOption represents an option for text generation.
@@ -92,7 +110,32 @@ func WithStopSequences(sequences ...string) GenerateOption {
 
 // BaseLLM provides a base implementation of the LLM interface.
 type BaseLLM struct {
-	Name string
+	providerName string
+	modelID      ModelID
+	capabilities []Capability
+}
+
+// ProviderName implements LLM interface.
+func (b *BaseLLM) ProviderName() string {
+	return b.providerName
+}
+
+// ModelID implements LLM interface.
+func (b *BaseLLM) ModelID() string {
+	return string(b.modelID)
+}
+
+// Capabilities implements LLM interface.
+func (b *BaseLLM) Capabilities() []Capability {
+	return b.capabilities
+}
+
+func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability) *BaseLLM {
+	return &BaseLLM{
+		providerName: providerName,
+		modelID:      modelID,
+		capabilities: capabilities,
+	}
 }
 
 // Generate is a placeholder implementation and should be overridden by specific LLM implementations.

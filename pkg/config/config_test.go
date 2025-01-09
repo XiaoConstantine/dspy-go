@@ -23,6 +23,17 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options .
 	args := m.Called(ctx, prompt, options)
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
+func (m *MockLLM) ProviderName() string {
+	return "mock"
+}
+
+func (m *MockLLM) ModelID() string {
+	return "mock"
+}
+
+func (m *MockLLM) Capabilities() []core.Capability {
+	return []core.Capability{}
+}
 
 // TestConfigureDefaultLLM tests the configuration of the default LLM.
 func TestConfigureDefaultLLM(t *testing.T) {

@@ -31,7 +31,7 @@ func TestNewOllamaLLM(t *testing.T) {
 			} else {
 				assert.Equal(t, tt.endpoint, llm.endpoint)
 			}
-			assert.Equal(t, tt.model, llm.model)
+			assert.Equal(t, tt.model, llm.ModelID())
 		})
 	}
 }

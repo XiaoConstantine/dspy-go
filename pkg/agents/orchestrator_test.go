@@ -6,35 +6,13 @@ import (
 	"testing"
 	"time"
 
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// MockLLM implements core.LLM for testing.
-type MockLLM struct {
-	mock.Mock
-}
-
-func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
-	args := m.Called(ctx, prompt, options)
-	// Return nil, error if that's what was set up
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	// Otherwise return the response
-	return args.Get(0).(*core.LLMResponse), args.Error(1)
-}
-
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
-	args := m.Called(ctx, prompt, options)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(map[string]interface{}), args.Error(1)
-}
 
 // Mock implementations for testing.
 type MockTaskProcessor struct {
@@ -76,12 +54,12 @@ func setupTestContext() context.Context {
 	return core.WithExecutionState(ctx)
 }
 
-func setupTestOrchestrator() (*FlexibleOrchestrator, *MockTaskProcessor, *MockTaskParser, *MockPlanCreator, *MockLLM) {
+func setupTestOrchestrator() (*FlexibleOrchestrator, *MockTaskProcessor, *MockTaskParser, *MockPlanCreator, *testutil.MockLLM) {
 	memory := NewInMemoryStore()
 	mockProcessor := new(MockTaskProcessor)
 	mockParser := new(MockTaskParser)
 	mockPlanner := new(MockPlanCreator)
-	mockLLM := new(MockLLM)
+	mockLLM := new(testutil.MockLLM)
 
 	// Set up default LLM for the analyzer
 	config.GlobalConfig.DefaultLLM = mockLLM
@@ -272,12 +250,12 @@ tasks:<tasks>
 		testCases := []struct {
 			name string
 
-			setupMocks func(mockLLM *MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor)
+			setupMocks func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor)
 			checkErr   func(*testing.T, error)
 		}{
 			{
 				name: "Analyzer Error",
-				setupMocks: func(mockLLM *MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
+				setupMocks: func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
 					mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
 						Return(nil, errors.New("analyzer error"))
 				},
@@ -288,7 +266,7 @@ tasks:<tasks>
 			},
 			{
 				name: "Parser Error",
-				setupMocks: func(mockLLM *MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
+				setupMocks: func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
 					mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
 						Return(&core.LLMResponse{Content: `{"analysis": "Task analyzed"}`, Usage: &core.TokenInfo{}}, nil)
 					mockParser.On("Parse", mock.Anything).
@@ -302,7 +280,7 @@ tasks:<tasks>
 
 			{
 				name: "Plan Creation Error",
-				setupMocks: func(mockLLM *MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
+				setupMocks: func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
 					// Set up a valid analyzer response
 					resp := &core.LLMResponse{
 						Content: "analysis: Task analyzed\ntasks: <tasks><task>test task</task></tasks>",

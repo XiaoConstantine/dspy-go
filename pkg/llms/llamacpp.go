@@ -14,7 +14,8 @@ import (
 
 // LlamacppLLM implements the core.LLM interface for Llamacpp-hosted models.
 type LlamacppLLM struct {
-	client   *http.Client
+	client *http.Client
+	*core.BaseLLM
 	endpoint string
 }
 
@@ -23,9 +24,15 @@ func NewLlamacppLLM(endpoint string) (*LlamacppLLM, error) {
 	if endpoint == "" {
 		endpoint = "http://localhost:8080" // Default llamacpp endpoint
 	}
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
 
 	return &LlamacppLLM{
 		client:   &http.Client{},
+		BaseLLM:  core.NewBaseLLM("llamacpp", "", capabilities),
 		endpoint: endpoint,
 	}, nil
 }

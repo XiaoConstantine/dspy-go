@@ -14,7 +14,7 @@ import (
 // AnthropicLLM implements the core.LLM interface for Anthropic's models.
 type AnthropicLLM struct {
 	client *anthropic.Client
-	model  anthropic.ModelID
+	*core.BaseLLM
 }
 
 // NewAnthropicLLM creates a new AnthropicLLM instance.
@@ -23,10 +23,15 @@ func NewAnthropicLLM(apiKey string, model anthropic.ModelID) (*AnthropicLLM, err
 	if err != nil {
 		return nil, errors.Wrap(err, errors.Unknown, "failed to create Anthropic client")
 	}
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
 
 	return &AnthropicLLM{
-		client: client,
-		model:  model,
+		client:  client,
+		BaseLLM: core.NewBaseLLM("anthropic", core.ModelID(model), capabilities),
 	}, nil
 }
 
@@ -38,7 +43,7 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 	}
 
 	params := &anthropic.MessageParams{
-		Model: string(a.model),
+		Model: string(a.ModelID()),
 		Messages: []anthropic.MessageParam{
 			{
 				Role: "user",
@@ -79,7 +84,7 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate response"),
 			errors.Fields{
-				"model":      string(a.model),
+				"model":      string(a.ModelID()),
 				"max_tokens": opts.MaxTokens,
 			})
 	}
