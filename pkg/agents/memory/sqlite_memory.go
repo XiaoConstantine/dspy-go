@@ -26,7 +26,7 @@ type SQLiteStore struct {
 // The path parameter specifies the database file location.
 // If path is ":memory:", the database will be created in-memory.
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite3", path+"?cache=shared&mode=memory")
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.Unknown, "failed to open SQLite database"),
@@ -62,7 +62,8 @@ func (s *SQLiteStore) ensureInitialized() error {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME
         );
         
         -- Create index on created_at for efficient querying
@@ -152,7 +153,7 @@ func (s *SQLiteStore) Retrieve(key string) (interface{}, error) {
 	defer s.mu.RUnlock()
 
 	var jsonValue string
-	query := "SELECT value FROM memory_store WHERE key = ?"
+	query := `SELECT value FROM memory_store WHERE key = ?`
 
 	err := s.db.QueryRow(query, key).Scan(&jsonValue)
 	if err == sql.ErrNoRows {
@@ -293,16 +294,15 @@ func (s *SQLiteStore) StoreWithTTL(ctx context.Context, key string, value interf
 	}
 
 	query := `
-    INSERT INTO memory_store (key, value, created_at, updated_at) 
-    VALUES (?, ?, CURRENT_TIMESTAMP, datetime('now', ?))
+    INSERT INTO memory_store (key, value, created_at, updated_at, expires_at) 
+    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
     ON CONFLICT(key) DO UPDATE SET 
         value = excluded.value,
         updated_at = excluded.updated_at
     `
 
-	interval := fmt.Sprintf("+%d seconds", int(ttl.Seconds()))
-	fmt.Printf("%v\n", interval)
-	_, err = s.db.ExecContext(ctx, query, key, string(jsonValue), interval)
+	expirationTime := time.Now().Add(ttl).UTC().Format(time.RFC3339)
+	_, err = s.db.ExecContext(ctx, query, key, string(jsonValue), expirationTime)
 	if err != nil {
 		return errors.WithFields(
 			errors.Wrap(err, errors.Unknown, "failed to store value with TTL"),
@@ -320,9 +320,8 @@ func (s *SQLiteStore) CleanExpired(ctx context.Context) (int64, error) {
 
 	query := `
     DELETE FROM memory_store 
-        WHERE updated_at IS NOT NULL 
-        AND datetime(updated_at) < datetime('now')
-    `
+    WHERE expires_at IS NOT NULL 
+    AND datetime(expires_at) <= datetime('now', 'utc')`
 
 	result, err := s.db.ExecContext(ctx, query)
 	if err != nil {
