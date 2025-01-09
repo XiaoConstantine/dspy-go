@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -27,7 +28,7 @@ func (m *MockTool) Execute(ctx context.Context, action string) (string, error) {
 
 func TestReAct(t *testing.T) {
 	// Create a mock LLM
-	mockLLM := new(MockLLM)
+	mockLLM := new(testutil.MockLLM)
 
 	// Create a mock Tool
 	mockTool := new(MockTool)

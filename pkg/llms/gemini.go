@@ -16,9 +16,8 @@ import (
 
 // GeminiLLM implements the core.LLM interface for Google's Gemini model.
 type GeminiLLM struct {
-	client   *http.Client
+	*core.BaseLLM
 	apiKey   string
-	model    core.ModelID
 	endpoint string
 }
 
@@ -72,6 +71,11 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	if model == "" {
 		model = core.ModelGoogleGeminiFlash // Default model
 	}
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
 	// Validate model ID
 	switch model {
 	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash:
@@ -81,12 +85,18 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 			errors.New(errors.InvalidInput, fmt.Sprintf("unsupported Gemini model: %s", model)),
 			errors.Fields{"model": model})
 	}
+	endpoint := &core.EndpointConfig{
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta",
+		Path:    fmt.Sprintf("models/%s:generateContent", model),
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 30,
+	}
 
 	return &GeminiLLM{
-		client:   &http.Client{},
-		apiKey:   apiKey,
-		model:    model,
-		endpoint: fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model),
+		apiKey:  apiKey,
+		BaseLLM: core.NewBaseLLM("google", model, capabilities, endpoint),
 	}, nil
 }
 
@@ -118,7 +128,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
 			errors.Fields{
 				"prompt": prompt,
-				"model":  g.model,
+				"model":  g.ModelID(),
 			})
 	}
 
@@ -133,18 +143,20 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
 			errors.Fields{
-				"model": g.model,
+				"model": g.ModelID(),
 			})
 	}
+	// TODO: make basellm make request to dry this up
+	for key, value := range g.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
 
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := g.client.Do(req)
+	resp, err := g.GetHTTPClient().Do(req)
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
 			errors.Fields{
-				"model": g.model,
+				"model": g.ModelID(),
 			})
 	}
 	defer resp.Body.Close()
@@ -154,7 +166,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
 			errors.Fields{
-				"model": g.model,
+				"model": g.ModelID(),
 			})
 	}
 
@@ -162,7 +174,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 		return nil, errors.WithFields(
 			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
 			errors.Fields{
-				"model":      g.model,
+				"model":      g.ModelID(),
 				"statusCode": resp.StatusCode,
 			})
 	}
@@ -172,7 +184,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
 			errors.Fields{
-				"model": g.model,
+				"model": g.ModelID(),
 			})
 	}
 
@@ -180,7 +192,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 		return nil, errors.WithFields(
 			errors.New(errors.InvalidResponse, "no candidates in response"),
 			errors.Fields{
-				"model": g.model,
+				"model": g.ModelID(),
 			})
 	}
 

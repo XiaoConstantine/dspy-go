@@ -27,11 +27,11 @@ func TestNewOllamaLLM(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotNil(t, llm)
 			if tt.endpoint == "" {
-				assert.Equal(t, "http://localhost:11434", llm.endpoint)
+				assert.Equal(t, "http://localhost:11434", llm.GetEndpointConfig().BaseURL)
 			} else {
-				assert.Equal(t, tt.endpoint, llm.endpoint)
+				assert.Equal(t, tt.endpoint, llm.GetEndpointConfig().BaseURL)
 			}
-			assert.Equal(t, tt.model, llm.model)
+			assert.Equal(t, tt.model, llm.ModelID())
 		})
 	}
 }

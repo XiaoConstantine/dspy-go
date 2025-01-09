@@ -81,9 +81,9 @@ func TestNewGeminiLLM(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, llm)
 				if tt.model == "" {
-					assert.Equal(t, "gemini-2.0-flash-exp", string(llm.model))
+					assert.Equal(t, "gemini-2.0-flash-exp", llm.ModelID())
 				} else {
-					assert.Equal(t, tt.model, llm.model)
+					assert.Equal(t, tt.model, core.ModelID(llm.ModelID()))
 				}
 			}
 		})

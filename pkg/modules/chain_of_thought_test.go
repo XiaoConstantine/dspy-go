@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -12,7 +13,7 @@ import (
 
 func TestChainOfThought(t *testing.T) {
 	// Create a mock LLM
-	mockLLM := new(MockLLM)
+	mockLLM := new(testutil.MockLLM)
 
 	// Set up the expected behavior
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(`

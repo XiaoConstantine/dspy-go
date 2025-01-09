@@ -64,8 +64,8 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...c
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
-// GetModelID mocks the GetModelID method from the LLM interface.
-func (m *MockLLM) GetModelID() string {
+// ModelID mocks the GetModelID method from the LLM interface.
+func (m *MockLLM) ModelID() string {
 	args := m.Called()
 
 	ret0, _ := args.Get(0).(string)
@@ -74,10 +74,14 @@ func (m *MockLLM) GetModelID() string {
 }
 
 // GetProviderName mocks the GetProviderName method from the LLM interface.
-func (m *MockLLM) GetProviderName() string {
+func (m *MockLLM) ProviderName() string {
 	args := m.Called()
 
 	ret0, _ := args.Get(0).(string)
 
 	return ret0
+}
+
+func (m *MockLLM) Capabilities() []core.Capability {
+	return []core.Capability{}
 }

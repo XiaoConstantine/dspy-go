@@ -4,35 +4,16 @@ import (
 	"context"
 	"testing"
 
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-// MockLLM is a mock implementation of core.LLM.
-type MockLLM struct {
-	mock.Mock
-}
-
-func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
-	args := m.Called(ctx, prompt, options)
-	// Handle both string and struct returns
-	if response, ok := args.Get(0).(*core.LLMResponse); ok {
-		return response, args.Error(1)
-	}
-	// Fall back to string conversion for simple cases
-	return &core.LLMResponse{Content: args.String(0)}, args.Error(1)
-}
-
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
-	args := m.Called(ctx, prompt, options)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
-}
-
 func TestPredict(t *testing.T) {
 	// Create a mock LLM
-	mockLLM := new(MockLLM)
+	mockLLM := new(testutil.MockLLM)
 
 	expectedResponse := `answer:
 	42

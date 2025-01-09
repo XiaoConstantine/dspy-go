@@ -14,9 +14,7 @@ import (
 
 // OllamaLLM implements the core.LLM interface for Ollama-hosted models.
 type OllamaLLM struct {
-	client   *http.Client
-	endpoint string
-	model    string
+	*core.BaseLLM
 }
 
 // NewOllamaLLM creates a new OllamaLLM instance.
@@ -24,11 +22,22 @@ func NewOllamaLLM(endpoint, model string) (*OllamaLLM, error) {
 	if endpoint == "" {
 		endpoint = "http://localhost:11434" // Default Ollama endpoint
 	}
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
+	endpointCfg := &core.EndpointConfig{
+		BaseURL: endpoint,
+		Path:    "api/generate", // Ollama's generation endpoint
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 30, // Default timeout
+	}
 
 	return &OllamaLLM{
-		client:   &http.Client{},
-		endpoint: endpoint,
-		model:    model,
+		BaseLLM: core.NewBaseLLM("ollama", core.ModelID(model), capabilities, endpointCfg),
 	}, nil
 }
 
@@ -54,7 +63,7 @@ func (o *OllamaLLM) Generate(ctx context.Context, prompt string, options ...core
 	}
 
 	reqBody := ollamaRequest{
-		Model:       o.model,
+		Model:       o.ModelID(),
 		Prompt:      prompt,
 		Stream:      false,
 		MaxTokens:   opts.MaxTokens,
@@ -66,13 +75,16 @@ func (o *OllamaLLM) Generate(ctx context.Context, prompt string, options ...core
 		return &core.LLMResponse{}, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", o.endpoint+"/api/generate", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", o.GetEndpointConfig().BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return &core.LLMResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(req)
+	for key, value := range o.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := o.GetHTTPClient().Do(req)
 	if err != nil {
 		return &core.LLMResponse{}, fmt.Errorf("failed to send request: %w", err)
 	}
