@@ -70,7 +70,6 @@ func appendRationaleField(signature core.Signature) core.Signature {
 	rationaleField := core.OutputField{
 		Field: core.NewField("rationale",
 			core.WithDescription("Step-by-step reasoning process"),
-			//		core.WithCustomPrefix("Reasoning: Let's think step by step."),
 		),
 	}
 	newSignature.Outputs = append([]core.OutputField{rationaleField}, newSignature.Outputs...)
