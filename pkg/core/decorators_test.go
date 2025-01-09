@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockBaseLLM implements the LLM interface for testing
+// MockBaseLLM implements the LLM interface for testing.
 type MockBaseLLM struct {
 	mock.Mock
 }
