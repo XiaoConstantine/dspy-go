@@ -1,12 +1,154 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>DSPy-Go Documentation</title>
-    <link rel="stylesheet" href="css/main.css">
-</head>
-<body>
-    <h1>DSPy-Go Documentation</h1>
-    <p>Welcome to the DSPy-Go documentation site.</p>
-</body>
-</html>
+<h1 id="dspy-go">dspy-go</h1>
+<p><a href="https://goreportcard.com/report/github.com/XiaoConstantine/dspy-go"><img src="https://goreportcard.com/badge/github.com/XiaoConstantine/dspy-go" alt="Go Report Card"></a>
+<a href="https://codecov.io/gh/XiaoConstantine/dspy-go"><img src="https://codecov.io/gh/XiaoConstantine/dspy-go/graph/badge.svg?token=GGKRLMLXJ9" alt="codecov"></a>
+<a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go"><img src="https://pkg.go.dev/badge/github.com/XiaoConstantine/dspy-go" alt="Go Reference"></a></p>
+<p>DSPy-Go is a Go implementation of DSPy, bringing systematic prompt engineering and automated reasoning capabilities to Go applications. It provides a flexible framework for building reliable and effective Language Model (LLM) applications through composable modules and workflows.</p>
+<h3 id="installation">Installation</h3>
+<pre><code class="lang-go"><span class="hljs-keyword">go</span> <span class="hljs-built_in">get</span> github.<span class="hljs-keyword">com</span>/XiaoConstantine/dspy-<span class="hljs-keyword">go</span>
+</code></pre>
+<h3 id="quick-start">Quick Start</h3>
+<p>Here&#39;s a simple example to get you started with DSPy-Go:</p>
+<pre><code class="lang-go"><span class="hljs-keyword">import</span> (
+    <span class="hljs-string">"context"</span>
+    <span class="hljs-string">"fmt"</span>
+    <span class="hljs-string">"log"</span>
+
+    <span class="hljs-string">"github.com/XiaoConstantine/dspy-go/pkg/core"</span>
+    <span class="hljs-string">"github.com/XiaoConstantine/dspy-go/pkg/modules"</span>
+    <span class="hljs-string">"github.com/XiaoConstantine/dspy-go/pkg/config"</span>
+)
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">main</span><span class="hljs-params">()</span></span> {
+    <span class="hljs-comment">// Configure the default LLM</span>
+    err := config.ConfigureDefaultLLM(<span class="hljs-string">"your-api-key"</span>, core.ModelAnthropicSonnet)
+    <span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+        log.Fatalf(<span class="hljs-string">"Failed to configure LLM: %v"</span>, err)
+    }
+
+    <span class="hljs-comment">// Create a signature for question answering</span>
+    signature := core.NewSignature(
+        []core.InputField{{Field: core.Field{Name: <span class="hljs-string">"question"</span>}}},
+        []core.OutputField{{Field: core.Field{Name: <span class="hljs-string">"answer"</span>}}},
+    )
+
+    <span class="hljs-comment">// Create a ChainOfThought module</span>
+    cot := modules.NewChainOfThought(signature)
+
+    <span class="hljs-comment">// Create a program</span>
+    program := core.NewProgram(
+        <span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]core.Module{<span class="hljs-string">"cot"</span>: cot},
+        <span class="hljs-function"><span class="hljs-keyword">func</span><span class="hljs-params">(ctx context.Context, inputs <span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]<span class="hljs-keyword">interface</span>{})</span> <span class="hljs-params">(<span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]<span class="hljs-keyword">interface</span>{}, error)</span></span> {
+            <span class="hljs-keyword">return</span> cot.Process(ctx, inputs)
+        },
+    )
+
+    <span class="hljs-comment">// Execute the program</span>
+    result, err := program.Execute(context.Background(), <span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]<span class="hljs-keyword">interface</span>{}{
+        <span class="hljs-string">"question"</span>: <span class="hljs-string">"What is the capital of France?"</span>,
+    })
+    <span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
+        log.Fatalf(<span class="hljs-string">"Error executing program: %v"</span>, err)
+    }
+
+    fmt.Printf(<span class="hljs-string">"Answer: %s\n"</span>, result[<span class="hljs-string">"answer"</span>])
+}
+</code></pre>
+<h3 id="core-concepts">Core Concepts</h3>
+<h4 id="signatures">Signatures</h4>
+<p>Signatures define the input and output fields for modules. They help in creating type-safe and well-defined interfaces for your AI components.</p>
+<h4 id="modules">Modules</h4>
+<p>Modules are the building blocks of DSPy-Go programs. They encapsulate specific functionalities and can be composed to create complex pipelines. Some key modules include:</p>
+<ul>
+<li>Predict: Basic prediction module</li>
+<li>ChainOfThought: Implements chain-of-thought reasoning</li>
+<li>ReAct: Implements the ReAct (Reasoning and Acting) paradigm</li>
+</ul>
+<h4 id="optimizers">Optimizers</h4>
+<p>Optimizers help improve the performance of your DSPy-Go programs by automatically tuning prompts and module parameters. Including:</p>
+<ul>
+<li>BootstrapFewShot: Automatic few-shot example selection</li>
+<li>MIPRO: Multi-step interactive prompt optimization</li>
+<li>Copro: Collaborative prompt optimization</li>
+</ul>
+<h4 id="agents">Agents</h4>
+<p>Use dspy&#39;s core concepts as building blocks, impl <a href="https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents">Building Effective Agents</a></p>
+<ul>
+<li>Chain Workflow: Sequential execution of steps</li>
+<li>Parallel Workflow: Concurrent execution with controlled parallelism</li>
+<li>Router Workflow: Dynamic routing based on classification</li>
+<li>Orchestrator: Flexible task decomposition and execution</li>
+</ul>
+<p>See <a href="/examples/agents/main.go">agent examples</a></p>
+<pre><code class="lang-go"><span class="hljs-comment">// Chain</span>
+workflow := workflows.NewChainWorkflow(store)
+workflow.AddStep(<span class="hljs-variable">&amp;workflows</span>.Step{
+<span class="hljs-symbol">    ID:</span> <span class="hljs-string">"step1"</span>,
+<span class="hljs-symbol">    Module:</span> modules.NewPredict(signature1),
+})
+workflow.AddStep(<span class="hljs-variable">&amp;workflows</span>.Step{
+<span class="hljs-symbol">    ID:</span> <span class="hljs-string">"step2"</span>, 
+<span class="hljs-symbol">    Module:</span> modules.NewPredict(signature2),
+})
+</code></pre>
+<p>Each workflow step can be configured with:</p>
+<ul>
+<li>Retry logic with exponential backoff</li>
+<li>Conditional execution based on workflow state</li>
+<li>Custom error handling</li>
+</ul>
+<pre><code class="lang-go">
+step := &amp;workflows.Step{
+    ID: <span class="hljs-string">"retry_example"</span>,
+    Module: myModule,
+    RetryConfig: &amp;workflows.RetryConfig{
+        MaxAttempts: <span class="hljs-number">3</span>,
+        BackoffMultiplier: <span class="hljs-number">2.0</span>,
+    },
+    Condition: func(<span class="hljs-keyword">state</span> map[string]interface{}) bool {
+        return someCondition(<span class="hljs-keyword">state</span>)
+    },
+}
+</code></pre>
+<h3 id="advanced-features">Advanced Features</h3>
+<h4 id="tracing-and-logging">Tracing and Logging</h4>
+<pre><code class="lang-go">// Enable detailed tracing
+ctx = core.WithExecutionState(context.Background())
+
+// Configure logging
+logger := logging.NewLogger(logging.Config{
+    <span class="hljs-attribute">Severity</span>: logging<span class="hljs-variable">.DEBUG</span>,
+    Outputs:  []logging<span class="hljs-variable">.Output</span>{logging<span class="hljs-variable">.NewConsoleOutput</span>(true)},
+})
+logging<span class="hljs-variable">.SetLogger</span>(logger)
+</code></pre>
+<h4 id="custom-tools">Custom Tools</h4>
+<p>You can extend ReAct modules with custom tools:</p>
+<pre><code class="lang-go">
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *CustomTool)</span> <span class="hljs-title">CanHandle</span><span class="hljs-params">(action <span class="hljs-keyword">string</span>)</span> <span class="hljs-title">bool</span></span> {
+    <span class="hljs-keyword">return</span> strings.HasPrefix(action, <span class="hljs-string">"custom_"</span>)
+}
+
+<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *CustomTool)</span> <span class="hljs-title">Execute</span><span class="hljs-params">(ctx context.Context, action <span class="hljs-keyword">string</span>)</span> <span class="hljs-params">(<span class="hljs-keyword">string</span>, error)</span></span> {
+    <span class="hljs-comment">// Implement tool logic</span>
+    <span class="hljs-keyword">return</span> <span class="hljs-string">"Tool result"</span>, <span class="hljs-literal">nil</span>
+}
+</code></pre>
+<h4 id="working-with-different-llm-providers">Working with Different LLM Providers</h4>
+<pre><code class="lang-go"><span class="hljs-comment">// Using Anthropic Claude</span>
+llm, _ := llms.NewAnthropicLLM(<span class="hljs-string">"api-key"</span>, anthropic.ModelSonnet)
+
+<span class="hljs-comment">// Using Ollama</span>
+llm, _ := llms.NewOllamaLLM(<span class="hljs-string">"http://localhost:11434"</span>, <span class="hljs-string">"llama2"</span>)
+
+<span class="hljs-comment">// Using LlamaCPP</span>
+llm, _ := llms.NewLlamacppLLM(<span class="hljs-string">"http://localhost:8080"</span>)
+</code></pre>
+<h3 id="examples">Examples</h3>
+<p>Check the examples directory for complete implementations:</p>
+<ul>
+<li>examples/agents: Demonstrates different agent patterns</li>
+<li>examples/hotpotqa: Question-answering implementation</li>
+<li>examples/gsm8k: Math problem solving</li>
+</ul>
+<h3 id="license">License</h3>
+<p>DSPy-Go is released under the MIT License. See the LICENSE file for details.</p>
