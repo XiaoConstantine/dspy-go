@@ -143,7 +143,6 @@ func (b *BaseLLM) Capabilities() []Capability {
 }
 
 func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability, endpoint *EndpointConfig) *BaseLLM {
-
 	var timeout time.Duration
 	if endpoint != nil && endpoint.TimeoutSec >= 0 {
 		timeout = time.Duration(endpoint.TimeoutSec) * time.Second
@@ -177,16 +176,6 @@ func ValidateEndpointConfig(cfg *EndpointConfig) error {
 	}
 
 	return nil
-}
-
-// Generate is a placeholder implementation and should be overridden by specific LLM implementations.
-func (b *BaseLLM) Generate(ctx context.Context, prompt string, options ...GenerateOption) (string, error) {
-	return "", errors.New(errors.Unknown, "Generate method not implemented")
-}
-
-// GenerateWithJSON is a placeholder implementation and should be overridden by specific LLM implementations.
-func (b *BaseLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
-	return nil, errors.New(errors.Unknown, "GenerateWithJSON method not implemented")
 }
 
 // GetEndpointConfig returns the current endpoint configuration.

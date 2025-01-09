@@ -343,7 +343,7 @@ func main() {
 	logging.SetLogger(logger)
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
 
-	ctx := context.Background()
+	ctx := core.WithExecutionState(context.Background())
 	err := config.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
