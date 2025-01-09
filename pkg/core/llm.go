@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -108,11 +110,21 @@ func WithStopSequences(sequences ...string) GenerateOption {
 	}
 }
 
+type EndpointConfig struct {
+	BaseURL    string            // Base API URL
+	Path       string            // Specific endpoint path
+	Headers    map[string]string // Common headers
+	TimeoutSec int               // Request timeout in seconds
+}
+
 // BaseLLM provides a base implementation of the LLM interface.
 type BaseLLM struct {
 	providerName string
 	modelID      ModelID
 	capabilities []Capability
+
+	endpoint *EndpointConfig // Optional endpoint configuration
+	client   *http.Client    // Common HTTP client
 }
 
 // ProviderName implements LLM interface.
@@ -130,12 +142,41 @@ func (b *BaseLLM) Capabilities() []Capability {
 	return b.capabilities
 }
 
-func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability) *BaseLLM {
+func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability, endpoint *EndpointConfig) *BaseLLM {
+
+	var timeout time.Duration
+	if endpoint != nil && endpoint.TimeoutSec >= 0 {
+		timeout = time.Duration(endpoint.TimeoutSec) * time.Second
+	} else {
+		timeout = 30 * time.Second
+	}
+
+	client := &http.Client{
+		Timeout: timeout,
+	}
 	return &BaseLLM{
 		providerName: providerName,
 		modelID:      modelID,
 		capabilities: capabilities,
+		endpoint:     endpoint,
+		client:       client,
 	}
+}
+
+func ValidateEndpointConfig(cfg *EndpointConfig) error {
+	if cfg == nil {
+		return nil // Valid to have no endpoint config
+	}
+
+	if cfg.BaseURL == "" {
+		return errors.New(errors.InvalidInput, "base URL required in endpoint configuration")
+	}
+
+	if cfg.TimeoutSec <= 0 {
+		cfg.TimeoutSec = 30 // Default timeout
+	}
+
+	return nil
 }
 
 // Generate is a placeholder implementation and should be overridden by specific LLM implementations.
@@ -146,6 +187,16 @@ func (b *BaseLLM) Generate(ctx context.Context, prompt string, options ...Genera
 // GenerateWithJSON is a placeholder implementation and should be overridden by specific LLM implementations.
 func (b *BaseLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
 	return nil, errors.New(errors.Unknown, "GenerateWithJSON method not implemented")
+}
+
+// GetEndpointConfig returns the current endpoint configuration.
+func (b *BaseLLM) GetEndpointConfig() *EndpointConfig {
+	return b.endpoint
+}
+
+// GetHTTPClient returns the HTTP client.
+func (b *BaseLLM) GetHTTPClient() *http.Client {
+	return b.client
 }
 
 // LLMFactory is a function type for creating LLM instances.

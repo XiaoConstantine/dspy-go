@@ -14,9 +14,7 @@ import (
 
 // LlamacppLLM implements the core.LLM interface for Llamacpp-hosted models.
 type LlamacppLLM struct {
-	client *http.Client
 	*core.BaseLLM
-	endpoint string
 }
 
 // NewLlamacppLLM creates a new LlamacppLLM instance.
@@ -29,11 +27,16 @@ func NewLlamacppLLM(endpoint string) (*LlamacppLLM, error) {
 		core.CapabilityChat,
 		core.CapabilityJSON,
 	}
+	endpointCfg := &core.EndpointConfig{
+		BaseURL: endpoint,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 30, // Default timeout
+	}
 
 	return &LlamacppLLM{
-		client:   &http.Client{},
-		BaseLLM:  core.NewBaseLLM("llamacpp", "", capabilities),
-		endpoint: endpoint,
+		BaseLLM: core.NewBaseLLM("llamacpp", "", capabilities, endpointCfg),
 	}, nil
 }
 
@@ -70,13 +73,16 @@ func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...co
 		return &core.LLMResponse{}, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", o.endpoint+"/completion", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", o.GetEndpointConfig().BaseURL+"/completion", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return &core.LLMResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(req)
+	for key, value := range o.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := o.GetHTTPClient().Do(req)
 	if err != nil {
 		return &core.LLMResponse{}, fmt.Errorf("failed to send request: %w", err)
 	}

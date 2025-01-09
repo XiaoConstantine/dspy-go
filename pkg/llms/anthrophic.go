@@ -31,7 +31,7 @@ func NewAnthropicLLM(apiKey string, model anthropic.ModelID) (*AnthropicLLM, err
 
 	return &AnthropicLLM{
 		client:  client,
-		BaseLLM: core.NewBaseLLM("anthropic", core.ModelID(model), capabilities),
+		BaseLLM: core.NewBaseLLM("anthropic", core.ModelID(model), capabilities, nil),
 	}, nil
 }
 

@@ -17,7 +17,6 @@ import (
 // GeminiLLM implements the core.LLM interface for Google's Gemini model.
 type GeminiLLM struct {
 	*core.BaseLLM
-	client   *http.Client
 	apiKey   string
 	endpoint string
 }
@@ -86,11 +85,18 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 			errors.New(errors.InvalidInput, fmt.Sprintf("unsupported Gemini model: %s", model)),
 			errors.Fields{"model": model})
 	}
+	endpoint := &core.EndpointConfig{
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta",
+		Path:    fmt.Sprintf("models/%s:generateContent", model),
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 30,
+	}
 
 	return &GeminiLLM{
-		client:   &http.Client{},
-		BaseLLM:  core.NewBaseLLM("google", model, capabilities),
-		endpoint: fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model),
+		apiKey:  apiKey,
+		BaseLLM: core.NewBaseLLM("google", model, capabilities, endpoint),
 	}, nil
 }
 
@@ -140,10 +146,12 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 				"model": g.ModelID(),
 			})
 	}
+	// TODO: make basellm make request to dry this up
+	for key, value := range g.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
 
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := g.client.Do(req)
+	resp, err := g.GetHTTPClient().Do(req)
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
