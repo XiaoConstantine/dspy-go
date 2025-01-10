@@ -3,7 +3,6 @@ package llms
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -186,11 +185,26 @@ func TestGeminiLLM_Generate(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-
-			llm, err := NewGeminiLLM("test-api-key", core.ModelGoogleGeminiFlash)
-			require.NoError(t, err)
-
-			llm.endpoint = fmt.Sprintf("%s/v1beta/models/%s:generateContent", server.URL, core.ModelGoogleGeminiFlash)
+			// Create GeminiLLM instance with proper initialization
+			endpoint := &core.EndpointConfig{
+				BaseURL:    server.URL,
+				Path:       "/models/gemini-2.0-flash-exp:generateContent",
+				Headers:    map[string]string{"Content-Type": "application/json"},
+				TimeoutSec: 30,
+			}
+			llm := &GeminiLLM{
+				apiKey: "test-api-key",
+				BaseLLM: core.NewBaseLLM(
+					"google",
+					core.ModelGoogleGeminiFlash,
+					[]core.Capability{
+						core.CapabilityCompletion,
+						core.CapabilityChat,
+						core.CapabilityJSON,
+					},
+					endpoint,
+				),
+			}
 
 			response, err := llm.Generate(context.Background(), "Test prompt",
 				core.WithMaxTokens(100),
@@ -288,12 +302,26 @@ func TestGeminiLLM_GenerateWithJSON(t *testing.T) {
 				require.NoError(t, err)
 			}))
 			defer server.Close()
-
-			// Create Gemini client with test server
-			llm, err := NewGeminiLLM("test-api-key", core.ModelGoogleGeminiFlash)
-			require.NoError(t, err)
-			llm.endpoint = fmt.Sprintf("%s/v1beta/models/%s:generateContent", server.URL, core.ModelGoogleGeminiFlash)
-
+			// Create GeminiLLM instance with proper initialization
+			endpoint := &core.EndpointConfig{
+				BaseURL:    server.URL,
+				Path:       "/models/gemini-2.0-flash-exp:generateContent",
+				Headers:    map[string]string{"Content-Type": "application/json"},
+				TimeoutSec: 30,
+			}
+			llm := &GeminiLLM{
+				apiKey: "test-api-key",
+				BaseLLM: core.NewBaseLLM(
+					"google",
+					core.ModelGoogleGeminiFlash,
+					[]core.Capability{
+						core.CapabilityCompletion,
+						core.CapabilityChat,
+						core.CapabilityJSON,
+					},
+					endpoint,
+				),
+			}
 			// Make the request
 			response, err := llm.GenerateWithJSON(context.Background(), "Test prompt")
 
