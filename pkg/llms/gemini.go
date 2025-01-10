@@ -18,8 +18,7 @@ import (
 // GeminiLLM implements the core.LLM interface for Google's Gemini model.
 type GeminiLLM struct {
 	*core.BaseLLM
-	apiKey   string
-	endpoint string
+	apiKey string
 }
 
 // GeminiRequest represents the request structure for Gemini API.
