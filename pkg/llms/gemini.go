@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -87,7 +88,7 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	}
 	endpoint := &core.EndpointConfig{
 		BaseURL: "https://generativelanguage.googleapis.com/v1beta",
-		Path:    fmt.Sprintf("models/%s:generateContent", model),
+		Path:    fmt.Sprintf("/models/%s:generateContent", model),
 		Headers: map[string]string{
 			"Content-Type": "application/json",
 		},
@@ -135,7 +136,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 	req, err := http.NewRequestWithContext(
 		ctx,
 		"POST",
-		fmt.Sprintf("%s?key=%s", g.endpoint, g.apiKey),
+		constructRequestURL(g.GetEndpointConfig(), g.apiKey),
 		bytes.NewBuffer(jsonData),
 	)
 
@@ -217,4 +218,16 @@ func (g *GeminiLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 	}
 
 	return utils.ParseJSONResponse(response.Content)
+}
+
+func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {
+	// Remove any trailing slashes from base URL and leading slashes from path
+	baseURL := strings.TrimRight(endpoint.BaseURL, "/")
+	path := strings.TrimLeft(endpoint.Path, "/")
+
+	// Join them with a single slash
+	fullEndpoint := fmt.Sprintf("%s/%s", baseURL, path)
+
+	// Add the API key as query parameter
+	return fmt.Sprintf("%s?key=%s", fullEndpoint, apiKey)
 }
