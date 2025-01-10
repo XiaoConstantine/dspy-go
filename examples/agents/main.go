@@ -272,11 +272,11 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
             </metadata>
         </task>
     </tasks>`
-	parser := &XMLTaskParser{
+	parser := &agents.XMLTaskParser{
 		RequiredFields: []string{"id", "type", "processor"},
 	}
 
-	planner := NewDependencyPlanCreator(5) // Max 5 tasks per phase
+	planner := agents.NewDependencyPlanCreator(5) // Max 5 tasks per phase
 
 	// Create orchestrator configuration
 	config := agents.OrchestrationConfig{
