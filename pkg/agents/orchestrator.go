@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -197,6 +198,7 @@ func (f *FlexibleOrchestrator) getProcessor(processorType string) (TaskProcessor
 
 	processor, exists := f.processors[processorType]
 	if !exists {
+		logging.GetLogger().Error(context.Background(), "No processor found for type: %s", processorType)
 		return nil, fmt.Errorf("no processor registered for type: %s", processorType)
 	}
 	return processor, nil
@@ -206,6 +208,9 @@ func (f *FlexibleOrchestrator) getProcessor(processorType string) (TaskProcessor
 func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context map[string]interface{}) (*OrchestratorResult, error) {
 	ctx, span := core.StartSpan(ctx, "FlexibleOrchestrator.Process")
 	defer core.EndSpan(ctx)
+
+	logger := logging.GetLogger()
+
 	// Add context check at the start
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -214,12 +219,18 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 	// Analyze and break down the task
 	tasks, analysis, err := f.analyzeTasks(ctx, task, context)
 	if err != nil {
+		logger.Error(ctx, "Task analysis failed: %v", err)
 		span.WithError(err)
 		return nil, fmt.Errorf("task analysis failed: %w", err)
 	}
 	// Check context again after analysis
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	if len(tasks) == 0 {
+		logger.Error(ctx, "No tasks were generated from analysis")
+		return nil, fmt.Errorf("no tasks generated from analysis")
 	}
 
 	// Create execution plan based on dependencies
@@ -330,41 +341,73 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 
 // executeTask handles single task execution with retries.
 func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
+	logger := logging.GetLogger()
+	ctx, span := core.StartSpan(ctx, fmt.Sprintf("Task_%s", task.ID))
+	defer core.EndSpan(ctx)
+
+	// Add structured task information to span
+	span.WithAnnotation("task", map[string]interface{}{
+		"id":        task.ID,
+		"type":      task.Type,
+		"processor": task.ProcessorType,
+		"priority":  task.Priority,
+	})
 	processor, err := f.getProcessor(task.ProcessorType)
 	if err != nil {
+		logger.Error(ctx, "Failed to get processor for task %s: %v",
+			task.ID, err)
+		span.WithError(err)
 		result.mu.Lock()
 		result.FailedTasks[task.ID] = err
 		result.mu.Unlock()
 		return err
 	}
-
+	logger.Debug(ctx, "Starting execution of task [%s] using processor [%T]",
+		task.ID, processor)
 	// Apply retry logic if configured
 	var lastErr error
 	attempts := 1
-	if f.config.RetryConfig != nil {
+	if f.config.RetryConfig.MaxAttempts > 1 {
 		attempts = f.config.RetryConfig.MaxAttempts
 	}
+	logger.Debug(ctx, "Starting execution of task [%s] with max attempts [%d]", task.ID, attempts)
 
 	for i := 0; i < attempts; i++ {
-		taskResult, err := processor.Process(ctx, task, taskContext)
+		attemptCtx, _ := core.StartSpan(ctx, fmt.Sprintf("Attempt_%d", i+1))
+		logger.Debug(attemptCtx, "Processing task [%s] (attempt %d/%d) with context: %+v",
+			task.ID, i+1, attempts, taskContext)
+		taskResult, err := processor.Process(attemptCtx, task, taskContext)
+
+		logger.Info(ctx, "task: %v with result: %v", task, taskResult)
 		if err == nil {
+			logger.Info(attemptCtx, "Task [%s] completed successfully with result: %+v",
+				task.ID, taskResult)
+
 			result.mu.Lock()
 			result.CompletedTasks[task.ID] = taskResult
 			result.mu.Unlock()
+
+			core.EndSpan(attemptCtx)
 			return nil
 		}
-		lastErr = err
 
+		lastErr = err
 		if i < attempts-1 {
-			// Apply backoff before retry
 			backoff := time.Duration(float64(time.Second) *
 				math.Pow(f.config.RetryConfig.BackoffMultiplier, float64(i)))
+
+			logger.Warn(attemptCtx, "Task [%s] failed attempt %d/%d: %v. Retrying in %v",
+				task.ID, i+1, attempts, err, backoff)
 			time.Sleep(backoff)
 		}
+
+		core.EndSpan(attemptCtx)
 	}
 
 	result.mu.Lock()
 	result.FailedTasks[task.ID] = lastErr
 	result.mu.Unlock()
+
+	logger.Error(ctx, "Task [%s] failed all %d attempts", task.ID, attempts)
 	return lastErr
 }
