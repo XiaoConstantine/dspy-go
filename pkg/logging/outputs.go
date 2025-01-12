@@ -344,7 +344,7 @@ func (o *ConsoleOutput) Write(e LogEntry) error {
 	defer o.mu.Unlock()
 
 	// Format basic log info
-	timestamp := time.Unix(0, e.Time).Format("2006-01-02 15:04:05.000")
+	timestamp := time.Unix(0, e.Time).Format(time.RFC3339)
 
 	var levelColor, resetColor string
 	if o.color {
@@ -352,10 +352,14 @@ func (o *ConsoleOutput) Write(e LogEntry) error {
 		resetColor = "\033[0m"
 	}
 
-	// Create a more concise trace ID
-	traceID := e.TraceID
-	if len(traceID) > 8 {
-		traceID = traceID[:8]
+	traceDisplay := "traceId=-" // Default when no trace ID is present
+	if e.TraceID != "" {
+		// Truncate long trace IDs to 8 characters for readability
+		displayID := e.TraceID
+		if len(displayID) > 8 {
+			displayID = displayID[:8]
+		}
+		traceDisplay = fmt.Sprintf("traceId=%s", displayID)
 	}
 
 	// Format the base message
@@ -364,7 +368,7 @@ func (o *ConsoleOutput) Write(e LogEntry) error {
 		levelColor,
 		e.Severity,
 		resetColor,
-		traceID,
+		traceDisplay,
 		e.File,
 		e.Line,
 		e.Message,
@@ -380,11 +384,13 @@ func (o *ConsoleOutput) Write(e LogEntry) error {
 		return err
 	}
 
-	if spans, ok := e.Fields["spans"]; ok && spans != nil {
-		if spanSlice, ok := spans.([]*core.Span); ok && len(spanSlice) > 0 {
-			spanInfo := formatSpans(spanSlice)
-			if _, err := fmt.Fprintln(o.writer, spanInfo); err != nil {
-				return err
+	if e.Severity <= DEBUG {
+		if spans, ok := e.Fields["spans"]; ok && spans != nil {
+			if spanSlice, ok := spans.([]*core.Span); ok && len(spanSlice) > 0 {
+				spanInfo := formatSpans(spanSlice)
+				if _, err := fmt.Fprintln(o.writer, spanInfo); err != nil {
+					return err
+				}
 			}
 		}
 	}
