@@ -32,7 +32,7 @@ func NewLlamacppLLM(endpoint string) (*LlamacppLLM, error) {
 		Headers: map[string]string{
 			"Content-Type": "application/json",
 		},
-		TimeoutSec: 30, // Default timeout
+		TimeoutSec: 60, // Default timeout
 	}
 
 	return &LlamacppLLM{
