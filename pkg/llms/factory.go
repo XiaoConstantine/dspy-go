@@ -3,13 +3,30 @@ package llms
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
+type DefaultLLMFactory struct{}
+
+var (
+	defaultFactory     *DefaultLLMFactory
+	defaultFactoryOnce sync.Once
+)
+
+func ensureFactory() {
+	defaultFactoryOnce.Do(func() {
+		defaultFactory = &DefaultLLMFactory{}
+		core.DefaultFactory = defaultFactory
+	})
+}
+
 // NewLLM creates a new LLM instance based on the provided model ID.
 func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
+
+	ensureFactory()
 	var llm core.LLM
 	var err error
 	switch {
@@ -34,4 +51,18 @@ func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	return core.Chain(llm,
 		func(l core.LLM) core.LLM { return core.NewModelContextDecorator(l) },
 	), nil
+}
+
+// Implement the LLMFactory interface.
+func (f *DefaultLLMFactory) CreateLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
+
+	return NewLLM(apiKey, modelID)
+}
+
+func init() {
+	ensureFactory()
+}
+
+func EnsureFactory() {
+	ensureFactory()
 }

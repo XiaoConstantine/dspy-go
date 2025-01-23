@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
@@ -20,9 +19,9 @@ func init() {
 	Paris`}, nil)
 	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"answer": "Paris"}, nil)
 
-	config.GlobalConfig.DefaultLLM = mockLLM
-	config.GlobalConfig.TeacherLLM = mockLLM
-	config.GlobalConfig.ConcurrencyLevel = 1
+	core.GlobalConfig.DefaultLLM = mockLLM
+	core.GlobalConfig.TeacherLLM = mockLLM
+	core.GlobalConfig.ConcurrencyLevel = 1
 }
 
 func createProgram() core.Program {

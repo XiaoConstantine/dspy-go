@@ -7,7 +7,6 @@ import (
 	"time"
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -62,7 +61,7 @@ func setupTestOrchestrator() (*FlexibleOrchestrator, *MockTaskProcessor, *MockTa
 	mockLLM := new(testutil.MockLLM)
 
 	// Set up default LLM for the analyzer
-	config.GlobalConfig.DefaultLLM = mockLLM
+	core.GlobalConfig.DefaultLLM = mockLLM
 
 	config := OrchestrationConfig{
 		MaxConcurrent:  2,

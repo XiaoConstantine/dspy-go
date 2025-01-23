@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/sourcegraph/conc/pool"
@@ -27,9 +26,9 @@ func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction 
 
 func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
 	compiledStudent := student.Clone()
-	teacherLLM := config.GetTeacherLLM()
+	teacherLLM := core.GetTeacherLLM()
 	if teacherLLM == nil {
-		teacherLLM = config.GetDefaultLLM()
+		teacherLLM = core.GetDefaultLLM()
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -57,7 +56,7 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Pr
 		examplesNeeded = len(trainset)
 	}
 
-	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
+	p := pool.New().WithMaxGoroutines(core.GlobalConfig.ConcurrencyLevel)
 
 	for i := 0; i < examplesNeeded; i++ {
 		if b.enoughBootstrappedDemos(compiledStudent) {

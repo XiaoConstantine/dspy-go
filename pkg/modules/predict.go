@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 
@@ -25,7 +24,7 @@ func NewPredict(signature core.Signature) *Predict {
 	return &Predict{
 		BaseModule: *core.NewModule(signature),
 		Demos:      []core.Example{},
-		LLM:        config.GetDefaultLLM(),
+		LLM:        core.GetDefaultLLM(),
 	}
 }
 

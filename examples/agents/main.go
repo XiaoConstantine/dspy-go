@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 
 	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
@@ -344,7 +344,9 @@ func main() {
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
 
 	ctx := core.WithExecutionState(context.Background())
-	err := config.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)
+
+	llms.EnsureFactory()
+	err := core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}

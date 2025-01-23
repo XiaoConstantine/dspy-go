@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/examples/utils"
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
@@ -75,7 +74,7 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 		}
 	}()
 
-	p := pool.New().WithMaxGoroutines(config.GlobalConfig.ConcurrencyLevel)
+	p := pool.New().WithMaxGoroutines(core.GlobalConfig.ConcurrencyLevel)
 	for _, ex := range examples {
 		example := ex
 		p.Go(func() {
@@ -128,7 +127,7 @@ func RunHotPotQAExample(apiKey string) {
 	utils.SetupLLM(apiKey, core.ModelID("ollama:mistral"))
 
 	// Set concurrency level
-	config.SetConcurrencyOptions(10)
+	core.SetConcurrencyOptions(10)
 	examples, err := datasets.LoadHotpotQA()
 	if err != nil {
 		log.Fatalf("Failed to load HotPotQA dataset: %v", err)

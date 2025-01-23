@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/config"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
@@ -532,7 +531,7 @@ func main() {
 	if *verifyOnly {
 		os.Exit(0)
 	}
-	err = config.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)
+	err = core.ConfigureDefaultLLM(*apiKey, core.ModelAnthropicSonnet)
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
