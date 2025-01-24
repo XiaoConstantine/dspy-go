@@ -188,32 +188,6 @@ func (b *BaseLLM) GetHTTPClient() *http.Client {
 	return b.client
 }
 
-// LLMRegistry maintains a registry of available LLM implementations.
-// type LLMRegistry struct {
-// 	factories map[string]LLMFactory
-// }
-//
-// // NewLLMRegistry creates a new LLMRegistry.
-// func NewLLMRegistry() *LLMRegistry {
-// 	return &LLMRegistry{
-// 		factories: make(map[string]LLMFactory),
-// 	}
-// }
-//
-// // Register adds a new LLM factory to the registry.
-// func (r *LLMRegistry) Register(name string, factory LLMFactory) {
-// 	r.factories[name] = factory
-// }
-//
-// // Create instantiates a new LLM based on the given name.
-// func (r *LLMRegistry) Create(name string) (LLM, error) {
-// 	factory, exists := r.factories[name]
-// 	if !exists {
-// 		return nil, errors.New(errors.Unknown, "unknown LLM type: "+name)
-// 	}
-// 	return factory()
-// }
-
 // DefaultLLM represents the default LLM to be used when none is specified.
 var DefaultLLM LLM
 
