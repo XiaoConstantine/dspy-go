@@ -297,29 +297,29 @@ func VerifyTokenPermissions(ctx context.Context, token, owner, repo string) erro
 				return nil
 			},
 		},
-		{
-			name: "Pull request write access (comment creation)",
-			check: func() error {
-				// Try to create a draft review to check write permissions
-				// We'll delete it right after
-				_, _, err := client.PullRequests.CreateReview(ctx, owner, repo, 1,
-					&github.PullRequestReviewRequest{
-						Body:  github.Ptr("Permission check - please ignore"),
-						Event: github.Ptr("COMMENT"),
-					})
-				if err != nil {
-					if strings.Contains(err.Error(), "403") {
-						return fmt.Errorf("no permission to create reviews")
-					}
-					// Don't return error if PR #1 doesn't exist
-					if !strings.Contains(err.Error(), "404") {
-						return err
-					}
-				}
-
-				return nil
-			},
-		},
+		//		{
+		// 	name: "Pull request write access (comment creation)",
+		// 	check: func() error {
+		// 		// Try to create a draft review to check write permissions
+		// 		// We'll delete it right after
+		// 		_, _, err := client.PullRequests.CreateReview(ctx, owner, repo, 1,
+		// 			&github.PullRequestReviewRequest{
+		// 				Body:  github.Ptr("Permission check - please ignore"),
+		// 				Event: github.Ptr("COMMENT"),
+		// 			})
+		// 		if err != nil {
+		// 			if strings.Contains(err.Error(), "403") {
+		// 				return fmt.Errorf("no permission to create reviews")
+		// 			}
+		// 			// Don't return error if PR #1 doesn't exist
+		// 			if !strings.Contains(err.Error(), "404") {
+		// 				return err
+		// 			}
+		// 		}
+		//
+		// 		return nil
+		// 	},
+		// },
 	}
 
 	// Run all permission checks
