@@ -57,7 +57,7 @@ func TestXMLTaskParser(t *testing.T) {
 				"tasks": "not xml",
 			},
 			expectError:  true,
-			errorMessage: "no valid XML tasks found in output",
+			errorMessage: "could not find complete <tasks> section",
 		},
 		{
 			name: "Missing required fields",
