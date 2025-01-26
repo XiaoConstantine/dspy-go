@@ -132,6 +132,13 @@ type FlexibleOrchestrator struct {
 func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *FlexibleOrchestrator {
 	if config.AnalyzerConfig.BaseInstruction == "" {
 		config.AnalyzerConfig.BaseInstruction = `Analyze the given task and break it down into well-defined subtasks.
+
+	IMPORTANT FORMAT RULES:
+	1. Start fields exactly with 'analysis:' or 'tasks:' (no markdown formatting)
+	2. Provide raw XML directly after 'tasks:' without any wrapping
+	3. Keep the exact field prefix format - no decorations or modifications
+	4. Ensure proper indentation and structure in the XML
+
         Consider:
         - Task dependencies and optimal execution order
         - Opportunities for parallel execution
@@ -218,6 +225,8 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 
 	// Analyze and break down the task
 	tasks, analysis, err := f.analyzeTasks(ctx, task, context)
+	logger.Info(ctx, "tasks: %v, analysis: %s", tasks, analysis)
+
 	if err != nil {
 		logger.Error(ctx, "Task analysis failed: %v", err)
 		span.WithError(err)
@@ -266,6 +275,7 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, context map[string]interface{}) ([]Task, string, error) {
 	ctx, span := core.StartSpan(ctx, "AnalyzeTasks")
 	defer core.EndSpan(ctx)
+	logger := logging.GetLogger()
 
 	// Get task breakdown from analyzer
 	result, err := f.analyzer.Process(ctx, map[string]interface{}{
@@ -277,8 +287,11 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		span.WithError(err)
 		return nil, "", err
 	}
+	logger.Info(ctx, "raw task: %s, result: %s", task, result)
+
 	tasks, err := f.parser.Parse(result)
 	if err != nil {
+
 		span.WithError(err)
 		return nil, "", fmt.Errorf("task parsing failed: %w", err)
 	}

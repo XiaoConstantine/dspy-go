@@ -3,9 +3,20 @@ package agents
 import (
 	"encoding/xml"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// XMLNormalizer handles cleaning and standardization of XML content.
+type XMLNormalizer struct {
+	// Pattern for finding XML declarations
+	xmlDeclPattern *regexp.Regexp
+	// Pattern for finding markdown code blocks
+	codeBlockPattern *regexp.Regexp
+	// Pattern for finding tasks prefix
+	tasksPrefixPattern *regexp.Regexp
+}
 
 type XMLTaskParser struct {
 	// Configuration for XML parsing
@@ -32,6 +43,91 @@ type XMLMetadataItem struct {
 	Value string `xml:",chardata"`
 }
 
+// NewXMLNormalizer creates a new normalizer with compiled regex patterns.
+func NewXMLNormalizer() *XMLNormalizer {
+	return &XMLNormalizer{
+		xmlDeclPattern:     regexp.MustCompile(`<\?xml.*?\?>`),
+		codeBlockPattern:   regexp.MustCompile("```(?:xml)?\\n?"),
+		tasksPrefixPattern: regexp.MustCompile(`(?m)^tasks:\s*$`),
+	}
+}
+
+// NormalizeXML cleans and standardizes XML content for parsing.
+func (n *XMLNormalizer) NormalizeXML(content string) (string, error) {
+	// Remove any XML declaration
+	content = n.xmlDeclPattern.ReplaceAllString(content, "")
+
+	// Remove markdown code blocks
+	content = n.codeBlockPattern.ReplaceAllString(content, "")
+
+	// Remove tasks: prefix if present
+	content = n.tasksPrefixPattern.ReplaceAllString(content, "")
+
+	// Handle CDATA sections by removing CDATA markers
+	content = strings.ReplaceAll(content, "<![CDATA[", "")
+	content = strings.ReplaceAll(content, "]]>", "")
+
+	// Extract just the tasks section
+	startIdx := strings.Index(content, "<tasks>")
+	endIdx := strings.LastIndex(content, "</tasks>")
+	if startIdx == -1 || endIdx == -1 {
+		return "", &XMLError{
+			Code:    ErrNoTasksSection,
+			Message: "could not find complete <tasks> section",
+			Details: map[string]interface{}{
+				"content_length": len(content),
+				"start_found":    startIdx != -1,
+				"end_found":      endIdx != -1,
+			},
+		}
+	}
+
+	content = content[startIdx : endIdx+8] // 8 is length of "</tasks>"
+
+	// Normalize whitespace within the XML
+	content = n.normalizeWhitespace(content)
+
+	return content, nil
+}
+
+// normalizeWhitespace handles whitespace standardization.
+func (n *XMLNormalizer) normalizeWhitespace(content string) string {
+	// Split into lines and process each line
+	lines := strings.Split(content, "\n")
+	normalized := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		// Trim whitespace from each line
+		line = strings.TrimSpace(line)
+		if line != "" {
+			normalized = append(normalized, line)
+		}
+	}
+
+	// Join with newlines for pretty formatting
+	return strings.Join(normalized, "\n")
+}
+
+// XMLError represents structured errors during XML processing.
+type XMLError struct {
+	Code    ErrorCode
+	Message string
+	Details map[string]interface{}
+}
+
+func (e *XMLError) Error() string {
+	return e.Message
+}
+
+// ErrorCode represents specific error conditions.
+type ErrorCode int
+
+const (
+	ErrNoTasksSection ErrorCode = iota
+	ErrInvalidXML
+	ErrMalformedTasks
+)
+
 func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, error) {
 	tasksXML, ok := analyzerOutput["tasks"].(string)
 	if !ok {
@@ -43,13 +139,15 @@ func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, er
 		Tasks []XMLTask `xml:"task"`
 	}
 
-	xmlStart := strings.Index(tasksXML, "<tasks>")
-	if xmlStart == -1 {
-		return nil, fmt.Errorf("no valid XML tasks found in output")
-	}
-	tasksXML = tasksXML[xmlStart:]
+	normalizer := NewXMLNormalizer()
 
-	if err := xml.Unmarshal([]byte(tasksXML), &xmlTasks); err != nil {
+	normalizedXML, err := normalizer.NormalizeXML(tasksXML)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to normalize XML: %w", err)
+	}
+
+	if err := xml.Unmarshal([]byte(normalizedXML), &xmlTasks); err != nil {
 		return nil, fmt.Errorf("failed to parse XML tasks: %w", err)
 	}
 

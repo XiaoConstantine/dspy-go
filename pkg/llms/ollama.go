@@ -33,7 +33,7 @@ func NewOllamaLLM(endpoint, model string) (*OllamaLLM, error) {
 		Headers: map[string]string{
 			"Content-Type": "application/json",
 		},
-		TimeoutSec: 30, // Default timeout
+		TimeoutSec: 10 * 60, // Default timeout
 	}
 
 	return &OllamaLLM{

@@ -76,6 +76,8 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 	}
 
 	outputs := parseCompletion(resp.Content, signature)
+
+	logger.Debug(ctx, "Parsed LLM Completion: %v", outputs)
 	formattedOutputs := p.FormatOutputs(outputs)
 	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 
