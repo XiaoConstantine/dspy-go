@@ -24,12 +24,14 @@ import (
     "log"
 
     "github.com/XiaoConstantine/dspy-go/pkg/core"
+    "github.com/XiaoConstantine/dspy-go/pkg/llms"
     "github.com/XiaoConstantine/dspy-go/pkg/modules"
     "github.com/XiaoConstantine/dspy-go/pkg/config"
 )
 
 func main() {
     // Configure the default LLM
+    llms.EnsureFactory()
     err := config.ConfigureDefaultLLM("your-api-key", core.ModelAnthropicSonnet)
     if err != nil {
         log.Fatalf("Failed to configure LLM: %v", err)
@@ -163,7 +165,7 @@ func (t *CustomTool) Execute(ctx context.Context, action string) (string, error)
 llm, _ := llms.NewAnthropicLLM("api-key", anthropic.ModelSonnet)
 
 // Using Ollama
-llm, _ := llms.NewOllamaLLM("http://localhost:11434", "llama2")
+llm, _ := llms.NewOllamaLLM("http://localhost:11434", "ollama:llama2")
 
 // Using LlamaCPP
 llm, _ := llms.NewLlamacppLLM("http://localhost:8080")
