@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,11 @@ type ReviewChunk struct {
 	leadingcontext  string // Previous lines for context
 	trailingcontext string // Following lines for context
 	changes         string // Relevant diff section for this chunk
+	filePath        string // Path of the parent file
+	fileType        string // Type/extension of the file
+	totalLines      int    // Total lines in original file
+	chunkIndex      int    // Position of this chunk in sequence
+	totalChunks     int    // Total number of chunks for this file
 }
 
 // PRReviewTask represents a single file review task.
@@ -60,13 +66,16 @@ type ChunkConfig struct {
 	maxtokens    int // Maximum tokens per chunk
 	contextlines int // Number of context lines to include
 	overlaplines int // Number of lines to overlap between chunks
+
+	fileMetadata map[string]interface{}
 }
 
 func NewChunkConfig() ChunkConfig {
 	return ChunkConfig{
-		maxtokens:    4000, // Reserve space for model response
-		contextlines: 10,   // Lines of surrounding context
-		overlaplines: 5,    // Overlapping lines between chunks
+		maxtokens:    4000,                         // Reserve space for model response
+		contextlines: 10,                           // Lines of surrounding context
+		overlaplines: 5,                            // Overlapping lines between chunks
+		fileMetadata: make(map[string]interface{}), // Initialize empty metadata map
 	}
 }
 
@@ -78,6 +87,13 @@ func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChun
 	var currentchunk []string
 	currenttokens := 0
 
+	filePath, filePathExists := config.fileMetadata["file_path"].(string)
+	if !filePathExists {
+		// Provide a reasonable default or return an error
+		filePath = "unknown"
+	}
+	estimatedChunks := (len(lines) + config.maxtokens - 1) / config.maxtokens
+	chunkIndex := 0
 	for i := 0; i < len(lines); i++ {
 		// Estimate tokens for current line
 		linetokens := estimatetokens(lines[i])
@@ -91,9 +107,26 @@ func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChun
 				leadingcontext:  getleadingcontext(lines, i-len(currentchunk), config.contextlines),
 				trailingcontext: gettrailingcontext(lines, i, config.contextlines),
 				changes:         ExtractRelevantChanges(changes, i-len(currentchunk), i),
+				filePath:        filePath,
+				totalChunks:     estimatedChunks,
+			}
+			if fileType, ok := config.fileMetadata["file_type"].(string); ok {
+				// Example: Special handling for different file types
+				switch fileType {
+				case ".go":
+					// Maybe add extra context for Go files
+					if pkg, ok := config.fileMetadata["package"].(string); ok {
+						// Could use package info for context
+						_ = pkg // Using _ to show we could use this
+					}
+				case ".md":
+					// Different handling for markdown files
+					break
+				}
 			}
 			chunks = append(chunks, chunk)
 
+			chunkIndex++
 			// Start new chunk with overlap
 			overlapstart := max(0, len(currentchunk)-config.overlaplines)
 			currentchunk = currentchunk[overlapstart:]
@@ -223,8 +256,21 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 	// Configure the analyzer for PR review tasks
 	analyzerConfig := agents.AnalyzerConfig{
 		BaseInstruction: `Analyze the PR changes and break down the code review into focused tasks.
-		For each file that needs review, create a separate task that examines:
 
+		You will receive code chunks with metadata about their source files and position.
+
+		For each file being reviewed:
+
+		1. Collect all chunks for the same file (check filePath and chunkIndex)
+
+		2. Build a complete understanding of the file changes
+
+		3. Generate a SINGLE review task for each complete file in XML format
+
+
+		IMPORTANT: Always combine all chunks from the same file into a single task in the XML output.
+
+		Do not create separate tasks for individual chunks.
 		IMPORTANT FORMAT RULES:
 
 		1. Start fields exactly with 'analysis:' or 'tasks:' (no markdown formatting)
@@ -241,7 +287,7 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 
 		Each file should be reviewed independently, with higher priority given to files
     with more changes or core functionality.`,
-		FormatInstructions: `Format tasks in XML with one task per file:
+		FormatInstructions: `Format tasks in XML with one task per file in exact following structure:
     <tasks>
         <task id="review_{file_path}" type="code_review" processor="code_review" priority="1">
             <description>Review {file_path} for code quality</description>
@@ -279,6 +325,11 @@ func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]P
 	fileData := make(map[string]map[string]interface{})
 	for _, task := range tasks {
 		config := NewChunkConfig()
+		config.fileMetadata = map[string]interface{}{
+			"file_path": task.FilePath,
+			"file_type": filepath.Ext(task.FilePath),
+			"package":   filepath.Base(filepath.Dir(task.FilePath)),
+		}
 		chunks, err := chunkfile(task.FileContent, task.Changes, config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to chunk file %s: %w", task.FilePath, err)
