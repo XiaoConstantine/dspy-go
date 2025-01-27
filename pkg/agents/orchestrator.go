@@ -137,13 +137,7 @@ func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *Flexibl
 	1. Start fields exactly with 'analysis:' or 'tasks:' (no markdown formatting)
 	2. Provide raw XML directly after 'tasks:' without any wrapping
 	3. Keep the exact field prefix format - no decorations or modifications
-	4. Ensure proper indentation and structure in the XML
-
-        Consider:
-        - Task dependencies and optimal execution order
-        - Opportunities for parallel execution
-        - Required processor types for each task
-        - Task priorities and resource requirementsAnalyze the given task and break it down into well-defined subtasks.`
+	4. Ensure proper indentation and structure in the XML.`
 	}
 	instruction := config.AnalyzerConfig.BaseInstruction
 	if config.AnalyzerConfig.FormatInstructions != "" {

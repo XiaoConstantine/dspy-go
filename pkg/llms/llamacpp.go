@@ -49,9 +49,33 @@ type llamacppRequest struct {
 }
 
 type llamacppResponse struct {
-	Model     string `json:"model"`
-	CreatedAt string `json:"created_at"`
-	Response  string `json:"response"`
+	Index           int    `json:"index"`            // Response index number
+	Content         string `json:"content"`          // The actual generated text response
+	Tokens          []any  `json:"tokens"`           // Token information (if requested)
+	IDSlot          int    `json:"id_slot"`          // Slot ID in the server
+	Stop            bool   `json:"stop"`             // Whether generation stopped naturally
+	Model           string `json:"model"`            // Model identifier
+	TokensPredicted int    `json:"tokens_predicted"` // Number of tokens generated
+	TokensEvaluated int    `json:"tokens_evaluated"` // Number of tokens processed
+
+	// Input and processing metadata
+	Prompt       string `json:"prompt"`        // Original input prompt
+	HasNewLine   bool   `json:"has_new_line"`  // Whether response has a newline
+	Truncated    bool   `json:"truncated"`     // Whether response was truncated
+	StopType     string `json:"stop_type"`     // Type of stop condition met
+	StoppingWord string `json:"stopping_word"` // Word that triggered stopping
+	TokensCached int    `json:"tokens_cached"` // Number of tokens cached
+	// Performance timing information
+	Timings struct {
+		PromptN             int     `json:"prompt_n"`               // Number of prompt tokens
+		PromptMS            float64 `json:"prompt_ms"`              // Time spent on prompt processing
+		PromptPerTokenMS    float64 `json:"prompt_per_token_ms"`    // Average time per prompt token
+		PromptPerSecond     float64 `json:"prompt_per_second"`      // Tokens per second for prompt
+		PredictedN          int     `json:"predicted_n"`            // Number of predicted tokens
+		PredictedMS         float64 `json:"predicted_ms"`           // Time spent on prediction
+		PredictedPerTokenMS float64 `json:"predicted_per_token_ms"` // Average time per predicted token
+		PredictedPerSecond  float64 `json:"predicted_per_second"`   // Tokens per second for prediction
+	} `json:"timings"`
 }
 
 // Generate implements the core.LLM interface.
@@ -96,15 +120,18 @@ func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...co
 	if resp.StatusCode != http.StatusOK {
 		return &core.LLMResponse{}, fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
 	}
-
 	var llamacppResp llamacppResponse
 	err = json.Unmarshal(body, &llamacppResp)
 	if err != nil {
 		return &core.LLMResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
-
-	// TODO: add token usage
-	return &core.LLMResponse{Content: llamacppResp.Response}, nil
+	// Create token info if available
+	tokenInfo := &core.TokenInfo{
+		PromptTokens:     llamacppResp.TokensEvaluated,
+		CompletionTokens: llamacppResp.TokensPredicted,
+		TotalTokens:      llamacppResp.TokensEvaluated + llamacppResp.TokensPredicted,
+	}
+	return &core.LLMResponse{Content: llamacppResp.Content, Usage: tokenInfo}, nil
 }
 
 // GenerateWithJSON implements the core.LLM interface.
