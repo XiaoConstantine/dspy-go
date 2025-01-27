@@ -55,7 +55,7 @@ type ReviewMetadata struct {
 	ReviewType  string
 }
 
-// Chunkconfig holds configuration for code chunking
+// Chunkconfig holds configuration for code chunking.
 type ChunkConfig struct {
 	maxtokens    int // Maximum tokens per chunk
 	contextlines int // Number of context lines to include
@@ -70,7 +70,7 @@ func NewChunkConfig() ChunkConfig {
 	}
 }
 
-// chunkfile splits a file into reviewable chunks while preserving context
+// chunkfile splits a file into reviewable chunks while preserving context.
 func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChunk, error) {
 	lines := strings.Split(content, "\n")
 	chunks := make([]ReviewChunk, 0)
@@ -120,7 +120,7 @@ func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChun
 	return chunks, nil
 }
 
-// Helper functions to manage context and changes
+// Helper functions to manage context and changes.
 func getleadingcontext(lines []string, start, contextlines int) string {
 	contextstart := max(0, start-contextlines)
 	if contextstart >= start {
@@ -137,7 +137,7 @@ func gettrailingcontext(lines []string, end, contextlines int) string {
 	return strings.Join(lines[end:contextend], "\n")
 }
 
-// estimatetokens provides a rough estimate of tokens in a string
+// estimatetokens provides a rough estimate of tokens in a string.
 func estimatetokens(text string) int {
 	// Simple estimation: ~1.3 tokens per word
 	words := len(strings.Fields(text))
@@ -185,7 +185,7 @@ func parseHunkHeader(line string) (int, error) {
 	return startLine, nil
 }
 
-// ExtractRelevantChanges extracts the portion of git diff relevant to the chunk
+// ExtractRelevantChanges extracts the portion of git diff relevant to the chunk.
 func ExtractRelevantChanges(changes string, startline, endline int) string {
 	// Parse the git diff and extract changes for the line range
 	// This is a simplified version - would need proper diff parsing
