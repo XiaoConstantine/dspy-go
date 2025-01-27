@@ -30,7 +30,7 @@ jobs:
         run: go test -tags skip -race -v ./pkg/... -coverprofile ./coverage.txt
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5.1.2
+        uses: codecov/codecov-action@v5.3.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
