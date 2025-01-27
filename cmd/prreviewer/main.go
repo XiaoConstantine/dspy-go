@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -13,11 +15,21 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
+type ReviewChunk struct {
+	content         string
+	startline       int
+	endline         int
+	leadingcontext  string // Previous lines for context
+	trailingcontext string // Following lines for context
+	changes         string // Relevant diff section for this chunk
+}
+
 // PRReviewTask represents a single file review task.
 type PRReviewTask struct {
 	FilePath    string
 	FileContent string
 	Changes     string // Git diff content
+	Chunks      []ReviewChunk
 }
 
 // PRReviewComment represents a review comment.
@@ -41,6 +53,167 @@ type ReviewMetadata struct {
 	Changes     string
 	Category    string
 	ReviewType  string
+}
+
+// Chunkconfig holds configuration for code chunking
+type ChunkConfig struct {
+	maxtokens    int // Maximum tokens per chunk
+	contextlines int // Number of context lines to include
+	overlaplines int // Number of lines to overlap between chunks
+}
+
+func NewChunkConfig() ChunkConfig {
+	return ChunkConfig{
+		maxtokens:    4000, // Reserve space for model response
+		contextlines: 10,   // Lines of surrounding context
+		overlaplines: 5,    // Overlapping lines between chunks
+	}
+}
+
+// chunkfile splits a file into reviewable chunks while preserving context
+func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChunk, error) {
+	lines := strings.Split(content, "\n")
+	chunks := make([]ReviewChunk, 0)
+
+	var currentchunk []string
+	currenttokens := 0
+
+	for i := 0; i < len(lines); i++ {
+		// Estimate tokens for current line
+		linetokens := estimatetokens(lines[i])
+
+		if currenttokens+linetokens > config.maxtokens && len(currentchunk) > 0 {
+			// Create chunk with context
+			chunk := ReviewChunk{
+				content:         strings.Join(currentchunk, "\n"),
+				startline:       max(0, i-len(currentchunk)),
+				endline:         i,
+				leadingcontext:  getleadingcontext(lines, i-len(currentchunk), config.contextlines),
+				trailingcontext: gettrailingcontext(lines, i, config.contextlines),
+				changes:         ExtractRelevantChanges(changes, i-len(currentchunk), i),
+			}
+			chunks = append(chunks, chunk)
+
+			// Start new chunk with overlap
+			overlapstart := max(0, len(currentchunk)-config.overlaplines)
+			currentchunk = currentchunk[overlapstart:]
+			currenttokens = estimatetokens(strings.Join(currentchunk, "\n"))
+		}
+
+		currentchunk = append(currentchunk, lines[i])
+		currenttokens += linetokens
+		i++
+	}
+
+	// Add final chunk if needed
+	if len(currentchunk) > 0 {
+		chunks = append(chunks, ReviewChunk{
+			content:         strings.Join(currentchunk, "\n"),
+			startline:       max(0, len(lines)-len(currentchunk)),
+			endline:         len(lines),
+			leadingcontext:  getleadingcontext(lines, len(lines)-len(currentchunk), config.contextlines),
+			trailingcontext: "",
+			changes:         ExtractRelevantChanges(changes, len(lines)-len(currentchunk), len(lines)),
+		})
+	}
+
+	return chunks, nil
+}
+
+// Helper functions to manage context and changes
+func getleadingcontext(lines []string, start, contextlines int) string {
+	contextstart := max(0, start-contextlines)
+	if contextstart >= start {
+		return ""
+	}
+	return strings.Join(lines[contextstart:start], "\n")
+}
+
+func gettrailingcontext(lines []string, end, contextlines int) string {
+	if end >= len(lines) {
+		return ""
+	}
+	contextend := min(len(lines), end+contextlines)
+	return strings.Join(lines[end:contextend], "\n")
+}
+
+// estimatetokens provides a rough estimate of tokens in a string
+func estimatetokens(text string) int {
+	// Simple estimation: ~1.3 tokens per word
+	words := len(strings.Fields(text))
+	return int(float64(words) * 1.3)
+}
+
+func parseHunkHeader(line string) (int, error) {
+	// First, verify this is actually a hunk header
+	if !strings.HasPrefix(line, "@@") {
+		return 0, fmt.Errorf("not a valid hunk header: %s", line)
+	}
+
+	// Extract the part between @@ markers
+	parts := strings.Split(line, "@@")
+	if len(parts) < 2 {
+		return 0, fmt.Errorf("malformed hunk header: %s", line)
+	}
+
+	// Parse the line numbers section
+	// It looks like: -34,6 +34,8
+	numbers := strings.TrimSpace(parts[1])
+
+	// Split into old and new changes
+	ranges := strings.Split(numbers, " ")
+	if len(ranges) < 2 {
+		return 0, fmt.Errorf("invalid hunk range format: %s", numbers)
+	}
+
+	// Get the new file range (starts with +)
+	newRange := ranges[1]
+	if !strings.HasPrefix(newRange, "+") {
+		return 0, fmt.Errorf("new range must start with +: %s", newRange)
+	}
+
+	// Remove the + and split into start,count if there's a comma
+	newRange = strings.TrimPrefix(newRange, "+")
+	newParts := strings.Split(newRange, ",")
+
+	// Parse the starting line number
+	startLine, err := strconv.Atoi(newParts[0])
+	if err != nil {
+		return 0, fmt.Errorf("invalid line number: %w", err)
+	}
+
+	return startLine, nil
+}
+
+// ExtractRelevantChanges extracts the portion of git diff relevant to the chunk
+func ExtractRelevantChanges(changes string, startline, endline int) string {
+	// Parse the git diff and extract changes for the line range
+	// This is a simplified version - would need proper diff parsing
+	difflines := strings.Split(changes, "\n")
+	relevantdiff := make([]string, 0)
+
+	currentLine := 0
+	for _, line := range difflines {
+		if strings.HasPrefix(line, "@@") {
+			newStart, err := parseHunkHeader(line)
+			if err != nil {
+				// Handle error appropriately
+				continue
+			}
+			currentLine = newStart
+			continue
+		}
+
+		if currentLine >= startline && currentLine < endline {
+			relevantdiff = append(relevantdiff, line)
+		}
+
+		if !strings.HasPrefix(line, "-") {
+			currentLine++
+		}
+	}
+
+	return strings.Join(relevantdiff, "\n")
 }
 
 // NewPRReviewAgent creates a new PR review agent.
@@ -105,9 +278,16 @@ func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]P
 	// Create review context
 	fileData := make(map[string]map[string]interface{})
 	for _, task := range tasks {
+		config := NewChunkConfig()
+		chunks, err := chunkfile(task.FileContent, task.Changes, config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to chunk file %s: %w", task.FilePath, err)
+		}
+		task.Chunks = chunks
 		fileData[task.FilePath] = map[string]interface{}{
 			"file_content": task.FileContent,
 			"changes":      task.Changes,
+			"chunks":       chunks,
 		}
 	}
 	reviewContext := map[string]interface{}{
@@ -326,8 +506,8 @@ func main() {
 	}
 	llms.EnsureFactory()
 
+	//	err = core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
 	err = core.ConfigureDefaultLLM(*apiKey, "ollama:deepseek-r1:14b-qwen-distill-q4_K_M")
-	//err = core.ConfigureDefaultLLM(*apiKey, "ollama:")
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
