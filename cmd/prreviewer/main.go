@@ -81,9 +81,12 @@ func NewChunkConfig() ChunkConfig {
 
 // chunkfile splits a file into reviewable chunks while preserving context.
 func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChunk, error) {
+	logger := logging.GetLogger()
+	ctx := context.Background() // For logging
 	lines := strings.Split(content, "\n")
 	chunks := make([]ReviewChunk, 0)
 
+	logger.Debug(ctx, "Processing file with %d lines of content", len(lines))
 	var currentchunk []string
 	currenttokens := 0
 
@@ -110,6 +113,9 @@ func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChun
 				filePath:        filePath,
 				totalChunks:     estimatedChunks,
 			}
+			logger.Debug(ctx, "Created chunk: lines %d-%d, content length: %d, leading context: %d chars, trailing context: %d chars",
+				chunk.startline, chunk.endline, len(chunk.content),
+				len(chunk.leadingcontext), len(chunk.trailingcontext))
 			if fileType, ok := config.fileMetadata["file_type"].(string); ok {
 				// Example: Special handling for different file types
 				switch fileType {
@@ -148,6 +154,26 @@ func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChun
 			trailingcontext: "",
 			changes:         ExtractRelevantChanges(changes, len(lines)-len(currentchunk), len(lines)),
 		})
+
+	}
+	logger.Info(ctx, "Created %d chunks for file", len(chunks))
+
+	// Validate the chunking result
+	if len(chunks) == 0 {
+		logger.Error(ctx, "No chunks created from file with %d lines", len(lines))
+		// If file is small enough, create a single chunk
+		if len(lines) > 0 && estimatetokens(content) <= config.maxtokens {
+			chunk := ReviewChunk{
+				content:         content,
+				startline:       0,
+				endline:         len(lines),
+				leadingcontext:  "",
+				trailingcontext: "",
+				changes:         changes,
+			}
+			logger.Info(ctx, "Created single chunk for small file: %d lines", len(lines))
+			return []ReviewChunk{chunk}, nil
+		}
 	}
 
 	return chunks, nil
@@ -255,8 +281,7 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 
 	// Configure the analyzer for PR review tasks
 	analyzerConfig := agents.AnalyzerConfig{
-		BaseInstruction: `Analyze the PR changes and break down the code review into focused tasks.
-
+		BaseInstruction: `Analyze this code chunk considering
 		You will receive code chunks with metadata about their source files and position.
 
 		For each file being reviewed:
@@ -321,9 +346,13 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 
 // ReviewPR reviews a complete pull request.
 func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]PRReviewComment, error) {
+	logger := logging.GetLogger()
+
+	var allComments []PRReviewComment
 	// Create review context
 	fileData := make(map[string]map[string]interface{})
-	for _, task := range tasks {
+	for i := range tasks {
+		task := tasks[i]
 		config := NewChunkConfig()
 		config.fileMetadata = map[string]interface{}{
 			"file_path": task.FilePath,
@@ -334,35 +363,86 @@ func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]P
 		if err != nil {
 			return nil, fmt.Errorf("failed to chunk file %s: %w", task.FilePath, err)
 		}
-		task.Chunks = chunks
+
+		tasks[i].Chunks = chunks
+
 		fileData[task.FilePath] = map[string]interface{}{
 			"file_content": task.FileContent,
 			"changes":      task.Changes,
 			"chunks":       chunks,
 		}
 	}
-	reviewContext := map[string]interface{}{
-		"files":       fileData,
-		"review_type": "pull_request",
-	}
 
-	// Execute orchestrated review
-	result, err := a.orchestrator.Process(ctx, "Review pull request changes", reviewContext)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process PR review: %w", err)
-	}
+	for i := range tasks {
+		// Process each chunk separately
+		task := tasks[i]
 
-	// Collect and format comments
-	comments := make([]PRReviewComment, 0)
-	for taskID, taskResult := range result.CompletedTasks {
-		logging.GetLogger().Info(ctx, "Processing task: %s", taskID)
+		logger.Info(ctx, "======== chunks: %v for task: %v", task.Chunks, task.FilePath)
+		for i, chunk := range task.Chunks {
+			chunkContext := map[string]interface{}{
+				"file_path": task.FilePath,
+				"chunk":     chunk.content,
+				"context": map[string]string{
+					"leading":  chunk.leadingcontext,
+					"trailing": chunk.trailingcontext,
+				},
+				"changes": chunk.changes,
+				"line_range": map[string]int{
+					"start": chunk.startline,
+					"end":   chunk.endline,
+				},
+				"review_type": "chunk_review",
+			}
 
-		if reviewComments, ok := taskResult.([]PRReviewComment); ok {
-			comments = append(comments, reviewComments...)
+			logger.Info(ctx, "====================")
+			// Execute review for this chunk
+			result, err := a.orchestrator.Process(ctx,
+				fmt.Sprintf("Review chunk %d of %s", i+1, task.FilePath),
+				chunkContext)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process chunk %d of %s: %w", i+1, task.FilePath, err)
+			}
+			logging.GetLogger().Info(ctx, "Result: %v", result)
+
+			// Collect comments from this chunk
+			for taskID, taskResult := range result.CompletedTasks {
+				logging.GetLogger().Info(ctx, "Processing task: %s", taskID)
+
+				// Convert task results to comments
+				if reviewComments, err := extractComments(taskResult, task.FilePath); err != nil {
+					logging.GetLogger().Error(ctx, "Failed to extract comments from task %s: %v", taskID, err)
+					continue
+				} else {
+					allComments = append(allComments, reviewComments...)
+				}
+			}
 		}
 	}
+	logger.Info(ctx, "All comments: %v", allComments)
 
-	return comments, nil
+	// reviewContext := map[string]interface{}{
+	// 	"files":       fileData,
+	// 	"review_type": "pull_request",
+	// }
+	// logger.Info(ctx, "Tasks: %v", tasks)
+	//
+	// // Execute orchestrated review
+	// result, err := a.orchestrator.Process(ctx, "Review pull request changes", reviewContext)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to process PR review: %w", err)
+	// }
+	//
+	// // Collect and format comments
+	// comments := make([]PRReviewComment, 0)
+	// for taskID, taskResult := range result.CompletedTasks {
+	// 	logging.GetLogger().Info(ctx, "Processing task: %s", taskID)
+	//
+	// 	if reviewComments, ok := taskResult.([]PRReviewComment); ok {
+	// 		comments = append(comments, reviewComments...)
+	// 	}
+	// }
+
+	return allComments, nil
 }
 
 // CodeReviewProcessor implements the core review logic.
@@ -451,8 +531,16 @@ func parseReviewComments(filePath string, commentsStr string) ([]PRReviewComment
 	return []PRReviewComment{}, nil
 }
 
-func extractComments(result map[string]interface{}, filePath string) ([]PRReviewComment, error) {
-	commentsRaw, exists := result["comments"]
+func extractComments(result interface{}, filePath string) ([]PRReviewComment, error) {
+	if comments, ok := result.([]PRReviewComment); ok {
+		return comments, nil
+	}
+
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid task result type: %T", result)
+	}
+	commentsRaw, exists := resultMap["comments"]
 	if !exists {
 		return nil, fmt.Errorf("prediction result missing 'comments' field")
 	}
