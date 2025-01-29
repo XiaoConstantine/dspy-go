@@ -270,31 +270,78 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 	ctx, span := core.StartSpan(ctx, "AnalyzeTasks")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
-
-	// Get task breakdown from analyzer
-	result, err := f.analyzer.Process(ctx, map[string]interface{}{
-		"task":    task,
-		"context": context,
-	})
-
-	if err != nil {
-		span.WithError(err)
-		return nil, "", err
-	}
-	logger.Info(ctx, "raw task: %s, result: %s", task, result)
-
-	tasks, err := f.parser.Parse(result)
-	if err != nil {
-
-		span.WithError(err)
-		return nil, "", fmt.Errorf("task parsing failed: %w", err)
+	var lastErr error
+	maxAttempts := 1
+	if f.config.RetryConfig != nil {
+		maxAttempts = f.config.RetryConfig.MaxAttempts
 	}
 
-	analysis, ok := result["analysis"].(string)
-	if !ok {
-		return nil, "", fmt.Errorf("invalid analysis format in analyzer output")
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		attemptCtx, attemptSpan := core.StartSpan(ctx, fmt.Sprintf("AnalyzeAttempt_%d", attempt))
+
+		// Check context cancellation
+		if err := checkCtxErr(attemptCtx); err != nil {
+			core.EndSpan(attemptCtx)
+			return nil, "", err
+		}
+		// Get task breakdown from analyzer
+		result, err := f.analyzer.Process(ctx, map[string]interface{}{
+			"task":    task,
+			"context": context,
+		})
+		if err != nil {
+			lastErr = err
+			attemptSpan.WithError(err)
+			logger.Warn(attemptCtx, "Analysis attempt %d failed: %v", attempt+1, err)
+			core.EndSpan(attemptCtx)
+
+			// Calculate backoff duration if configured
+			if f.config.RetryConfig != nil && attempt < maxAttempts-1 {
+				backoff := time.Duration(float64(time.Second) *
+					math.Pow(f.config.RetryConfig.BackoffMultiplier, float64(attempt)))
+
+				logger.Debug(attemptCtx, "Retrying analysis in %v", backoff)
+
+				select {
+				case <-ctx.Done():
+					return nil, "", ctx.Err()
+				case <-time.After(backoff):
+					continue
+				}
+			}
+			continue
+		}
+
+		logger.Debug(ctx, "raw task: %s, result: %s", task, result)
+
+		tasks, err := f.parser.Parse(result)
+		if err != nil {
+			lastErr = fmt.Errorf("task parsing failed: %w", err)
+			attemptSpan.WithError(lastErr)
+			logger.Warn(attemptCtx, "Task parsing failed in attempt %d: %v", attempt+1, err)
+			core.EndSpan(attemptCtx)
+			continue
+		}
+
+		analysis, ok := result["analysis"].(string)
+		if !ok {
+			lastErr = fmt.Errorf("invalid analysis format in analyzer output")
+			attemptSpan.WithError(lastErr)
+			logger.Warn(attemptCtx, "Invalid analysis format in attempt %d", attempt+1)
+			core.EndSpan(attemptCtx)
+			continue
+		}
+		logger.Info(attemptCtx, "Successfully analyzed tasks on attempt %d", attempt+1)
+		attemptSpan.WithAnnotation("tasks", tasks)
+		attemptSpan.WithAnnotation("analysis", analysis)
+		core.EndSpan(attemptCtx)
+
+		return tasks, analysis, nil
 	}
-	return tasks, analysis, nil
+
+	span.WithError(lastErr)
+
+	return nil, "", fmt.Errorf("analysis failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // createExecutionPlan organizes tasks based on dependencies.
@@ -417,4 +464,13 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 
 	logger.Error(ctx, "Task [%s] failed all %d attempts", task.ID, attempts)
 	return lastErr
+}
+
+func checkCtxErr(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
