@@ -153,7 +153,6 @@ func chunkfile(content string, changes string, config ChunkConfig) ([]ReviewChun
 		})
 
 	}
-	logger.Info(ctx, "Created %d chunks for file", len(chunks))
 
 	// Validate the chunking result
 	if len(chunks) == 0 {
@@ -528,7 +527,6 @@ func extractComments(result interface{}, filePath string) ([]PRReviewComment, er
 func extractReviewMetadata(metadata map[string]interface{}) (*ReviewMetadata, error) {
 	logger := logging.GetLogger()
 	rm := &ReviewMetadata{}
-	logger.Info(context.Background(), "Meta: %v", metadata)
 
 	// Extract category (always required)
 	categoryRaw, exists := metadata["category"]
@@ -564,8 +562,6 @@ func extractReviewMetadata(metadata map[string]interface{}) (*ReviewMetadata, er
 
 	if fileContent, ok := metadata["file_content"]; ok {
 		if str, ok := fileContent.(string); ok {
-
-			logger.Info(context.Background(), "file content: %v", str)
 			rm.FileContent = str
 		}
 	}
