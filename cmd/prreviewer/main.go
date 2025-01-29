@@ -277,18 +277,15 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 	memory := agents.NewInMemoryStore()
 
 	analyzerConfig := agents.AnalyzerConfig{
-		BaseInstruction: `Analyze this code chunk considering
-		You will receive code chunks with metadata about their source files and position.
-
+		BaseInstruction: `
 		IMPORTANT FORMAT RULES:
-		1. NO MARKDOWN FORMATTING
+		1. Start fields exactly with 'analysis:' or 'tasks:' (no markdown formatting)
 		2. Provide raw XML directly after 'tasks:' without any wrapping
 		3. Keep the exact field prefix format - no decorations or modifications
-		4. Ensure proper indentation and structure in the XML
-`,
-		FormatInstructions: `Format tasks in XML with one task per file in the exact following structure:
+		4. Ensure proper indentation and structure in the XML`,
+		FormatInstructions: `Format tasks section in following XML format:
 	   <tasks>
-	       <task id="review_{file_path}" type="code_review" processor="code_review" priority="1">
+	       <task id="1" type="code_review" processor="code_review" priority="1">
 	           <description>Review {file_path} for code quality</description>
 	           <metadata>
 	               <item key="file_path">{file_path}</item>
@@ -305,6 +302,10 @@ func NewPRReviewAgent() (*PRReviewAgent, error) {
 		TaskParser:     &agents.XMLTaskParser{},
 		PlanCreator:    &agents.DependencyPlanCreator{},
 		AnalyzerConfig: analyzerConfig,
+		RetryConfig: &agents.RetryConfig{
+			MaxAttempts:       1,
+			BackoffMultiplier: 2.0,
+		},
 		CustomProcessors: map[string]agents.TaskProcessor{
 			"code_review": &CodeReviewProcessor{},
 		},
@@ -351,7 +352,6 @@ func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]P
 		// Process each chunk separately
 		task := tasks[i]
 
-		logger.Info(ctx, "======== chunks: %v for task: %v", task.Chunks, task.FilePath)
 		for i, chunk := range task.Chunks {
 			chunkContext := map[string]interface{}{
 				"file_path": task.FilePath,
@@ -368,7 +368,6 @@ func (a *PRReviewAgent) ReviewPR(ctx context.Context, tasks []PRReviewTask) ([]P
 				"review_type": "chunk_review",
 			}
 
-			logger.Info(ctx, "====================")
 			// Execute review for this chunk
 			result, err := a.orchestrator.Process(ctx,
 				fmt.Sprintf("Review chunk %d of %s", i+1, task.FilePath),
@@ -431,8 +430,8 @@ func (p *CodeReviewProcessor) Process(ctx context.Context, task agents.Task, con
 			{Field: core.Field{Name: "changes"}},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "comments"}},
-			{Field: core.Field{Name: "summary"}},
+			{Field: core.NewField("comments")},
+			{Field: core.NewField("summary")},
 		},
 	).WithInstruction(`Review the code changes and provide specific, actionable feedback.
     Analyze the code for:
@@ -460,8 +459,7 @@ func (p *CodeReviewProcessor) Process(ctx context.Context, task agents.Task, con
     - Each comment should be specific and actionable
     - Include line numbers where applicable
     - Suggest improvements with example code when helpful
-    - Prioritize major issues over minor style concerns
-	`)
+    - Prioritize major issues over minor style concerns`)
 
 	// Create predict module for review
 	predict := modules.NewPredict(signature)
@@ -619,8 +617,8 @@ func main() {
 	}
 	llms.EnsureFactory()
 
-	//	err = core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
-	err = core.ConfigureDefaultLLM(*apiKey, "ollama:deepseek-r1:14b-qwen-distill-q4_K_M")
+	err = core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
+	//	err = core.ConfigureDefaultLLM(*apiKey, "ollama:deepseek-r1:14b-qwen-distill-q4_K_M")
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}

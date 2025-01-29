@@ -33,7 +33,6 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	ctx, span := core.StartSpan(ctx, "Predict")
 	defer core.EndSpan(ctx)
-	logger.Debug(ctx, "Processing inputs: %v", inputs)
 	span.WithAnnotation("inputs", inputs)
 
 	if err := p.ValidateInputs(inputs); err != nil {
@@ -75,7 +74,10 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 		logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d", resp.Usage.TotalTokens, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	}
 
-	outputs := parseCompletion(resp.Content, signature)
+	cleaned := stripMarkdown(resp.Content, p.GetSignature())
+
+	logger.Debug(ctx, "Normalized completion: %s", cleaned)
+	outputs := parseCompletion(cleaned, signature)
 
 	logger.Debug(ctx, "Parsed LLM Completion: %v", outputs)
 	formattedOutputs := p.FormatOutputs(outputs)
@@ -140,53 +142,357 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	return sb.String()
 }
 
+//	func stripMarkdown(content string) string {
+//		// First, split into lines to handle line-by-line patterns
+//		lines := strings.Split(content, "\n")
+//		var cleanedLines []string
+//
+//		// Track if we're inside a code block
+//		inCodeBlock := false
+//		var xmlContent strings.Builder
+//
+//		for _, line := range lines {
+//			// Handle code block boundaries
+//			if strings.Contains(line, "```") {
+//				inCodeBlock = !inCodeBlock
+//				continue // Skip the boundary line
+//			}
+//
+//			// If we're in a code block, collect XML content
+//			if inCodeBlock {
+//				xmlContent.WriteString(line + "\n")
+//				continue
+//			}
+//
+//			// Clean line-level markdown patterns
+//			cleaned := line
+//
+//			// Remove bold markers
+//			cleaned = strings.ReplaceAll(cleaned, "**", "")
+//
+//			// Remove header markers
+//			cleaned = strings.TrimLeft(cleaned, "#")
+//			cleaned = strings.TrimSpace(cleaned)
+//
+//			// Remove list markers
+//			cleaned = strings.TrimPrefix(cleaned, "- ")
+//			cleaned = strings.TrimPrefix(cleaned, "* ")
+//			cleaned = strings.TrimPrefix(cleaned, "> ")
+//
+//			// Only add non-empty lines
+//			if cleaned != "" {
+//				cleanedLines = append(cleanedLines, cleaned)
+//			}
+//		}
+//
+//		// Handle the case where we found XML content
+//		if xmlContent.Len() > 0 {
+//			return xmlContent.String()
+//		}
+//
+//		// Join cleaned lines back together
+//		return strings.TrimSpace(strings.Join(cleanedLines, "\n"))
+//	}
+func stripMarkdown(content string, signature core.Signature) string {
+	// Define a map to track each field's content
+	fieldContents := make(map[string][]string)
+
+	// Helper to find which field a prefix belongs to
+	findField := func(line string) (string, string) {
+		for _, field := range signature.Outputs {
+			prefix := strings.TrimSpace(field.Prefix)
+			if prefix != "" && strings.HasPrefix(strings.ToLower(line), strings.ToLower(prefix)) {
+				// Return the field name and the content after the prefix
+				content := strings.TrimPrefix(strings.TrimSpace(line), prefix)
+				return field.Name, content
+			}
+		}
+		return "", ""
+	}
+
+	// Process the content line by line
+	var currentField string
+	lines := strings.Split(content, "\n")
+
+	for _, line := range lines {
+		// First, clean basic markdown formatting
+		cleaned := cleanBasicMarkdown(line)
+
+		// Check if this line starts a new field
+		if fieldName, remainingContent := findField(cleaned); fieldName != "" {
+			currentField = fieldName
+			// If there's content after the prefix, add it
+			if remainingContent != "" {
+				fieldContents[currentField] = append(fieldContents[currentField], remainingContent)
+			}
+			continue
+		}
+
+		// If we're in a field, add the content
+		if currentField != "" {
+			// Skip empty lines at the start of a section
+			if len(fieldContents[currentField]) == 0 && strings.TrimSpace(cleaned) == "" {
+				continue
+			}
+			fieldContents[currentField] = append(fieldContents[currentField], cleaned)
+		}
+	}
+
+	// Rebuild the content with clean formatting
+	var result strings.Builder
+	for _, field := range signature.Outputs {
+		content := fieldContents[field.Name]
+		if len(content) > 0 {
+			// Add the field prefix
+			result.WriteString(field.Prefix)
+			result.WriteString("\n")
+
+			// Process the content based on its structure
+			if isStructuredContent(content[0]) {
+				// Preserve structure (like XML or JSON)
+				result.WriteString(preserveStructure(content))
+			} else {
+				// Clean unstructured content
+				result.WriteString(cleanUnstructuredContentNew(content))
+			}
+			result.WriteString("\n\n")
+		}
+	}
+
+	return strings.TrimSpace(result.String())
+}
+
+func cleanBasicMarkdown(line string) string {
+	// Remove bold markers
+	line = strings.ReplaceAll(line, "**", "")
+
+	// Remove code block markers
+	line = strings.ReplaceAll(line, "```xml", "")
+	line = strings.ReplaceAll(line, "```markdown", "")
+	line = strings.ReplaceAll(line, "```", "")
+
+	// Remove bullet points
+	line = strings.TrimPrefix(strings.TrimSpace(line), "-")
+	line = strings.TrimPrefix(strings.TrimSpace(line), "*")
+
+	return strings.TrimSpace(line)
+}
+
+func isStructuredContent(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "<") ||
+		strings.HasPrefix(trimmed, "{") ||
+		strings.HasPrefix(trimmed, "[")
+}
+
+func preserveStructure(content []string) string {
+	// Join with newlines to maintain structure
+	return strings.Join(content, "\n")
+}
+
+//	func parseCompletion(completion string, signature core.Signature) map[string]any {
+//		outputs := make(map[string]any)
+//		completion = stripMarkdown(completion)
+//		logging.GetLogger().Info(context.Background(), "Normalized completion:  %s", completion)
+//
+//		lines := strings.Split(strings.TrimSpace(completion), "\n")
+//		var currentField *core.OutputField
+//		var contentLines []string
+//
+//		for i, line := range lines {
+//			line = strings.TrimSpace(line)
+//			if line == "" {
+//				continue
+//			}
+//
+//			// Try to match a field prefix
+//			for _, field := range signature.Outputs {
+//				prefix := strings.TrimSpace(field.Prefix)
+//				if prefix != "" && strings.HasPrefix(strings.ToLower(line), strings.ToLower(prefix)) {
+//					// If we were collecting content for a previous field, save it
+//					if currentField != nil && len(contentLines) > 0 {
+//						outputs[currentField.Name] = strings.TrimSpace(strings.Join(contentLines, "\n"))
+//					}
+//
+//					// Start collecting content for this new field
+//					currentField = &field
+//					contentLines = nil
+//					content := strings.TrimPrefix(line, field.Prefix)
+//					if content != "" {
+//						contentLines = append(contentLines, content)
+//					}
+//					continue
+//				}
+//			}
+//
+//			// If we have a current field and this isn't a prefix line, collect the content
+//			if currentField != nil {
+//				// Don't add the prefix line itself to the content
+//				if !strings.HasPrefix(strings.ToLower(line), strings.ToLower(currentField.Prefix)) {
+//					contentLines = append(contentLines, line)
+//				}
+//			}
+//
+//			// If this is the last line, save any remaining content
+//			if i == len(lines)-1 && currentField != nil && len(contentLines) > 0 {
+//				outputs[currentField.Name] = strings.TrimSpace(strings.Join(contentLines, "\n"))
+//			}
+//		}
+//
+//		return outputs
+//	}
 func parseCompletion(completion string, signature core.Signature) map[string]any {
 	outputs := make(map[string]any)
-	lines := strings.Split(strings.TrimSpace(completion), "\n")
-	var currentField *core.OutputField
-	var contentLines []string
 
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
+	// We'll track sections and their content
+	type section struct {
+		name       string   // The field name
+		startLine  int      // Where the section content begins
+		content    []string // The accumulated content lines
+		inProgress bool     // Whether we're currently collecting this section
+	}
+
+	// Initialize our sections based on signature
+	sections := make(map[string]*section)
+	for _, field := range signature.Outputs {
+		sections[field.Name] = &section{
+			name:       field.Name,
+			content:    make([]string, 0),
+			inProgress: false,
+		}
+	}
+
+	// Process the content line by line, keeping track of section boundaries
+	lines := strings.Split(completion, "\n")
+	var currentSection *section
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 
-		// Try to match a field prefix
+		// Check if this line starts a new section
+		foundNewSection := false
 		for _, field := range signature.Outputs {
 			prefix := strings.TrimSpace(field.Prefix)
 			if prefix != "" && strings.HasPrefix(strings.ToLower(line), strings.ToLower(prefix)) {
-				// If we were collecting content for a previous field, save it
-				if currentField != nil && len(contentLines) > 0 {
-					outputs[currentField.Name] = strings.TrimSpace(strings.Join(contentLines, "\n"))
+				// If we were collecting another section, finalize it
+				if currentSection != nil {
+					currentSection.inProgress = false
 				}
 
-				// Start collecting content for this new field
-				currentField = &field
-				contentLines = nil
-				content := strings.TrimPrefix(line, field.Prefix)
-				if content != "" {
-					contentLines = append(contentLines, content)
-				}
-				continue
+				// Start the new section
+				section := sections[field.Name]
+				section.startLine = i + 1 // Content starts on next line
+				section.inProgress = true
+				currentSection = section
+				foundNewSection = true
+				break
 			}
 		}
 
-		// If we have a current field and this isn't a prefix line, collect the content
-		if currentField != nil {
-			// Don't add the prefix line itself to the content
-			if !strings.HasPrefix(strings.ToLower(line), strings.ToLower(currentField.Prefix)) {
-				contentLines = append(contentLines, line)
-			}
+		// If this isn't a section marker and we have a current section, add the content
+		if !foundNewSection && currentSection != nil && currentSection.inProgress {
+			currentSection.content = append(currentSection.content, line)
 		}
+	}
 
-		// If this is the last line, save any remaining content
-		if i == len(lines)-1 && currentField != nil && len(contentLines) > 0 {
-			outputs[currentField.Name] = strings.TrimSpace(strings.Join(contentLines, "\n"))
+	// Process each section's content
+	for name, section := range sections {
+		if len(section.content) > 0 {
+			// Join the content lines while preserving structure
+			content := strings.Join(section.content, "\n")
+
+			// Clean up any remaining markdown artifacts
+			content = strings.TrimSpace(content)
+
+			// Handle common content patterns (XML, JSON, etc.)
+			content = preserveStructuredContent(content)
+
+			outputs[name] = content
 		}
 	}
 
 	return outputs
+}
+
+// preserveStructuredContent handles various types of structured content.
+func preserveStructuredContent(content string) string {
+	// First, detect if this is structured content by checking common patterns
+	trimmed := strings.TrimSpace(content)
+
+	// Handle XML-like content
+	if strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") {
+		// Preserve XML indentation and structure
+		return preserveXMLStructure(content)
+	}
+
+	// Handle JSON-like content
+	// if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+	// 	(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
+	// 	// Preserve JSON formatting
+	// 	return preserveJSONStructure(content)
+	// }
+	//
+	// // Handle YAML-like content
+	// if strings.Contains(trimmed, ":") && !strings.Contains(trimmed, "<") {
+	// 	// Preserve YAML indentation
+	// 	return preserveYAMLStructure(content)
+	// }
+
+	// For unstructured content, clean up any remaining formatting issues
+	return cleanUnstructuredContent(content)
+}
+
+func preserveXMLStructure(content string) string {
+	// Preserve XML formatting while cleaning any artifacts
+	lines := strings.Split(content, "\n")
+	var cleaned []string
+
+	for _, line := range lines {
+		// Preserve indentation
+		indent := countLeadingSpaces(line)
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines
+		if trimmed == "" {
+			continue
+		}
+
+		// Rebuild the line with proper indentation
+		cleaned = append(cleaned, strings.Repeat(" ", indent)+trimmed)
+	}
+
+	return strings.Join(cleaned, "\n")
+}
+
+func countLeadingSpaces(s string) int {
+	return len(s) - len(strings.TrimLeft(s, " \t"))
+}
+
+func cleanUnstructuredContent(content string) string {
+	// Handle unstructured content (like plain text or lists)
+	lines := strings.Split(content, "\n")
+	var cleaned []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+
+	return strings.Join(cleaned, "\n")
+}
+func cleanUnstructuredContentNew(content []string) string {
+	var cleaned []string
+	for _, line := range content {
+		if strings.TrimSpace(line) != "" {
+			cleaned = append(cleaned, line)
+		}
+	}
+	return strings.Join(cleaned, "\n")
 }
 func joinFieldNames(fields []core.Field) string {
 	names := make([]string, len(fields))
