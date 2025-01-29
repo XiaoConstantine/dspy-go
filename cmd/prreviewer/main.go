@@ -24,9 +24,6 @@ type ReviewChunk struct {
 	trailingcontext string // Following lines for context
 	changes         string // Relevant diff section for this chunk
 	filePath        string // Path of the parent file
-	fileType        string // Type/extension of the file
-	totalLines      int    // Total lines in original file
-	chunkIndex      int    // Position of this chunk in sequence
 	totalChunks     int    // Total number of chunks for this file
 }
 
@@ -279,51 +276,28 @@ func ExtractRelevantChanges(changes string, startline, endline int) string {
 func NewPRReviewAgent() (*PRReviewAgent, error) {
 	memory := agents.NewInMemoryStore()
 
-	// Configure the analyzer for PR review tasks
 	analyzerConfig := agents.AnalyzerConfig{
 		BaseInstruction: `Analyze this code chunk considering
 		You will receive code chunks with metadata about their source files and position.
 
-		For each file being reviewed:
-
-		1. Collect all chunks for the same file (check filePath and chunkIndex)
-
-		2. Build a complete understanding of the file changes
-
-		3. Generate a SINGLE review task for each complete file in XML format
-
-
-		IMPORTANT: Always combine all chunks from the same file into a single task in the XML output.
-
-		Do not create separate tasks for individual chunks.
 		IMPORTANT FORMAT RULES:
-
-		1. Start fields exactly with 'analysis:' or 'tasks:' (no markdown formatting)
+		1. NO MARKDOWN FORMATTING
 		2. Provide raw XML directly after 'tasks:' without any wrapping
 		3. Keep the exact field prefix format - no decorations or modifications
 		4. Ensure proper indentation and structure in the XML
-
-		Consider:
-		- Code style and readability
-		- Function and variable naming
-		- Code organization
-		- Error handling patterns
-		- Documentation quality
-
-		Each file should be reviewed independently, with higher priority given to files
-    with more changes or core functionality.`,
-		FormatInstructions: `Format tasks in XML with one task per file in exact following structure:
-    <tasks>
-        <task id="review_{file_path}" type="code_review" processor="code_review" priority="1">
-            <description>Review {file_path} for code quality</description>
-            <metadata>
-                <item key="file_path">{file_path}</item>
-                <item key="file_content">{file_content}</item>
-                <item key="changes">{changes}</item>
-                <item key="category">code_review</item>
-            </metadata>
-        </task>
-    </tasks>`,
+`,
+		FormatInstructions: `Format tasks in XML with one task per file in the exact following structure:
+	   <tasks>
+	       <task id="review_{file_path}" type="code_review" processor="code_review" priority="1">
+	           <description>Review {file_path} for code quality</description>
+	           <metadata>
+	               <item key="file_path">{file_path}</item>
+	               <item key="file_content">{file_content}</item>
+	               <item key="changes">{changes}</item>
+	               <item key="category">code_review</item>
+	           </metadata>
+	       </task>
+	   </tasks>`,
 	}
 
 	config := agents.OrchestrationConfig{
