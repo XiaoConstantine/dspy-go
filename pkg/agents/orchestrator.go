@@ -219,7 +219,7 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 
 	// Analyze and break down the task
 	tasks, analysis, err := f.analyzeTasks(ctx, task, context)
-	logger.Info(ctx, "tasks: %v, analysis: %s", tasks, analysis)
+	logger.Debug(ctx, "tasks: %v, analysis: %s", tasks, analysis)
 
 	if err != nil {
 		logger.Error(ctx, "Task analysis failed: %v", err)
