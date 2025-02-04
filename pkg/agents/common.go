@@ -2,10 +2,11 @@ package agents
 
 import (
 	"encoding/xml"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // XMLNormalizer handles cleaning and standardization of XML content.
@@ -131,7 +132,13 @@ const (
 func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, error) {
 	tasksXML, ok := analyzerOutput["tasks"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid tasks format in analyzer output")
+		return nil, errors.WithFields(
+			errors.New(errors.ValidationFailed, "invalid tasks format in analyzer output"),
+			errors.Fields{
+				"error_type":      "format_validation",
+				"component":       "analyzer",
+				"expected_format": "tasks field should contain valid XML task definitions",
+			})
 	}
 
 	// Parse XML tasks
@@ -144,11 +151,12 @@ func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, er
 	normalizedXML, err := normalizer.NormalizeXML(tasksXML)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to normalize XML: %w", err)
+		return nil, errors.Wrap(err, errors.InvalidInput, "failed to normalize XML")
+
 	}
 
 	if err := xml.Unmarshal([]byte(normalizedXML), &xmlTasks); err != nil {
-		return nil, fmt.Errorf("failed to parse XML tasks: %w", err)
+		return nil, errors.Wrap(err, errors.InvalidResponse, "failed to parse XML tasks")
 	}
 
 	// Convert to Task objects
@@ -156,7 +164,11 @@ func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, er
 	for i, xmlTask := range xmlTasks.Tasks {
 		// Validate required fields
 		if err := p.validateTask(xmlTask); err != nil {
-			return nil, fmt.Errorf("invalid task %s: %w", xmlTask.ID, err)
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.ValidationFailed, "invalid task"),
+				errors.Fields{
+					"task_id": xmlTask.ID,
+				})
 		}
 
 		// Convert metadata to map
@@ -180,13 +192,13 @@ func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, er
 
 func (p *XMLTaskParser) validateTask(task XMLTask) error {
 	if task.ID == "" {
-		return fmt.Errorf("missing task ID")
+		return errors.New(errors.ValidationFailed, "missing task ID")
 	}
 	if task.Type == "" {
-		return fmt.Errorf("missing task type")
+		return errors.New(errors.ValidationFailed, "missing task type")
 	}
 	if task.ProcessorType == "" {
-		return fmt.Errorf("missing processor type")
+		return errors.New(errors.ValidationFailed, "missing processor type")
 	}
 	return nil
 }
@@ -212,7 +224,7 @@ func (p *DependencyPlanCreator) CreatePlan(tasks []Task) ([][]Task, error) {
 
 	// Detect cycles
 	if err := detectCycles(graph); err != nil {
-		return nil, fmt.Errorf("invalid task dependencies: %w", err)
+		return nil, errors.Wrap(err, errors.ValidationFailed, "invalid task dependencies")
 	}
 
 	// Create phases based on dependencies
@@ -244,7 +256,7 @@ func (p *DependencyPlanCreator) CreatePlan(tasks []Task) ([][]Task, error) {
 
 		// If no tasks can be executed, we have a problem
 		if len(phase) == 0 {
-			return nil, fmt.Errorf("circular dependency or missing dependency detected")
+			return nil, errors.New(errors.ValidationFailed, "circular dependency or missing dependency detected")
 		}
 
 		// Sort phase by priority
@@ -288,7 +300,11 @@ func detectCycles(graph map[string][]string) error {
 					return err
 				}
 			} else if path[dep] {
-				return fmt.Errorf("cycle detected involving task %s", node)
+				return errors.WithFields(
+					errors.New(errors.ValidationFailed, "cycle detected in task dependencies"),
+					errors.Fields{
+						"task_id": node,
+					})
 			}
 		}
 

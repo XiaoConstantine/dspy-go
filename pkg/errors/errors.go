@@ -16,6 +16,7 @@ const (
 	ResourceNotFound
 	Timeout
 	RateLimitExceeded
+	Canceled
 
 	// LLM specific errors.
 	LLMGenerationFailed
