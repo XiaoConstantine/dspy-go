@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/sourcegraph/conc/pool"
@@ -29,14 +30,16 @@ type PlanCreator interface {
 type DefaultTaskParser struct{}
 
 func (p *DefaultTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, error) {
-	return nil, fmt.Errorf("default parser is a placeholder - please provide a custom implementation")
+	return nil, errors.New(errors.InvalidInput,
+		"default parser is a placeholder - please provide a custom implementation")
 }
 
 // DefaultPlanCreator provides a simple implementation for testing.
 type DefaultPlanCreator struct{}
 
 func (p *DefaultPlanCreator) CreatePlan(tasks []Task) ([][]Task, error) {
-	return nil, fmt.Errorf("default planner is a placeholder - please provide a custom implementation")
+	return nil, errors.New(errors.InvalidInput,
+		"default planner is a placeholder - please provide a custom implementation")
 }
 
 // TaskProcessor defines how to process individual tasks.
@@ -200,9 +203,22 @@ func (f *FlexibleOrchestrator) getProcessor(processorType string) (TaskProcessor
 	processor, exists := f.processors[processorType]
 	if !exists {
 		logging.GetLogger().Error(context.Background(), "No processor found for type: %s", processorType)
-		return nil, fmt.Errorf("no processor registered for type: %s", processorType)
+		return nil, errors.WithFields(
+			errors.New(errors.ResourceNotFound, "processor not found"),
+			errors.Fields{
+				"processor_type":       processorType,
+				"available_processors": getProcessorTypes(f.processors),
+			})
 	}
 	return processor, nil
+}
+
+func getProcessorTypes(processors map[string]TaskProcessor) []string {
+	types := make([]string, 0, len(processors))
+	for pType := range processors {
+		types = append(types, pType)
+	}
+	return types
 }
 
 // Process handles complete orchestration workflow.
@@ -214,7 +230,8 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 
 	// Add context check at the start
 	if err := ctx.Err(); err != nil {
-		return nil, err
+
+		return nil, errors.Wrap(err, errors.Canceled, "context canceled before processing started")
 	}
 
 	// Analyze and break down the task
@@ -224,23 +241,32 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 	if err != nil {
 		logger.Error(ctx, "Task analysis failed: %v", err)
 		span.WithError(err)
-		return nil, fmt.Errorf("task analysis failed: %w", err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.WorkflowExecutionFailed, "task analysis failed"),
+			errors.Fields{
+				"task_input": task,
+			})
 	}
 	// Check context again after analysis
 	if err := ctx.Err(); err != nil {
-		return nil, err
+
+		return nil, errors.Wrap(err, errors.Canceled, "context canceled after analysis")
 	}
 
 	if len(tasks) == 0 {
 		logger.Error(ctx, "No tasks were generated from analysis")
-		return nil, fmt.Errorf("no tasks generated from analysis")
+		return nil, errors.New(errors.InvalidResponse, "no tasks generated from analysis")
 	}
 
 	// Create execution plan based on dependencies
 	plan, err := f.createExecutionPlan(tasks)
 	if err != nil {
 		span.WithError(err)
-		return nil, fmt.Errorf("Plan failed: %w", err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.WorkflowExecutionFailed, "execution plan creation failed"),
+			errors.Fields{
+				"task_count": len(tasks),
+			})
 
 	}
 
@@ -259,7 +285,12 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 	// Execute tasks with controlled concurrency
 	if err := f.executePlan(ctx, plan, context, result); err != nil {
 		result.Metadata["error"] = err.Error()
-		return result, err
+		return result, errors.WithFields(
+			errors.Wrap(err, errors.WorkflowExecutionFailed, "plan execution failed"),
+			errors.Fields{
+				"completed_tasks": len(result.CompletedTasks),
+				"failed_tasks":    len(result.FailedTasks),
+			})
 	}
 
 	return result, nil
@@ -282,7 +313,8 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		// Check context cancellation
 		if err := checkCtxErr(attemptCtx); err != nil {
 			core.EndSpan(attemptCtx)
-			return nil, "", err
+
+			return nil, "", errors.Wrap(err, errors.Canceled, "context canceled during analysis")
 		}
 		// Get task breakdown from analyzer
 		result, err := f.analyzer.Process(ctx, map[string]interface{}{
@@ -316,7 +348,11 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 
 		tasks, err := f.parser.Parse(result)
 		if err != nil {
-			lastErr = fmt.Errorf("task parsing failed: %w", err)
+			lastErr = errors.WithFields(
+				errors.Wrap(err, errors.InvalidResponse, "failed to parse analyzer output"),
+				errors.Fields{
+					"attempt": attempt + 1,
+				})
 			attemptSpan.WithError(lastErr)
 			logger.Warn(attemptCtx, "Task parsing failed in attempt %d: %v", attempt+1, err)
 			core.EndSpan(attemptCtx)
@@ -325,7 +361,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 
 		analysis, ok := result["analysis"].(string)
 		if !ok {
-			lastErr = fmt.Errorf("invalid analysis format in analyzer output")
+			lastErr = errors.New(errors.InvalidResponse, "invalid analysis format in analyzer output")
 			attemptSpan.WithError(lastErr)
 			logger.Warn(attemptCtx, "Invalid analysis format in attempt %d", attempt+1)
 			core.EndSpan(attemptCtx)
@@ -340,8 +376,11 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 	}
 
 	span.WithError(lastErr)
-
-	return nil, "", fmt.Errorf("analysis failed after %d attempts: %w", maxAttempts, lastErr)
+	return nil, "", errors.WithFields(
+		errors.Wrap(lastErr, errors.WorkflowExecutionFailed, "analysis failed after all attempts"),
+		errors.Fields{
+			"max_attempts": maxAttempts,
+		})
 }
 
 // createExecutionPlan organizes tasks based on dependencies.
@@ -374,7 +413,12 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 					// Execute task with proper context handling
 					if err := f.executeTask(phaseCtx, t, taskContext, result); err != nil {
 						span.WithError(err)
-						return fmt.Errorf("task %s failed: %w", t.ID, err)
+						return errors.WithFields(
+							errors.Wrap(err, errors.StepExecutionFailed, "task execution failed"),
+							errors.Fields{
+								"task_id":   t.ID,
+								"task_type": t.Type,
+							})
 					}
 					return nil
 				})
@@ -382,7 +426,12 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 
 			// Wait for all tasks in this phase and handle errors
 			if err := phasePool.Wait(); err != nil {
-				return fmt.Errorf("phase %d failed: %w", currentPhaseIdx, err)
+				return errors.WithFields(
+					errors.Wrap(err, errors.WorkflowExecutionFailed, "phase execution failed"),
+					errors.Fields{
+						"phase_index": currentPhaseIdx,
+						"task_count":  len(currentPhase),
+					})
 			}
 
 			return nil

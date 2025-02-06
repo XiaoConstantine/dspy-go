@@ -1,8 +1,10 @@
 package agents
 
 import (
-	"fmt"
 	"sync"
+	"time"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // Memory provides storage capabilities for agents.
@@ -45,7 +47,12 @@ func (s *InMemoryStore) Retrieve(key string) (interface{}, error) {
 
 	value, exists := s.data[key]
 	if !exists {
-		return nil, fmt.Errorf("key %s not found", key)
+		return nil, errors.WithFields(
+			errors.New(errors.ResourceNotFound, "key not found in memory store"),
+			errors.Fields{
+				"key":         key,
+				"access_time": time.Now().UTC(),
+			})
 	}
 	return value, nil
 }
