@@ -91,7 +91,7 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 		Headers: map[string]string{
 			"Content-Type": "application/json",
 		},
-		TimeoutSec: 30,
+		TimeoutSec: 10 * 60,
 	}
 
 	return &GeminiLLM{
