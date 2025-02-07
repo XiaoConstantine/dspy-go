@@ -42,6 +42,9 @@ type LLM interface {
 	// GenerateWithJSON produces structured JSON output based on the given prompt
 	GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error)
 
+	CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error)
+	CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error)
+
 	ProviderName() string
 	ModelID() string
 	Capabilities() []Capability
@@ -59,6 +62,38 @@ type GenerateOptions struct {
 	FrequencyPenalty float64
 	Stop             []string
 }
+
+type EmbeddingOptions struct {
+	// Model-specific options for embedding
+	Model string
+	// Optional batch size for bulk embeddings
+	BatchSize int
+	// Additional model-specific parameters
+	Params map[string]interface{}
+}
+
+// EmbeddingResult represents the result of embedding generation
+type EmbeddingResult struct {
+	// The generated embedding vector
+	Vector []float32
+	// Token count and other metadata
+	TokenCount int
+	// Any model-specific metadata
+	Metadata map[string]interface{}
+}
+
+// BatchEmbeddingResult represents results for multiple inputs
+type BatchEmbeddingResult struct {
+	// Embeddings for each input
+	Embeddings []EmbeddingResult
+	// Any error that occurred during processing
+	Error error
+	// Input index that caused the error (if applicable)
+	ErrorIndex int
+}
+
+// EmbeddingOption allows for optional parameters
+type EmbeddingOption func(*EmbeddingOptions)
 
 // NewGenerateOptions creates a new GenerateOptions with default values.
 func NewGenerateOptions() *GenerateOptions {
@@ -107,6 +142,37 @@ func WithFrequencyPenalty(p float64) GenerateOption {
 func WithStopSequences(sequences ...string) GenerateOption {
 	return func(o *GenerateOptions) {
 		o.Stop = sequences
+	}
+}
+
+func WithModel(model string) EmbeddingOption {
+	return func(o *EmbeddingOptions) {
+		o.Model = model
+	}
+}
+
+func WithBatchSize(size int) EmbeddingOption {
+	return func(o *EmbeddingOptions) {
+		o.BatchSize = size
+	}
+}
+
+func WithParams(params map[string]interface{}) EmbeddingOption {
+	return func(o *EmbeddingOptions) {
+		if o.Params == nil {
+			o.Params = make(map[string]interface{})
+		}
+		for k, v := range params {
+			o.Params[k] = v
+		}
+	}
+}
+
+// Default options for embeddings
+func NewEmbeddingOptions() *EmbeddingOptions {
+	return &EmbeddingOptions{
+		BatchSize: 32, // Default batch size
+		Params:    make(map[string]interface{}),
 	}
 }
 

@@ -26,6 +26,67 @@ func (m *MockBaseLLM) GenerateWithJSON(ctx context.Context, prompt string, optio
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
+// CreateEmbedding mocks the single embedding creation following the same pattern as Generate
+func (m *MockBaseLLM) CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error) {
+	// Record the method call and get the mock results
+	args := m.Called(ctx, input, options)
+
+	// Handle nil case first - if first argument is nil, return error
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+
+	// Check if we got a properly structured EmbeddingResult
+	if result, ok := args.Get(0).(*EmbeddingResult); ok {
+		return result, args.Error(1)
+	}
+
+	// Fallback case: create a simple embedding result with basic values
+	// This is similar to how Generate falls back to string conversion
+	return &EmbeddingResult{
+		Vector:     []float32{0.1, 0.2, 0.3}, // Default vector
+		TokenCount: len(input),
+		Metadata: map[string]interface{}{
+			"fallback": true,
+		},
+	}, args.Error(1)
+}
+
+// CreateEmbeddings mocks the batch embedding creation
+func (m *MockBaseLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error) {
+	// Record the method call and get the mock results
+	args := m.Called(ctx, inputs, options)
+
+	// Handle nil case
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+
+	// Check if we got a properly structured BatchEmbeddingResult
+	if result, ok := args.Get(0).(*BatchEmbeddingResult); ok {
+		return result, args.Error(1)
+	}
+
+	// Similar to the single embedding case, provide a fallback
+	embeddings := make([]EmbeddingResult, len(inputs))
+	for i := range inputs {
+		embeddings[i] = EmbeddingResult{
+			Vector:     []float32{0.1, 0.2, 0.3},
+			TokenCount: len(inputs[i]),
+			Metadata: map[string]interface{}{
+				"fallback": true,
+				"index":    i,
+			},
+		}
+	}
+
+	return &BatchEmbeddingResult{
+		Embeddings: embeddings,
+		Error:      nil,
+		ErrorIndex: -1,
+	}, args.Error(1)
+}
+
 func (m *MockBaseLLM) ModelID() string {
 	args := m.Called()
 	return args.String(0)

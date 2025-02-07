@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +16,46 @@ func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...Genera
 
 func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
 	return map[string]interface{}{"response": "mock response"}, nil
+}
+
+func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error) {
+	return &EmbeddingResult{
+		// Using float32 for the vector as embeddings are typically floating point numbers
+		Vector: []float32{0.1, 0.2, 0.3},
+		// Include token count to simulate real embedding behavior
+		TokenCount: len(strings.Fields(input)),
+		// Add metadata to simulate real response
+		Metadata: map[string]interface{}{},
+	}, nil
+}
+
+func (m *MockLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error) {
+	opts := NewEmbeddingOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	// Create mock results for each input
+	embeddings := make([]EmbeddingResult, len(inputs))
+	for i, input := range inputs {
+		embeddings[i] = EmbeddingResult{
+			// Each embedding gets slightly different values to simulate real behavior
+			Vector:     []float32{0.1 * float32(i+1), 0.2 * float32(i+1), 0.3 * float32(i+1)},
+			TokenCount: len(strings.Fields(input)),
+			Metadata: map[string]interface{}{
+				"model":        opts.Model,
+				"input_length": len(input),
+				"batch_index":  i,
+			},
+		}
+	}
+
+	// Return the batch result
+	return &BatchEmbeddingResult{
+		Embeddings: embeddings,
+		Error:      nil,
+		ErrorIndex: -1, // -1 indicates no error
+	}, nil
 }
 
 func (m *MockLLM) ProviderName() string {

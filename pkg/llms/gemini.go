@@ -58,6 +58,55 @@ type geminiResponse struct {
 	} `json:"usageMetadata"`
 }
 
+// Request and response structures for Gemini embeddings
+type geminiEmbeddingRequest struct {
+	Model   string `json:"model"`
+	Content struct {
+		Parts []struct {
+			Text string `json:"text"`
+		} `json:"parts"`
+	} `json:"content"`
+	// Task type helps the model generate appropriate embeddings
+	TaskType string `json:"taskType,omitempty"`
+	// Additional configuration
+	Title      string                 `json:"title,omitempty"`
+	Parameters map[string]interface{} `json:"parameters,omitempty"`
+}
+
+type geminiBatchEmbeddingRequest struct {
+	Model    string `json:"model"`
+	Requests []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"requests"`
+	TaskType   string                 `json:"taskType,omitempty"`
+	Parameters map[string]interface{} `json:"parameters,omitempty"`
+}
+
+type geminiEmbeddingResponse struct {
+	Embedding struct {
+		Values []float32 `json:"values"`
+		// Statistics about the generated embedding
+		Statistics struct {
+			TruncatedInputTokenCount int `json:"truncatedInputTokenCount"`
+			TokenCount               int `json:"tokenCount"`
+		} `json:"statistics"`
+	} `json:"embedding"`
+	// Usage information
+	UsageMetadata struct {
+		PromptTokenCount     int `json:"promptTokenCount"`
+		CandidatesTokenCount int `json:"candidatesTokenCount"`
+		TotalTokenCount      int `json:"totalTokenCount"`
+	} `json:"usageMetadata"`
+}
+
+type geminiBatchEmbeddingResponse struct {
+	Embeddings []geminiEmbeddingResponse `json:"embeddings"`
+}
+
 // NewGeminiLLM creates a new GeminiLLM instance.
 func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	if apiKey == "" {
@@ -229,4 +278,281 @@ func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {
 
 	// Add the API key as query parameter
 	return fmt.Sprintf("%s?key=%s", fullEndpoint, apiKey)
+}
+
+// CreateEmbedding implements the embedding generation for a single input
+func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
+	// Apply options
+	opts := core.NewEmbeddingOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	// Prepare the request body
+	reqBody := geminiEmbeddingRequest{
+		Model: string(g.ModelID()),
+	}
+	reqBody.Content.Parts = []struct {
+		Text string `json:"text"`
+	}{{Text: input}}
+
+	// Add task type if specified in options
+	if taskType, ok := opts.Params["task_type"].(string); ok {
+		reqBody.TaskType = taskType
+	}
+
+	// Add any additional parameters
+	reqBody.Parameters = opts.Params
+
+	// Marshal request
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			errors.Fields{
+				"model":        g.ModelID(),
+				"input_length": len(input),
+			})
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		constructRequestURL(g.GetEndpointConfig(), g.apiKey)+"/embeddings",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	// Set headers
+	for key, value := range g.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Execute request
+	resp, err := g.GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
+			errors.Fields{
+				"model":      g.ModelID(),
+				"statusCode": resp.StatusCode,
+			})
+	}
+
+	var geminiResp geminiEmbeddingResponse
+	if err := json.Unmarshal(body, &geminiResp); err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	// Convert to standard format
+	result := &core.EmbeddingResult{
+		Vector:     geminiResp.Embedding.Values,
+		TokenCount: geminiResp.UsageMetadata.TotalTokenCount,
+		Metadata: map[string]interface{}{
+			"model":            g.ModelID(),
+			"prompt_tokens":    geminiResp.UsageMetadata.PromptTokenCount,
+			"truncated_tokens": geminiResp.Embedding.Statistics.TruncatedInputTokenCount,
+			"embedding_tokens": geminiResp.Embedding.Statistics.TokenCount,
+		},
+	}
+
+	return result, nil
+}
+
+// CreateEmbeddings implements batch embedding generation
+func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
+	// Apply options
+	opts := core.NewEmbeddingOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	// Use default batch size if not specified
+	if opts.BatchSize <= 0 {
+		opts.BatchSize = 32
+	}
+
+	var allResults []core.EmbeddingResult
+	var firstError error
+	var errorIndex int = -1
+
+	// Process in batches
+	for i := 0; i < len(inputs); i += opts.BatchSize {
+		end := i + opts.BatchSize
+		if end > len(inputs) {
+			end = len(inputs)
+		}
+
+		batch := inputs[i:end]
+		// Prepare batch request
+		reqBody := geminiBatchEmbeddingRequest{
+			Model: string(g.ModelID()),
+		}
+
+		// Add each input to the batch request
+		reqBody.Requests = make([]struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		}, len(batch))
+
+		for j, input := range batch {
+			reqBody.Requests[j].Content.Parts = []struct {
+				Text string `json:"text"`
+			}{{Text: input}}
+		}
+
+		// Add task type if specified
+		if taskType, ok := opts.Params["task_type"].(string); ok {
+			reqBody.TaskType = taskType
+		}
+		reqBody.Parameters = opts.Params
+
+		// Marshal request
+		jsonData, err := json.Marshal(reqBody)
+		if err != nil {
+			if firstError == nil {
+				firstError = errors.WithFields(
+					errors.Wrap(err, errors.InvalidInput, "failed to marshal batch request"),
+					errors.Fields{
+						"model":      g.ModelID(),
+						"batch_size": len(batch),
+					})
+				errorIndex = i
+			}
+			continue
+		}
+
+		// Create request
+		req, err := http.NewRequestWithContext(
+			ctx,
+			"POST",
+			constructRequestURL(g.GetEndpointConfig(), g.apiKey)+"/embeddings:batchEmbedContents",
+			bytes.NewBuffer(jsonData),
+		)
+		if err != nil {
+			if firstError == nil {
+				firstError = errors.WithFields(
+					errors.Wrap(err, errors.InvalidInput, "failed to create batch request"),
+					errors.Fields{
+						"model": g.ModelID(),
+					})
+				errorIndex = i
+			}
+			continue
+		}
+
+		// Set headers
+		for key, value := range g.GetEndpointConfig().Headers {
+			req.Header.Set(key, value)
+		}
+
+		// Execute request
+		resp, err := g.GetHTTPClient().Do(req)
+		if err != nil {
+			if firstError == nil {
+				firstError = errors.WithFields(
+					errors.Wrap(err, errors.LLMGenerationFailed, "failed to send batch request"),
+					errors.Fields{
+						"model": g.ModelID(),
+					})
+				errorIndex = i
+			}
+			continue
+		}
+
+		// Read response
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			if firstError == nil {
+				firstError = errors.WithFields(
+					errors.Wrap(err, errors.LLMGenerationFailed, "failed to read batch response"),
+					errors.Fields{
+						"model": g.ModelID(),
+					})
+				errorIndex = i
+			}
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			if firstError == nil {
+				firstError = errors.WithFields(
+					errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
+					errors.Fields{
+						"model":      g.ModelID(),
+						"statusCode": resp.StatusCode,
+					})
+				errorIndex = i
+			}
+			continue
+		}
+
+		var batchResp geminiBatchEmbeddingResponse
+		if err := json.Unmarshal(body, &batchResp); err != nil {
+			if firstError == nil {
+				firstError = errors.WithFields(
+					errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal batch response"),
+					errors.Fields{
+						"model": g.ModelID(),
+					})
+				errorIndex = i
+			}
+			continue
+		}
+
+		// Process batch results
+		for j, embedding := range batchResp.Embeddings {
+			result := core.EmbeddingResult{
+				Vector:     embedding.Embedding.Values,
+				TokenCount: embedding.UsageMetadata.TotalTokenCount,
+				Metadata: map[string]interface{}{
+					"model":            g.ModelID(),
+					"prompt_tokens":    embedding.UsageMetadata.PromptTokenCount,
+					"truncated_tokens": embedding.Embedding.Statistics.TruncatedInputTokenCount,
+					"embedding_tokens": embedding.Embedding.Statistics.TokenCount,
+					"batch_index":      i + j,
+				},
+			}
+			allResults = append(allResults, result)
+		}
+	}
+
+	return &core.BatchEmbeddingResult{
+		Embeddings: allResults,
+		Error:      firstError,
+		ErrorIndex: errorIndex,
+	}, nil
 }
