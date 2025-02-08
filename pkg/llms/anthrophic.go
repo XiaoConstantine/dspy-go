@@ -105,106 +105,10 @@ func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, opti
 }
 
 func (a *AnthropicLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
-	// Apply options
-	// opts := core.NewEmbeddingOptions()
-	//
-	// for _, opt := range options {
-	// 	opt(opts)
-	// }
-	//
-	// // Create the request parameters
-	// params := &anthropic.EmbeddingParams{
-	// 	Model:   string(a.ModelID()),
-	// 	Input:   input,
-	// 	Options: make(map[string]interface{}),
-	// }
-	//
-	// // Apply any additional parameters from options
-	// for k, v := range opts.Params {
-	// 	params.Options[k] = v
-	// }
-	//
-	// // Call Anthropic's embedding API
-	// embedding, err := a.client.Embeddings().Create(ctx, params)
-	// if err != nil {
-	// 	return nil, errors.WithFields(
-	// 		errors.Wrap(err, errors.LLMGenerationFailed, "failed to create embedding"),
-	// 		errors.Fields{
-	// 			"model":        a.ModelID(),
-	// 			"input_length": len(input),
-	// 		})
-	// }
-	//
-	// // Convert the response to our standard format
-	// result := &core.EmbeddingResult{
-	// 	Vector:     embedding.Embedding,
-	// 	TokenCount: embedding.TokenCount,
-	// 	Metadata: map[string]interface{}{
-	// 		"model": embedding.Model,
-	// 	},
-	// }
-	//
-	// return result, nil
+	// Anthropic does not provide embedding api directly, but go through voyage
 	return nil, nil
 }
 
 func (a *AnthropicLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
-	// Apply options
-	// opts := core.NewEmbeddingOptions()
-	// for _, opt := range options {
-	// 	opt(opts)
-	// }
-	//
-	// // Validate batch size
-	// if opts.BatchSize <= 0 {
-	// 	opts.BatchSize = 32 // Default batch size
-	// }
-	//
-	// // Process in batches
-	// var allResults []core.EmbeddingResult
-	// var firstError error
-	// var errorIndex int
-	//
-	// for i := 0; i < len(inputs); i += opts.BatchSize {
-	// 	end := i + opts.BatchSize
-	// 	if end > len(inputs) {
-	// 		end = len(inputs)
-	// 	}
-	//
-	// 	batch := inputs[i:end]
-	// 	params := &anthropic.BatchEmbeddingParams{
-	// 		Model:   string(a.ModelID()),
-	// 		Inputs:  batch,
-	// 		Options: opts.Params,
-	// 	}
-	//
-	// 	// Call Anthropic's batch embedding API
-	// 	batchResults, err := a.client.Embeddings().CreateBatch(ctx, params)
-	// 	if err != nil {
-	// 		if firstError == nil {
-	// 			firstError = err
-	// 			errorIndex = i
-	// 		}
-	// 		continue
-	// 	}
-	//
-	// 	// Convert batch results
-	// 	for _, embedding := range batchResults.Embeddings {
-	// 		result := core.EmbeddingResult{
-	// 			Vector:     embedding.Embedding,
-	// 			TokenCount: embedding.TokenCount,
-	// 			Metadata: map[string]interface{}{
-	// 				"model": embedding.Model,
-	// 			},
-	// 		}
-	// 		allResults = append(allResults, result)
-	// 	}
-	// }
-	//
-	// return &core.BatchEmbeddingResult{
-	// 	Embeddings: allResults,
-	// 	Error:      firstError,
-	// 	ErrorIndex: errorIndex,
-	// }, nil
 	return nil, nil
 }
