@@ -26,7 +26,7 @@ func (m *MockBaseLLM) GenerateWithJSON(ctx context.Context, prompt string, optio
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
-// CreateEmbedding mocks the single embedding creation following the same pattern as Generate
+// CreateEmbedding mocks the single embedding creation following the same pattern as Generate.
 func (m *MockBaseLLM) CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error) {
 	// Record the method call and get the mock results
 	args := m.Called(ctx, input, options)
@@ -52,7 +52,7 @@ func (m *MockBaseLLM) CreateEmbedding(ctx context.Context, input string, options
 	}, args.Error(1)
 }
 
-// CreateEmbeddings mocks the batch embedding creation
+// CreateEmbeddings mocks the batch embedding creation.
 func (m *MockBaseLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error) {
 	// Record the method call and get the mock results
 	args := m.Called(ctx, inputs, options)

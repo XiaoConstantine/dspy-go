@@ -58,7 +58,7 @@ type geminiResponse struct {
 	} `json:"usageMetadata"`
 }
 
-// Request and response structures for Gemini embeddings
+// Request and response structures for Gemini embeddings.
 type geminiEmbeddingRequest struct {
 	Model   string `json:"model"`
 	Content struct {
@@ -124,6 +124,7 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 		core.CapabilityCompletion,
 		core.CapabilityChat,
 		core.CapabilityJSON,
+		core.CapabilityEmbedding,
 	}
 	// Validate model ID
 	switch model {
@@ -280,7 +281,7 @@ func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {
 	return fmt.Sprintf("%s?key=%s", fullEndpoint, apiKey)
 }
 
-// CreateEmbedding implements the embedding generation for a single input
+// CreateEmbedding implements the embedding generation for a single input.
 func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
 	// Apply options
 	opts := core.NewEmbeddingOptions()
@@ -290,7 +291,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 
 	// Prepare the request body
 	reqBody := geminiEmbeddingRequest{
-		Model: string(g.ModelID()),
+		Model: "models/text-embedding-004",
 	}
 	reqBody.Content.Parts = []struct {
 		Text string `json:"text"`
@@ -310,26 +311,29 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
 			errors.Fields{
-				"model":        g.ModelID(),
+				"model":        "text-embedding-004",
 				"input_length": len(input),
 			})
 	}
 
 	// Create request
+	url := fmt.Sprintf("%s/models/text-embedding-004:embedContent?key=%s",
+		g.GetEndpointConfig().BaseURL,
+		g.apiKey)
 	req, err := http.NewRequestWithContext(
 		ctx,
 		"POST",
-		constructRequestURL(g.GetEndpointConfig(), g.apiKey)+"/embeddings",
+		url,
 		bytes.NewBuffer(jsonData),
 	)
+
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
 			errors.Fields{
-				"model": g.ModelID(),
+				"model": "text-embedding-004",
 			})
 	}
-
 	// Set headers
 	for key, value := range g.GetEndpointConfig().Headers {
 		req.Header.Set(key, value)
@@ -337,11 +341,13 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 
 	// Execute request
 	resp, err := g.GetHTTPClient().Do(req)
+
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
 			errors.Fields{
-				"model": g.ModelID(),
+
+				"model": "text-embedding-004",
 			})
 	}
 	defer resp.Body.Close()
@@ -351,7 +357,8 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
 			errors.Fields{
-				"model": g.ModelID(),
+
+				"model": "text-embedding-004",
 			})
 	}
 
@@ -369,7 +376,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
 			errors.Fields{
-				"model": g.ModelID(),
+				"model": "text-embedding-004",
 			})
 	}
 
@@ -378,7 +385,8 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 		Vector:     geminiResp.Embedding.Values,
 		TokenCount: geminiResp.UsageMetadata.TotalTokenCount,
 		Metadata: map[string]interface{}{
-			"model":            g.ModelID(),
+
+			"model":            "text-embedding-004",
 			"prompt_tokens":    geminiResp.UsageMetadata.PromptTokenCount,
 			"truncated_tokens": geminiResp.Embedding.Statistics.TruncatedInputTokenCount,
 			"embedding_tokens": geminiResp.Embedding.Statistics.TokenCount,
@@ -388,7 +396,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	return result, nil
 }
 
-// CreateEmbeddings implements batch embedding generation
+// CreateEmbeddings implements batch embedding generation.
 func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
 	// Apply options
 	opts := core.NewEmbeddingOptions()
@@ -415,7 +423,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		batch := inputs[i:end]
 		// Prepare batch request
 		reqBody := geminiBatchEmbeddingRequest{
-			Model: string(g.ModelID()),
+			Model: "text-embedding-004",
 		}
 
 		// Add each input to the batch request
@@ -446,7 +454,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidInput, "failed to marshal batch request"),
 					errors.Fields{
-						"model":      g.ModelID(),
+						"model":      "text-embedding-004",
 						"batch_size": len(batch),
 					})
 				errorIndex = i
@@ -454,11 +462,15 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			continue
 		}
 
+		url := fmt.Sprintf("%s/models/text-embedding-004:batchEmbedContents?key=%s",
+			g.GetEndpointConfig().BaseURL,
+			g.apiKey)
+
 		// Create request
 		req, err := http.NewRequestWithContext(
 			ctx,
 			"POST",
-			constructRequestURL(g.GetEndpointConfig(), g.apiKey)+"/embeddings:batchEmbedContents",
+			url,
 			bytes.NewBuffer(jsonData),
 		)
 		if err != nil {
@@ -466,7 +478,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidInput, "failed to create batch request"),
 					errors.Fields{
-						"model": g.ModelID(),
+						"model": "text-embedding-004",
 					})
 				errorIndex = i
 			}
@@ -485,7 +497,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.LLMGenerationFailed, "failed to send batch request"),
 					errors.Fields{
-						"model": g.ModelID(),
+						"model": "text-embedding-004",
 					})
 				errorIndex = i
 			}
@@ -500,7 +512,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.LLMGenerationFailed, "failed to read batch response"),
 					errors.Fields{
-						"model": g.ModelID(),
+						"model": "text-embedding-004",
 					})
 				errorIndex = i
 			}
@@ -512,7 +524,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
 					errors.Fields{
-						"model":      g.ModelID(),
+						"model":      "text-embedding-004",
 						"statusCode": resp.StatusCode,
 					})
 				errorIndex = i
@@ -526,7 +538,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal batch response"),
 					errors.Fields{
-						"model": g.ModelID(),
+						"model": "text-embedding-004",
 					})
 				errorIndex = i
 			}
@@ -539,7 +551,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				Vector:     embedding.Embedding.Values,
 				TokenCount: embedding.UsageMetadata.TotalTokenCount,
 				Metadata: map[string]interface{}{
-					"model":            g.ModelID(),
+					"model":            "text-embedding-004",
 					"prompt_tokens":    embedding.UsageMetadata.PromptTokenCount,
 					"truncated_tokens": embedding.Embedding.Statistics.TruncatedInputTokenCount,
 					"embedding_tokens": embedding.Embedding.Statistics.TokenCount,

@@ -55,7 +55,7 @@ type ollamaResponse struct {
 	Response  string `json:"response"`
 }
 
-// Define request/response structures for Ollama embeddings
+// Define request/response structures for Ollama embeddings.
 type ollamaEmbeddingRequest struct {
 	Model   string                 `json:"model"`   // Required model name
 	Prompt  string                 `json:"prompt"`  // Input text for embedding
@@ -144,7 +144,7 @@ func (o *OllamaLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 	return utils.ParseJSONResponse(response.Content)
 }
 
-// CreateEmbedding generates embeddings for a single input
+// CreateEmbedding generates embeddings for a single input.
 func (o *OllamaLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
 	// Apply the provided options
 	opts := core.NewEmbeddingOptions()
@@ -218,7 +218,7 @@ func (o *OllamaLLM) CreateEmbedding(ctx context.Context, input string, options .
 	return result, nil
 }
 
-// CreateEmbeddings generates embeddings for multiple inputs in batches
+// CreateEmbeddings generates embeddings for multiple inputs in batches.
 func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
 	// Apply options
 	opts := core.NewEmbeddingOptions()

@@ -242,7 +242,7 @@ func (o *LlamacppLLM) CreateEmbedding(ctx context.Context, input string, options
 	return result, nil
 }
 
-// CreateEmbeddings implements batch embedding creation
+// CreateEmbeddings implements batch embedding creation.
 func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
 	// Apply options
 	opts := core.NewEmbeddingOptions()

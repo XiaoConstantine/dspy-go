@@ -72,7 +72,7 @@ type EmbeddingOptions struct {
 	Params map[string]interface{}
 }
 
-// EmbeddingResult represents the result of embedding generation
+// EmbeddingResult represents the result of embedding generation.
 type EmbeddingResult struct {
 	// The generated embedding vector
 	Vector []float32
@@ -82,7 +82,7 @@ type EmbeddingResult struct {
 	Metadata map[string]interface{}
 }
 
-// BatchEmbeddingResult represents results for multiple inputs
+// BatchEmbeddingResult represents results for multiple inputs.
 type BatchEmbeddingResult struct {
 	// Embeddings for each input
 	Embeddings []EmbeddingResult
@@ -92,7 +92,7 @@ type BatchEmbeddingResult struct {
 	ErrorIndex int
 }
 
-// EmbeddingOption allows for optional parameters
+// EmbeddingOption allows for optional parameters.
 type EmbeddingOption func(*EmbeddingOptions)
 
 // NewGenerateOptions creates a new GenerateOptions with default values.
@@ -168,7 +168,7 @@ func WithParams(params map[string]interface{}) EmbeddingOption {
 	}
 }
 
-// Default options for embeddings
+// Default options for embeddings.
 func NewEmbeddingOptions() *EmbeddingOptions {
 	return &EmbeddingOptions{
 		BatchSize: 32, // Default batch size
