@@ -196,7 +196,7 @@ func (f *FlexibleOrchestrator) RegisterProcessor(processorType string, processor
 }
 
 // getProcessor returns the registered processor for a task type.
-func (f *FlexibleOrchestrator) getProcessor(processorType string) (TaskProcessor, error) {
+func (f *FlexibleOrchestrator) GetProcessor(processorType string) (TaskProcessor, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -455,7 +455,7 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 		"processor": task.ProcessorType,
 		"priority":  task.Priority,
 	})
-	processor, err := f.getProcessor(task.ProcessorType)
+	processor, err := f.GetProcessor(task.ProcessorType)
 	if err != nil {
 		logger.Error(ctx, "Failed to get processor for task %s: %v",
 			task.ID, err)
