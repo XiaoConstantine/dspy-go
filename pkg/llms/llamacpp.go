@@ -95,21 +95,6 @@ type llamacppBatchEmbeddingRequest struct {
 	Parameters map[string]interface{} `json:"parameters,omitempty"`
 }
 
-type llamacppEmbeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
-	// Token usage information
-	Usage struct {
-		PromptTokens int `json:"prompt_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	} `json:"usage"`
-	Model string `json:"model"`
-}
-
-type llamacppBatchEmbeddingResponse struct {
-	Embeddings []llamacppEmbeddingResponse `json:"embeddings"`
-}
-
-// Generate implements the core.LLM interface.
 func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
@@ -218,25 +203,29 @@ func (o *LlamacppLLM) CreateEmbedding(ctx context.Context, input string, options
 	if err != nil {
 		return nil, fmt.Errorf("failed to read embedding response: %w", err)
 	}
+	var rawResp []struct {
+		Index     int         `json:"index"`
+		Embedding [][]float32 `json:"embedding"`
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
 	}
-
-	// Parse response
-	var llamacppResp llamacppEmbeddingResponse
-	if err := json.Unmarshal(body, &llamacppResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal embedding response: %w", err)
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return nil, fmt.Errorf("failed to parse raw JSON response: %w", err)
 	}
+
+	// Validate the response
+	if len(rawResp) == 0 || len(rawResp[0].Embedding) == 0 {
+		return nil, fmt.Errorf("received empty embedding response")
+	}
+
+	// Extract the embedding vector and create our result
+	vector := rawResp[0].Embedding[0]
 
 	// Convert to standard EmbeddingResult format
 	result := &core.EmbeddingResult{
-		Vector:     llamacppResp.Embedding,
-		TokenCount: llamacppResp.Usage.TotalTokens,
-		Metadata: map[string]interface{}{
-			"model":         llamacppResp.Model,
-			"prompt_tokens": llamacppResp.Usage.PromptTokens,
-		},
+		Vector: vector,
 	}
 
 	return result, nil
@@ -326,9 +315,12 @@ func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, opt
 			}
 			continue
 		}
+		var rawResp []struct {
+			Index     int         `json:"index"`
+			Embedding [][]float32 `json:"embedding"`
+		}
 
-		var batchResp llamacppBatchEmbeddingResponse
-		if err := json.Unmarshal(body, &batchResp); err != nil {
+		if err := json.Unmarshal(body, &rawResp); err != nil {
 			if firstError == nil {
 				firstError = fmt.Errorf("failed to unmarshal batch response: %w", err)
 				errorIndex = i
@@ -337,16 +329,31 @@ func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, opt
 		}
 
 		// Convert batch results
-		for _, embedding := range batchResp.Embeddings {
+		for _, item := range rawResp {
+			if len(item.Embedding) == 0 || len(item.Embedding[0]) == 0 {
+				if firstError == nil {
+					firstError = fmt.Errorf("received empty embedding at index %d", item.Index)
+					errorIndex = i + item.Index
+				}
+				continue
+			}
+
+			// Create the embedding result with metadata
 			result := core.EmbeddingResult{
-				Vector:     embedding.Embedding,
-				TokenCount: embedding.Usage.TotalTokens,
+				Vector: item.Embedding[0],
 				Metadata: map[string]interface{}{
-					"model":         embedding.Model,
-					"prompt_tokens": embedding.Usage.PromptTokens,
+					"index":        item.Index,
+					"batch_offset": i,
+					"model":        opts.Model,
+					"vector_size":  len(item.Embedding[0]),
 				},
 			}
-			allResults = append(allResults, result)
+
+			// Ensure results are ordered correctly using the index
+			for len(allResults) <= i+item.Index {
+				allResults = append(allResults, core.EmbeddingResult{})
+			}
+			allResults[i+item.Index] = result
 		}
 	}
 
