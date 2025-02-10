@@ -128,7 +128,7 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	}
 	// Validate model ID
 	switch model {
-	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash:
+	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashThinking:
 		break
 	default:
 		return nil, errors.WithFields(

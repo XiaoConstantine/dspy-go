@@ -32,7 +32,7 @@ func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	switch {
 	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus:
 		llm, err = NewAnthropicLLM(apiKey, anthropic.ModelID(modelID))
-	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro:
+	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashThinking:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case strings.HasPrefix(string(modelID), "ollama:"):
 		parts := strings.SplitN(string(modelID), ":", 2)

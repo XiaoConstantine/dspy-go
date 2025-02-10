@@ -267,9 +267,10 @@ type ModelID string
 
 const (
 	// Anthropic models.
-	ModelAnthropicHaiku    ModelID = ModelID(anthropic.ModelHaiku)
-	ModelAnthropicSonnet   ModelID = ModelID(anthropic.ModelSonnet)
-	ModelAnthropicOpus     ModelID = ModelID(anthropic.ModelOpus)
-	ModelGoogleGeminiFlash ModelID = "gemini-2.0-flash"
-	ModelGoogleGeminiPro   ModelID = "gemini-2.0-pro-exp"
+	ModelAnthropicHaiku            ModelID = ModelID(anthropic.ModelHaiku)
+	ModelAnthropicSonnet           ModelID = ModelID(anthropic.ModelSonnet)
+	ModelAnthropicOpus             ModelID = ModelID(anthropic.ModelOpus)
+	ModelGoogleGeminiFlash         ModelID = "gemini-2.0-flash"
+	ModelGoogleGeminiPro           ModelID = "gemini-2.0-pro-exp"
+	ModelGoogleGeminiFlashThinking ModelID = "gemini-2.0-flash-thinking-exp"
 )
