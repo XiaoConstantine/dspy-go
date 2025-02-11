@@ -16,7 +16,7 @@ type MockModule struct {
 	mock.Mock
 }
 
-func (m *MockModule) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	args := m.Called(ctx, inputs)
 	return args.Get(0).(map[string]any), args.Error(1)
 }

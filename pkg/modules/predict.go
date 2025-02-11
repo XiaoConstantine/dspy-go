@@ -28,9 +28,12 @@ func NewPredict(signature core.Signature) *Predict {
 	}
 }
 
-func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
 	logger := logging.GetLogger()
-
+	options := &core.ModuleOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	ctx, span := core.StartSpan(ctx, "Predict")
 	defer core.EndSpan(ctx)
 	span.WithAnnotation("inputs", inputs)
@@ -50,7 +53,7 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}) (m
 
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
-	resp, err := p.LLM.Generate(ctx, prompt)
+	resp, err := p.LLM.Generate(ctx, prompt, options.GenerateOptions...)
 	if err != nil {
 		span.WithError(err)
 		return nil, errors.WithFields(

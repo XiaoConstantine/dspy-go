@@ -25,7 +25,7 @@ func TestChainWorkflow(t *testing.T) {
 			Inputs:  []core.InputField{{Field: core.Field{Name: "input1"}}},
 			Outputs: []core.OutputField{{Field: core.Field{Name: "output1"}}},
 		})
-		module1.On("Process", mock.Anything, mock.Anything).Return(
+		module1.On("Process", mock.Anything, mock.Anything, mock.Anything).Return(
 			map[string]any{"output1": "intermediate"}, nil,
 		)
 
@@ -33,7 +33,7 @@ func TestChainWorkflow(t *testing.T) {
 			Inputs:  []core.InputField{{Field: core.Field{Name: "output1"}}},
 			Outputs: []core.OutputField{{Field: core.Field{Name: "final"}}},
 		})
-		module2.On("Process", mock.Anything, mock.Anything).Return(
+		module2.On("Process", mock.Anything, mock.Anything, mock.Anything).Return(
 			map[string]any{"final": "result"}, nil,
 		)
 

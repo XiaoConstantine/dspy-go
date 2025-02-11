@@ -34,7 +34,10 @@ func RunGSM8KExample(apiKey string) {
 
 	// Create program
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-		return cot.Process(ctx, inputs)
+		return cot.Process(ctx, inputs, core.WithGenerateOptions(
+			core.WithTemperature(0.7),
+			core.WithMaxTokens(8192),
+		))
 	})
 
 	// Create optimizer

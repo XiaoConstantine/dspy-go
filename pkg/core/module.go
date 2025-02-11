@@ -8,7 +8,7 @@ import (
 // Module represents a basic unit of computation in DSPy.
 type Module interface {
 	// Process executes the module's logic
-	Process(ctx context.Context, inputs map[string]any) (map[string]any, error)
+	Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error)
 
 	// GetSignature returns the module's input and output signature
 	GetSignature() Signature
@@ -18,6 +18,21 @@ type Module interface {
 
 	// Clone creates a deep copy of the module
 	Clone() Module
+}
+
+type Option func(*ModuleOptions)
+
+// ModuleOptions holds configuration that can be passed to modules.
+type ModuleOptions struct {
+	// LLM generation options
+	GenerateOptions []GenerateOption
+}
+
+// WithGenerateOptions adds LLM generation options.
+func WithGenerateOptions(opts ...GenerateOption) Option {
+	return func(o *ModuleOptions) {
+		o.GenerateOptions = append(o.GenerateOptions, opts...)
+	}
 }
 
 // BaseModule provides a basic implementation of the Module interface.
@@ -41,7 +56,7 @@ func (bm *BaseModule) SetSignature(signature Signature) {
 }
 
 // Process is a placeholder implementation and should be overridden by specific modules.
-func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
 	return nil, errors.New("Process method not implemented")
 }
 

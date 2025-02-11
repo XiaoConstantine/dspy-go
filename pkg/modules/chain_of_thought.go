@@ -20,12 +20,12 @@ func NewChainOfThought(signature core.Signature) *ChainOfThought {
 	}
 }
 
-func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	ctx, span := core.StartSpan(ctx, "ChainOfThought")
 	defer core.EndSpan(ctx)
 
 	span.WithAnnotation("inputs", inputs)
-	outputs, err := c.Predict.Process(ctx, inputs)
+	outputs, err := c.Predict.Process(ctx, inputs, opts...)
 	if err != nil {
 		span.WithError(err)
 		return nil, err
