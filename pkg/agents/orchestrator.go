@@ -86,6 +86,7 @@ type OrchestrationConfig struct {
 	PlanCreator      PlanCreator
 
 	AnalyzerConfig AnalyzerConfig
+	Options        core.Option
 }
 
 // New type to encapsulate analyzer-specific configuration.
@@ -320,7 +321,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		result, err := f.analyzer.Process(ctx, map[string]interface{}{
 			"task":    task,
 			"context": context,
-		})
+		}, f.config.Options)
 		if err != nil {
 			lastErr = err
 			attemptSpan.WithError(err)

@@ -33,6 +33,13 @@ func NewReAct(signature core.Signature, tools []Tool, maxIters int) *ReAct {
 	}
 }
 
+// WithDefaultOptions sets default options by configuring the underlying Predict module.
+func (r *ReAct) WithDefaultOptions(opts ...core.Option) *ReAct {
+	// Simply delegate to the Predict module's WithDefaultOptions
+	r.Predict.WithDefaultOptions(opts...)
+	return r
+}
+
 func (r *ReAct) SetLLM(llm core.LLM) {
 	r.BaseModule.SetLLM(llm)
 	r.Predict.SetLLM(llm)

@@ -20,6 +20,13 @@ func NewChainOfThought(signature core.Signature) *ChainOfThought {
 	}
 }
 
+// WithDefaultOptions sets default options by configuring the underlying Predict module.
+func (c *ChainOfThought) WithDefaultOptions(opts ...core.Option) *ChainOfThought {
+	// Simply delegate to the Predict module's WithDefaultOptions
+	c.Predict.WithDefaultOptions(opts...)
+	return c
+}
+
 func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	ctx, span := core.StartSpan(ctx, "ChainOfThought")
 	defer core.EndSpan(ctx)
