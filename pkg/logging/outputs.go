@@ -258,6 +258,21 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 		duration = time.Since(span.StartTime)
 	}
 
+	spanInfo := fmt.Sprintf("%s%s %s", prefix, marker, span.Operation)
+
+	if taskInfo, ok := span.Annotations["task"].(map[string]interface{}); ok {
+		// Add processor type and task ID for better context
+		if processor, ok := taskInfo["processor"].(string); ok {
+			spanInfo += fmt.Sprintf(" [%s]", processor)
+		}
+		if id, ok := taskInfo["id"].(string); ok {
+			spanInfo += fmt.Sprintf(" (task=%s)", id)
+		}
+		// Optionally add task type and priority if they provide valuable context
+		if taskType, ok := taskInfo["type"].(string); ok && taskType != "" {
+			spanInfo += fmt.Sprintf(" type=%s", taskType)
+		}
+	}
 	// Format duration with appropriate unit and handle edge cases
 	var durationStr string
 	switch {
@@ -272,23 +287,25 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 		durationStr = formatSpanDuration(duration)
 	}
 
-	// Format the span line
-	fmt.Fprintf(b, "%s%s %s (%s)", prefix, marker, span.Operation, durationStr)
+	spanInfo += fmt.Sprintf(" (%s)", durationStr)
 
 	// Add error if present
 	if span.Error != nil {
-		fmt.Fprintf(b, " [ERROR: %v]", span.Error)
+		spanInfo += fmt.Sprintf(" [ERROR: %v]", span.Error)
+	}
+	if tokenInfo, ok := span.Annotations["token_usage"].(*core.TokenUsage); ok {
+		spanInfo += fmt.Sprintf(" {tokens=%d(%d↑%d↓)}",
+			tokenInfo.TotalTokens,
+			tokenInfo.PromptTokens,
+			tokenInfo.CompletionTokens)
 	}
 
-	// Add important annotations
-	if len(span.Annotations) > 0 {
-		relevantAnnotations := filterRelevantAnnotations(span.Annotations)
-		if len(relevantAnnotations) > 0 {
-			fmt.Fprintf(b, " {%s}", formatAnnotations(relevantAnnotations))
-		}
+	filteredAnnotations := filterRelevantAnnotations(span.Annotations)
+	if len(filteredAnnotations) > 0 {
+		spanInfo += fmt.Sprintf(" {%s}", formatAnnotations(filteredAnnotations))
 	}
 
-	b.WriteString("\n")
+	fmt.Fprintln(b, spanInfo)
 
 	// Find children
 	var children []*core.Span
@@ -322,12 +339,14 @@ func filterRelevantAnnotations(annotations map[string]interface{}) map[string]in
 
 	// Define which annotations are meaningful for logging
 	relevantKeys := map[string]bool{
-		"status":   true,
-		"result":   true,
-		"error":    true,
-		"count":    true,
-		"score":    true,
-		"progress": true,
+		"status":      true,
+		"result":      true,
+		"error":       true,
+		"count":       true,
+		"score":       true,
+		"progress":    true,
+		"task":        true,
+		"token_usage": true,
 	}
 
 	for k, v := range annotations {
