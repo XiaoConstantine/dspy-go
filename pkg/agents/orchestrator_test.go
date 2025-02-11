@@ -78,6 +78,7 @@ func setupTestOrchestrator() (*FlexibleOrchestrator, *MockTaskProcessor, *MockTa
 		AnalyzerConfig: AnalyzerConfig{
 			FormatInstructions: "Format as XML",
 		},
+		Options: core.WithGenerateOptions(core.WithMaxTokens(100)),
 	}
 
 	orchestrator := NewFlexibleOrchestrator(memory, config)

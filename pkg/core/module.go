@@ -35,6 +35,29 @@ func WithGenerateOptions(opts ...GenerateOption) Option {
 	}
 }
 
+// Clone creates a copy of ModuleOptions.
+func (o *ModuleOptions) Clone() *ModuleOptions {
+	if o == nil {
+		return nil
+	}
+	return &ModuleOptions{
+		GenerateOptions: append([]GenerateOption{}, o.GenerateOptions...),
+	}
+}
+
+// MergeWith merges this options with other options, with other taking precedence.
+func (o *ModuleOptions) MergeWith(other *ModuleOptions) *ModuleOptions {
+	if other == nil {
+		return o.Clone()
+	}
+	merged := o.Clone()
+	if merged == nil {
+		merged = &ModuleOptions{}
+	}
+	merged.GenerateOptions = append(merged.GenerateOptions, other.GenerateOptions...)
+	return merged
+}
+
 // BaseModule provides a basic implementation of the Module interface.
 type BaseModule struct {
 	Signature Signature
