@@ -98,7 +98,7 @@ type EmbeddingOption func(*EmbeddingOptions)
 // NewGenerateOptions creates a new GenerateOptions with default values.
 func NewGenerateOptions() *GenerateOptions {
 	return &GenerateOptions{
-		MaxTokens:   4096, // Default max tokens
+		MaxTokens:   8192, // Default max tokens
 		Temperature: 0.5,  // Default temperature
 	}
 }
