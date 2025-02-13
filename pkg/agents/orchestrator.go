@@ -368,7 +368,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 			core.EndSpan(attemptCtx)
 			continue
 		}
-		logger.Info(attemptCtx, "Successfully analyzed tasks on attempt %d", attempt+1)
+		logger.Debug(attemptCtx, "Successfully analyzed tasks on attempt %d", attempt+1)
 		attemptSpan.WithAnnotation("tasks", tasks)
 		attemptSpan.WithAnnotation("analysis", analysis)
 		core.EndSpan(attemptCtx)
@@ -482,9 +482,9 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 			task.ID, i+1, attempts, taskContext)
 		taskResult, err := processor.Process(attemptCtx, task, taskContext)
 
-		logger.Info(ctx, "task: %v with result: %v", task, taskResult)
+		logger.Debug(ctx, "task: %v with result: %v", task, taskResult)
 		if err == nil {
-			logger.Info(attemptCtx, "Task [%s] completed successfully with result: %+v",
+			logger.Debug(attemptCtx, "Task [%s] completed successfully with result: %+v",
 				task.ID, taskResult)
 
 			result.mu.Lock()
