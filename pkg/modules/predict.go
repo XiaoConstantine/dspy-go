@@ -157,57 +157,6 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	return sb.String()
 }
 
-//	func stripMarkdown(content string) string {
-//		// First, split into lines to handle line-by-line patterns
-//		lines := strings.Split(content, "\n")
-//		var cleanedLines []string
-//
-//		// Track if we're inside a code block
-//		inCodeBlock := false
-//		var xmlContent strings.Builder
-//
-//		for _, line := range lines {
-//			// Handle code block boundaries
-//			if strings.Contains(line, "```") {
-//				inCodeBlock = !inCodeBlock
-//				continue // Skip the boundary line
-//			}
-//
-//			// If we're in a code block, collect XML content
-//			if inCodeBlock {
-//				xmlContent.WriteString(line + "\n")
-//				continue
-//			}
-//
-//			// Clean line-level markdown patterns
-//			cleaned := line
-//
-//			// Remove bold markers
-//			cleaned = strings.ReplaceAll(cleaned, "**", "")
-//
-//			// Remove header markers
-//			cleaned = strings.TrimLeft(cleaned, "#")
-//			cleaned = strings.TrimSpace(cleaned)
-//
-//			// Remove list markers
-//			cleaned = strings.TrimPrefix(cleaned, "- ")
-//			cleaned = strings.TrimPrefix(cleaned, "* ")
-//			cleaned = strings.TrimPrefix(cleaned, "> ")
-//
-//			// Only add non-empty lines
-//			if cleaned != "" {
-//				cleanedLines = append(cleanedLines, cleaned)
-//			}
-//		}
-//
-//		// Handle the case where we found XML content
-//		if xmlContent.Len() > 0 {
-//			return xmlContent.String()
-//		}
-//
-//		// Join cleaned lines back together
-//		return strings.TrimSpace(strings.Join(cleanedLines, "\n"))
-//	}
 func stripMarkdown(content string, signature core.Signature) string {
 	// Define a map to track each field's content
 	fieldContents := make(map[string][]string)
@@ -305,57 +254,6 @@ func preserveStructure(content []string) string {
 	return strings.Join(content, "\n")
 }
 
-//	func parseCompletion(completion string, signature core.Signature) map[string]any {
-//		outputs := make(map[string]any)
-//		completion = stripMarkdown(completion)
-//		logging.GetLogger().Info(context.Background(), "Normalized completion:  %s", completion)
-//
-//		lines := strings.Split(strings.TrimSpace(completion), "\n")
-//		var currentField *core.OutputField
-//		var contentLines []string
-//
-//		for i, line := range lines {
-//			line = strings.TrimSpace(line)
-//			if line == "" {
-//				continue
-//			}
-//
-//			// Try to match a field prefix
-//			for _, field := range signature.Outputs {
-//				prefix := strings.TrimSpace(field.Prefix)
-//				if prefix != "" && strings.HasPrefix(strings.ToLower(line), strings.ToLower(prefix)) {
-//					// If we were collecting content for a previous field, save it
-//					if currentField != nil && len(contentLines) > 0 {
-//						outputs[currentField.Name] = strings.TrimSpace(strings.Join(contentLines, "\n"))
-//					}
-//
-//					// Start collecting content for this new field
-//					currentField = &field
-//					contentLines = nil
-//					content := strings.TrimPrefix(line, field.Prefix)
-//					if content != "" {
-//						contentLines = append(contentLines, content)
-//					}
-//					continue
-//				}
-//			}
-//
-//			// If we have a current field and this isn't a prefix line, collect the content
-//			if currentField != nil {
-//				// Don't add the prefix line itself to the content
-//				if !strings.HasPrefix(strings.ToLower(line), strings.ToLower(currentField.Prefix)) {
-//					contentLines = append(contentLines, line)
-//				}
-//			}
-//
-//			// If this is the last line, save any remaining content
-//			if i == len(lines)-1 && currentField != nil && len(contentLines) > 0 {
-//				outputs[currentField.Name] = strings.TrimSpace(strings.Join(contentLines, "\n"))
-//			}
-//		}
-//
-//		return outputs
-//	}
 func parseCompletion(completion string, signature core.Signature) map[string]any {
 	outputs := make(map[string]any)
 
@@ -443,20 +341,6 @@ func preserveStructuredContent(content string) string {
 		return preserveXMLStructure(content)
 	}
 
-	// Handle JSON-like content
-	// if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
-	// 	(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
-	// 	// Preserve JSON formatting
-	// 	return preserveJSONStructure(content)
-	// }
-	//
-	// // Handle YAML-like content
-	// if strings.Contains(trimmed, ":") && !strings.Contains(trimmed, "<") {
-	// 	// Preserve YAML indentation
-	// 	return preserveYAMLStructure(content)
-	// }
-
-	// For unstructured content, clean up any remaining formatting issues
 	return cleanUnstructuredContent(content)
 }
 

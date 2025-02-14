@@ -1,5 +1,3 @@
-// modules/react.go
-
 package modules
 
 import (
@@ -9,6 +7,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
+// TODO: consistency with agent tooling
 type Tool interface {
 	CanHandle(action string) bool
 	Execute(ctx context.Context, action string) (string, error)
