@@ -177,8 +177,8 @@ func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *Flexibl
 		config:     config,
 		analyzer:   modules.NewPredict(analyzerSig),
 		processors: make(map[string]TaskProcessor),
-		parser:     config.TaskParser,  // Add this line
-		planner:    config.PlanCreator, // And this line
+		parser:     config.TaskParser,
+		planner:    config.PlanCreator,
 	}
 
 	// Register custom processors
