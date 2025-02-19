@@ -339,14 +339,12 @@ func filterRelevantAnnotations(annotations map[string]interface{}) map[string]in
 
 	// Define which annotations are meaningful for logging
 	relevantKeys := map[string]bool{
-		"status":      true,
-		"result":      true,
-		"error":       true,
-		"count":       true,
-		"score":       true,
-		"progress":    true,
-		"task":        true,
-		"token_usage": true,
+		"status":   true,
+		"result":   true,
+		"error":    true,
+		"count":    true,
+		"score":    true,
+		"progress": true,
 	}
 
 	for k, v := range annotations {
