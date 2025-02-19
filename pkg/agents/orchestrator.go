@@ -446,7 +446,7 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 // executeTask handles single task execution with retries.
 func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
 	logger := logging.GetLogger()
-	ctx, span := core.StartSpan(ctx, fmt.Sprintf("Task_%s", task.ID))
+	ctx, span := core.StartSpan(ctx, fmt.Sprintf("Task_%s_%s", task.ID, task.Type))
 	defer core.EndSpan(ctx)
 
 	// Add structured task information to span
@@ -458,34 +458,34 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 	})
 	processor, err := f.GetProcessor(task.ProcessorType)
 	if err != nil {
-		logger.Error(ctx, "Failed to get processor for task %s: %v",
-			task.ID, err)
+		logger.Error(ctx, "Failed to get processor for [task-%s-%s]: %v",
+			task.ID, task.Type, err)
 		span.WithError(err)
 		result.mu.Lock()
 		result.FailedTasks[task.ID] = err
 		result.mu.Unlock()
 		return err
 	}
-	logger.Debug(ctx, "Starting execution of task [%s] using processor [%T]",
-		task.ID, processor)
+	logger.Debug(ctx, "Starting execution of task [%s-%s] using processor [%T]",
+		task.ID, task.Type, processor)
 	// Apply retry logic if configured
 	var lastErr error
 	attempts := 1
 	if f.config.RetryConfig.MaxAttempts > 1 {
 		attempts = f.config.RetryConfig.MaxAttempts
 	}
-	logger.Debug(ctx, "Starting execution of task [%s] with max attempts [%d]", task.ID, attempts)
+	logger.Debug(ctx, "Starting execution of task [%s-%s] with max attempts [%d]", task.ID, task.Type, attempts)
 
 	for i := 0; i < attempts; i++ {
 		attemptCtx, _ := core.StartSpan(ctx, fmt.Sprintf("Attempt_%d", i+1))
-		logger.Debug(attemptCtx, "Processing task [%s] (attempt %d/%d) with context: %+v",
-			task.ID, i+1, attempts, taskContext)
+		logger.Debug(attemptCtx, "Processing task [%s-%s] (attempt %d/%d) with context: %+v",
+			task.ID, task.Type, i+1, attempts, taskContext)
 		taskResult, err := processor.Process(attemptCtx, task, taskContext)
 
 		logger.Debug(ctx, "task: %v with result: %v", task, taskResult)
 		if err == nil {
-			logger.Debug(attemptCtx, "Task [%s] completed successfully with result: %+v",
-				task.ID, taskResult)
+			logger.Debug(attemptCtx, "Task [%s-%s] completed successfully with result: %+v",
+				task.ID, task.Type, taskResult)
 
 			result.mu.Lock()
 			result.CompletedTasks[task.ID] = taskResult
@@ -500,8 +500,8 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 			backoff := time.Duration(float64(time.Second) *
 				math.Pow(f.config.RetryConfig.BackoffMultiplier, float64(i)))
 
-			logger.Warn(attemptCtx, "Task [%s] failed attempt %d/%d: %v. Retrying in %v",
-				task.ID, i+1, attempts, err, backoff)
+			logger.Warn(attemptCtx, "Task [%s-%s] failed attempt %d/%d: %v. Retrying in %v",
+				task.ID, task.Type, i+1, attempts, err, backoff)
 			time.Sleep(backoff)
 		}
 
@@ -512,7 +512,7 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 	result.FailedTasks[task.ID] = lastErr
 	result.mu.Unlock()
 
-	logger.Error(ctx, "Task [%s] failed all %d attempts", task.ID, attempts)
+	logger.Error(ctx, "Task [%s-%s] failed all %d attempts", task.ID, task.Type, attempts)
 	return lastErr
 }
 
