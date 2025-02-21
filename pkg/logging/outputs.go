@@ -259,6 +259,14 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 	}
 
 	spanInfo := fmt.Sprintf("%s%s %s", prefix, marker, span.Operation)
+	if chainInfo, ok := span.Annotations["chain_step"].(map[string]interface{}); ok {
+		if stepName, ok := chainInfo["name"].(string); ok {
+			spanInfo += fmt.Sprintf(" (step=%s)", stepName)
+		}
+		if stepIndex, ok := chainInfo["index"].(int); ok {
+			spanInfo += fmt.Sprintf(" [%d/%d]", stepIndex+1, chainInfo["total"].(int))
+		}
+	}
 
 	if taskInfo, ok := span.Annotations["task"].(map[string]interface{}); ok {
 		// Add processor type and task ID for better context

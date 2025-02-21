@@ -2,8 +2,10 @@ package workflows
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
@@ -27,8 +29,18 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 		state[k] = v
 	}
 
+	totalSteps := len(w.steps)
 	// Execute steps in sequence
-	for _, step := range w.steps {
+	for i, step := range w.steps {
+
+		stepCtx, stepSpan := core.StartSpan(ctx, fmt.Sprintf("ChainStep_%d", i))
+
+		stepSpan.WithAnnotation("chain_step", map[string]interface{}{
+			"name":  step.ID,
+			"index": i,
+			"total": totalSteps,
+		})
+
 		signature := step.Module.GetSignature()
 
 		// Create subset of state containing only the fields this step needs
@@ -40,14 +52,17 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 		}
 
 		// Execute the step
-		result, err := step.Execute(ctx, stepInputs)
+		result, err := step.Execute(stepCtx, stepInputs)
 
+		core.EndSpan(stepCtx)
 		if err != nil {
 			return nil, errors.WithFields(
 				errors.Wrap(err, errors.StepExecutionFailed, "step execution failed"),
 				errors.Fields{
 					"step_id": step.ID,
+					"step":    i + 1,
 					"inputs":  stepInputs,
+					"total":   totalSteps,
 				})
 		}
 
