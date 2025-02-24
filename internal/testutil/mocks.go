@@ -146,3 +146,78 @@ func (m *MockLLM) ProviderName() string {
 func (m *MockLLM) Capabilities() []core.Capability {
 	return []core.Capability{}
 }
+
+type MockTool struct {
+	mock.Mock
+	metadata *core.ToolMetadata // Holds static metadata for the mock tool
+}
+
+// NewMockTool creates a new mock tool with default metadata.
+func NewMockTool(name string) *MockTool {
+	return &MockTool{
+		metadata: &core.ToolMetadata{
+			Name:        name,
+			Description: "Mock tool for testing",
+			InputSchema: map[string]string{
+				"action": "string",
+			},
+			OutputSchema: map[string]string{
+				"result": "string",
+			},
+			Capabilities:  []string{"test"},
+			ContextNeeded: []string{"trace_id"},
+		},
+	}
+}
+
+// Metadata implements the Tool interface.
+func (m *MockTool) Metadata() *core.ToolMetadata {
+	args := m.Called()
+	if ret := args.Get(0); ret != nil {
+		return ret.(*core.ToolMetadata)
+	}
+	return m.metadata
+}
+
+// CanHandle implements the Tool interface.
+func (m *MockTool) CanHandle(ctx context.Context, intent string) bool {
+	args := m.Called(ctx, intent)
+	return args.Bool(0)
+}
+
+// Execute implements the Tool interface.
+func (m *MockTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+	args := m.Called(ctx, params)
+
+	// Handle the case where the mock is configured to return an error
+	if err := args.Error(1); err != nil {
+		return core.ToolResult{}, err
+	}
+
+	// Convert the result based on type
+	switch result := args.Get(0).(type) {
+	case core.ToolResult:
+		return result, nil
+	case string:
+		// Convert string results to ToolResult for backward compatibility
+		return core.ToolResult{
+			Data: result,
+			Metadata: map[string]interface{}{
+				"source": "mock_tool",
+			},
+		}, nil
+	default:
+		return core.ToolResult{
+			Data: result,
+			Metadata: map[string]interface{}{
+				"source": "mock_tool",
+			},
+		}, nil
+	}
+}
+
+// Validate implements the Tool interface.
+func (m *MockTool) Validate(params map[string]interface{}) error {
+	args := m.Called(params)
+	return args.Error(0)
+}

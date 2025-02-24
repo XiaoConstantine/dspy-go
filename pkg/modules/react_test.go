@@ -11,27 +11,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// MockTool is a mock implementation of the Tool interface.
-type MockTool struct {
-	mock.Mock
-}
-
-func (m *MockTool) CanHandle(action string) bool {
-	args := m.Called(action)
-	return args.Bool(0)
-}
-
-func (m *MockTool) Execute(ctx context.Context, action string) (string, error) {
-	args := m.Called(ctx, action)
-	return args.String(0), args.Error(1)
-}
-
 func TestReAct(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
 	// Create a mock Tool
-	mockTool := new(MockTool)
+	mockTool := testutil.NewMockTool("mock")
+	toolMetadata := &core.ToolMetadata{
+		Name:        "test_tool",
+		Description: "A test tool",
+		InputSchema: map[string]string{
+			"question": "string",
+			"action":   "string",
+		},
+		Capabilities: []string{"test", "use_tool"},
+	}
+	mockTool.On("Metadata").Return(toolMetadata)
+	mockTool.On("CanHandle", mock.Anything, "use_tool").Return(true)
+
+	mockTool.On("Validate", mock.Anything).Return(nil)
+	mockTool.On("Execute", mock.Anything, mock.Anything).Return(
+		core.ToolResult{
+			Data: "Tool execution result",
+			Metadata: map[string]interface{}{
+				"status": "success",
+			},
+		},
+		nil,
+	)
 
 	resp1Content := `
 	thought:
@@ -72,15 +79,13 @@ func TestReAct(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp1, nil).Once()
 
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp2, nil).Once()
-	mockTool.On("CanHandle", "use_tool").Return(true)
-	mockTool.On("Execute", mock.Anything, "use_tool").Return("Tool output", nil)
 
 	// Create a ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	react := NewReAct(signature, []Tool{mockTool}, 5)
+	react := NewReAct(signature, []core.Tool{mockTool}, 5)
 	react.SetLLM(mockLLM)
 
 	// Test the Process method
