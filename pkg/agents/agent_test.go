@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -43,9 +45,9 @@ func (m *MockAgent) Execute(ctx context.Context, input map[string]interface{}) (
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
-func (m *MockAgent) GetCapabilities() []Tool {
+func (m *MockAgent) GetCapabilities() []core.Tool {
 	args := m.Called()
-	return args.Get(0).([]Tool)
+	return args.Get(0).([]core.Tool)
 }
 
 func (m *MockAgent) GetMemory() Memory {
@@ -56,7 +58,7 @@ func (m *MockAgent) GetMemory() Memory {
 func TestAgentInterface(t *testing.T) {
 	t.Run("MockAgent Implementation", func(t *testing.T) {
 		mockAgent := new(MockAgent)
-		mockTool := new(MockTool)
+		mockTool := testutil.NewMockTool("test_tool")
 		mockMemory := NewInMemoryStore()
 
 		// Setup expectations
@@ -64,7 +66,7 @@ func TestAgentInterface(t *testing.T) {
 			"result": "success",
 		}
 		mockAgent.On("Execute", mock.Anything, mock.Anything).Return(expectedOutput, nil)
-		mockAgent.On("GetCapabilities").Return([]Tool{mockTool})
+		mockAgent.On("GetCapabilities").Return([]core.Tool{mockTool})
 		mockAgent.On("GetMemory").Return(mockMemory)
 
 		// Test Execute
