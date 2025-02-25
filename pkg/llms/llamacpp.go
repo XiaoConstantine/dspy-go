@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
@@ -110,12 +111,20 @@ func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...co
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return &core.LLMResponse{}, fmt.Errorf("failed to marshal request body: %w", err)
+		return &core.LLMResponse{}, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			errors.Fields{
+				"model": o.ModelID(),
+			})
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", o.GetEndpointConfig().BaseURL+"/completion", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return &core.LLMResponse{}, fmt.Errorf("failed to create request: %w", err)
+		return &core.LLMResponse{}, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.Fields{
+				"model": o.ModelID(),
+			})
 	}
 
 	for key, value := range o.GetEndpointConfig().Headers {
@@ -124,22 +133,43 @@ func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...co
 
 	resp, err := o.GetHTTPClient().Do(req)
 	if err != nil {
-		return &core.LLMResponse{}, fmt.Errorf("failed to send request: %w", err)
+		return &core.LLMResponse{}, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
+			errors.Fields{
+				"model": o.ModelID(),
+			})
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return &core.LLMResponse{}, fmt.Errorf("failed to read response body: %w", err)
+		return &core.LLMResponse{}, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
+			errors.Fields{
+				"model": o.ModelID(),
+			})
+
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return &core.LLMResponse{}, fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
+		return &core.LLMResponse{}, errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d", resp.StatusCode)),
+			errors.Fields{
+				"model":         o.ModelID(),
+				"status_code":   resp.StatusCode,
+				"response_body": string(body),
+			})
 	}
 	var llamacppResp llamacppResponse
 	err = json.Unmarshal(body, &llamacppResp)
 	if err != nil {
-		return &core.LLMResponse{}, fmt.Errorf("failed to unmarshal response: %w", err)
+		return &core.LLMResponse{}, errors.WithFields(
+			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
+			errors.Fields{
+				"resp":  body[:50],
+				"model": o.ModelID(),
+			})
+
 	}
 	// Create token info if available
 	tokenInfo := &core.TokenInfo{
