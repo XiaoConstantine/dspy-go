@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -164,8 +165,7 @@ func (b *BootstrapFewShot) enoughBootstrappedDemos(program core.Program) bool {
 
 func (b *BootstrapFewShot) addDemonstrations(program core.Program, demo core.Example, ctx context.Context) error {
 	if ctx == nil {
-		return fmt.Errorf("cannot add demonstrations: context is nil")
-
+		return errors.New(errors.InvalidInput, "cannot add demonstrations: context is nil")
 	}
 
 	ctx, span := core.StartSpan(ctx, "AddDemonstrations")
@@ -190,8 +190,14 @@ func (b *BootstrapFewShot) addDemonstrations(program core.Program, demo core.Exa
 		} else {
 			span.WithAnnotation("skipped_module", moduleName)
 			span.WithAnnotation("reason", "max_demos_reached")
-			return fmt.Errorf("max demonstrations reached for module %s", moduleName)
+			return errors.WithFields(
+				errors.New(errors.ResourceExhausted, fmt.Sprintf("max demonstrations reached for module %s", moduleName)),
+				errors.Fields{
+					"module":        moduleName,
+					"max_demos":     b.MaxBootstrapped,
+					"current_demos": len(currentDemos),
+				})
 		}
 	}
-	return fmt.Errorf("no suitable module found for adding demonstrations")
+	return errors.New(errors.ResourceNotFound, "no suitable module found for adding demonstrations")
 }
