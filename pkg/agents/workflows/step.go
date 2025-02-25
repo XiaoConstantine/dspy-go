@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // Step represents a single unit of computation in a workflow. Each step wraps a DSPy
@@ -61,12 +62,20 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 
 	// First validate that we have all required inputs
 	if err := s.validateInputs(inputs, signature); err != nil {
-		return nil, fmt.Errorf("input validation failed: %w", err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "input validation failed"),
+			errors.Fields{
+				"step_id":    s.ID,
+				"input_keys": getKeysAsArray(inputs),
+			})
 	}
-
 	// Check if step's condition allows execution
 	if s.Condition != nil && !s.Condition(inputs) {
-		return nil, ErrStepConditionFailed
+		return nil, errors.WithFields(
+			ErrStepConditionFailed,
+			errors.Fields{
+				"step_id": s.ID,
+			})
 	}
 
 	var result *StepResult
@@ -80,14 +89,23 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("step %s execution failed: %w", s.ID, err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.StepExecutionFailed, fmt.Sprintf("step %s execution failed", s.ID)),
+			errors.Fields{
+				"step_id":          s.ID,
+				"retry_configured": s.RetryConfig != nil,
+			})
 	}
 
 	// Validate outputs match expected fields
 	if err := s.validateOutputs(result.Outputs, signature); err != nil {
-		return nil, fmt.Errorf("output validation failed: %w", err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "output validation failed"),
+			errors.Fields{
+				"step_id":     s.ID,
+				"output_keys": getKeysAsArray(result.Outputs),
+			})
 	}
-
 	return result, nil
 }
 
@@ -119,7 +137,7 @@ func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]interface
 	for attempt := 0; attempt < s.RetryConfig.MaxAttempts; attempt++ {
 
 		if err := checkCtxErr(ctx); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, errors.Canceled, "context canceled before executing step")
 		}
 		result, err := s.executeOnce(ctx, inputs)
 		if err == nil {
@@ -132,19 +150,29 @@ func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]interface
 			math.Pow(s.RetryConfig.BackoffMultiplier, float64(attempt)))
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errors.Wrap(ctx.Err(), errors.Canceled, "context canceled during retry backoff")
 		case <-time.After(backoffDuration):
 			continue
 		}
 	}
-	return nil, fmt.Errorf("max retry attempts reached: %w", lastErr)
+	return nil, errors.WithFields(
+		errors.Wrap(lastErr, errors.StepExecutionFailed, "max retry attempts reached"),
+		errors.Fields{
+			"step_id":      s.ID,
+			"max_attempts": s.RetryConfig.MaxAttempts,
+		})
 }
 
 // validateInputs checks if all required input fields are present.
 func (s *Step) validateInputs(inputs map[string]interface{}, signature core.Signature) error {
 	for _, field := range signature.Inputs {
 		if _, ok := inputs[field.Name]; !ok {
-			return fmt.Errorf("missing required input field: %s", field)
+			return errors.WithFields(
+				errors.New(errors.InvalidInput, fmt.Sprintf("missing required input field: %s", field.Name)),
+				errors.Fields{
+					"field_name": field.Name,
+					"step_id":    s.ID,
+				})
 		}
 	}
 	return nil
@@ -154,7 +182,13 @@ func (s *Step) validateInputs(inputs map[string]interface{}, signature core.Sign
 func (s *Step) validateOutputs(outputs map[string]interface{}, signature core.Signature) error {
 	for _, field := range signature.Outputs {
 		if _, ok := outputs[field.Name]; !ok {
-			return fmt.Errorf("missing required output field: %s", field)
+			return errors.WithFields(
+				errors.New(errors.InvalidResponse, fmt.Sprintf("missing required output field: %s", field.Name)),
+				errors.Fields{
+					"field_name":        field.Name,
+					"step_id":           s.ID,
+					"available_outputs": getKeysAsArray(outputs),
+				})
 		}
 	}
 	return nil
@@ -167,4 +201,12 @@ func checkCtxErr(ctx context.Context) error {
 	default:
 		return nil
 	}
+}
+
+func getKeysAsArray(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
