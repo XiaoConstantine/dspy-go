@@ -27,6 +27,23 @@ type geminiRequest struct {
 	GenerationConfig geminiGenerationConfig `json:"generationConfig,omitempty"`
 }
 
+// Add this to your existing geminiRequest struct or create a new one for function calling.
+type geminiRequestWithFunction struct {
+	Contents         []geminiContent        `json:"contents"`
+	Tools            []geminiTool           `json:"tools,omitempty"`
+	GenerationConfig geminiGenerationConfig `json:"generationConfig,omitempty"`
+}
+
+// Add these new types to support function calling.
+type geminiTool struct {
+	FunctionDeclarations []geminiFunctionDeclaration `json:"function_declarations"`
+}
+
+type geminiFunctionDeclaration struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
 type geminiContent struct {
 	Parts []geminiPart `json:"parts"`
 	Role  string       `json:"role,omitempty"`
@@ -56,6 +73,26 @@ type geminiResponse struct {
 		CandidatesTokenCount int `json:"candidatesTokenCount"`
 		TotalTokenCount      int `json:"totalTokenCount"`
 	} `json:"usageMetadata"`
+}
+
+type geminiFunctionResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text         string              `json:"text,omitempty"`
+				FunctionCall *geminiFunctionCall `json:"function_call,omitempty"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+	UsageMetadata struct {
+		PromptTokenCount     int `json:"promptTokenCount"`
+		CandidatesTokenCount int `json:"candidatesTokenCount"`
+		TotalTokenCount      int `json:"totalTokenCount"`
+	} `json:"usageMetadata"`
+}
+type geminiFunctionCall struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
 }
 
 // Request and response structures for Gemini embeddings.
@@ -267,6 +304,187 @@ func (g *GeminiLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 	}
 
 	return utils.ParseJSONResponse(response.Content)
+}
+
+// Implement the GenerateWithFunctions method for GeminiLLM.
+func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	// Convert the generic function schemas to Gemini's format
+	functionDeclarations := make([]geminiFunctionDeclaration, 0, len(functions))
+	for _, function := range functions {
+		name, ok := function["name"].(string)
+		if !ok {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "function schema missing 'name' field"),
+				errors.Fields{
+					"function": function,
+				})
+		}
+
+		description := ""
+		if desc, ok := function["description"].(string); ok {
+			description = desc
+		}
+
+		parameters, ok := function["parameters"].(map[string]interface{})
+		if !ok {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "function schema missing 'parameters' field"),
+				errors.Fields{
+					"function": function,
+				})
+		}
+
+		functionDeclarations = append(functionDeclarations, geminiFunctionDeclaration{
+			Name:        name,
+			Description: description,
+			Parameters:  parameters,
+		})
+	}
+
+	// Create the request body with functions
+	reqBody := geminiRequestWithFunction{
+		Contents: []geminiContent{
+			{
+				Parts: []geminiPart{
+					{Text: prompt},
+				},
+			},
+		},
+		Tools: []geminiTool{
+			{
+				FunctionDeclarations: functionDeclarations,
+			},
+		},
+		GenerationConfig: geminiGenerationConfig{
+			Temperature:     opts.Temperature,
+			MaxOutputTokens: opts.MaxTokens,
+			TopP:            opts.TopP,
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			errors.Fields{
+				"prompt": prompt,
+				"model":  g.ModelID(),
+			})
+	}
+
+	// Create the request URL
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		constructRequestURL(g.GetEndpointConfig(), g.apiKey),
+		bytes.NewBuffer(jsonData),
+	)
+
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	// Set headers
+	for key, value := range g.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Send the request
+	resp, err := g.GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+	defer resp.Body.Close()
+
+	// Read and process the response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
+			errors.Fields{
+				"model":      g.ModelID(),
+				"statusCode": resp.StatusCode,
+			})
+	}
+
+	// Parse the response
+	var geminiResp geminiFunctionResponse
+	if err := json.Unmarshal(body, &geminiResp); err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
+			errors.Fields{
+				"model": g.ModelID(),
+				"body":  string(body),
+			})
+	}
+
+	if len(geminiResp.Candidates) == 0 {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "no candidates in response"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	// Extract usage information
+	usage := &core.TokenInfo{
+		PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
+		CompletionTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
+		TotalTokens:      geminiResp.UsageMetadata.TotalTokenCount,
+	}
+
+	// Process the response to extract function call if present
+	result := make(map[string]interface{})
+
+	// Check if there was a function call
+	if len(geminiResp.Candidates[0].Content.Parts) > 0 {
+		part := geminiResp.Candidates[0].Content.Parts[0]
+
+		// Check if this part contains a function call
+		if part.FunctionCall != nil {
+			// Extract function call information
+			result["function_call"] = map[string]interface{}{
+				"name":      part.FunctionCall.Name,
+				"arguments": part.FunctionCall.Arguments,
+			}
+		}
+
+		// Include text content if available
+		if part.Text != "" {
+			result["content"] = part.Text
+		}
+	}
+
+	// If no content or function call was found, add a default message
+	if len(result) == 0 {
+		result["content"] = "No content or function call received from model"
+	}
+
+	// Add token usage information
+	result["_usage"] = usage
+
+	return result, nil
 }
 
 func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {

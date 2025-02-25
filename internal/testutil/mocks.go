@@ -64,6 +64,10 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...c
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
 // CreateEmbedding mocks the single embedding creation following the same pattern as Generate.
 func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
 	// Record the method call and get the mock results
