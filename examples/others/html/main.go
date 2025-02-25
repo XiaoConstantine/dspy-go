@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
