@@ -190,6 +190,10 @@ func (o *LlamacppLLM) GenerateWithJSON(ctx context.Context, prompt string, optio
 	return utils.ParseJSONResponse(response.Content)
 }
 
+func (o *LlamacppLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+	panic("Not implemented")
+}
+
 func (o *LlamacppLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
 	// Apply options
 	opts := core.NewEmbeddingOptions()

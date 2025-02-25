@@ -18,6 +18,10 @@ func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options .
 	return map[string]interface{}{"response": "mock response"}, nil
 }
 
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
 func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error) {
 	return &EmbeddingResult{
 		// Using float32 for the vector as embeddings are typically floating point numbers

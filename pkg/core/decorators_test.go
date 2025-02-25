@@ -21,6 +21,10 @@ func (m *MockBaseLLM) Generate(ctx context.Context, prompt string, options ...Ge
 	return nil, args.Error(1)
 }
 
+func (m *MockBaseLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
 func (m *MockBaseLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
 	args := m.Called(ctx, prompt, options)
 	return args.Get(0).(map[string]interface{}), args.Error(1)

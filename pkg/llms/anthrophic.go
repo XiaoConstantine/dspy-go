@@ -104,6 +104,10 @@ func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, opti
 	return utils.ParseJSONResponse(response.Content)
 }
 
+func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+	panic("Not implemented")
+}
+
 func (a *AnthropicLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
 	// Anthropic does not provide embedding api directly, but go through voyage
 	return nil, nil
