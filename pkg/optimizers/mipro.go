@@ -6,6 +6,7 @@ import (
 	"math/rand"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
@@ -83,7 +84,6 @@ type Trial struct {
 }
 
 func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
-
 	if core.GetExecutionState(ctx) == nil {
 		ctx = core.WithExecutionState(ctx)
 	}
@@ -116,7 +116,9 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 		trial := m.generateTrial(program.GetModules(), len(instructionCandidates), len(demoCandidates))
 		candidateProgram := m.constructProgram(program, trial, instructionCandidates, demoCandidates)
 
-		score, err := m.evaluateProgram(ctx, candidateProgram, dataset, metric)
+		score, err := m.evaluateProgram(trialsCtx, candidateProgram, dataset, metric)
+
+		logging.GetLogger().Info(trialCtx, "RAW SCORE FROM EVALUATION: %.2f", score)
 		if err != nil {
 			trialSpan.WithError(err)
 			compilationError = err
@@ -125,6 +127,8 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 		}
 
 		trial.Score = score
+
+		logging.GetLogger().Info(trialCtx, "TRIAL SCORE AFTER ASSIGNMENT: %.2f", trial.Score)
 		trialSpan.WithAnnotation("score", score)
 
 		if score > bestTrial.Score || i == 0 {
@@ -186,6 +190,12 @@ func (m *MIPRO) constructProgram(baseProgram core.Program, trial Trial, instruct
 }
 
 func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (float64, error) {
+
+	logger := logging.GetLogger()
+
+	logger.Info(ctx, "MIPRO evaluateProgram: Using metric function: %v", m.Metric != nil)
+
+	logger.Info(ctx, "MIPRO evaluateProgram: Using provided metric: %v", metric != nil)
 	totalScore := 0.0
 	count := 0
 	ctx = core.WithExecutionState(ctx)
@@ -204,7 +214,7 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 		// Create a context for each example evaluation
 		exampleCtx, exampleSpan := core.StartSpan(ctx, "EvaluateExample")
 		exampleSpan.WithAnnotation("example_inputs", example.Inputs)
-		prediction, err := program.Execute(ctx, example.Inputs)
+		prediction, err := program.Execute(exampleCtx, example.Inputs)
 		if err != nil {
 			exampleSpan.WithError(err)
 			core.EndSpan(exampleCtx)
@@ -212,7 +222,24 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 		}
 		exampleSpan.WithAnnotation("prediction", prediction)
 		metricCtx, metricSpan := core.StartSpan(exampleCtx, "MetricEvaluation")
-		score := m.Metric(example.Inputs, prediction, metricCtx)
+
+		// First, try to use the context-aware metric if available
+		var score float64
+		if m.Metric != nil {
+			exampleMap := map[string]interface{}{}
+			for k, v := range example.Inputs {
+				exampleMap[k] = v
+			}
+			score = m.Metric(exampleMap, prediction, metricCtx)
+		} else if metric != nil {
+			// Fall back to the provided non-context metric
+			score = metric(example.Outputs, prediction)
+		} else {
+			// No metrics available
+			score = 0.0
+		}
+
+		logging.GetLogger().Info(ctx, "SCORE FROM METRIC: %.2f", score)
 		metricSpan.WithAnnotation("score", score)
 		core.EndSpan(metricCtx)
 		totalScore += score
@@ -255,17 +282,32 @@ func (m *MIPRO) generateDemoCandidates(program core.Program, dataset core.Datase
 	candidates := make([][][]core.Example, len(program.GetModules()))
 	for i, module := range program.GetModules() {
 		if _, ok := module.(*modules.Predict); ok {
+			dataset.Reset()
 			candidates[i] = make([][]core.Example, m.NumCandidates)
 			for j := 0; j < m.NumCandidates; j++ {
-				demos := make([]core.Example, m.MaxBootstrappedDemos+m.MaxLabeledDemos)
+				var demos []core.Example
 				for k := 0; k < m.MaxBootstrappedDemos; k++ {
 					example, ok := dataset.Next()
 					if !ok {
 						dataset.Reset()
 						example, _ = dataset.Next()
+						if !ok {
+							break // No examples available
+						}
 					}
-					demos[k] = example
+					if len(example.Outputs) > 0 {
+						demos = append(demos, example)
+					}
 				}
+				// Add any existing examples up to the maximum
+				for len(demos) < m.MaxBootstrappedDemos+m.MaxLabeledDemos {
+					if len(demos) == 0 {
+						break // No examples available
+					}
+					// Reuse an existing example (in practice we would bootstrap with model)
+					demos = append(demos, demos[0])
+				}
+
 				candidates[i][j] = demos
 			}
 		}
