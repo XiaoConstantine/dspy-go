@@ -12,6 +12,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
@@ -308,6 +309,7 @@ func (g *GeminiLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 
 // Implement the GenerateWithFunctions method for GeminiLLM.
 func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+	logger := logging.GetLogger()
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -353,6 +355,7 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 				Parts: []geminiPart{
 					{Text: prompt},
 				},
+				Role: "user",
 			},
 		},
 		Tools: []geminiTool{
@@ -366,6 +369,8 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 			TopP:            opts.TopP,
 		},
 	}
+	requestJSON, _ := json.MarshalIndent(reqBody, "", "  ")
+	logger.Debug(ctx, "Function call request JSON: %s", string(requestJSON))
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -427,6 +432,8 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 				"statusCode": resp.StatusCode,
 			})
 	}
+
+	logger.Debug(ctx, "Raw Gemini response: %s", string(body))
 
 	// Parse the response
 	var geminiResp geminiFunctionResponse
