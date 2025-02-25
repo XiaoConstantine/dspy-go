@@ -17,7 +17,7 @@ const (
 	Timeout
 	RateLimitExceeded
 	Canceled
-
+	ResourceExhausted // For scenarios where a resource limit is reached
 	// LLM specific errors.
 	LLMGenerationFailed
 	TokenLimitExceeded
