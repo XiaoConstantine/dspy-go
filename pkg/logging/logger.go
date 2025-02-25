@@ -143,6 +143,32 @@ func (l *Logger) Error(ctx context.Context, format string, args ...interface{}) 
 	l.logf(ctx, ERROR, format, args...)
 }
 
+func (l *Logger) Fatal(ctx context.Context, msg string) {
+	l.logf(ctx, FATAL, msg)
+
+	// Ensure all logs are written
+	for _, out := range l.outputs {
+		_ = out.Sync()
+		_ = out.Close()
+	}
+
+	// Exit the program with status code 1
+	os.Exit(1)
+}
+
+func (l *Logger) Fatalf(ctx context.Context, format string, args ...interface{}) {
+	l.logf(ctx, FATAL, format, args...)
+
+	// Ensure all logs are written
+	for _, out := range l.outputs {
+		_ = out.Sync()
+		_ = out.Close()
+	}
+
+	// Exit the program with status code 1
+	os.Exit(1)
+}
+
 // GetLogger returns the global logger instance.
 func GetLogger() *Logger {
 	// First try reading without a write lock
