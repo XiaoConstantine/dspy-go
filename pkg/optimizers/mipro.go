@@ -87,17 +87,18 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	if core.GetExecutionState(ctx) == nil {
 		ctx = core.WithExecutionState(ctx)
 	}
-	ctx, compilationSpan := core.StartSpan(ctx, "MIPROCompilation")
-	defer core.EndSpan(ctx)
+	compileCtx, compilationSpan := core.StartSpan(ctx, "MIPROCompilation")
+	defer core.EndSpan(compileCtx)
 
-	instructionCandidates, err := m.generateInstructionCandidates(ctx, program, dataset)
+	dataset.Reset()
+	instructionCandidates, err := m.generateInstructionCandidates(compileCtx, program, dataset)
 	if err != nil {
 
 		compilationSpan.WithError(err)
 		return program, fmt.Errorf("failed to generate instruction candidates: %w", err)
 	}
 
-	demoCandidates, err := m.generateDemoCandidates(program, dataset)
+	demoCandidates, err := m.generateDemoCandidates(compileCtx, program, dataset)
 	if err != nil {
 
 		compilationSpan.WithError(err)
@@ -112,13 +113,15 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	for i := 0; i < m.NumTrials; i++ {
 
 		trialCtx, trialSpan := core.StartSpan(trialsCtx, fmt.Sprintf("Trial_%d", i))
-		dataset.Reset()
 		trial := m.generateTrial(program.GetModules(), len(instructionCandidates), len(demoCandidates))
 		candidateProgram := m.constructProgram(program, trial, instructionCandidates, demoCandidates)
+		// Reset dataset before evaluation to ensure consistent starting point
+		if i == 0 || i%m.FullEvalSteps == 0 {
+			dataset.Reset()
+		}
 
 		score, err := m.evaluateProgram(trialsCtx, candidateProgram, dataset, metric)
 
-		logging.GetLogger().Info(trialCtx, "RAW SCORE FROM EVALUATION: %.2f", score)
 		if err != nil {
 			trialSpan.WithError(err)
 			compilationError = err
@@ -128,7 +131,6 @@ func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.
 
 		trial.Score = score
 
-		logging.GetLogger().Info(trialCtx, "TRIAL SCORE AFTER ASSIGNMENT: %.2f", trial.Score)
 		trialSpan.WithAnnotation("score", score)
 
 		if score > bestTrial.Score || i == 0 {
@@ -193,9 +195,8 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 
 	logger := logging.GetLogger()
 
-	logger.Info(ctx, "MIPRO evaluateProgram: Using metric function: %v", m.Metric != nil)
+	logger.Debug(ctx, "MIPRO evaluateProgram: Using metric function: %v", m.Metric != nil)
 
-	logger.Info(ctx, "MIPRO evaluateProgram: Using provided metric: %v", metric != nil)
 	totalScore := 0.0
 	count := 0
 	ctx = core.WithExecutionState(ctx)
@@ -239,7 +240,7 @@ func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, datas
 			score = 0.0
 		}
 
-		logging.GetLogger().Info(ctx, "SCORE FROM METRIC: %.2f", score)
+		logger.Debug(ctx, "SCORE FROM METRIC: %.2f", score)
 		metricSpan.WithAnnotation("score", score)
 		core.EndSpan(metricCtx)
 		totalScore += score
@@ -278,34 +279,42 @@ func (m *MIPRO) generateInstructionCandidates(ctx context.Context, program core.
 	return candidates, nil
 }
 
-func (m *MIPRO) generateDemoCandidates(program core.Program, dataset core.Dataset) ([][][]core.Example, error) {
+func (m *MIPRO) generateDemoCandidates(ctx context.Context, program core.Program, dataset core.Dataset) ([][][]core.Example, error) {
 	candidates := make([][][]core.Example, len(program.GetModules()))
+	logger := logging.GetLogger()
+
+	// Collect examples just once
+	var allExamples []core.Example
+	maxNeeded := m.MaxBootstrappedDemos + m.MaxLabeledDemos
+
+	// We won't reset the dataset here - it should already be at the beginning
+	for i := 0; i < maxNeeded*m.NumCandidates; i++ {
+		example, ok := dataset.Next()
+		if !ok {
+			break
+		}
+		if len(example.Outputs) > 0 {
+			allExamples = append(allExamples, example)
+		}
+	}
+
+	if len(allExamples) == 0 {
+		return nil, fmt.Errorf("no valid examples found in dataset")
+	}
+
+	logger.Debug(ctx, "Collected %d examples for demo generation", len(allExamples))
+
 	for i, module := range program.GetModules() {
 		if _, ok := module.(*modules.Predict); ok {
-			dataset.Reset()
 			candidates[i] = make([][]core.Example, m.NumCandidates)
 			for j := 0; j < m.NumCandidates; j++ {
-				var demos []core.Example
-				for k := 0; k < m.MaxBootstrappedDemos; k++ {
-					example, ok := dataset.Next()
-					if !ok {
-						dataset.Reset()
-						example, _ = dataset.Next()
-						if !ok {
-							break // No examples available
-						}
-					}
-					if len(example.Outputs) > 0 {
-						demos = append(demos, example)
-					}
-				}
-				// Add any existing examples up to the maximum
-				for len(demos) < m.MaxBootstrappedDemos+m.MaxLabeledDemos {
-					if len(demos) == 0 {
-						break // No examples available
-					}
-					// Reuse an existing example (in practice we would bootstrap with model)
-					demos = append(demos, demos[0])
+
+				demos := make([]core.Example, 0, maxNeeded)
+
+				startIdx := (j * maxNeeded) % len(allExamples)
+				for k := 0; k < min(maxNeeded, len(allExamples)); k++ {
+					idx := (startIdx + k) % len(allExamples)
+					demos = append(demos, allExamples[idx])
 				}
 
 				candidates[i][j] = demos

@@ -48,7 +48,7 @@ func TestMIPRO_Compile(t *testing.T) {
 	// Set up expectations for the dataset
 	mockDataset.On("Next").Return(core.Example{}, true).Times(len(mockDataset.Examples) * 2) // Allow for 2 trials
 	mockDataset.On("Next").Return(core.Example{}, false).Maybe()
-	mockDataset.On("Reset").Return().Times(3) // Expect Reset to be called for each trial
+	mockDataset.On("Reset").Return().Times(2) // Expect Reset to be called for each trial
 
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return("Instruction", nil)
 	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"output": "result"}, nil)
@@ -153,7 +153,7 @@ func TestMIPRO_CompileErrors(t *testing.T) {
 
 		_, err := mipro.Compile(ctx, program, emptyDataset, metricWrapper)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no examples")
+		assert.Contains(t, err.Error(), "no valid examples")
 
 		mockLLM.AssertExpectations(t)
 		emptyDataset.AssertExpectations(t)
@@ -343,7 +343,7 @@ func TestMIPRO_generateDemoCandidates(t *testing.T) {
 		nil,
 	)
 
-	candidates, err := mipro.generateDemoCandidates(program, mockDataset)
+	candidates, err := mipro.generateDemoCandidates(context.Background(), program, mockDataset)
 
 	assert.NoError(t, err)
 	assert.Len(t, candidates, 1)
