@@ -3,13 +3,11 @@ module github.com/XiaoConstantine/dspy-go
 go 1.22.5
 
 require (
-	github.com/XiaoConstantine/anthropic-go v0.0.7
+	github.com/XiaoConstantine/anthropic-go v0.0.8
 	github.com/apache/arrow/go/v13 v13.0.0
-	github.com/google/go-github/v68 v68.0.0
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/oauth2 v0.25.0
 )
 
 require (
@@ -21,7 +19,6 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/compress v1.15.15 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
