@@ -325,7 +325,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		if err != nil {
 			lastErr = err
 			attemptSpan.WithError(err)
-			logger.Warn(attemptCtx, "Analysis attempt %d failed: %v", attempt+1, err)
+			logger.Debug(attemptCtx, "Analysis attempt %d failed: %v", attempt+1, err)
 			core.EndSpan(attemptCtx)
 
 			// Calculate backoff duration if configured
@@ -355,7 +355,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 					"attempt": attempt + 1,
 				})
 			attemptSpan.WithError(lastErr)
-			logger.Warn(attemptCtx, "Task parsing failed in attempt %d: %v", attempt+1, err)
+			logger.Debug(attemptCtx, "Task parsing failed in attempt %d: %v", attempt+1, err)
 			core.EndSpan(attemptCtx)
 			continue
 		}
@@ -364,7 +364,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		if !ok {
 			lastErr = errors.New(errors.InvalidResponse, "invalid analysis format in analyzer output")
 			attemptSpan.WithError(lastErr)
-			logger.Warn(attemptCtx, "Invalid analysis format in attempt %d", attempt+1)
+			logger.Debug(attemptCtx, "Invalid analysis format in attempt %d", attempt+1)
 			core.EndSpan(attemptCtx)
 			continue
 		}
@@ -500,7 +500,7 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 			backoff := time.Duration(float64(time.Second) *
 				math.Pow(f.config.RetryConfig.BackoffMultiplier, float64(i)))
 
-			logger.Warn(attemptCtx, "Task [%s-%s] failed attempt %d/%d: %v. Retrying in %v",
+			logger.Debug(attemptCtx, "Task [%s-%s] failed attempt %d/%d: %v. Retrying in %v",
 				task.ID, task.Type, i+1, attempts, err, backoff)
 			time.Sleep(backoff)
 		}
