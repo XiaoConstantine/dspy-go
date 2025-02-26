@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -336,17 +338,28 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 func main() {
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))
 
+	fileOutput, err := logging.NewFileOutput(
+		filepath.Join(".", "dspy.log"),
+		logging.WithRotation(10*1024*1024, 5), // 10MB max size, keep 5 files
+		logging.WithJSONFormat(true),          // Use JSON format
+	)
+	if err != nil {
+		fmt.Printf("Failed to create file output: %v\n", err)
+		os.Exit(1)
+	}
 	logger := logging.NewLogger(logging.Config{
 		Severity: logging.DEBUG,
-		Outputs:  []logging.Output{output},
+		Outputs:  []logging.Output{output, fileOutput},
 	})
 	logging.SetLogger(logger)
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
 
 	ctx := core.WithExecutionState(context.Background())
-
+	logger.Info(ctx, "Starting application")
+	logger.Debug(ctx, "This is a debug message")
+	logger.Warn(ctx, "This is a warning message")
 	llms.EnsureFactory()
-	err := core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
+	err = core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
