@@ -14,6 +14,14 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
+type fileWriter interface {
+	Write(p []byte) (n int, err error)
+	WriteString(s string) (n int, err error)
+	Sync() error
+	Close() error
+	Stat() (os.FileInfo, error)
+}
+
 // ConsoleOutput formats logs for human readability.
 type ConsoleOutput struct {
 	mu     sync.Mutex
@@ -24,7 +32,7 @@ type ConsoleOutput struct {
 // FileOutput formats logs and writes them to a file.
 type FileOutput struct {
 	mu         sync.Mutex
-	file       *os.File
+	file       fileWriter
 	path       string
 	formatter  LogFormatter
 	jsonFormat bool
@@ -220,11 +228,13 @@ func (f *FileOutput) Write(e LogEntry) error {
 	formatted := f.formatter.Format(e)
 	formatted = formatted + "\n" // Add newline
 
+	entrySize := int64(len(formatted))
 	// Check if we need to rotate the file
-	if f.rotateSize > 0 && f.curSize+int64(len(formatted)) > f.rotateSize {
+	if f.rotateSize > 0 && (f.curSize+entrySize) >= f.rotateSize {
 		if err := f.rotate(); err != nil {
 			return fmt.Errorf("failed to rotate log file: %w", err)
 		}
+		f.curSize = 0
 	}
 
 	// Write to the file
