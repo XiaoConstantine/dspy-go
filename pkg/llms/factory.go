@@ -32,7 +32,7 @@ func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	switch {
 	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus:
 		llm, err = NewAnthropicLLM(apiKey, anthropic.ModelID(modelID))
-	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashThinking:
+	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashThinking || modelID == core.ModelGoogleGeminiFlashLite:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case strings.HasPrefix(string(modelID), "ollama:"):
 		parts := strings.SplitN(string(modelID), ":", 2)
@@ -55,7 +55,6 @@ func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
 
 // Implement the LLMFactory interface.
 func (f *DefaultLLMFactory) CreateLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
-
 	return NewLLM(apiKey, modelID)
 }
 

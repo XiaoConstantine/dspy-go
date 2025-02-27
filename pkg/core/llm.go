@@ -274,11 +274,12 @@ const (
 	ModelGoogleGeminiFlash         ModelID = "gemini-2.0-flash"
 	ModelGoogleGeminiPro           ModelID = "gemini-2.0-pro-exp"
 	ModelGoogleGeminiFlashThinking ModelID = "gemini-2.0-flash-thinking-exp"
+	ModelGoogleGeminiFlashLite     ModelID = "gemini-2.0-flash-lite"
 )
 
 var ProviderModels = map[string][]ModelID{
 	"anthropic": {ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus},
-	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashThinking},
+	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashThinking, ModelGoogleGeminiFlashLite},
 	"ollama":    {},
 	"llamacpp":  {},
 }

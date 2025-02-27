@@ -304,6 +304,10 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 				"Task priorities and resource requirements",
 			},
 		},
+		Options: core.WithGenerateOptions(
+			core.WithTemperature(0.3),
+			core.WithMaxTokens(8192),
+		),
 	}
 
 	// Create orchestrator
@@ -359,13 +363,13 @@ func main() {
 	logger.Debug(ctx, "This is a debug message")
 	logger.Warn(ctx, "This is a warning message")
 	llms.EnsureFactory()
-	err = core.ConfigureDefaultLLM(*apiKey, "llamacpp:")
+	err = core.ConfigureDefaultLLM(*apiKey, core.ModelGoogleGeminiFlash)
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	RunChainExample(ctx, logger)
-	RunParallelExample(ctx, logger)
-	RunRouteExample(ctx, logger)
-	RunEvalutorOptimizerExample(ctx, logger)
+	// RunChainExample(ctx, logger)
+	// RunParallelExample(ctx, logger)
+	// RunRouteExample(ctx, logger)
+	// RunEvalutorOptimizerExample(ctx, logger)
 	RunOrchestratorExample(ctx, logger)
 }
