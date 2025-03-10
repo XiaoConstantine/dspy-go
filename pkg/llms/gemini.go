@@ -515,6 +515,8 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	}
 	if opts.Model == "" {
 		opts.Model = "text-embedding-004"
+	} else if !isValidGeminiEmbeddingModel(opts.Model) {
+		return nil, errors.New(errors.InvalidInput, fmt.Sprintf("invalid Gemini embedding model: %s", opts.Model))
 	}
 
 	// Prepare the request body
@@ -590,8 +592,12 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		truncatedBody := string(body)
+		if len(truncatedBody) > 500 { // Example: truncate to 500 characters
+			truncatedBody = truncatedBody[:500] + "... (truncated)"
+		}
 		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(truncatedBody))),
 			errors.Fields{
 				"model":      opts.Model,
 				"statusCode": resp.StatusCode,
@@ -621,6 +627,10 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	}
 
 	return result, nil
+}
+
+func isValidGeminiEmbeddingModel(s string) bool {
+	return s == "gemini-embedding-exp-03-07" || s == "text-embedding-004"
 }
 
 // CreateEmbeddings implements batch embedding generation.
