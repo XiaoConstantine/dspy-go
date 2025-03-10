@@ -367,9 +367,16 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	// RunChainExample(ctx, logger)
-	// RunParallelExample(ctx, logger)
-	// RunRouteExample(ctx, logger)
-	// RunEvalutorOptimizerExample(ctx, logger)
+	err = core.ConfigureTeacherLLM(*apiKey, core.ModelGoogleGeminiPro)
+	if err != nil {
+		logger.Error(ctx, "Failed to configure LLM: %v", err)
+	}
+	resp, err := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
+	logger.Info(ctx, "get resp: %v", resp)
+
+	RunChainExample(ctx, logger)
+	RunParallelExample(ctx, logger)
+	RunRouteExample(ctx, logger)
+	RunEvalutorOptimizerExample(ctx, logger)
 	RunOrchestratorExample(ctx, logger)
 }
