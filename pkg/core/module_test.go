@@ -62,6 +62,10 @@ func (m *MockLLM) CreateEmbeddings(ctx context.Context, inputs []string, options
 	}, nil
 }
 
+func (m *MockLLM) StreamGenerate(ctx context.Context, prompt string, opts ...GenerateOption) (*StreamResponse, error) {
+	return nil, nil
+}
+
 func (m *MockLLM) ProviderName() string {
 	return "mock"
 }

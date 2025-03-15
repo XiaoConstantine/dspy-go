@@ -20,6 +20,19 @@ type LLMResponse struct {
 	Usage   *TokenInfo
 }
 
+type StreamChunk struct {
+	Content string     // The text content of this chunk
+	Done    bool       // Indicates if this is the final chunk
+	Error   error      // Any error that occurred during streaming
+	Usage   *TokenInfo // Optional token usage information (may be nil)
+}
+
+// StreamResponse encapsulates a streaming response.
+type StreamResponse struct {
+	ChunkChannel <-chan StreamChunk // Channel receiving response chunks
+	Cancel       func()             // Function to cancel the stream
+}
+
 type Capability string
 
 const (
@@ -45,6 +58,8 @@ type LLM interface {
 	GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error)
 	CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error)
 	CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error)
+
+	StreamGenerate(ctx context.Context, prompt string, options ...GenerateOption) (*StreamResponse, error)
 
 	ProviderName() string
 	ModelID() string

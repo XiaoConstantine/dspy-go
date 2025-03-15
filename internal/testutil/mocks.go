@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/mock"
@@ -35,6 +36,17 @@ func NewMockDataset(examples []core.Example) *MockDataset {
 	return &MockDataset{
 		Examples: examples,
 	}
+}
+
+// MockStreamConfig configures how the mock LLM will stream responses during tests.
+type MockStreamConfig struct {
+	Content      string
+	ChunkSize    int
+	ChunkDelay   time.Duration
+	Error        error
+	ErrorAfter   int
+	TokenCounts  *core.TokenInfo
+	ShouldCancel bool
 }
 
 // MockLLM is a mock implementation of core.LLM.
@@ -126,6 +138,109 @@ func (m *MockLLM) CreateEmbeddings(ctx context.Context, inputs []string, options
 		Embeddings: embeddings,
 		Error:      nil,
 		ErrorIndex: -1,
+	}, args.Error(1)
+}
+
+func (m *MockLLM) StreamGenerate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.StreamResponse, error) {
+	args := m.Called(ctx, prompt, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	// Create cancellable context
+	streamCtx, cancelFunc := context.WithCancel(ctx)
+
+	// Extract mock configuration from args
+	mockConfig, ok := args.Get(0).(*MockStreamConfig)
+	if !ok {
+		// Fall back to string conversion for simple cases
+		content := args.String(0)
+		mockConfig = &MockStreamConfig{
+			Content:   content,
+			ChunkSize: 10, // Default chunk size
+			TokenCounts: &core.TokenInfo{
+				PromptTokens: 3, // Default token count
+			},
+		}
+	}
+
+	// Create the actual stream response
+	chunkChan := make(chan core.StreamChunk)
+
+	// Start goroutine to send chunks according to the config
+	go func() {
+		defer close(chunkChan)
+		defer cancelFunc()
+		// Handle immediate error case
+		if mockConfig.Error != nil && mockConfig.ErrorAfter <= 0 {
+			chunkChan <- core.StreamChunk{Error: mockConfig.Error}
+			return
+		}
+
+		// Split content into chunks
+		content := mockConfig.Content
+		chunkSize := mockConfig.ChunkSize
+		if chunkSize <= 0 {
+			chunkSize = 10 // Default chunk size if not specified
+		}
+
+		var chunksSent int
+		for i := 0; i < len(content); i += chunkSize {
+			// Check for cancellation
+			select {
+			case <-streamCtx.Done():
+				return
+			default:
+				// Continue processing
+			}
+
+			// Simulate cancel request
+			if mockConfig.ShouldCancel {
+				return
+			}
+
+			end := i + chunkSize
+			if end > len(content) {
+				end = len(content)
+			}
+
+			chunk := content[i:end]
+			chunksSent++
+
+			// Check if we should inject an error
+			if mockConfig.Error != nil && chunksSent >= mockConfig.ErrorAfter {
+				chunkChan <- core.StreamChunk{Error: mockConfig.Error}
+				return
+			}
+
+			// Create token info for this chunk
+			var tokenInfo *core.TokenInfo
+			if mockConfig.TokenCounts != nil {
+				tokenInfo = &core.TokenInfo{
+					PromptTokens:     mockConfig.TokenCounts.PromptTokens,
+					CompletionTokens: len(chunk) / 4, // Rough approximation for testing
+					TotalTokens:      mockConfig.TokenCounts.PromptTokens + (len(chunk) / 4),
+				}
+			}
+
+			// Send the chunk
+			chunkChan <- core.StreamChunk{
+				Content: chunk,
+				Usage:   tokenInfo,
+			}
+
+			// Apply delay if specified
+			if mockConfig.ChunkDelay > 0 {
+				time.Sleep(mockConfig.ChunkDelay)
+			}
+		}
+
+		// Signal completion
+		chunkChan <- core.StreamChunk{Done: true}
+	}()
+
+	return &core.StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       cancelFunc,
 	}, args.Error(1)
 }
 

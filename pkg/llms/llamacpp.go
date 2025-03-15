@@ -1,12 +1,14 @@
 package llms
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -396,4 +398,160 @@ func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, opt
 		Error:      firstError,
 		ErrorIndex: errorIndex,
 	}, nil
+}
+
+// StreamGenerate implements streaming for LlamaCPP.
+func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	// Create request body with streaming enabled
+	reqBody := llamacppRequest{
+		Model:       o.ModelID(),
+		Prompt:      prompt,
+		Stream:      true, // Enable streaming
+		MaxTokens:   opts.MaxTokens,
+		Temperature: opts.Temperature,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			errors.Fields{
+				"model": o.ModelID(),
+			})
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		o.GetEndpointConfig().BaseURL+"/api/completion", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.Fields{
+				"model": o.ModelID(),
+			})
+	}
+
+	for key, value := range o.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Create stream context and cancellation function
+	streamCtx, cancelFunc := context.WithCancel(ctx)
+
+	// Create channel for stream chunks
+	chunkChan := make(chan core.StreamChunk)
+
+	// Create stream response object
+	response := &core.StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       cancelFunc,
+	}
+
+	// Start goroutine to handle streaming
+	go func() {
+		defer close(chunkChan)
+		defer cancelFunc() // Ensure context is cancelled when goroutine exits
+
+		// Send HTTP request
+		resp, err := o.GetHTTPClient().Do(req)
+		if err != nil {
+			chunkChan <- core.StreamChunk{
+				Error: errors.WithFields(
+					errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
+					errors.Fields{
+						"model": o.ModelID(),
+					}),
+			}
+			return
+		}
+		defer resp.Body.Close()
+
+		// Check response status
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			chunkChan <- core.StreamChunk{
+				Error: errors.WithFields(
+					errors.New(errors.LLMGenerationFailed, fmt.Sprintf(
+						"API request failed with status code %d", resp.StatusCode)),
+					errors.Fields{
+						"model":         o.ModelID(),
+						"status_code":   resp.StatusCode,
+						"response_body": string(body),
+					}),
+			}
+			return
+		}
+
+		// LlamaCPP returns newline-delimited JSON objects for streaming
+		scanner := bufio.NewScanner(resp.Body)
+		var tokenCount int
+
+		for scanner.Scan() {
+			// Check if context was cancelled
+			select {
+			case <-streamCtx.Done():
+				return
+			default:
+				// Process next chunk
+			}
+
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			// Parse the streaming response
+			var streamResp llamacppResponse
+			if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
+				// Skip lines that aren't valid JSON
+				continue
+			}
+
+			// Only send non-empty content
+			if streamResp.Content != "" {
+				// Create token info for this chunk
+				tokenCount += len(strings.Split(streamResp.Content, " ")) // Rough approximation
+				tokenInfo := &core.TokenInfo{
+					PromptTokens:     streamResp.TokensEvaluated,
+					CompletionTokens: tokenCount,
+					TotalTokens:      streamResp.TokensEvaluated + tokenCount,
+				}
+
+				// Send the chunk
+				chunkChan <- core.StreamChunk{
+					Content: streamResp.Content,
+					Usage:   tokenInfo,
+				}
+			}
+
+			// Check if we've reached the end of the stream
+			if streamResp.Stop {
+				// Send completion signal
+				chunkChan <- core.StreamChunk{Done: true}
+				return
+			}
+		}
+
+		// Handle scanner errors
+		if err := scanner.Err(); err != nil {
+			chunkChan <- core.StreamChunk{
+				Error: errors.WithFields(
+					errors.Wrap(err, errors.LLMGenerationFailed, "error reading stream"),
+					errors.Fields{
+						"model": o.ModelID(),
+					}),
+			}
+			return
+		}
+
+		// If we get here without seeing a 'stop' flag, still signal completion
+		chunkChan <- core.StreamChunk{Done: true}
+	}()
+
+	return response, nil
 }

@@ -1,6 +1,7 @@
 package llms
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -804,4 +805,106 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		Error:      firstError,
 		ErrorIndex: errorIndex,
 	}, nil
+}
+
+// StreamGenerate for Gemini.
+func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{
+				Parts: []geminiPart{
+					{Text: prompt},
+				},
+			},
+		},
+		GenerationConfig: geminiGenerationConfig{
+			Temperature:     opts.Temperature,
+			MaxOutputTokens: opts.MaxTokens,
+			TopP:            opts.TopP,
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			errors.Fields{"prompt": prompt, "model": g.ModelID()})
+	}
+
+	// Add streaming parameter
+	streamURL := constructRequestURL(g.GetEndpointConfig(), g.apiKey) + "&alt=sse"
+
+	req, err := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.Fields{"model": g.ModelID()})
+	}
+
+	for key, value := range g.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	// Create channels and response
+	chunkChan := make(chan core.StreamChunk)
+	streamCtx, cancelStream := context.WithCancel(ctx)
+
+	response := &core.StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       cancelStream,
+	}
+
+	// Start streaming goroutine
+	go func() {
+		defer close(chunkChan)
+
+		resp, err := g.GetHTTPClient().Do(req)
+		if err != nil {
+			chunkChan <- core.StreamChunk{
+				Error: errors.Wrap(err, errors.LLMGenerationFailed, "request failed"),
+			}
+			return
+		}
+		defer resp.Body.Close()
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			select {
+			case <-streamCtx.Done():
+				return
+			default:
+				line := scanner.Text()
+
+				// SSE format: "data: {...}"
+				if strings.HasPrefix(line, "data: ") {
+					data := strings.TrimPrefix(line, "data: ")
+
+					// Check for end marker
+					if data == "[DONE]" {
+						chunkChan <- core.StreamChunk{Done: true}
+						return
+					}
+
+					// Parse the response
+					var chunk geminiResponse
+					if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+						continue // Skip invalid chunks
+					}
+
+					if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
+						content := chunk.Candidates[0].Content.Parts[0].Text
+						chunkChan <- core.StreamChunk{Content: content}
+					}
+				}
+			}
+		}
+	}()
+
+	return response, nil
 }
