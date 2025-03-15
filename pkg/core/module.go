@@ -22,12 +22,21 @@ type Module interface {
 
 type Option func(*ModuleOptions)
 
+type StreamHandler func(chunk StreamChunk) error
+
+// WithStreamHandler returns an option to enable streaming.
+func WithStreamHandler(handler StreamHandler) Option {
+	return func(o *ModuleOptions) {
+		o.StreamHandler = handler
+	}
+}
+
 // ModuleOptions holds configuration that can be passed to modules.
 type ModuleOptions struct {
 	// LLM generation options
 	GenerateOptions []GenerateOption
 
-	StreamHandler interface{}
+	StreamHandler StreamHandler
 }
 
 // WithGenerateOptions adds LLM generation options.
@@ -44,6 +53,7 @@ func (o *ModuleOptions) Clone() *ModuleOptions {
 	}
 	return &ModuleOptions{
 		GenerateOptions: append([]GenerateOption{}, o.GenerateOptions...),
+		StreamHandler:   o.StreamHandler, // Copy the StreamHandler reference
 	}
 }
 
@@ -57,7 +67,19 @@ func (o *ModuleOptions) MergeWith(other *ModuleOptions) *ModuleOptions {
 		merged = &ModuleOptions{}
 	}
 	merged.GenerateOptions = append(merged.GenerateOptions, other.GenerateOptions...)
+	// If other has a StreamHandler, it takes precedence
+	if other.StreamHandler != nil {
+		merged.StreamHandler = other.StreamHandler
+	}
 	return merged
+}
+
+func WithOptions(opts ...Option) Option {
+	return func(o *ModuleOptions) {
+		for _, opt := range opts {
+			opt(o)
+		}
+	}
 }
 
 // BaseModule provides a basic implementation of the Module interface.
