@@ -2,7 +2,9 @@ package llms
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -115,4 +117,132 @@ func (a *AnthropicLLM) CreateEmbedding(ctx context.Context, input string, option
 
 func (a *AnthropicLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
 	return nil, nil
+}
+
+// StreamGenerate for Anthropic adapts the callback-based API to our channel-based approach.
+func (a *AnthropicLLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	logger := logging.GetLogger()
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	// Create a channel for the stream chunks
+	chunkChan := make(chan core.StreamChunk)
+
+	// Create a cancellable context
+	streamCtx, cancelFunc := context.WithCancel(ctx)
+
+	// Prepare the message parameters with streaming
+	params := &anthropic.MessageParams{
+		Model: string(a.ModelID()),
+		Messages: []anthropic.MessageParam{
+			{
+				Role: "user",
+				Content: []anthropic.ContentBlock{
+					{
+						Type: "text",
+						Text: prompt,
+					},
+				},
+			},
+		},
+		MaxTokens:   opts.MaxTokens,
+		Temperature: opts.Temperature,
+		TopP:        opts.TopP,
+	}
+
+	// Track accumulated content for token counting
+	var contentBuffer strings.Builder
+	var tokenInfo core.TokenInfo
+
+	// Define the StreamFunc that will receive streaming chunks
+	params.StreamFunc = func(ctx context.Context, chunk []byte) error {
+		// Check if streaming has been cancelled
+		select {
+		case <-streamCtx.Done():
+			return streamCtx.Err()
+		default:
+			// Continue processing
+		}
+
+		// Parse the streaming chunk
+		var streamData struct {
+			Type  string `json:"type"`
+			Delta struct {
+				Text string `json:"text"`
+			} `json:"delta"`
+			Usage *struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage,omitempty"`
+		}
+
+		if err := json.Unmarshal(chunk, &streamData); err != nil {
+			logger.Debug(ctx, "Error parsing stream chunk: %v", err)
+			return nil // Skip unparseable chunks
+		}
+
+		// Handle different message types
+		switch streamData.Type {
+		case "content_block_delta":
+			// Text content
+			if streamData.Delta.Text != "" {
+				contentBuffer.WriteString(streamData.Delta.Text)
+				chunkChan <- core.StreamChunk{Content: streamData.Delta.Text}
+			}
+
+		case "message_stop":
+			// End of message
+			chunkChan <- core.StreamChunk{Done: true}
+
+		case "error":
+			// Error in the stream
+			chunkChan <- core.StreamChunk{
+				Error: errors.New(errors.LLMGenerationFailed, "Error from Anthropic API"),
+			}
+
+		case "message_start":
+			// Message beginning, nothing to do
+
+		case "content_block_start":
+			// Beginning of a content block, nothing to do
+
+		case "ping":
+			// Keepalive ping, nothing to do
+		}
+
+		// Update token info if usage data is provided
+		if streamData.Usage != nil {
+			tokenInfo.PromptTokens = streamData.Usage.InputTokens
+			tokenInfo.CompletionTokens = streamData.Usage.OutputTokens
+			tokenInfo.TotalTokens = tokenInfo.PromptTokens + tokenInfo.CompletionTokens
+
+			// Add token info to the latest chunk
+			chunkChan <- core.StreamChunk{
+				Usage: &tokenInfo,
+			}
+		}
+
+		return nil
+	}
+
+	// Start a goroutine to handle the streaming request
+	go func() {
+		defer close(chunkChan)
+		defer cancelFunc() // Ensure context is cancelled when done
+
+		_, err := a.client.Messages().Create(streamCtx, params)
+		if err != nil {
+			chunkChan <- core.StreamChunk{
+				Error: errors.Wrap(err, errors.LLMGenerationFailed, "streaming failed"),
+			}
+			return
+		}
+	}()
+
+	return &core.StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       cancelFunc,
+	}, nil
 }

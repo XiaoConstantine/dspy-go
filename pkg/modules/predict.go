@@ -18,6 +18,15 @@ type Predict struct {
 	defaultOptions *core.ModuleOptions
 }
 
+type StreamHandler func(chunk core.StreamChunk) error
+
+// WithStreamHandler returns an option to enable streaming.
+func WithStreamHandler(handler StreamHandler) core.Option {
+	return func(o *core.ModuleOptions) {
+		o.StreamHandler = handler
+	}
+}
+
 // Ensure Predict implements core.Module.
 var _ core.Module = (*Predict)(nil)
 
@@ -46,6 +55,13 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	}
 
 	finalOptions := p.defaultOptions.MergeWith(callOptions)
+	var streamHandler StreamHandler
+	if callOptions.StreamHandler != nil {
+		if handler, ok := callOptions.StreamHandler.(StreamHandler); ok {
+			streamHandler = handler
+			return p.processWithStreaming(ctx, inputs, streamHandler, finalOptions)
+		}
+	}
 	ctx, span := core.StartSpan(ctx, "Predict")
 	defer core.EndSpan(ctx)
 	span.WithAnnotation("inputs", inputs)
@@ -113,6 +129,92 @@ func (p *Predict) Clone() core.Module {
 
 func (p *Predict) GetDemos() []core.Example {
 	return p.Demos
+}
+
+func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]interface{},
+	handler StreamHandler, opts *core.ModuleOptions) (map[string]interface{}, error) {
+	logger := logging.GetLogger()
+	ctx, span := core.StartSpan(ctx, "PredictStream")
+	defer core.EndSpan(ctx)
+
+	// Validate inputs and build prompt (same as regular Process)
+	if err := p.ValidateInputs(inputs); err != nil {
+		span.WithError(err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "input validation failed"),
+			errors.Fields{
+				"module": "Predict",
+				"inputs": inputs,
+			})
+	}
+
+	signature := p.GetSignature()
+	prompt := formatPrompt(signature, p.Demos, inputs)
+
+	// Use StreamGenerate instead of Generate
+	stream, err := p.LLM.StreamGenerate(ctx, prompt, opts.GenerateOptions...)
+	if err != nil {
+		span.WithError(err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate prediction"),
+			errors.Fields{
+				"module": "Predict",
+				"prompt": prompt,
+				"model":  p.LLM,
+			})
+	}
+
+	// Collect the full response while streaming chunks
+	var fullContent strings.Builder
+	var tokenUsage core.TokenInfo
+
+	for chunk := range stream.ChunkChannel {
+		// Update token usage if available
+		if chunk.Usage != nil {
+			tokenUsage.PromptTokens = chunk.Usage.PromptTokens
+			tokenUsage.CompletionTokens += chunk.Usage.CompletionTokens
+			tokenUsage.TotalTokens = tokenUsage.PromptTokens + tokenUsage.CompletionTokens
+		}
+
+		// Handle errors
+		if chunk.Error != nil {
+			span.WithError(chunk.Error)
+			return nil, chunk.Error
+		}
+
+		// Check if done
+		if chunk.Done {
+			break
+		}
+
+		// Append content to the full response
+		fullContent.WriteString(chunk.Content)
+
+		// Call the handler
+		if err := handler(chunk); err != nil {
+			stream.Cancel() // Cancel the stream
+			return nil, err
+		}
+	}
+
+	// Process the complete response just like in the normal flow
+	content := fullContent.String()
+	logger.Debug(ctx, "Complete response: %s", content)
+
+	cleaned := stripMarkdown(content, p.GetSignature())
+	outputs := parseCompletion(cleaned, signature)
+	formattedOutputs := p.FormatOutputs(outputs)
+
+	// Update execution state with token usage
+	if state := core.GetExecutionState(ctx); state != nil {
+		state.WithTokenUsage(&core.TokenUsage{
+			PromptTokens:     tokenUsage.PromptTokens,
+			CompletionTokens: tokenUsage.CompletionTokens,
+			TotalTokens:      tokenUsage.TotalTokens,
+		})
+	}
+
+	return formattedOutputs, nil
 }
 
 func formatPrompt(signature core.Signature, demos []core.Example, inputs map[string]any) string {

@@ -1,6 +1,7 @@
 package llms
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -374,4 +375,90 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		Error:      firstError,
 		ErrorIndex: errorIndex,
 	}, nil
+}
+
+// StreamGenerate for Ollama.
+func (o *OllamaLLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	reqBody := ollamaRequest{
+		Model:       o.ModelID(),
+		Prompt:      prompt,
+		Stream:      true,
+		MaxTokens:   opts.MaxTokens,
+		Temperature: opts.Temperature,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.InvalidInput, "failed to marshal request")
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		o.GetEndpointConfig().BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, errors.Wrap(err, errors.InvalidInput, "failed to create request")
+	}
+
+	for key, value := range o.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Create channel and response
+	chunkChan := make(chan core.StreamChunk)
+	streamCtx, cancelStream := context.WithCancel(ctx)
+
+	response := &core.StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       cancelStream,
+	}
+
+	go func() {
+		defer close(chunkChan)
+
+		resp, err := o.GetHTTPClient().Do(req)
+		if err != nil {
+			chunkChan <- core.StreamChunk{Error: err}
+			return
+		}
+		defer resp.Body.Close()
+
+		// Ollama returns JSONL stream
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			select {
+			case <-streamCtx.Done():
+				return
+			default:
+				line := scanner.Text()
+				if line == "" {
+					continue
+				}
+
+				var response struct {
+					Response string `json:"response"`
+					Done     bool   `json:"done"`
+				}
+
+				if err := json.Unmarshal([]byte(line), &response); err != nil {
+					continue
+				}
+
+				// Send the chunk
+				chunkChan <- core.StreamChunk{Content: response.Response}
+
+				// Check if we're done
+				if response.Done {
+					chunkChan <- core.StreamChunk{Done: true}
+					return
+				}
+			}
+		}
+	}()
+
+	return response, nil
 }

@@ -26,6 +26,8 @@ type Option func(*ModuleOptions)
 type ModuleOptions struct {
 	// LLM generation options
 	GenerateOptions []GenerateOption
+
+	StreamHandler interface{}
 }
 
 // WithGenerateOptions adds LLM generation options.
