@@ -157,6 +157,8 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 	var tokenUsage core.TokenInfo
 
 	for chunk := range stream.ChunkChannel {
+		logger.Debug(ctx, "Predict received chunk: Done=%v, Error=%v, ContentLen=%d",
+			chunk.Done, chunk.Error != nil, len(chunk.Content))
 		// Update token usage if available
 		if chunk.Usage != nil {
 			tokenUsage.PromptTokens = chunk.Usage.PromptTokens
@@ -172,6 +174,10 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 
 		// Check if done
 		if chunk.Done {
+			if err := handler(chunk); err != nil {
+				stream.Cancel()
+				return nil, err
+			}
 			break
 		}
 
@@ -183,6 +189,11 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 			stream.Cancel() // Cancel the stream
 			return nil, err
 		}
+	}
+
+	logger.Debug(ctx, "Stream channel closed, ensuring Done signal is sent")
+	if err := handler(core.StreamChunk{Done: true}); err != nil {
+		return nil, err
 	}
 
 	// Process the complete response just like in the normal flow

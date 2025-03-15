@@ -282,18 +282,20 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 
 	// Define streaming handler
 	streamHandler := func(chunk core.StreamChunk) error {
+		logger := logging.GetLogger()
+		ctx := context.Background()
 		if chunk.Error != nil {
-			fmt.Printf("Error: %v\n", chunk.Error)
+			logger.Info(ctx, "Error: %v\n", chunk.Error)
 			return chunk.Error
 		}
 
 		if chunk.Done {
-			fmt.Println("\n[DONE]")
+			logger.Info(ctx, "\n[DONE]")
 			return nil
 		}
 
 		// Display chunks as they arrive
-		fmt.Print(chunk.Content)
+		logger.Info(ctx, "Get chunk: %v", chunk.Content)
 		return nil
 	}
 
@@ -372,7 +374,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger := logging.NewLogger(logging.Config{
-		Severity: logging.DEBUG,
+		Severity: logging.INFO,
 		Outputs:  []logging.Output{output, fileOutput},
 	})
 	logging.SetLogger(logger)
@@ -391,12 +393,12 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	//_, err := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
-	//	logger.Info(ctx, "get resp: %v", resp)
+	resp, err := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
+	logger.Info(ctx, "get resp: %v", resp)
 
-	// RunChainExample(ctx, logger)
-	// RunParallelExample(ctx, logger)
-	// RunRouteExample(ctx, logger)
-	// RunEvalutorOptimizerExample(ctx, logger)
+	RunChainExample(ctx, logger)
+	RunParallelExample(ctx, logger)
+	RunRouteExample(ctx, logger)
+	RunEvalutorOptimizerExample(ctx, logger)
 	RunOrchestratorExample(ctx, logger)
 }
