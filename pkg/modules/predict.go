@@ -18,15 +18,6 @@ type Predict struct {
 	defaultOptions *core.ModuleOptions
 }
 
-type StreamHandler func(chunk core.StreamChunk) error
-
-// WithStreamHandler returns an option to enable streaming.
-func WithStreamHandler(handler StreamHandler) core.Option {
-	return func(o *core.ModuleOptions) {
-		o.StreamHandler = handler
-	}
-}
-
 // Ensure Predict implements core.Module.
 var _ core.Module = (*Predict)(nil)
 
@@ -55,12 +46,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	}
 
 	finalOptions := p.defaultOptions.MergeWith(callOptions)
-	var streamHandler StreamHandler
+
 	if callOptions.StreamHandler != nil {
-		if handler, ok := callOptions.StreamHandler.(StreamHandler); ok {
-			streamHandler = handler
-			return p.processWithStreaming(ctx, inputs, streamHandler, finalOptions)
-		}
+		return p.processWithStreaming(ctx, inputs, callOptions.StreamHandler, finalOptions)
 	}
 	ctx, span := core.StartSpan(ctx, "Predict")
 	defer core.EndSpan(ctx)
@@ -132,7 +120,7 @@ func (p *Predict) GetDemos() []core.Example {
 }
 
 func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]interface{},
-	handler StreamHandler, opts *core.ModuleOptions) (map[string]interface{}, error) {
+	handler core.StreamHandler, opts *core.ModuleOptions) (map[string]interface{}, error) {
 	logger := logging.GetLogger()
 	ctx, span := core.StartSpan(ctx, "PredictStream")
 	defer core.EndSpan(ctx)

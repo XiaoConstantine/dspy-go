@@ -280,6 +280,23 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 
 	planner := agents.NewDependencyPlanCreator(5) // Max 5 tasks per phase
 
+	// Define streaming handler
+	streamHandler := func(chunk core.StreamChunk) error {
+		if chunk.Error != nil {
+			fmt.Printf("Error: %v\n", chunk.Error)
+			return chunk.Error
+		}
+
+		if chunk.Done {
+			fmt.Println("\n[DONE]")
+			return nil
+		}
+
+		// Display chunks as they arrive
+		fmt.Print(chunk.Content)
+		return nil
+	}
+
 	// Create orchestrator configuration
 	config := agents.OrchestrationConfig{
 		MaxConcurrent:  3,
@@ -304,9 +321,12 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 				"Task priorities and resource requirements",
 			},
 		},
-		Options: core.WithGenerateOptions(
-			core.WithTemperature(0.3),
-			core.WithMaxTokens(8192),
+		Options: core.WithOptions(
+			core.WithGenerateOptions(
+				core.WithTemperature(0.3),
+				core.WithMaxTokens(8192),
+			),
+			core.WithStreamHandler(streamHandler),
 		),
 	}
 
@@ -371,12 +391,12 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	resp, err := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
-	logger.Info(ctx, "get resp: %v", resp)
+	//_, err := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
+	//	logger.Info(ctx, "get resp: %v", resp)
 
-	RunChainExample(ctx, logger)
-	RunParallelExample(ctx, logger)
-	RunRouteExample(ctx, logger)
-	RunEvalutorOptimizerExample(ctx, logger)
+	// RunChainExample(ctx, logger)
+	// RunParallelExample(ctx, logger)
+	// RunRouteExample(ctx, logger)
+	// RunEvalutorOptimizerExample(ctx, logger)
 	RunOrchestratorExample(ctx, logger)
 }
