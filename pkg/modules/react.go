@@ -168,12 +168,10 @@ func extractToolParams(action string, inputs map[string]interface{}, toolMetadat
 	// Always include the action
 	params["action"] = action
 
-	// Copy inputs that match the tool's input schema
-	if toolMetadata != nil && toolMetadata.InputSchema != nil {
-		for paramName := range toolMetadata.InputSchema {
+	// Check if we have valid metadata and schema properties
+	if toolMetadata != nil && toolMetadata.InputSchema.Properties != nil && len(toolMetadata.InputSchema.Properties) > 0 {
+		for paramName := range toolMetadata.InputSchema.Properties {
 			if value, exists := inputs[paramName]; exists {
-				// We could add type validation here based on paramType
-				// For now, just copy the value if it exists
 				params[paramName] = value
 			}
 		}

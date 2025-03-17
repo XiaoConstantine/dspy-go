@@ -6,6 +6,7 @@ import (
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -14,16 +15,26 @@ import (
 func TestReAct(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
+	schema := models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"question": {
+				Type:        "string",
+				Description: "Default parameter",
+				Required:    true,
+			},
+			"action": {
+				Type: "string",
+			},
+		},
+	}
 
 	// Create a mock Tool
 	mockTool := testutil.NewMockTool("mock")
 	toolMetadata := &core.ToolMetadata{
-		Name:        "test_tool",
-		Description: "A test tool",
-		InputSchema: map[string]string{
-			"question": "string",
-			"action":   "string",
-		},
+		Name:         "test_tool",
+		Description:  "A test tool",
+		InputSchema:  schema,
 		Capabilities: []string{"test", "use_tool"},
 	}
 	mockTool.On("Metadata").Return(toolMetadata)
