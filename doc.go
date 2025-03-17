@@ -5,33 +5,131 @@
 // reliable LLM-powered applications. It focuses on making it easy to:
 //   - Break down complex tasks into modular steps
 //   - Optimize prompts and chain-of-thought reasoning
+//   - Build flexible agent-based systems
 //   - Handle common LLM interaction patterns
 //   - Evaluate and improve system performance
 //
 // Key Components:
-//   - Modules: Building blocks like Predict and ChainOfThought for composing LLM workflows
-//   - Optimizers: Tools for improving prompt effectiveness like BootstrapFewShot
-//   - Workflows: Pre-built patterns for common tasks like routing and parallel execution
-//   - Metrics: Evaluation tools for measuring performance
+//
+//   - Core: Fundamental abstractions like Module, Signature, LLM and Program
+//     for defining and executing LLM-based workflows.
+//
+//   - Modules: Building blocks for composing LLM workflows:
+//     * Predict: Basic prediction module for simple LLM interactions
+//     * ChainOfThought: Implements step-by-step reasoning with rationale tracking
+//     * ReAct: Implements Reasoning and Acting with tool integration
+//
+//   - Optimizers: Tools for improving prompt effectiveness:
+//     * BootstrapFewShot: Automatically selects high-quality examples for few-shot learning
+//     * MIPRO: Multi-step interactive prompt optimization
+//     * Copro: Collaborative prompt optimization
+//
+//   - Agents: Advanced patterns for building sophisticated AI systems:
+//     * Memory: Different memory implementations for tracking conversation history
+//     * Tools: Integration with external tools and APIs
+//     * Workflows:
+//       - Chain: Sequential execution of steps
+//       - Parallel: Concurrent execution with controlled parallelism
+//       - Router: Dynamic routing based on classification
+//     * Orchestrator: Flexible task decomposition and execution
+//
+//   - Integration with multiple LLM providers:
+//     * Anthropic Claude
+//     * Google Gemini
+//     * Ollama
+//     * LlamaCPP
 //
 // Simple Example:
 //
-//	signature := core.NewSignature(
-//		[]core.InputField{{Field: core.Field{Name: "question"}}},
-//		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "log"
+//
+//	    "github.com/XiaoConstantine/dspy-go/pkg/core"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/modules"
 //	)
 //
-//	// Create a chain-of-thought module
-//	cot := modules.NewChainOfThought(signature)
+//	func main() {
+//	    // Configure the default LLM
+//	    llms.EnsureFactory()
+//	    err := config.ConfigureDefaultLLM("your-api-key", core.ModelAnthropicSonnet)
+//	    if err != nil {
+//	        log.Fatalf("Failed to configure LLM: %v", err)
+//	    }
 //
-//	// Create a program using the module
-//	program := core.NewProgram(
-//		map[string]core.Module{"cot": cot},
-//		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-//			return cot.Process(ctx, inputs)
-//		},
-//	)
+//	    // Create a signature for question answering
+//	    signature := core.NewSignature(
+//	        []core.InputField{{Field: core.Field{Name: "question"}}},
+//	        []core.OutputField{{Field: core.Field{Name: "answer"}}},
+//	    )
+//
+//	    // Create a ChainOfThought module
+//	    cot := modules.NewChainOfThought(signature)
+//
+//	    // Create a program
+//	    program := core.NewProgram(
+//	        map[string]core.Module{"cot": cot},
+//	        func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+//	            return cot.Process(ctx, inputs)
+//	        },
+//	    )
+//
+//	    // Execute the program
+//	    result, err := program.Execute(context.Background(), map[string]interface{}{
+//	        "question": "What is the capital of France?",
+//	    })
+//	    if err != nil {
+//	        log.Fatalf("Error executing program: %v", err)
+//	    }
+//
+//	    fmt.Printf("Answer: %s\n", result["answer"])
+//	}
+//
+// Advanced Features:
+//
+//   - Tracing and Logging: Detailed tracing and structured logging for debugging and optimization
+//     Execution context is tracked and passed through the pipeline for debugging and analysis.
+//
+//   - Error Handling: Comprehensive error management with custom error types and centralized handling
+//
+//   - Metric-Based Optimization: Improve module performance based on custom evaluation metrics
+//
+//   - Custom Tool Integration: Extend ReAct modules with domain-specific tools
+//
+//   - Workflow Retry Logic: Resilient execution with configurable retry mechanisms and backoff strategies
+//
+//   - Streaming Support: Process LLM outputs incrementally as they're generated
+//
+//   - Data Storage: Integration with various storage backends for persistence of examples and results
+//
+//   - Arrow Support: Integration with Apache Arrow for efficient data handling and processing
+//
+// Working with Workflows:
+//
+//	// Chain workflow example
+//	workflow := workflows.NewChainWorkflow(store)
+//	workflow.AddStep(&workflows.Step{
+//	    ID: "step1",
+//	    Module: modules.NewPredict(signature1),
+//	})
+//	workflow.AddStep(&workflows.Step{
+//	    ID: "step2", 
+//	    Module: modules.NewPredict(signature2),
+//	    // Configurable retry logic
+//	    RetryConfig: &workflows.RetryConfig{
+//	        MaxAttempts: 3,
+//	        BackoffMultiplier: 2.0,
+//	    },
+//	    // Conditional execution
+//	    Condition: func(state map[string]interface{}) bool {
+//	        return someCondition(state)
+//	    },
+//	})
 //
 // For more examples and detailed documentation, visit:
 // https://github.com/XiaoConstantine/dspy-go
+//
+// DSPy-Go is released under the MIT License.
 package dspy
