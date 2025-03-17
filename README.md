@@ -1,23 +1,34 @@
-dspy-go
--------
+# DSPy-Go
+
 [![Go Report Card](https://goreportcard.com/badge/github.com/XiaoConstantine/dspy-go)](https://goreportcard.com/report/github.com/XiaoConstantine/dspy-go)
 [![codecov](https://codecov.io/gh/XiaoConstantine/dspy-go/graph/badge.svg?token=GGKRLMLXJ9)](https://codecov.io/gh/XiaoConstantine/dspy-go)
 [![Go Reference](https://pkg.go.dev/badge/github.com/XiaoConstantine/dspy-go)](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go)
 
+## What is DSPy-Go?
 
-DSPy-Go is a Go implementation of DSPy, bringing systematic prompt engineering and automated reasoning capabilities to Go applications. It provides a flexible framework for building reliable and effective Language Model (LLM) applications through composable modules and workflows.
+DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic prompt engineering and automated reasoning capabilities to Go applications. It provides a flexible and idiomatic framework for building reliable and effective Language Model (LLM) applications through composable modules and workflows.
 
+### Key Features
 
-### Installation
+- **Modular Architecture**: Build complex LLM applications by composing simple, reusable components
+- **Systematic Prompt Engineering**: Optimize prompts automatically based on examples and feedback
+- **Flexible Workflows**: Chain, branch, and orchestrate LLM operations with powerful workflow abstractions
+- **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini, Ollama, and LlamaCPP
+- **Advanced Reasoning Patterns**: Implement chain-of-thought, ReAct, and other reasoning techniques
+
+## Installation
+
 ```go
 go get github.com/XiaoConstantine/dspy-go
 ```
 
-### Quick Start
+## Quick Start
 
 Here's a simple example to get you started with DSPy-Go:
 
 ```go
+package main
+
 import (
     "context"
     "fmt"
@@ -43,10 +54,10 @@ func main() {
         []core.OutputField{{Field: core.Field{Name: "answer"}}},
     )
 
-    // Create a ChainOfThought module
+    // Create a ChainOfThought module that implements step-by-step reasoning
     cot := modules.NewChainOfThought(signature)
 
-    // Create a program
+    // Create a program that executes the module
     program := core.NewProgram(
         map[string]core.Module{"cot": cot},
         func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
@@ -54,7 +65,7 @@ func main() {
         },
     )
 
-    // Execute the program
+    // Execute the program with a question
     result, err := program.Execute(context.Background(), map[string]interface{}{
         "question": "What is the capital of France?",
     })
@@ -66,63 +77,188 @@ func main() {
 }
 ```
 
-### Core Concepts
+## Core Concepts
 
-#### Signatures
-Signatures define the input and output fields for modules. They help in creating type-safe and well-defined interfaces for your AI components.
+DSPy-Go is built around several key concepts that work together to create powerful LLM applications:
 
-#### Modules
-Modules are the building blocks of DSPy-Go programs. They encapsulate specific functionalities and can be composed to create complex pipelines. Some key modules include:
+### Signatures
 
-* Predict: Basic prediction module
-* ChainOfThought: Implements chain-of-thought reasoning
-* ReAct: Implements the ReAct (Reasoning and Acting) paradigm
-
-
-#### Optimizers
-Optimizers help improve the performance of your DSPy-Go programs by automatically tuning prompts and module parameters. Including:
-* BootstrapFewShot: Automatic few-shot example selection
-* MIPRO: Multi-step interactive prompt optimization
-* Copro: Collaborative prompt optimization
-
-
-#### Agents
-Use dspy's core concepts as building blocks, impl [Building Effective Agents](https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents)
-
-
-* Chain Workflow: Sequential execution of steps
-* Parallel Workflow: Concurrent execution with controlled parallelism
-* Router Workflow: Dynamic routing based on classification
-* Orchestrator: Flexible task decomposition and execution
-
-See [agent examples](/examples/agents/main.go)
-
+Signatures define the input and output fields for modules, creating a clear contract for what a module expects and produces.
 
 ```go
-// Chain
+// Create a signature for a summarization task
+signature := core.NewSignature(
+    []core.InputField{
+        {Field: core.Field{Name: "document", Description: "The document to summarize"}},
+    },
+    []core.OutputField{
+        {Field: core.Field{Name: "summary", Description: "A concise summary of the document"}},
+        {Field: core.Field{Name: "key_points", Description: "The main points from the document"}},
+    },
+)
+```
+
+Signatures can include field descriptions that enhance prompt clarity and improve LLM performance.
+
+### Modules
+
+Modules are the building blocks of DSPy-Go programs. They encapsulate specific functionalities and can be composed to create complex pipelines. Some key modules include:
+
+#### Predict
+
+The simplest module that makes direct predictions using an LLM.
+
+```go
+predict := modules.NewPredict(signature)
+result, err := predict.Process(ctx, map[string]interface{}{
+    "document": "Long document text here...",
+})
+// result contains "summary" and "key_points"
+```
+
+#### ChainOfThought
+
+Implements chain-of-thought reasoning, which guides the LLM to break down complex problems into intermediate steps.
+
+```go
+cot := modules.NewChainOfThought(signature)
+result, err := cot.Process(ctx, map[string]interface{}{
+    "question": "Solve 25 × 16 step by step.",
+})
+// result contains both the reasoning steps and the final answer
+```
+
+#### ReAct
+
+Implements the Reasoning and Acting paradigm, allowing LLMs to use tools to solve problems.
+
+```go
+// Create tools
+calculator := tools.NewCalculatorTool()
+searchTool := tools.NewSearchTool()
+
+// Create ReAct module with tools
+react := modules.NewReAct(signature, []core.Tool{calculator, searchTool})
+result, err := react.Process(ctx, map[string]interface{}{
+    "question": "What is the population of France divided by 1000?",
+})
+// ReAct will use the search tool to find the population and the calculator to divide it
+```
+
+### Programs
+
+Programs combine modules into executable workflows. They define how inputs flow through the system and how outputs are produced.
+
+```go
+program := core.NewProgram(
+    map[string]core.Module{
+        "retriever": retriever,
+        "generator": generator,
+    },
+    func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+        // First retrieve relevant documents
+        retrieverResult, err := retriever.Process(ctx, inputs)
+        if err != nil {
+            return nil, err
+        }
+        
+        // Then generate an answer using the retrieved documents
+        generatorInputs := map[string]interface{}{
+            "question": inputs["question"],
+            "documents": retrieverResult["documents"],
+        }
+        return generator.Process(ctx, generatorInputs)
+    },
+)
+```
+
+### Optimizers
+
+Optimizers help improve the performance of your DSPy-Go programs by automatically tuning prompts and module parameters.
+
+#### BootstrapFewShot
+
+Automatically selects high-quality examples for few-shot learning.
+
+```go
+// Create a dataset of examples
+dataset := datasets.NewInMemoryDataset()
+dataset.AddExample(map[string]interface{}{
+    "question": "What is the capital of France?",
+    "answer": "The capital of France is Paris.",
+})
+// Add more examples...
+
+// Create and apply the optimizer
+optimizer := optimizers.NewBootstrapFewShot(dataset, metrics.NewExactMatchMetric("answer"))
+optimizedModule, err := optimizer.Optimize(ctx, originalModule)
+```
+
+#### MIPRO and Copro
+
+More advanced optimizers for multi-step interactive prompt optimization (MIPRO) and collaborative prompt optimization (Copro).
+
+```go
+// Create a MIPRO optimizer
+mipro := optimizers.NewMIPRO(dataset, metrics.NewRougeMetric("answer"))
+optimizedModule, err := mipro.Optimize(ctx, originalModule)
+```
+
+## Agents and Workflows
+
+DSPy-Go provides powerful abstractions for building more complex agent systems.
+
+### Memory
+
+Different memory implementations for tracking conversation history.
+
+```go
+// Create a buffer memory for conversation history
+memory := memory.NewBufferMemory(10) // Keep last 10 exchanges
+memory.Add(context.Background(), "user", "Hello, how can you help me?")
+memory.Add(context.Background(), "assistant", "I can answer questions and help with tasks. What do you need?")
+
+// Retrieve conversation history
+history, err := memory.Get(context.Background())
+```
+
+### Workflows
+
+#### Chain Workflow
+
+Sequential execution of steps:
+
+```go
+// Create a chain workflow
 workflow := workflows.NewChainWorkflow(store)
+
+// Add steps to the workflow
 workflow.AddStep(&workflows.Step{
     ID: "step1",
     Module: modules.NewPredict(signature1),
 })
+
 workflow.AddStep(&workflows.Step{
     ID: "step2", 
     Module: modules.NewPredict(signature2),
 })
+
+// Execute the workflow
+result, err := workflow.Execute(ctx, inputs)
 ```
-Each workflow step can be configured with:
-* Retry logic with exponential backoff
-* Conditional execution based on workflow state
-* Custom error handling
+
+#### Configurable Retry Logic
+
+Each workflow step can be configured with retry logic:
 
 ```go
-
 step := &workflows.Step{
     ID: "retry_example",
     Module: myModule,
     RetryConfig: &workflows.RetryConfig{
         MaxAttempts: 3,
         BackoffMultiplier: 2.0,
+        InitialBackoff: time.Second,
     },
     Condition: func(state map[string]interface{}) bool {
         return someCondition(state)
@@ -130,9 +266,57 @@ step := &workflows.Step{
 }
 ```
 
-### Advanced Features
+### Orchestrator
 
-#### Tracing and Logging
+Flexible task decomposition and execution:
+
+```go
+// Create an orchestrator with subtasks
+orchestrator := agents.NewOrchestrator()
+
+// Define and add subtasks
+researchTask := agents.NewTask("research", researchModule)
+summarizeTask := agents.NewTask("summarize", summarizeModule)
+
+orchestrator.AddTask(researchTask)
+orchestrator.AddTask(summarizeTask)
+
+// Execute the orchestration
+result, err := orchestrator.Execute(ctx, map[string]interface{}{
+    "topic": "Climate change impacts",
+})
+```
+
+## Working with Different LLM Providers
+
+DSPy-Go supports multiple LLM providers out of the box:
+
+```go
+// Using Anthropic Claude
+llm, err := llms.NewAnthropicLLM("api-key", core.ModelAnthropicSonnet)
+
+// Using Google Gemini
+llm, err := llms.NewGeminiLLM("api-key", "gemini-pro")
+
+// Using Ollama (local)
+llm, err := llms.NewOllamaLLM("http://localhost:11434", "ollama:llama2")
+
+// Using LlamaCPP (local)
+llm, err := llms.NewLlamacppLLM("http://localhost:8080")
+
+// Set as default LLM
+llms.SetDefaultLLM(llm)
+
+// Or use with a specific module
+myModule.SetLLM(llm)
+```
+
+## Advanced Features
+
+### Tracing and Logging
+
+DSPy-Go includes detailed tracing and structured logging for debugging and optimization:
+
 ```go
 // Enable detailed tracing
 ctx = core.WithExecutionState(context.Background())
@@ -143,42 +327,86 @@ logger := logging.NewLogger(logging.Config{
     Outputs:  []logging.Output{logging.NewConsoleOutput(true)},
 })
 logging.SetLogger(logger)
+
+// After execution, inspect trace
+executionState := core.GetExecutionState(ctx)
+steps := executionState.GetSteps("moduleId")
+for _, step := range steps {
+    fmt.Printf("Step: %s, Duration: %s\n", step.Name, step.Duration)
+    fmt.Printf("Prompt: %s\n", step.Prompt)
+    fmt.Printf("Response: %s\n", step.Response)
+}
 ```
 
-#### Custom Tools
+### Custom Tools
+
 You can extend ReAct modules with custom tools:
-```go
 
-func (t *CustomTool) CanHandle(action string) bool {
-    return strings.HasPrefix(action, "custom_")
+```go
+// Define a custom tool
+type WeatherTool struct{}
+
+func (t *WeatherTool) GetName() string {
+    return "weather"
 }
 
-func (t *CustomTool) Execute(ctx context.Context, action string) (string, error) {
-    // Implement tool logic
-    return "Tool result", nil
+func (t *WeatherTool) GetDescription() string {
+    return "Get the current weather for a location"
 }
+
+func (t *WeatherTool) CanHandle(action string) bool {
+    return strings.HasPrefix(action, "weather(")
+}
+
+func (t *WeatherTool) Execute(ctx context.Context, action string) (string, error) {
+    // Parse location from action
+    location := parseLocation(action)
+    
+    // Fetch weather data (implementation detail)
+    weather, err := fetchWeather(location)
+    if err != nil {
+        return "", err
+    }
+    
+    return fmt.Sprintf("Weather in %s: %s, %d°C", location, weather.Condition, weather.Temperature), nil
+}
+
+// Use the custom tool with ReAct
+react := modules.NewReAct(signature, []core.Tool{&WeatherTool{}})
 ```
 
-#### Working with Different LLM Providers
+### Streaming Support
+
+Process LLM outputs incrementally as they're generated:
+
 ```go
-// Using Anthropic Claude
-llm, _ := llms.NewAnthropicLLM("api-key", anthropic.ModelSonnet)
+// Create a streaming handler
+handler := func(chunk string) {
+    fmt.Print(chunk)
+}
 
-// Using Ollama
-llm, _ := llms.NewOllamaLLM("http://localhost:11434", "ollama:llama2")
+// Enable streaming on the module
+module.SetStreamingHandler(handler)
 
-// Using LlamaCPP
-llm, _ := llms.NewLlamacppLLM("http://localhost:8080")
+// Process with streaming enabled
+result, err := module.Process(ctx, inputs)
 ```
 
+## Examples
 
-### Examples
 Check the examples directory for complete implementations:
 
-* examples/agents: Demonstrates different agent patterns
-* examples/hotpotqa: Question-answering implementation
-* examples/gsm8k: Math problem solving
+* [examples/agents](examples/agents): Demonstrates different agent patterns
+* [examples/hotpotqa](examples/hotpotqa): Question-answering implementation
+* [examples/gsm8k](examples/gsm8k): Math problem solving
 
+## Documentation
 
-### License
-DSPy-Go is released under the MIT License. See the LICENSE file for details.
+For more detailed documentation:
+
+* [GoDoc Reference](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go): Full API documentation
+* [Example Apps](https://github.com/XiaoConstantine/maestro): A local code review & question answering agent built on top of dspy-go
+
+## License
+
+DSPy-Go is released under the MIT License. See the [LICENSE](LICENSE) file for details.
