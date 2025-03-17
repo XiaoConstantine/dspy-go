@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -268,25 +269,51 @@ func (m *MockLLM) Capabilities() []core.Capability {
 
 type MockTool struct {
 	mock.Mock
-	metadata *core.ToolMetadata // Holds static metadata for the mock tool
+	name        string
+	description string
+	metadata    *core.ToolMetadata
 }
 
 // NewMockTool creates a new mock tool with default metadata.
 func NewMockTool(name string) *MockTool {
-	return &MockTool{
-		metadata: &core.ToolMetadata{
-			Name:        name,
-			Description: "Mock tool for testing",
-			InputSchema: map[string]string{
-				"action": "string",
+	schema := models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"query": {
+				Type:        "string",
+				Description: "Default parameter",
+				Required:    false,
 			},
-			OutputSchema: map[string]string{
-				"result": "string",
-			},
-			Capabilities:  []string{"test"},
-			ContextNeeded: []string{"trace_id"},
 		},
 	}
+	metadata := &core.ToolMetadata{
+		Name:         name,
+		Description:  "Mock tool for testing",
+		InputSchema:  schema,
+		OutputSchema: map[string]string{"result": "string"}, // Keep this for compatibility
+		Capabilities: []string{"mock", "test"},
+		Version:      "1.0.0",
+	}
+	tool := &MockTool{
+		name:        name,
+		description: "Mock tool for testing",
+		metadata:    metadata,
+	}
+	tool.On("Metadata").Return(metadata)
+	tool.On("CanHandle", mock.Anything, mock.Anything).Return(true)
+	tool.On("Validate", mock.Anything).Return(nil)
+
+	return tool
+}
+
+func (m *MockTool) Name() string {
+	args := m.Called()
+	return args.String(0)
+}
+
+func (m *MockTool) Description() string {
+	args := m.Called()
+	return args.String(0)
 }
 
 // Metadata implements the Tool interface.
@@ -339,4 +366,9 @@ func (m *MockTool) Execute(ctx context.Context, params map[string]interface{}) (
 func (m *MockTool) Validate(params map[string]interface{}) error {
 	args := m.Called(params)
 	return args.Error(0)
+}
+
+func (m *MockTool) InputSchema() models.InputSchema {
+	args := m.Called()
+	return args.Get(0).(models.InputSchema)
 }

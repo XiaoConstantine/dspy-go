@@ -1,20 +1,30 @@
 package core
 
-import "context"
+import (
+	"context"
+
+	"github.com/XiaoConstantine/mcp-go/pkg/model"
+)
 
 // ToolMetadata contains information about a tool's capabilities and requirements.
 type ToolMetadata struct {
-	Name          string            // Unique identifier for the tool
-	Description   string            // Human-readable description
-	InputSchema   map[string]string // Expected input parameter types
-	OutputSchema  map[string]string // Expected output types
-	Capabilities  []string          // List of supported capabilities
-	ContextNeeded []string          // Required context keys
-	Version       string            // Tool version for compatibility
+	Name          string             // Unique identifier for the tool
+	Description   string             // Human-readable description
+	InputSchema   models.InputSchema // Rich schema from MCP-Go - now consistent with Tool interface
+	OutputSchema  map[string]string  // Keep this field for backward compatibility
+	Capabilities  []string           // List of supported capabilities
+	ContextNeeded []string           // Required context keys
+	Version       string             // Tool version for compatibility
 }
 
 // Tool represents a capability that can be used by both agents and modules.
 type Tool interface {
+	// Name returns the tool's identifier
+	Name() string
+
+	// Description returns human-readable explanation of the tool's purpose
+	Description() string
+
 	// Metadata returns the tool's metadata
 	Metadata() *ToolMetadata
 
@@ -26,6 +36,9 @@ type Tool interface {
 
 	// Validate checks if the parameters match the expected schema
 	Validate(params map[string]interface{}) error
+
+	// InputSchema returns the expected parameter structure
+	InputSchema() models.InputSchema
 }
 
 // ToolResult wraps tool execution results with metadata.
