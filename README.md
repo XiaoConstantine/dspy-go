@@ -405,7 +405,7 @@ Check the examples directory for complete implementations:
 For more detailed documentation:
 
 * [GoDoc Reference](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go): Full API documentation
-* [Example Apps](https://github.com/XiaoConstantine/maestro): A local code review & question answering agent built on top of dspy-go
+* [Example Apps: Maestro](https://github.com/XiaoConstantine/maestro): A local code review & question answering agent built on top of dspy-go
 
 ## License
 
