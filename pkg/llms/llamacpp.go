@@ -392,6 +392,9 @@ func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, opt
 			allResults[i+item.Index] = result
 		}
 	}
+	if firstError != nil {
+		return nil, firstError
+	}
 
 	return &core.BatchEmbeddingResult{
 		Embeddings: allResults,

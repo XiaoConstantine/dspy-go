@@ -812,7 +812,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 	}
 	// If we had errors but still got some results, return what we have
 	if firstError != nil && len(allResults) == 0 {
-		return nil, firstError // Only return error if we have no results
+		return nil, firstError
 	}
 
 	return &core.BatchEmbeddingResult{
