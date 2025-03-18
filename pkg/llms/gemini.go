@@ -621,7 +621,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	}
 
 	// Check if the embedding values exist
-	if geminiResp.Embedding.Values == nil || len(geminiResp.Embedding.Values) == 0 {
+	if len(geminiResp.Embedding.Values) == 0 {
 		return nil, errors.WithFields(
 			errors.New(errors.InvalidResponse, "embedding values missing in response"),
 			errors.Fields{
@@ -1017,13 +1017,13 @@ func isValidGeminiEmbeddingModel(s string) bool {
 		"embedding-gecko-001",
 		"text-embedding-gecko-001",
 	}
-	
+
 	for _, model := range validModels {
 		if s == model {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
