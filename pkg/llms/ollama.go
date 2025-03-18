@@ -368,6 +368,9 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			allResults = append(allResults, result)
 		}
 	}
+	if firstError != nil {
+		return nil, firstError
+	}
 
 	// Return the combined results
 	return &core.BatchEmbeddingResult{

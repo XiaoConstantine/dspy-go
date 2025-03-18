@@ -5,33 +5,7 @@ import (
 	"testing"
 )
 
-// TestLLMRegistry tests the LLMRegistry.
-//
-//	func TestLLMRegistry(t *testing.T) {
-//		registry := NewLLMRegistry()
-//
-//		// Test registering an LLM
-//		registry.Register("test", func() (LLM, error) {
-//			return &MockLLM{}, nil
-//		})
-//
-//		// Test creating a registered LLM
-//		llm, err := registry.Create("test")
-//		if err != nil {
-//			t.Errorf("Unexpected error creating LLM: %v", err)
-//		}
-//		if _, ok := llm.(*MockLLM); !ok {
-//			t.Error("Created LLM is not of expected type")
-//		}
-//
-//		// Test creating an unregistered LLM
-//		_, err = registry.Create("nonexistent")
-//		if err == nil {
-//			t.Error("Expected error when creating unregistered LLM, got nil")
-//		}
-//	}
-//
-// // TestGenerateOptions tests the GenerateOptions and related functions.
+// TestGenerateOptions tests the GenerateOptions and related functions.
 func TestGenerateOptions(t *testing.T) {
 	opts := &GenerateOptions{}
 
