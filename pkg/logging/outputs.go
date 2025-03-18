@@ -503,6 +503,10 @@ func extractModelName(modelID string) string {
 		// Find "claude" and the following size indicator (opus, sonnet, etc.)
 		for i, part := range parts {
 			if part == "claude" && i+1 < len(parts) {
+				if parts[i+1] == "3" && i+2 < len(parts) {
+					// Handle claude-3-opus format
+					return fmt.Sprintf("claude-%s", parts[i+2])
+				}
 				return fmt.Sprintf("claude-%s", parts[i+1])
 			}
 		}
@@ -519,13 +523,26 @@ func extractModelName(modelID string) string {
 
 	case contains(parts, "gpt"):
 		// Handle GPT models
-		for i, part := range parts {
-			if strings.HasPrefix(part, "gpt") && i+1 < len(parts) {
-				return fmt.Sprintf("%s-%s", part, parts[i+1])
+		if len(parts) >= 3 && parts[0] == "gpt" && parts[1] == "4" {
+			if parts[2] == "32k" {
+				return "gpt-4-32k" // Special case for gpt-4-32k
 			}
+			// Other gpt-4-X variants
+			return fmt.Sprintf("gpt-%s-%s", parts[1], parts[2])
+		}
+		// Basic gpt-X format
+		if len(parts) >= 2 {
+			return fmt.Sprintf("gpt-%s", parts[1])
 		}
 		return parts[0]
-
+	case contains(parts, "llama"):
+		// Handle llama-2 and other variants
+		for i, part := range parts {
+			if part == "llama" && i+1 < len(parts) {
+				return fmt.Sprintf("llama-%s", parts[i+1])
+			}
+		}
+		return "llama"
 	default:
 		// For unknown patterns, return the first part
 		if len(parts) > 0 {
@@ -792,8 +809,11 @@ func formatAnnotationValue(key string, value interface{}) string {
 
 	case string:
 		// Truncate long strings
-		if len(v) > 50 {
+		if len(v) > 47 {
 			return fmt.Sprintf("%s='%s...'", key, v[:47])
+		}
+		if key == "status" || key == "result" {
+			return fmt.Sprintf("%s=%s", key, v)
 		}
 		return fmt.Sprintf("%s='%s'", key, v)
 

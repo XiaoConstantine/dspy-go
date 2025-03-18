@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,6 +23,7 @@ type CustomFormatter struct{}
 func (c *CustomFormatter) Format(e LogEntry) string {
 	return fmt.Sprintf("CUSTOM [%s] %s", e.Severity, e.Message)
 }
+
 func TestConsoleOutputColor(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -454,6 +456,7 @@ type MockFile struct {
 	SyncErr  error
 	CloseErr error
 	Content  []byte
+	StatErr  error
 }
 
 func (m *MockFile) Write(p []byte) (int, error) {
@@ -477,32 +480,882 @@ func (m *MockFile) Close() error {
 }
 
 func (m *MockFile) Stat() (os.FileInfo, error) {
-	// Mock implementation for file stats
-	return nil, nil
+	if m.StatErr != nil {
+		return nil, m.StatErr
+	}
+	// Mock a simple file info
+	return &mockFileInfo{size: int64(len(m.Content))}, nil
 }
+
+// mockFileInfo is a simple implementation of os.FileInfo for testing.
+type mockFileInfo struct {
+	size int64
+}
+
+func (m *mockFileInfo) Name() string       { return "mock-file" }
+func (m *mockFileInfo) Size() int64        { return m.size }
+func (m *mockFileInfo) Mode() os.FileMode  { return 0644 }
+func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
+func (m *mockFileInfo) IsDir() bool        { return false }
+func (m *mockFileInfo) Sys() interface{}   { return nil }
 
 // Additional test for error handling with a mock file.
 func TestFileOutputWithMockFile(t *testing.T) {
-	mockFile := &MockFile{
-		WriteErr: io.ErrShortWrite,
+	t.Run("Write error", func(t *testing.T) {
+		mockFile := &MockFile{
+			WriteErr: io.ErrShortWrite,
+		}
+
+		fileOutput := &FileOutput{
+			file:       mockFile,
+			path:       "mock_path",
+			formatter:  &TextFormatter{IncludeTimestamp: true, IncludeLocation: true},
+			jsonFormat: false,
+			curSize:    0,
+		}
+
+		// Try to write with the error-producing mock file
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "This should fail",
+		}
+
+		err := fileOutput.Write(entry)
+		assert.Error(t, err, "Write should return an error with failing mock file")
+		assert.Contains(t, err.Error(), "failed to write", "Error message should indicate write failure")
+	})
+
+	t.Run("Rotation with file error", func(t *testing.T) {
+		mockFile := &MockFile{
+			CloseErr: fmt.Errorf("mock close error"),
+		}
+
+		fileOutput := &FileOutput{
+			file:       mockFile,
+			path:       "mock_path",
+			formatter:  &TextFormatter{IncludeTimestamp: true, IncludeLocation: true},
+			jsonFormat: false,
+			curSize:    100,
+			rotateSize: 50, // Force rotation on next write
+		}
+
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "This should trigger rotation",
+		}
+
+		// This should attempt rotation and fail
+		err := fileOutput.Write(entry)
+		assert.Error(t, err, "Rotation should fail with mock close error")
+		assert.Contains(t, err.Error(), "failed to rotate", "Error message should indicate rotation failure")
+	})
+
+	// Test Stat error in file rotation logic
+	t.Run("Stat error", func(t *testing.T) {
+		mockFile := &MockFile{
+			StatErr: fmt.Errorf("mock stat error"),
+		}
+
+		// fileOutput := &FileOutput{
+		// 	file:       mockFile,
+		// 	path:       "mock_path",
+		// 	formatter:  &TextFormatter{IncludeTimestamp: true, IncludeLocation: true},
+		// 	jsonFormat: false,
+		// }
+
+		// Get the current size should use the mock stat
+		_, err := mockFile.Stat()
+		assert.Error(t, err, "Stat should return the mock error")
+	})
+}
+
+// Test the text formatter.
+func TestTextFormatter(t *testing.T) {
+	formatter := &TextFormatter{
+		IncludeTimestamp:  true,
+		IncludeLocation:   true,
+		IncludeStackTrace: true,
 	}
 
-	fileOutput := &FileOutput{
-		file:       mockFile,
-		path:       "mock_path",
-		formatter:  &TextFormatter{IncludeTimestamp: true, IncludeLocation: true},
-		jsonFormat: false,
-		curSize:    0,
+	t.Run("Basic formatting", func(t *testing.T) {
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			File:     "test.go",
+			Line:     123,
+		}
+
+		formatted := formatter.Format(entry)
+		assert.Contains(t, formatted, "INFO")
+		assert.Contains(t, formatted, "Test message")
+		assert.Contains(t, formatted, "test.go:123")
+	})
+
+	t.Run("With trace ID", func(t *testing.T) {
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			File:     "test.go",
+			Line:     123,
+			TraceID:  "trace-123",
+		}
+
+		formatted := formatter.Format(entry)
+		assert.Contains(t, formatted, "traceId=trace-123")
+	})
+
+	t.Run("With token info", func(t *testing.T) {
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			TokenInfo: &core.TokenInfo{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+			},
+		}
+
+		formatted := formatter.Format(entry)
+		assert.Contains(t, formatted, "tokens=100/50")
+	})
+
+	t.Run("With fields", func(t *testing.T) {
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			Fields: map[string]interface{}{
+				"user":   "test-user",
+				"action": "login",
+			},
+		}
+
+		formatted := formatter.Format(entry)
+		assert.Contains(t, formatted, "user=test-user")
+		assert.Contains(t, formatted, "action=login")
+	})
+}
+
+// Test JSONFormatter.
+func TestJSONFormatter(t *testing.T) {
+	formatter := &JSONFormatter{}
+
+	t.Run("Basic JSON format", func(t *testing.T) {
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			File:     "test.go",
+			Line:     123,
+			Function: "TestFunc",
+		}
+
+		formatted := formatter.Format(entry)
+		var data map[string]interface{}
+		err := json.Unmarshal([]byte(formatted), &data)
+		require.NoError(t, err, "Formatter should produce valid JSON")
+
+		assert.Equal(t, "Test message", data["message"])
+		assert.Equal(t, "INFO", data["level"])
+		assert.Equal(t, "test.go", data["file"])
+		assert.Equal(t, float64(123), data["line"])
+		assert.Equal(t, "TestFunc", data["function"])
+	})
+
+	t.Run("With all fields", func(t *testing.T) {
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			File:     "test.go",
+			Line:     123,
+			Function: "TestFunc",
+			TraceID:  "trace-123",
+			ModelID:  "gpt-4",
+			TokenInfo: &core.TokenInfo{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+			},
+			Fields: map[string]interface{}{
+				"user":   "test-user",
+				"action": "login",
+				"count":  42,
+			},
+		}
+
+		formatted := formatter.Format(entry)
+		var data map[string]interface{}
+		err := json.Unmarshal([]byte(formatted), &data)
+		require.NoError(t, err, "Formatter should produce valid JSON")
+
+		assert.Equal(t, "Test message", data["message"])
+		assert.Equal(t, "INFO", data["level"])
+		assert.Equal(t, "trace-123", data["traceId"])
+		assert.Equal(t, "gpt-4", data["modelId"])
+		assert.Equal(t, "test-user", data["user"])
+		assert.Equal(t, "login", data["action"])
+		assert.Equal(t, float64(42), data["count"])
+
+		tokenInfo, ok := data["tokenInfo"].(map[string]interface{})
+		require.True(t, ok, "tokenInfo should be a map")
+		assert.Equal(t, float64(100), tokenInfo["promptTokens"])
+		assert.Equal(t, float64(50), tokenInfo["completionTokens"])
+		assert.Equal(t, float64(150), tokenInfo["totalTokens"])
+	})
+
+	// Test error case in JSON marshal
+	t.Run("JSON marshal error", func(t *testing.T) {
+		// Create a circular reference to cause JSON marshal to fail
+		circular := make(map[string]interface{})
+		circular["self"] = circular
+
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			Fields:   circular,
+		}
+
+		formatted := formatter.Format(entry)
+		assert.Contains(t, formatted, "Error marshaling log entry to JSON")
+	})
+}
+
+// Test Console Output with LLM information.
+func TestConsoleOutputWithLLMInfo(t *testing.T) {
+	t.Run("Basic console output", func(t *testing.T) {
+		buffer := &bytes.Buffer{}
+		console := &ConsoleOutput{
+			writer: buffer,
+			color:  false,
+		}
+
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+			File:     "test.go",
+			Line:     123,
+			TraceID:  "trace-123",
+		}
+
+		err := console.Write(entry)
+		require.NoError(t, err)
+
+		output := buffer.String()
+		assert.Contains(t, output, "Test message")
+		assert.Contains(t, output, "INFO")
+		assert.Contains(t, output, "test.go:123")
+		assert.Contains(t, output, "traceId=trace-12")
+	})
+
+	t.Run("With model and token info", func(t *testing.T) {
+		buffer := &bytes.Buffer{}
+		console := &ConsoleOutput{
+			writer: buffer,
+			color:  true, // Enable colors to test that path
+		}
+
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "LLM response",
+			File:     "test.go",
+			Line:     123,
+			ModelID:  "gpt-4-0314",
+			TokenInfo: &core.TokenInfo{
+				PromptTokens:     200,
+				CompletionTokens: 50,
+				TotalTokens:      250,
+			},
+		}
+
+		err := console.Write(entry)
+		require.NoError(t, err)
+
+		output := buffer.String()
+		assert.Contains(t, output, "LLM response")
+		assert.Contains(t, output, "model=gpt-4")
+		assert.Contains(t, output, "tokens=250")
+		// With color enabled, should have color codes
+		assert.Contains(t, output, "\033[")
+	})
+
+	t.Run("With spans information at debug level", func(t *testing.T) {
+		buffer := &bytes.Buffer{}
+		console := &ConsoleOutput{
+			writer: buffer,
+			color:  false,
+		}
+
+		spans := []*core.Span{
+			{
+				ID:        "span-1",
+				Operation: "llm-call",
+				StartTime: time.Now().Add(-500 * time.Millisecond),
+				EndTime:   time.Now(),
+				Annotations: map[string]interface{}{
+					"chain_step": map[string]interface{}{
+						"name":  "generate",
+						"index": 0,
+						"total": 2,
+					},
+				},
+			},
+			{
+				ID:        "span-2",
+				ParentID:  "span-1",
+				Operation: "api-call",
+				StartTime: time.Now().Add(-300 * time.Millisecond),
+				EndTime:   time.Now().Add(-100 * time.Millisecond),
+			},
+		}
+
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: DEBUG, // Debug level to show spans
+			Message:  "Debug with spans",
+			File:     "test.go",
+			Line:     123,
+			Fields: map[string]interface{}{
+				"spans": spans,
+			},
+		}
+
+		err := console.Write(entry)
+		require.NoError(t, err)
+
+		output := buffer.String()
+		assert.Contains(t, output, "Debug with spans")
+		assert.Contains(t, output, "Trace Timeline:")
+		assert.Contains(t, output, "llm-call")
+		assert.Contains(t, output, "step=generate")
+		assert.Contains(t, output, "[1/2]")
+		assert.Contains(t, output, "api-call")
+	})
+
+	// Test that write errors are propagated
+	t.Run("Write error", func(t *testing.T) {
+		errWriter := &ErrorWriter{err: fmt.Errorf("write error")}
+		console := &ConsoleOutput{
+			writer: errWriter,
+			color:  false,
+		}
+
+		entry := LogEntry{
+			Time:     time.Now().UnixNano(),
+			Severity: INFO,
+			Message:  "Test message",
+		}
+
+		err := console.Write(entry)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "write error")
+	})
+}
+
+// Mock writer that returns errors on write.
+type ErrorWriter struct {
+	err error
+}
+
+func (e *ErrorWriter) Write(p []byte) (n int, err error) {
+	return 0, e.err
+}
+
+// Test formatLLMInfo function.
+func TestFormatLLMInfo(t *testing.T) {
+	t.Run("Empty input", func(t *testing.T) {
+		result := formatLLMInfo("", nil)
+		assert.Equal(t, "", result, "Should return empty string for empty inputs")
+	})
+
+	t.Run("Model ID only", func(t *testing.T) {
+		result := formatLLMInfo("gpt-4-0314", nil)
+		assert.Contains(t, result, "model=gpt-4")
+	})
+
+	t.Run("Token info only", func(t *testing.T) {
+		tokenInfo := &core.TokenInfo{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		}
+		result := formatLLMInfo("", tokenInfo)
+		assert.Contains(t, result, "tokens=150")
+		// Should contain up arrow for prompt tokens
+		assert.Contains(t, result, "100")
+		// Should contain down arrow for completion tokens
+		assert.Contains(t, result, "50")
+	})
+
+	t.Run("Both model and tokens", func(t *testing.T) {
+		tokenInfo := &core.TokenInfo{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		}
+		result := formatLLMInfo("claude-3-opus-20240229", tokenInfo)
+		assert.Contains(t, result, "model=claude-opus")
+		assert.Contains(t, result, "tokens=150")
+	})
+
+	// Test different model name formats
+	t.Run("Different model name formats", func(t *testing.T) {
+		tests := []struct {
+			input    string
+			expected string
+		}{
+			{"gpt-4-0314", "gpt-4"},
+			{"gpt-4-32k", "gpt-4-32k"},
+			{"gpt-3.5-turbo", "gpt-3"},
+			{"claude-3-opus-20240229", "claude-opus"},
+			{"claude-3-sonnet-20240229", "claude-sonnet"},
+			{"gemini-pro", "gemini-pro"},
+			{"llama-2-70b", "llama-2"},
+			{"random-model", "random"}, // unknown model
+		}
+
+		for _, tt := range tests {
+			result := formatLLMInfo(tt.input, nil)
+			assert.Contains(t, result, fmt.Sprintf("model=%s", tt.expected))
+		}
+	})
+}
+
+// Test extractModelName function.
+func TestExtractModelName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"gpt-4-0314", "gpt-4-0314"},
+		{"gpt-4-32k", "gpt-4-32k"},
+		{"gpt-3.5-turbo", "gpt-3"},
+		{"claude-3-opus-20240229", "claude-opus"},
+		{"claude-3-sonnet-20240229", "claude-sonnet"},
+		{"gemini-pro", "gemini-pro"},
+		{"llama-2-70b", "llama-2"},
+		{"random-model", "random"}, // unknown model
+		{"", ""},                   // empty input
 	}
 
-	// Try to write with the error-producing mock file
-	entry := LogEntry{
-		Time:     time.Now().UnixNano(),
-		Severity: INFO,
-		Message:  "This should fail",
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := extractModelName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Test formatFields function.
+func TestFormatFields(t *testing.T) {
+	t.Run("Empty fields", func(t *testing.T) {
+		result := formatFields(map[string]interface{}{})
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("Simple fields", func(t *testing.T) {
+		fields := map[string]interface{}{
+			"user":  "test-user",
+			"count": 42,
+		}
+		result := formatFields(fields)
+		assert.Contains(t, result, "user=test-user")
+		assert.Contains(t, result, "count=42")
+	})
+
+	t.Run("Long prompt/completion", func(t *testing.T) {
+		longText := strings.Repeat("a", 200)
+		fields := map[string]interface{}{
+			"prompt":     longText,
+			"completion": longText,
+		}
+		result := formatFields(fields)
+		// Should be truncated
+		assert.Contains(t, result, "...")
+		// Should be quoted
+		assert.Contains(t, result, `"`)
+	})
+
+	t.Run("Mixed fields", func(t *testing.T) {
+		fields := map[string]interface{}{
+			"user":       "test-user",
+			"count":      42,
+			"prompt":     "Tell me a joke",
+			"completion": "Why did the chicken cross the road?",
+		}
+		result := formatFields(fields)
+		assert.Contains(t, result, "user=test-user")
+		assert.Contains(t, result, "count=42")
+		assert.Contains(t, result, `prompt="Tell me a joke"`)
+		assert.Contains(t, result, `completion="Why did the chicken cross the road?"`)
+	})
+}
+
+// Test span formatting.
+func TestFormatSpans(t *testing.T) {
+	t.Run("Empty spans", func(t *testing.T) {
+		result := formatSpans([]*core.Span{})
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("Single span", func(t *testing.T) {
+		now := time.Now()
+		spans := []*core.Span{
+			{
+				ID:        "span-1",
+				Operation: "test-operation",
+				StartTime: now.Add(-100 * time.Millisecond),
+				EndTime:   now,
+			},
+		}
+		result := formatSpans(spans)
+		assert.Contains(t, result, "Trace Timeline:")
+		assert.Contains(t, result, "test-operation")
+	})
+
+	t.Run("Parent-child spans", func(t *testing.T) {
+		now := time.Now()
+		spans := []*core.Span{
+			{
+				ID:        "span-1",
+				Operation: "parent-operation",
+				StartTime: now.Add(-200 * time.Millisecond),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-2",
+				ParentID:  "span-1",
+				Operation: "child-operation",
+				StartTime: now.Add(-150 * time.Millisecond),
+				EndTime:   now.Add(-50 * time.Millisecond),
+			},
+		}
+		result := formatSpans(spans)
+		assert.Contains(t, result, "parent-operation")
+		assert.Contains(t, result, "child-operation")
+	})
+
+	t.Run("Spans with annotations", func(t *testing.T) {
+		now := time.Now()
+		tokenUsage := &core.TokenUsage{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		}
+		spans := []*core.Span{
+			{
+				ID:        "span-1",
+				Operation: "llm-call",
+				StartTime: now.Add(-200 * time.Millisecond),
+				EndTime:   now,
+				Annotations: map[string]interface{}{
+					"chain_step": map[string]interface{}{
+						"name":  "generate",
+						"index": 0,
+						"total": 2,
+					},
+					"token_usage": tokenUsage,
+				},
+			},
+			{
+				ID:        "span-2",
+				ParentID:  "span-1",
+				Operation: "api-call",
+				StartTime: now.Add(-150 * time.Millisecond),
+				EndTime:   now.Add(-50 * time.Millisecond),
+				Error:     fmt.Errorf("test error"),
+				Annotations: map[string]interface{}{
+					"task": map[string]interface{}{
+						"processor": "llm",
+						"id":        "task-123",
+						"type":      "generation",
+					},
+				},
+			},
+		}
+		result := formatSpans(spans)
+		assert.Contains(t, result, "llm-call")
+		assert.Contains(t, result, "step=generate")
+		assert.Contains(t, result, "[1/2]")
+		assert.Contains(t, result, "tokens=150(100↑50↓)")
+		assert.Contains(t, result, "api-call")
+		assert.Contains(t, result, "[ERROR: test error]")
+		assert.Contains(t, result, "[llm]")
+	})
+
+	t.Run("Span duration formatting", func(t *testing.T) {
+		// Test different durations
+		now := time.Now()
+		spans := []*core.Span{
+			{
+				ID:        "span-1",
+				Operation: "nano-operation",
+				StartTime: now.Add(-500 * time.Nanosecond),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-2",
+				Operation: "micro-operation",
+				StartTime: now.Add(-500 * time.Microsecond),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-3",
+				Operation: "milli-operation",
+				StartTime: now.Add(-500 * time.Millisecond),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-4",
+				Operation: "second-operation",
+				StartTime: now.Add(-2 * time.Second),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-5",
+				Operation: "minute-operation",
+				StartTime: now.Add(-2 * time.Minute),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-6",
+				Operation: "hour-operation",
+				StartTime: now.Add(-2 * time.Hour),
+				EndTime:   now,
+			},
+			{
+				ID:        "span-7",
+				Operation: "unfinished-operation",
+				StartTime: now.Add(-1 * time.Second),
+				EndTime:   time.Time{}, // Zero time (unfinished)
+			},
+			{
+				ID:        "span-8",
+				Operation: "error-operation",
+				StartTime: now,
+				EndTime:   now.Add(-1 * time.Second), // Negative duration (error)
+			},
+		}
+		result := formatSpans(spans)
+		// Check for appropriate duration formatting
+		assert.Contains(t, result, "nano-operation")
+		assert.Contains(t, result, "micro-operation")
+		assert.Contains(t, result, "milli-operation")
+		assert.Contains(t, result, "second-operation")
+		assert.Contains(t, result, "minute-operation")
+		assert.Contains(t, result, "hour-operation")
+		assert.Contains(t, result, "unfinished-operation")
+		assert.Contains(t, result, "error-operation")
+	})
+}
+
+// Test duration formatting functions.
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		duration time.Duration
+		expected string
+	}{
+		{500 * time.Nanosecond, "500ns"},
+		{500 * time.Microsecond, "500.00µs"},
+		{500 * time.Millisecond, "500.00ms"},
+		{1500 * time.Millisecond, "1.50s"},
+		{90 * time.Second, "1m30s"},
 	}
 
-	err := fileOutput.Write(entry)
-	assert.Error(t, err, "Write should return an error with failing mock file")
-	assert.Contains(t, err.Error(), "failed to write", "Error message should indicate write failure")
+	for _, tt := range tests {
+		t.Run(tt.duration.String(), func(t *testing.T) {
+			result := formatDuration(tt.duration)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatSpanDuration(t *testing.T) {
+	tests := []struct {
+		duration time.Duration
+		expected string
+	}{
+		{500 * time.Nanosecond, "<1µs"},
+		{1500 * time.Nanosecond, "1.50µs"},
+		{1500 * time.Microsecond, "1.50ms"},
+		{1500 * time.Millisecond, "1.50s"},
+		{90 * time.Second, "1.5m"},
+		{90 * time.Minute, "1.5h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.duration.String(), func(t *testing.T) {
+			result := formatSpanDuration(tt.duration)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Test annotation formatting.
+func TestFormatAnnotations(t *testing.T) {
+	t.Run("Empty annotations", func(t *testing.T) {
+		result := formatAnnotations(map[string]interface{}{})
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("Simple annotations", func(t *testing.T) {
+		annotations := map[string]interface{}{
+			"status": "completed",
+			"score":  0.95,
+			"count":  42,
+		}
+		result := formatAnnotations(annotations)
+		assert.Contains(t, result, "status=completed")
+		assert.Contains(t, result, "score=0.95")
+		assert.Contains(t, result, "count=42")
+	})
+}
+
+func TestFormatAnnotationValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		value    interface{}
+		expected string
+	}{
+		{"Nil value", "key", nil, ""},
+		{"Boolean true", "flag", true, "flag=true"},
+		{"Boolean false", "flag", false, "flag=false"},
+		{"Integer", "count", 42, "count=42"},
+		{"Float", "score", 0.95, "score=0.95"},
+		{"String", "status", "completed", "status=completed"},
+		{"Long string", "desc", strings.Repeat("a", 100), "desc='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...'"},
+		{"Duration", "time", 500 * time.Millisecond, "time=500.00ms"},
+		{"Array", "tags", []interface{}{"tag1", "tag2"}, "tags=[tag1,tag2]"},
+		{"Large array", "items", make([]interface{}, 10), "items=[10 items]"},
+		{"Map", "config", map[string]interface{}{"a": 1, "b": 2}, "config={2 keys}"},
+		{"Error", "error", fmt.Errorf("test error"), "error=error('test error')"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatAnnotationValue(tt.key, tt.value)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Test FileOutput options.
+func TestFileOutputOptions(t *testing.T) {
+	t.Run("WithJSONFormat", func(t *testing.T) {
+		option := WithJSONFormat(true)
+		fileOutput := &FileOutput{}
+		option(fileOutput)
+		assert.True(t, fileOutput.jsonFormat)
+		assert.IsType(t, &JSONFormatter{}, fileOutput.formatter)
+
+		// Test with false
+		option = WithJSONFormat(false)
+		fileOutput = &FileOutput{}
+		option(fileOutput)
+		assert.False(t, fileOutput.jsonFormat)
+		assert.IsType(t, &TextFormatter{}, fileOutput.formatter)
+	})
+
+	t.Run("WithRotation", func(t *testing.T) {
+		option := WithRotation(1024, 5)
+		fileOutput := &FileOutput{}
+		option(fileOutput)
+		assert.Equal(t, int64(1024), fileOutput.rotateSize)
+		assert.Equal(t, 5, fileOutput.maxFiles)
+	})
+
+	t.Run("WithBufferSize", func(t *testing.T) {
+		option := WithBufferSize(8192)
+		fileOutput := &FileOutput{}
+		option(fileOutput)
+		assert.Equal(t, 8192, fileOutput.bufferSize)
+		assert.Equal(t, 8192, cap(fileOutput.buffer))
+	})
+
+	t.Run("WithFormatter", func(t *testing.T) {
+		formatter := &CustomFormatter{}
+		option := WithFormatter(formatter)
+		fileOutput := &FileOutput{}
+		option(fileOutput)
+		assert.Equal(t, formatter, fileOutput.formatter)
+	})
+}
+
+// Test ConsoleOutput options.
+func TestConsoleOutputOptions(t *testing.T) {
+	t.Run("WithColor", func(t *testing.T) {
+		option := WithColor(true)
+		console := &ConsoleOutput{}
+		option(console)
+		assert.True(t, console.color)
+
+		option = WithColor(false)
+		console = &ConsoleOutput{}
+		option(console)
+		assert.False(t, console.color)
+	})
+
+	t.Run("NewConsoleOutput", func(t *testing.T) {
+		// Test with stderr
+		console := NewConsoleOutput(true)
+		assert.Equal(t, os.Stderr, console.writer)
+		assert.True(t, console.color) // Default is true
+
+		// Test with stdout and color disabled
+		console = NewConsoleOutput(false, WithColor(false))
+		assert.Equal(t, os.Stdout, console.writer)
+		assert.False(t, console.color)
+	})
+
+	t.Run("GetSeverityColor", func(t *testing.T) {
+		// Test all severity levels
+		assert.NotEmpty(t, getSeverityColor(DEBUG))
+		assert.NotEmpty(t, getSeverityColor(INFO))
+		assert.NotEmpty(t, getSeverityColor(WARN))
+		assert.NotEmpty(t, getSeverityColor(ERROR))
+		assert.NotEmpty(t, getSeverityColor(FATAL))
+		// Test invalid severity
+		assert.Empty(t, getSeverityColor(Severity(999)))
+	})
+}
+
+// Test helper functions.
+func TestHelperFunctions(t *testing.T) {
+	t.Run("contains", func(t *testing.T) {
+		assert.True(t, contains([]string{"a", "b", "c"}, "b"))
+		assert.False(t, contains([]string{"a", "b", "c"}, "d"))
+		assert.False(t, contains([]string{}, "a"))
+	})
+
+	t.Run("filterRelevantAnnotations", func(t *testing.T) {
+		annotations := map[string]interface{}{
+			"status":      "completed",
+			"result":      "success",
+			"error":       nil,
+			"count":       42,
+			"score":       0.95,
+			"progress":    0.5,
+			"irrelevant1": "ignore",
+			"irrelevant2": "ignore",
+		}
+
+		filtered := filterRelevantAnnotations(annotations)
+		assert.Equal(t, 6, len(filtered))
+		assert.Contains(t, filtered, "status")
+		assert.Contains(t, filtered, "result")
+		assert.Contains(t, filtered, "count")
+		assert.Contains(t, filtered, "score")
+		assert.Contains(t, filtered, "progress")
+		assert.NotContains(t, filtered, "irrelevant1")
+		assert.NotContains(t, filtered, "irrelevant2")
+	})
 }

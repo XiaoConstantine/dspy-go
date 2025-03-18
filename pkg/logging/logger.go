@@ -17,6 +17,8 @@ var (
 	mu            sync.RWMutex
 )
 
+var osExit = os.Exit
+
 // Logger provides the core logging functionality.
 type Logger struct {
 	mu         sync.Mutex
@@ -153,7 +155,7 @@ func (l *Logger) Fatal(ctx context.Context, msg string) {
 	}
 
 	// Exit the program with status code 1
-	os.Exit(1)
+	osExit(1)
 }
 
 func (l *Logger) Fatalf(ctx context.Context, format string, args ...interface{}) {
@@ -166,7 +168,7 @@ func (l *Logger) Fatalf(ctx context.Context, format string, args ...interface{})
 	}
 
 	// Exit the program with status code 1
-	os.Exit(1)
+	osExit(1)
 }
 
 // GetLogger returns the global logger instance.
