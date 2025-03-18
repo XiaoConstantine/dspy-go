@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -243,7 +245,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 	resp, err := g.GetHTTPClient().Do(req)
 	if err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: failed to send request: %v", err)),
 			errors.Fields{
 				"model": g.ModelID(),
 			})
@@ -253,7 +255,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: failed to read response body: %v", err)),
 			errors.Fields{
 				"model": g.ModelID(),
 			})
@@ -261,7 +263,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: API request failed with status code %d: %s", resp.StatusCode, string(body))),
 			errors.Fields{
 				"model":      g.ModelID(),
 				"statusCode": resp.StatusCode,
@@ -271,7 +273,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 	var geminiResp geminiResponse
 	if err := json.Unmarshal(body, &geminiResp); err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
+			errors.New(errors.InvalidResponse, fmt.Sprintf("InvalidResponse: failed to unmarshal response: %v", err)),
 			errors.Fields{
 				"model": g.ModelID(),
 			})
@@ -279,7 +281,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 
 	if len(geminiResp.Candidates) == 0 {
 		return nil, errors.WithFields(
-			errors.New(errors.InvalidResponse, "no candidates in response"),
+			errors.New(errors.InvalidResponse, "InvalidResponse: no candidates in response"),
 			errors.Fields{
 				"model": g.ModelID(),
 			})
@@ -495,18 +497,6 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	return result, nil
 }
 
-func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {
-	// Remove any trailing slashes from base URL and leading slashes from path
-	baseURL := strings.TrimRight(endpoint.BaseURL, "/")
-	path := strings.TrimLeft(endpoint.Path, "/")
-
-	// Join them with a single slash
-	fullEndpoint := fmt.Sprintf("%s/%s", baseURL, path)
-
-	// Add the API key as query parameter
-	return fmt.Sprintf("%s?key=%s", fullEndpoint, apiKey)
-}
-
 // CreateEmbedding implements the embedding generation for a single input.
 func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
 	// Apply options
@@ -628,10 +618,6 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	}
 
 	return result, nil
-}
-
-func isValidGeminiEmbeddingModel(s string) bool {
-	return s == "gemini-embedding-exp-03-07" || s == "text-embedding-004"
 }
 
 // CreateEmbeddings implements batch embedding generation.
@@ -799,6 +785,9 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			allResults = append(allResults, result)
 		}
 	}
+	if firstError != nil {
+		return nil, firstError // Return nil result and error directly
+	}
 
 	return &core.BatchEmbeddingResult{
 		Embeddings: allResults,
@@ -832,7 +821,7 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			errors.New(errors.InvalidInput, fmt.Sprintf("InvalidInput: failed to marshal request body: %v", err)),
 			errors.Fields{"prompt": prompt, "model": g.ModelID()})
 	}
 
@@ -842,7 +831,7 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	req, err := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.New(errors.InvalidInput, fmt.Sprintf("InvalidInput: failed to create request: %v", err)),
 			errors.Fields{"model": g.ModelID()})
 	}
 
@@ -855,50 +844,132 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	chunkChan := make(chan core.StreamChunk)
 	streamCtx, cancelStream := context.WithCancel(ctx)
 
+	// Used to protect against multiple closes
+	var channelClosed sync.Once
+
+	// Create a safe way to close the channel
+	safeCloseChannel := func() {
+		channelClosed.Do(func() {
+			close(chunkChan)
+		})
+	}
+
 	response := &core.StreamResponse{
 		ChunkChannel: chunkChan,
-		Cancel:       cancelStream,
+		Cancel: func() {
+			// Cancel the context first
+			cancelStream()
+		},
 	}
 
 	// Start streaming goroutine
 	go func() {
-		defer close(chunkChan)
+		// Always close the channel when done
+		defer safeCloseChannel()
 
-		resp, err := g.GetHTTPClient().Do(req)
+		// Create a client that will properly cancel on context cancellation
+		client := g.GetHTTPClient()
+		resp, err := client.Do(req)
 		if err != nil {
+			// Check if context is already cancelled
+			if streamCtx.Err() != nil {
+				return
+			}
 			chunkChan <- core.StreamChunk{
-				Error: errors.Wrap(err, errors.LLMGenerationFailed, "request failed"),
+				Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: request failed: %v", err)),
 			}
 			return
 		}
 		defer resp.Body.Close()
 
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
+		reader := bufio.NewReader(resp.Body)
+
+		// Process stream until we're done or cancelled
+		for {
+			// Check if context is cancelled first
 			select {
 			case <-streamCtx.Done():
 				return
 			default:
-				line := scanner.Text()
+				// Continue processing
+			}
 
-				// SSE format: "data: {...}"
-				if strings.HasPrefix(line, "data: ") {
-					data := strings.TrimPrefix(line, "data: ")
+			// Create a timeout for reading
+			readCtx, cancel := context.WithTimeout(streamCtx, 500*time.Millisecond)
 
-					// Check for end marker
-					if data == "[DONE]" {
-						chunkChan <- core.StreamChunk{Done: true}
-						return
+			// Read with a timeout
+			ch := make(chan struct {
+				line string
+				err  error
+			}, 1)
+
+			go func() {
+				line, err := reader.ReadString('\n')
+				ch <- struct {
+					line string
+					err  error
+				}{line, err}
+			}()
+
+			// Wait for read completion or timeout
+			var line string
+			var readErr error
+
+			select {
+			case result := <-ch:
+				line = result.line
+				readErr = result.err
+				cancel() // Cancel the read context
+			case <-readCtx.Done():
+				cancel() // Explicit cancel
+				// Check if main context is cancelled
+				if streamCtx.Err() != nil {
+					return
+				}
+				// Just timed out, try again
+				continue
+			}
+
+			// Process read results
+			if readErr != nil {
+				// Check for end of stream or cancelled context
+				if readErr == io.EOF || streamCtx.Err() != nil {
+					return
+				}
+
+				// Only send error if context not cancelled
+				if streamCtx.Err() == nil {
+					chunkChan <- core.StreamChunk{
+						Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: stream read error: %v", readErr)),
 					}
+				}
+				return
+			}
 
-					// Parse the response
-					var chunk geminiResponse
-					if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-						continue // Skip invalid chunks
-					}
+			// Process the line if context not cancelled
+			if streamCtx.Err() != nil {
+				return
+			}
 
-					if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
-						content := chunk.Candidates[0].Content.Parts[0].Text
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "data: ") {
+				data := strings.TrimPrefix(line, "data: ")
+
+				// Check for end marker
+				if data == "[DONE]" {
+					return
+				}
+
+				// Parse the response
+				var chunk geminiResponse
+				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+					continue // Skip invalid chunks
+				}
+
+				if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
+					content := chunk.Candidates[0].Content.Parts[0].Text
+					// Only send if context not cancelled
+					if streamCtx.Err() == nil {
 						chunkChan <- core.StreamChunk{Content: content}
 					}
 				}
@@ -907,4 +978,20 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	}()
 
 	return response, nil
+}
+
+func isValidGeminiEmbeddingModel(s string) bool {
+	return s == "gemini-embedding-exp-03-07" || s == "text-embedding-004"
+}
+
+func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {
+	// Remove any trailing slashes from base URL and leading slashes from path
+	baseURL := strings.TrimRight(endpoint.BaseURL, "/")
+	path := strings.TrimLeft(endpoint.Path, "/")
+
+	// Join them with a single slash
+	fullEndpoint := fmt.Sprintf("%s/%s", baseURL, path)
+
+	// Add the API key as query parameter
+	return fmt.Sprintf("%s?key=%s", fullEndpoint, apiKey)
 }
