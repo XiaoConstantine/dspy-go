@@ -467,22 +467,38 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	// Process the response to extract function call if present
 	result := make(map[string]interface{})
 
-	// Check if there was a function call
+	// Check if there are any parts in the response
 	if len(geminiResp.Candidates[0].Content.Parts) > 0 {
-		part := geminiResp.Candidates[0].Content.Parts[0]
+		// Process all parts
+		var textContent string
+		var functionCall *geminiFunctionCall
 
-		// Check if this part contains a function call
-		if part.FunctionCall != nil {
-			// Extract function call information
-			result["function_call"] = map[string]interface{}{
-				"name":      part.FunctionCall.Name,
-				"arguments": part.FunctionCall.Arguments,
+		for _, part := range geminiResp.Candidates[0].Content.Parts {
+			// Collect text content
+			if part.Text != "" {
+				if textContent != "" {
+					textContent += " "
+				}
+				textContent += part.Text
+			}
+
+			// Get function call if present
+			if part.FunctionCall != nil {
+				functionCall = part.FunctionCall
 			}
 		}
 
-		// Include text content if available
-		if part.Text != "" {
-			result["content"] = part.Text
+		// Add text content if available
+		if textContent != "" {
+			result["content"] = textContent
+		}
+
+		// Add function call if available
+		if functionCall != nil {
+			result["function_call"] = map[string]interface{}{
+				"name":      functionCall.Name,
+				"arguments": functionCall.Arguments,
+			}
 		}
 	}
 
@@ -599,6 +615,15 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	if err := json.Unmarshal(body, &geminiResp); err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
+			errors.Fields{
+				"model": opts.Model,
+			})
+	}
+
+	// Check if the embedding values exist
+	if geminiResp.Embedding.Values == nil || len(geminiResp.Embedding.Values) == 0 {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "embedding values missing in response"),
 			errors.Fields{
 				"model": opts.Model,
 			})
@@ -785,8 +810,9 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			allResults = append(allResults, result)
 		}
 	}
-	if firstError != nil {
-		return nil, firstError // Return nil result and error directly
+	// If we had errors but still got some results, return what we have
+	if firstError != nil && len(allResults) == 0 {
+		return nil, firstError // Only return error if we have no results
 	}
 
 	return &core.BatchEmbeddingResult{
@@ -981,7 +1007,24 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 }
 
 func isValidGeminiEmbeddingModel(s string) bool {
-	return s == "gemini-embedding-exp-03-07" || s == "text-embedding-004"
+	validModels := []string{
+		"gemini-embedding-exp-03-07",
+		"text-embedding-004",
+		"gemini-embedding-004",
+		"embedding-001",
+		"embedding-latest",
+		"embedding-gecko",
+		"embedding-gecko-001",
+		"text-embedding-gecko-001",
+	}
+	
+	for _, model := range validModels {
+		if s == model {
+			return true
+		}
+	}
+	
+	return false
 }
 
 func constructRequestURL(endpoint *core.EndpointConfig, apiKey string) string {
