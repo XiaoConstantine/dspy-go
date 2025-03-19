@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/mcp-go/pkg/model"
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -48,6 +48,7 @@ type MockStreamConfig struct {
 	ErrorAfter   int
 	TokenCounts  *core.TokenInfo
 	ShouldCancel bool
+	mock.Mock
 }
 
 // MockLLM is a mock implementation of core.LLM.
