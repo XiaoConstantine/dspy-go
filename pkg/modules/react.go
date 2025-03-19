@@ -67,8 +67,18 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 
 		toolResult, err := r.executeMatchingTool(ctx, action, inputs)
 		if err != nil {
-			span.WithError(err)
-			return nil, err
+			// Check if the error message contains "no tool found" - in that case, propagate the error
+			if strings.Contains(err.Error(), "no tool found") ||
+				strings.Contains(err.Error(), "validation") ||
+				strings.Contains(err.Error(), "invalid tool parameters") {
+				span.WithError(err)
+				return nil, err
+			}
+
+			// For tool execution errors, add them to the observation and continue
+			inputs["observation"] = fmt.Sprintf("Error: %s", err.Error())
+			span.WithAnnotation("tool_error", err.Error())
+			continue
 		}
 		if toolResult != nil {
 			// Convert tool result to string observation for the model
@@ -90,10 +100,13 @@ func (r *ReAct) executeMatchingTool(ctx context.Context, action string, inputs m
 	// Find matching tool
 	var matchingTool core.Tool
 	var matchScore float64
+
+	foundMatch := false // Add a flag to track if any tool can handle this action
 	for _, tool := range r.Tools {
 
 		metadata := tool.Metadata()
 		if tool.CanHandle(ctx, action) {
+			foundMatch = true // We found at least one tool that can handle this
 			currentScore := calculateToolMatchScore(metadata, action)
 			logger.Debug(ctx, "get score: %f for tool: %v", currentScore, tool)
 
@@ -104,7 +117,7 @@ func (r *ReAct) executeMatchingTool(ctx context.Context, action string, inputs m
 		}
 	}
 
-	if matchingTool == nil {
+	if !foundMatch || matchingTool == nil {
 		return nil, fmt.Errorf("no tool found for action: %s", action)
 	}
 
