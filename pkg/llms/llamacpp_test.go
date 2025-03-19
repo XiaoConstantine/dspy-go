@@ -460,7 +460,7 @@ func TestLlamacppLLM_StreamGenerate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/api/completion", r.URL.Path)
+				assert.Equal(t, "/completion", r.URL.Path)
 				assert.Equal(t, "POST", r.Method)
 
 				// Parse request to verify stream parameter is set

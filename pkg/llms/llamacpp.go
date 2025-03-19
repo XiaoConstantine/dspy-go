@@ -430,7 +430,7 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "POST",
-		o.GetEndpointConfig().BaseURL+"/api/completion", bytes.NewBuffer(jsonData))
+		o.GetEndpointConfig().BaseURL+"/completion", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
