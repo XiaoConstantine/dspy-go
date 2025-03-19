@@ -146,7 +146,7 @@ func (l *Logger) Error(ctx context.Context, format string, args ...interface{}) 
 }
 
 func (l *Logger) Fatal(ctx context.Context, msg string) {
-	l.logf(ctx, FATAL, msg)
+	l.logf(ctx, FATAL, "%s", msg)
 
 	// Ensure all logs are written
 	for _, out := range l.outputs {
