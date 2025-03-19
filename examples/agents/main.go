@@ -379,6 +379,7 @@ func main() {
 	})
 	logging.SetLogger(logger)
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
+	flag.Parse()
 
 	ctx := core.WithExecutionState(context.Background())
 	logger.Info(ctx, "Starting application")

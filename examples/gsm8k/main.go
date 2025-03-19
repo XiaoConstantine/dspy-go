@@ -3,19 +3,32 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 
-	"github.com/XiaoConstantine/dspy-go/examples/utils"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	"github.com/XiaoConstantine/dspy-go/pkg/llms"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 )
 
 func RunGSM8KExample(apiKey string) {
+	output := logging.NewConsoleOutput(true, logging.WithColor(true))
+
+	logger := logging.NewLogger(logging.Config{
+		Severity: logging.INFO,
+		Outputs:  []logging.Output{output},
+	})
+	logging.SetLogger(logger)
+
+	ctx := core.WithExecutionState(context.Background())
 	// Setup LLM
-	utils.SetupLLM(apiKey, "llamacpp:local")
+	llms.EnsureFactory()
+	err := core.ConfigureDefaultLLM(apiKey, core.ModelGoogleGeminiFlash)
+	if err != nil {
+		logger.Fatalf(ctx, "Failed to setup llm")
+	}
 
 	// Load GSM8K dataset
 	examples, err := datasets.LoadGSM8K()
@@ -26,7 +39,7 @@ func RunGSM8KExample(apiKey string) {
 	// Create signature for ChainOfThought
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
 	// Create ChainOfThought module
@@ -55,26 +68,28 @@ func RunGSM8KExample(apiKey string) {
 	}
 
 	// Compile the program
-	compiledProgram, err := optimizer.Compile(context.Background(), program, program, trainset)
+	compiledProgram, err := optimizer.Compile(ctx, program, program, trainset)
 	if err != nil {
-		log.Fatalf("Failed to compile program: %v", err)
+		logger.Fatalf(ctx, "Failed to compile program: %v", err)
 	}
 
 	// Test the compiled program
 	for _, ex := range examples[10:15] {
-		result, err := compiledProgram.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
+		result, err := compiledProgram.Execute(ctx, map[string]interface{}{"question": ex.Question})
 		if err != nil {
 			log.Printf("Error executing program: %v", err)
 			continue
 		}
-		fmt.Printf("Question: %s\n", ex.Question)
-		fmt.Printf("Predicted Answer: %s\n", result["answer"])
-		fmt.Printf("Actual Answer: %s\n\n", ex.Answer)
+
+		logger.Info(ctx, "Question: %s\n", ex.Question)
+		logger.Info(ctx, "Predicted Answer: %s\n", result["answer"])
+		logger.Info(ctx, "Actual Answer: %s\n\n", ex.Answer)
 	}
 }
 
 func main() {
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
+	flag.Parse()
 
 	RunGSM8KExample(*apiKey)
 }

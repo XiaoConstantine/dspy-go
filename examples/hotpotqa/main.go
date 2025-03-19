@@ -10,13 +10,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/examples/utils"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	"github.com/XiaoConstantine/dspy-go/pkg/llms"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 	"github.com/sourcegraph/conc/pool"
 )
+
+var goroutineMonitor *GoroutineMonitor
 
 func computeF1(prediction, ground_truth string) float64 {
 	pred_tokens := strings.Fields(strings.ToLower(prediction))
@@ -46,10 +49,10 @@ func computeF1(prediction, ground_truth string) float64 {
 	return 2 * precision * recall / (precision + recall)
 }
 
-func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (float64, float64) {
+func evaluateModel(ctx context.Context, program core.Program, examples []datasets.HotPotQAExample) (float64, float64) {
+	logger := logging.GetLogger()
 	var totalF1, exactMatch float64
 	var validExamples int32
-	ctx := context.Background()
 
 	results := make(chan struct {
 		f1         float64
@@ -69,7 +72,7 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 				return
 			case <-ticker.C:
 				current := atomic.LoadInt32(&processed)
-				fmt.Printf("Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
+				logger.Info(ctx, "Progress: %d/%d (%.2f%%)\n", current, total, float64(current)/float64(total)*100)
 			}
 		}
 	}()
@@ -78,20 +81,24 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 	for _, ex := range examples {
 		example := ex
 		p.Go(func() {
-			fmt.Println("Starting new corotine")
+			logger.Debug(ctx, "Starting new corotine")
+
+			goroutineMonitor.TrackGoroutine()
+
+			defer goroutineMonitor.ReleaseGoroutine()
 			result, err := program.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
 			if err != nil {
-				log.Printf("Error executing program: %v", err)
+				logger.Error(ctx, "Error executing program: %v", err)
 				return
 			}
 
 			predictedAnswer, ok := result["answer"].(string)
 			if !ok {
-				log.Printf("Error: predicted answer is not a string or is nil")
+				logger.Error(ctx, "Error: Could not find answer in result: %v", result)
 				return
 			}
 
-			f1 := computeF1(predictedAnswer, example.Answer)
+			f1 := computeF1(fmt.Sprintf("%v", predictedAnswer), example.Answer)
 			exactMatch := 0.0
 			if predictedAnswer == example.Answer {
 				exactMatch = 1.0
@@ -124,13 +131,30 @@ func evaluateModel(program core.Program, examples []datasets.HotPotQAExample) (f
 }
 
 func RunHotPotQAExample(apiKey string) {
-	utils.SetupLLM(apiKey, core.ModelID("ollama:mistral"))
+	output := logging.NewConsoleOutput(true, logging.WithColor(true))
+
+	logger := logging.NewLogger(logging.Config{
+		Severity: logging.INFO,
+		Outputs:  []logging.Output{output},
+	})
+	logging.SetLogger(logger)
+	ctx := core.WithExecutionState(context.Background())
+	goroutineMonitor = NewGoroutineMonitor(5*time.Second, ctx)
+	goroutineMonitor.Start()
+	defer goroutineMonitor.Stop()
+
+	// Setup LLM
+	llms.EnsureFactory()
+	err := core.ConfigureDefaultLLM(apiKey, core.ModelGoogleGeminiFlash)
+	if err != nil {
+		logger.Fatalf(ctx, "Failed to setup llm")
+	}
 
 	// Set concurrency level
 	core.SetConcurrencyOptions(10)
 	examples, err := datasets.LoadHotpotQA()
 	if err != nil {
-		log.Fatalf("Failed to load HotPotQA dataset: %v", err)
+		logger.Fatalf(ctx, "Failed to load HotPotQA dataset: %v", err)
 	}
 
 	rand.Shuffle(len(examples), func(i, j int) { examples[i], examples[j] = examples[j], examples[i] })
@@ -143,7 +167,7 @@ func RunHotPotQAExample(apiKey string) {
 
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
 	cot := modules.NewChainOfThought(signature)
@@ -166,33 +190,34 @@ func RunHotPotQAExample(apiKey string) {
 		}
 	}
 
-	compiledProgram, err := optimizer.Compile(context.Background(), program, program, trainset)
+	compiledProgram, err := optimizer.Compile(ctx, program, program, trainset)
 	if err != nil {
-		log.Fatalf("Failed to compile program: %v", err)
+		logger.Fatalf(ctx, "Failed to compile program: %v", err)
 	}
 
-	valF1, valExactMatch := evaluateModel(compiledProgram, valExamples)
-	fmt.Printf("Validation Results - F1: %.4f, Exact Match: %.4f\n", valF1, valExactMatch)
+	valF1, valExactMatch := evaluateModel(ctx, compiledProgram, valExamples)
+	logger.Info(ctx, "Validation Results - F1: %.4f, Exact Match: %.4f\n", valF1, valExactMatch)
 
-	testF1, testExactMatch := evaluateModel(compiledProgram, testExamples)
-	fmt.Printf("Test Results - F1: %.4f, Exact Match: %.4f\n", testF1, testExactMatch)
+	testF1, testExactMatch := evaluateModel(ctx, compiledProgram, testExamples)
+	logger.Info(ctx, "Test Results - F1: %.4f, Exact Match: %.4f\n", testF1, testExactMatch)
 
 	// Example predictions
 	for _, ex := range testExamples[:5] {
-		result, err := compiledProgram.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
+		result, err := compiledProgram.Execute(ctx, map[string]interface{}{"question": ex.Question})
 		if err != nil {
-			log.Printf("Error executing program: %v", err)
+			logger.Error(ctx, "Error executing program: %v", err)
 			continue
 		}
-		fmt.Printf("Question: %s\n", ex.Question)
-		fmt.Printf("Predicted Answer: %s\n", result["answer"])
-		fmt.Printf("Actual Answer: %s\n", ex.Answer)
-		fmt.Printf("F1 Score: %.4f\n\n", computeF1(result["answer"].(string), ex.Answer))
+		logger.Info(ctx, "Question: %s\n", ex.Question)
+		logger.Info(ctx, "Predicted Answer: %s\n", result["answer"])
+		logger.Info(ctx, "Actual Answer: %s\n", ex.Answer)
+		logger.Info(ctx, "F1 Score: %.4f\n\n", computeF1(result["answer"].(string), ex.Answer))
 	}
 }
 
 func main() {
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
+	flag.Parse()
 
 	RunHotPotQAExample(*apiKey)
 }
