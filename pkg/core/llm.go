@@ -287,7 +287,7 @@ const (
 	ModelAnthropicSonnet           ModelID = ModelID(anthropic.ModelSonnet)
 	ModelAnthropicOpus             ModelID = ModelID(anthropic.ModelOpus)
 	ModelGoogleGeminiFlash         ModelID = "gemini-2.0-flash"
-	ModelGoogleGeminiPro           ModelID = "gemini-2.0-pro-exp"
+	ModelGoogleGeminiPro           ModelID = "gemini-2.5-pro-exp-03-25"
 	ModelGoogleGeminiFlashThinking ModelID = "gemini-2.0-flash-thinking-exp"
 	ModelGoogleGeminiFlashLite     ModelID = "gemini-2.0-flash-lite"
 )
