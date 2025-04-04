@@ -178,8 +178,10 @@ func formatToolResult(result core.ToolResult) string {
 func extractToolParams(action string, inputs map[string]interface{}, toolMetadata *core.ToolMetadata) map[string]interface{} {
 	params := make(map[string]interface{})
 
+	cleanedAction := cleanActionString(action)
+
 	// Always include the action
-	params["action"] = action
+	params["action"] = cleanedAction
 
 	// Check if we have valid metadata and schema properties
 	if toolMetadata != nil && toolMetadata.InputSchema.Properties != nil && len(toolMetadata.InputSchema.Properties) > 0 {
@@ -215,4 +217,33 @@ func calculateToolMatchScore(metadata *core.ToolMetadata, action string) float64
 	}
 
 	return score
+}
+
+func cleanActionString(action string) string {
+	// Split by newlines and find the actual command
+	lines := strings.Split(action, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip empty lines
+		if line == "" {
+			continue
+		}
+
+		// Skip lines with known prefixes
+		if strings.HasPrefix(line, "tool_code") {
+			continue
+		}
+
+		// Skip lines that are just "Finish"
+		if line == "Finish" {
+			continue
+		}
+
+		// This should be the actual command
+		return line
+	}
+
+	// If we didn't find anything, return the original action
+	return action
 }
