@@ -269,7 +269,7 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 	// Process inputs in batches
 	var allResults []core.EmbeddingResult
 	var firstError error
-	var errorIndex int = -1
+	var errorIndex = -1
 
 	// Process each batch
 	for i := 0; i < len(inputs); i += opts.BatchSize {

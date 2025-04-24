@@ -660,7 +660,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 
 	var allResults []core.EmbeddingResult
 	var firstError error
-	var errorIndex int = -1
+	var errorIndex = -1
 
 	// Process in batches
 	for i := 0; i < len(inputs); i += opts.BatchSize {

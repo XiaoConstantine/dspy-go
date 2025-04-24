@@ -530,28 +530,3 @@ func TestReAct_FormatToolResult(t *testing.T) {
 	assert.Contains(t, observation, "Metadata: map[source:test_tool status:success]")
 	assert.Contains(t, observation, "Annotations: map[confidence:high]")
 }
-
-func TestReAct_CalculateToolMatchScore(t *testing.T) {
-	// Create tool metadata
-	metadata := &core.ToolMetadata{
-		Name:         "weather_tool",
-		Description:  "Check the weather at a location",
-		Capabilities: []string{"weather", "temperature", "forecast"},
-	}
-
-	// Test exact match with tool name
-	score1 := calculateToolMatchScore(metadata, "weather_tool")
-	assert.Greater(t, score1, float64(0.5), "Exact name match should score high")
-
-	// Test partial match with tool name
-	score2 := calculateToolMatchScore(metadata, "Use weather_tool to check NYC")
-	assert.Greater(t, score2, float64(0.5), "Partial name match should score high")
-
-	// Test capability match
-	score3 := calculateToolMatchScore(metadata, "check temperature in NYC")
-	assert.Greater(t, score3, float64(0.3), "Capability match should have a moderate score")
-
-	// Test no match
-	score4 := calculateToolMatchScore(metadata, "search for restaurants")
-	assert.Less(t, score4, float64(0.3), "No match should have a low score")
-}

@@ -12,7 +12,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 )
 
-// SimpleDataset implements the core.Dataset interface for MIPRO
+// SimpleDataset implements the core.Dataset interface for MIPRO.
 type SimpleDataset struct {
 	Examples []core.Example
 	Index    int
@@ -45,14 +45,6 @@ func cleanMarkdownCodeBlocks(input string) string {
 	input = strings.TrimSuffix(input, "```")
 	input = strings.TrimSpace(input)
 	return input
-}
-
-func getKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 func createMetricFunc() func(example, prediction map[string]interface{}, ctx context.Context) bool {
@@ -264,7 +256,7 @@ Use proper HTML structure with html, head, and body tags.`)
 		}
 
 		// Simple presence checks
-		var score float64 = 0.0
+		var score = 0.0
 
 		// If we have a title that's not a placeholder
 		if hasTitle && !strings.Contains(strings.ToLower(title), "no title") {

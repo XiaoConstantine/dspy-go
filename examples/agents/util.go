@@ -69,7 +69,7 @@ func CreateParallelWorkflow(stakeholders []string) (*workflows.ParallelWorkflow,
 		}
 
 		if err := workflow.AddStep(step); err != nil {
-			return nil, nil, fmt.Errorf("Failed to add step: %v", err)
+			return nil, nil, fmt.Errorf("failed to add step: %v", err)
 		}
 		inputKey := fmt.Sprintf("analyze_stakeholder_%d_stakeholder_info", i)
 		logging.GetLogger().Info(context.Background(), "input key: %s", inputKey)
@@ -270,7 +270,7 @@ func (o *PromptingOptimizer) Compile(
 	return program, fmt.Errorf("failed to find satisfactory solution in %d attempts", o.MaxAttempts)
 }
 
-// Example processor implementation
+// Example processor implementation.
 type ExampleProcessor struct{}
 
 func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, taskContext map[string]interface{}) (interface{}, error) {

@@ -9,7 +9,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
-// GoroutineStats tracks goroutine statistics
+// GoroutineStats tracks goroutine statistics.
 type GoroutineStats struct {
 	Current   int32
 	Peak      int32
@@ -17,7 +17,7 @@ type GoroutineStats struct {
 	Completed int64
 }
 
-// GoroutineMonitor tracks goroutine usage
+// GoroutineMonitor tracks goroutine usage.
 type GoroutineMonitor struct {
 	stats    GoroutineStats
 	logger   *logging.Logger
@@ -26,7 +26,7 @@ type GoroutineMonitor struct {
 	interval time.Duration
 }
 
-// NewGoroutineMonitor creates a new monitor with the given logging interval
+// NewGoroutineMonitor creates a new monitor with the given logging interval.
 func NewGoroutineMonitor(interval time.Duration, ctx context.Context) *GoroutineMonitor {
 	ctx, cancel := context.WithCancel(ctx)
 	return &GoroutineMonitor{
@@ -38,7 +38,7 @@ func NewGoroutineMonitor(interval time.Duration, ctx context.Context) *Goroutine
 	}
 }
 
-// Start begins monitoring goroutine usage
+// Start begins monitoring goroutine usage.
 func (m *GoroutineMonitor) Start() {
 	go func() {
 		ticker := time.NewTicker(m.interval)
@@ -72,22 +72,22 @@ func (m *GoroutineMonitor) Start() {
 	}()
 }
 
-// Stop terminates the monitoring
+// Stop terminates the monitoring.
 func (m *GoroutineMonitor) Stop() {
 	m.cancel()
 }
 
-// TrackGoroutine increments the counter when a goroutine starts
+// TrackGoroutine increments the counter when a goroutine starts.
 func (m *GoroutineMonitor) TrackGoroutine() {
 	atomic.AddInt64(&m.stats.Started, 1)
 }
 
-// ReleaseGoroutine decrements the counter when a goroutine completes
+// ReleaseGoroutine decrements the counter when a goroutine completes.
 func (m *GoroutineMonitor) ReleaseGoroutine() {
 	atomic.AddInt64(&m.stats.Completed, 1)
 }
 
-// GetStats returns a copy of the current statistics
+// GetStats returns a copy of the current statistics.
 func (m *GoroutineMonitor) GetStats() GoroutineStats {
 	return GoroutineStats{
 		Current:   int32(runtime.NumGoroutine()),
