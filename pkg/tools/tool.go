@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
-	"github.com/XiaoConstantine/mcp-go/pkg/model"
+	"encoding/xml"
+
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
 // Tool defines a callable tool interface that abstracts both local functions
@@ -32,3 +34,29 @@ const (
 	// ToolTypeMCP represents a tool backed by an MCP server.
 	ToolTypeMCP ToolType = "mcp"
 )
+
+type XMLArgument struct {
+	XMLName xml.Name `xml:"arg"`
+	Key     string   `xml:"key,attr"`
+	Value   string   `xml:",chardata"` // Store raw value as string for now
+}
+
+type XMLAction struct {
+	XMLName   xml.Name      `xml:"action"`
+	ToolName  string        `xml:"tool_name"`
+	Arguments []XMLArgument `xml:"arguments>arg"`
+}
+
+// Helper to convert XML arguments to map[string]interface{}
+// Note: This currently stores all values as strings. More sophisticated type
+// inference or checking could be added later if needed based on tool schemas.
+func (xa *XMLAction) GetArgumentsMap() map[string]interface{} {
+	argsMap := make(map[string]interface{})
+	if xa == nil {
+		return argsMap // Return empty map if xa is nil
+	}
+	for _, arg := range xa.Arguments {
+		argsMap[arg.Key] = arg.Value // Store as string
+	}
+	return argsMap
+}

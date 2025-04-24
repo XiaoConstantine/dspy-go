@@ -37,7 +37,7 @@ func RunChainExample(ctx context.Context, logger *logging.Logger) {
 		// clean up any extra whitespace
 		lines := strings.Split(strings.TrimSpace(table), "\n")
 		for _, line := range lines {
-			logger.Info(ctx, strings.TrimSpace(line))
+			logger.Info(ctx, "%s", strings.TrimSpace(line))
 		}
 	} else {
 		logger.Error(ctx, "invalid table format in result")
@@ -68,7 +68,7 @@ func RunParallelExample(ctx context.Context, logger *logging.Logger) {
 	       - price pressures
 	       - tech transitions`,
 	}
-	workflow, inputs, err := CreateParallelWorkflow(stakeholders)
+	workflow, inputs, _ := CreateParallelWorkflow(stakeholders)
 	logger.Info(ctx, "Inputs: %v", inputs)
 	results, err := workflow.Execute(ctx, inputs)
 	if err != nil {
@@ -159,17 +159,17 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
 	logger.Info(ctx, "Processing support tickets...\n")
 	for i, ticket := range tickets {
 		logger.Info(ctx, "\nTicket %d:\n", i+1)
-		logger.Info(ctx, strings.Repeat("-", 40))
-		logger.Info(ctx, ticket)
+		logger.Info(ctx, "%s", strings.Repeat("-", 40))
+		logger.Info(ctx, "%s", ticket)
 		logger.Info(ctx, "\nResponse:")
-		logger.Info(ctx, strings.Repeat("-", 40))
+		logger.Info(ctx, "%s", strings.Repeat("-", 40))
 
 		response, err := router.Execute(ctx, map[string]interface{}{"input": ticket})
 		if err != nil {
 			logger.Info(ctx, "Error processing ticket %d: %v", i+1, err)
 			continue
 		}
-		logger.Info(ctx, response["response"].(string))
+		logger.Info(ctx, "%s", response["response"].(string))
 	}
 	logger.Info(ctx, "=================================================")
 
@@ -394,7 +394,7 @@ func main() {
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
 	}
-	resp, err := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
+	resp, _ := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
 	logger.Info(ctx, "get resp: %v", resp)
 
 	RunChainExample(ctx, logger)

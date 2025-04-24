@@ -4,7 +4,7 @@ go 1.24.1
 
 require (
 	github.com/XiaoConstantine/anthropic-go v0.0.8
-	github.com/XiaoConstantine/mcp-go v0.1.0
+	github.com/XiaoConstantine/mcp-go v0.2.1
 	github.com/apache/arrow/go/v13 v13.0.0
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/sourcegraph/conc v0.3.0

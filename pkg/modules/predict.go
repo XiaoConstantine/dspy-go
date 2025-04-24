@@ -237,6 +237,12 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	if signature.Instruction != "" {
 		sb.WriteString(signature.Instruction + "\n\n")
 	}
+	if context, ok := inputs["conversation_context"].(string); ok && context != "" {
+		sb.WriteString("===== CONVERSATION HISTORY =====\n")
+		sb.WriteString(context)
+		sb.WriteString("\n===== END HISTORY =====\n\n")
+	}
+
 	// Write the demonstrations
 	for _, demo := range demos {
 		sb.WriteString("---\n\n")

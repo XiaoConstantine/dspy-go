@@ -283,7 +283,7 @@ func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, opt
 	// Process in batches
 	var allResults []core.EmbeddingResult
 	var firstError error
-	var errorIndex int = -1
+	var errorIndex = -1
 
 	for i := 0; i < len(inputs); i += opts.BatchSize {
 		end := i + opts.BatchSize
