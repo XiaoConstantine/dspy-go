@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 
@@ -26,10 +27,8 @@ type ReAct struct {
 // NewReAct creates a new ReAct module.
 // It takes a signature (which it modifies), a list of tools, and max iterations.
 func NewReAct(signature core.Signature, tools []core.Tool, maxIters int) *ReAct {
-	// IMPORTANT: The signature provided to Predict MUST instruct the LLM
-	// to output the 'action' field as either the literal string "Finish"
-	// or an XML block like <action><tool_name>...</tool_name>...</action>
 	modifiedSignature := appendReActFields(signature)
+
 	predict := NewPredict(modifiedSignature)
 
 	// Build the tool map for efficient lookup
@@ -84,7 +83,7 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 
 	for i := 0; i < r.MaxIters; i++ {
 		// Debug logging to track iterations explicitly
-		logger.Info(ctx, "*** STARTING REACT ITERATION %d/%d ***", i+1, r.MaxIters)
+		logger.Debug(ctx, "*** STARTING REACT ITERATION %d/%d ***", i+1, r.MaxIters)
 		logger.Debug(ctx, "Current state: %v", state)
 
 		// Add conversation context to state for this iteration
@@ -93,7 +92,7 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		}
 
 		// --- Predict Step ---
-		logger.Info(ctx, "Sending prediction request in iteration %d", i+1)
+		logger.Debug(ctx, "Sending prediction request in iteration %d", i+1)
 		prediction, err := r.Predict.Process(ctx, state, opts...)
 		if err != nil {
 			logger.Error(ctx, "Prediction error in iteration %d: %v", i+1, err)
@@ -101,7 +100,7 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 			return nil, fmt.Errorf("error in Predict step (iteration %d): %w", i, err)
 		}
 
-		logger.Info(ctx, "Received prediction in iteration %d: %v", i+1, prediction)
+		logger.Debug(ctx, "Received prediction in iteration %d: %v", i+1, prediction)
 
 		// Extract and verify action field
 		actionField, ok := prediction["action"]
@@ -123,21 +122,22 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		// Parse the action (simplifying for clarity)
 		actionStr, isString := actionField.(string)
 		if isString {
-			if actionStr == "Finish" {
-				logger.Info(ctx, "Received FINISH action in iteration %d", i+1)
-				return prediction, nil // End with success
-			}
-
 			// Try to parse as XML action (simplifying error handling)
 			var xmlAction tools.XMLAction
-			if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err == nil && xmlAction.ToolName != "" {
+			if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err == nil {
+				// Check if this is a finish action
+				if strings.ToLower(xmlAction.ToolName) == "finish" ||
+					strings.ToLower(xmlAction.Content) == "finish" {
+					logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
+					return prediction, nil // End with success
+				}
 				parsedToolName = xmlAction.ToolName
 				parsedArgsMap = xmlAction.GetArgumentsMap()
-				logger.Info(ctx, "Parsed tool action in iteration %d: %s with args %v",
+				logger.Debug(ctx, "Parsed tool action in iteration %d: %s with args %v",
 					i+1, parsedToolName, parsedArgsMap)
 			} else {
 				// XML parsing failed
-				logger.Error(ctx, "Invalid action format in iteration %d: %s", i+1, actionStr)
+				logger.Error(ctx, "Invalid action format in iteration %d: %s, with error: %v", i+1, actionStr, err)
 				state["observation"] = fmt.Sprintf("Error: Invalid action format: %s", actionStr)
 
 				// Update conversation context
@@ -276,12 +276,23 @@ func (r *ReAct) Clone() core.Module {
 // appendReActFields adds the standard ReAct fields (thought, action, observation)
 // to the beginning of a signature's output fields.
 func appendReActFields(signature core.Signature) core.Signature {
+	const reactFormattingInstructions = `
+  CRITICAL FORMATTING RULES:
+  1. Format your response with these EXACT field headers, each on a new line:
+     thought: [your reasoning]
+     action: [your action]
+     observation: [result from previous action, if any]
+     answer: [your final answer when complete]
+  
+  2. ALWAYS include both 'thought' and EXACTLY ONE valid 'action' field (formatted as an XML block described in the action field description) in EVERY response. Do NOT output multiple <action> blocks.
+  `
 	newSignature := signature
+
+	newSignature.Instruction = reactFormattingInstructions + "\n" + signature.Instruction
 	// Define standard ReAct output fields
 	reactFields := []core.OutputField{
-		{Field: core.NewField("thought", core.WithDescription("The agent's reasoning step."))},
-		// Instruct LLM to use XML for tool calls or the string "Finish"
-		{Field: core.NewField("action", core.WithDescription("The action to take. MUST be EITHER the exact string 'Finish' OR an XML block   like '<action><tool_name>...</tool_name><arguments><arg key=\"...\">...</arg></arguments></action>'."))},
+		{Field: core.NewField("thought")},
+		{Field: core.NewField("action", core.WithDescription("The action to take. MUST be an XML block like '<action><tool_name>...</tool_name><arguments><arg key=\"...\">...</arg></arguments></action>'. To finish, use '<action><tool_name>Finish</tool_name></action>'. MUST INCLUDE and RETURN ONE ACTION at a time"))},
 		{Field: core.NewField("observation", core.WithDescription("The result of the previous action (tool output or error message). Leave empty on first step."))},
 	}
 
@@ -343,22 +354,15 @@ func formatToolResult(result core.ToolResult) string {
 	// Limit observation size? Could truncate dataStr if too long.
 	const maxObservationLength = 2000 // Example limit
 	if len(observation) > maxObservationLength {
-		// Calculate exactly how many characters we can keep
 		suffix := "... (truncated)"
-		// Remove an extra byte for the newline before the suffix
 		trimmedDataLen := maxObservationLength - len("Observation:\n") - len(suffix) - 1
 		if trimmedDataLen < 0 {
 			trimmedDataLen = 0
 		}
-
 		// Format with precise control over the output
 		observation = fmt.Sprintf("Observation:\n%s\n%s",
 			dataStr[:trimmedDataLen],
 			suffix)
-
-		logging.GetLogger().Warn(context.Background(),
-			"Observation truncated to %d characters",
-			maxObservationLength)
 	}
 
 	return observation // Return just the observation string

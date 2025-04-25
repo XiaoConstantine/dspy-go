@@ -54,7 +54,7 @@ func main() {
 	output := dspyLogging.NewConsoleOutput(true, dspyLogging.WithColor(true))
 
 	logger := dspyLogging.NewLogger(dspyLogging.Config{
-		Severity: dspyLogging.DEBUG,
+		Severity: dspyLogging.INFO,
 		Outputs:  []dspyLogging.Output{output},
 	})
 	dspyLogging.SetLogger(logger)
@@ -127,56 +127,14 @@ func main() {
 	}
 
 	// 4. Create and configure ReAct module
-	// signature := core.NewSignature(
-	// 	[]core.InputField{{Field: core.Field{Name: "query"}}},
-	// 	[]core.OutputField{
-	// 		{Field: core.NewField("answer")},
-	// 	},
-	// ).WithInstruction(`Answer the query about Git repositories by reasoning step by step and using the available Git tools.
-	// 	Identify which Git tool is appropriate for the question and use it with the correct arguments.
-	// 	Always use the git_ prefixed tools like git_blame, git_log, git_status, etc.
-	//
-	// 	CRITICAL rules for the 'action' field's VALUE within output, DO NOT wrap response in markdown or json:
-	// 	  1.  **Tool Call:** If calling a tool, the value MUST be a *string* containing the specific XML block below. Do NOT add any other
-	// 	  text, prefixes, newlines, or markdown formatting around this XML string value.
-	// 	      XML Format: <action><tool_name>TOOL_NAME</tool_name><arguments><arg key="ARG_KEY">ARG_VALUE</arg></arguments></action>
-	// 	      Example XML String Value: "<action><tool_name>git_log</tool_name><arguments><arg key=\"n\">1</arg></arguments></action>"
-	//
-	//                 2.  **Final Answer:** When you have the final answer, generate 'thought' summarizing it, and set 'action' to "Finish".
-	//
-	//          DO NOT omit the 'action' field in the final step.
-	//
-	// 	 `)
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "query"}}},
 		[]core.OutputField{
 			{Field: core.NewField("answer")},
 		},
-	).WithInstruction(`Answer the query about Git repositories by reasoning step by step and using the available Git tools.
+	).WithInstruction(`Answer the query about Git repositories by using the available Git tools.
     Identify which Git tool is appropriate for the question and use it with the correct arguments.
     Always use the git_ prefixed tools like git_blame, git_log, git_status, etc.
-
-    CRITICAL FORMATTING RULES:
-    1. Format your response with these EXACT field headers:
-       thought: [your reasoning]
-       action: [your action]
-       observation: [result from previous action, if any]
-       answer: [your final answer when complete]
-
-    2. For the action field, ONLY use one of these two formats:
-       - XML tool call: action: <action><tool_name>git_log</tool_name><arguments><arg key="n">5</arg></arguments></action>
-       - Final answer: action: Finish
-
-    3. ALWAYS include both 'thought' and 'action' fields in EVERY response.
-
-    Example correct format:
-    thought: I need to check recent commits.
-    action: <action><tool_name>git_log</tool_name><arguments><arg key="n">5</arg></arguments></action>
-
-    When giving your final answer:
-    thought: Based on the git_log output, I can see the 5 most recent commits.
-    action: Finish
-    answer: Here are the details of the 5 most recent commits: [summary of commits]
     `)
 
 	maxIters := 5
