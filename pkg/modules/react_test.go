@@ -7,15 +7,15 @@ import (
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
-	"github.com/XiaoConstantine/mcp-go/pkg/model"
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
 func TestReAct(t *testing.T) {
-	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
+	// Define schema inline or ensure it's available if defined globally
 	schema := models.InputSchema{
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
@@ -24,74 +24,46 @@ func TestReAct(t *testing.T) {
 				Description: "Default parameter",
 				Required:    true,
 			},
-			"action": {
-				Type: "string",
-			},
 		},
 	}
+	mockTool := testutil.NewMockTool("test_tool") // Use the actual tool name
 
-	// Create a mock Tool
-	mockTool := testutil.NewMockTool("mock")
 	toolMetadata := &core.ToolMetadata{
 		Name:         "test_tool",
 		Description:  "A test tool",
-		InputSchema:  schema,
-		Capabilities: []string{"test", "use_tool"},
+		InputSchema:  schema, // Use the defined schema
+		Capabilities: []string{"test"},
 	}
-	mockTool.On("Metadata").Return(toolMetadata)
-	mockTool.On("CanHandle", mock.Anything, "use_tool").Return(true)
-
-	mockTool.On("Validate", mock.Anything).Return(nil)
-	mockTool.On("Execute", mock.Anything, mock.Anything).Return(
-		core.ToolResult{
-			Data: "Tool execution result",
-			Metadata: map[string]interface{}{
-				"status": "success",
-			},
-		},
-		nil,
+	mockTool.On("Metadata").Return(toolMetadata) // Called during NewReAct
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	expectedArgs := map[string]interface{}{"question": "What is the meaning of\nlife?"}
+	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
+		core.ToolResult{Data: "Tool execution result"}, nil,
 	)
+	resp1 := &core.LLMResponse{Content: `
+  thought:
+  I should use the tool
 
-	resp1Content := `
-	thought:
-	I should use the tool
+  action:
+  <action><tool_name>test_tool</tool_name><arguments><arg key="question">What is the meaning of
+  life?</arg></arguments></action>
+  `}
+	resp2 := &core.LLMResponse{Content: `
+  thought:
+  I have the answer
 
-	action:
-	use_tool
-	`
-	resp1 := &core.LLMResponse{
-		Content: resp1Content,
-		Usage: &core.TokenInfo{
-			PromptTokens:     10,
-			CompletionTokens: 20,
-			TotalTokens:      30,
-		},
-	}
+  action:
+  Finish
 
-	resp2Content := `
-	thought:
-	I have the answer
+  answer:
+  42
+  `}
 
-	action:
-	Finish
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1,
+		nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
 
-	answer:
-	42
-	`
-	resp2 := &core.LLMResponse{
-		Content: resp2Content,
-		Usage: &core.TokenInfo{
-			PromptTokens:     10,
-			CompletionTokens: 20,
-			TotalTokens:      30,
-		},
-	}
-
-	// Set up the expected behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp1, nil).Once()
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp2, nil).Once()
-
-	// Create a ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
@@ -99,83 +71,63 @@ func TestReAct(t *testing.T) {
 	react := NewReAct(signature, []core.Tool{mockTool}, 5)
 	react.SetLLM(mockLLM)
 
-	// Test the Process method
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
-
 	inputs := map[string]any{"question": "What is the meaning of life?"}
 	outputs, err := react.Process(ctx, inputs)
 
-	// Assert the results
 	assert.NoError(t, err)
+	require.NotNil(t, outputs)
 	assert.Equal(t, "42", outputs["answer"])
-
-	// Verify that the mocks were called as expected
 	mockLLM.AssertExpectations(t)
-	mockTool.AssertExpectations(t)
-	// Verify traces
+	mockTool.AssertExpectations(t) // This should now only check Metadata, Validate, Execute
+
 	spans := core.CollectSpans(ctx)
-	require.Len(t, spans, 3)
+	require.Len(t, spans, 4)
 	assert.Equal(t, "ReAct", spans[0].Operation)
+	assert.Equal(t, "Predict", spans[1].Operation)
+	assert.Equal(t, "executeToolByName", spans[2].Operation)
+	assert.Equal(t, "Predict", spans[3].Operation)
 }
 
 func TestReAct_WithErroredTool(t *testing.T) {
-	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
-	// Create responses for the sequence
-	resp1 := &core.LLMResponse{
-		Content: `
-		thought:
-		I should check the weather
-		
-		action:
-		weather_check
-		`,
-	}
+	resp1 := &core.LLMResponse{Content: `
+  thought:
+  I should check the weather
 
-	resp2 := &core.LLMResponse{
-		Content: `
-		thought:
-		I encountered an error, I'll try another approach
-		
-		action:
-		Finish
-		
-		answer:
-		I apologize, but I wasn't able to get the weather information due to a technical issue.
-		`,
-	}
+  action:
+  <action><tool_name>weather_check</tool_name><arguments><arg key="location">nearby</arg></arguments></action>
+  `}
+	resp2 := &core.LLMResponse{Content: `
+  thought:
+  I encountered an error, I'll try another approach
 
-	// Set up the mock LLM behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp1, nil).Once()
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp2, nil).Once()
+  action:
+  Finish
 
-	// Create a tool that returns an error
+  answer:
+  I apologize, but I wasn't able to get the weather information due to a technical issue.
+  `}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1,
+		nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
+
 	mockWeatherTool := testutil.NewMockTool("weather_check")
-	weatherSchema := models.InputSchema{
-		Type: "object",
-		Properties: map[string]models.ParameterSchema{
-			"location": {
-				Type:        "string",
-				Description: "Location to check weather for",
-				Required:    true,
-			},
-		},
-	}
-
 	mockWeatherTool.On("Metadata").Return(&core.ToolMetadata{
 		Name:         "weather_check",
 		Description:  "Check the weather at a location",
-		InputSchema:  weatherSchema,
+		InputSchema:  models.InputSchema{ /* ... schema ... */ }, // Provide schema directly
 		Capabilities: []string{"weather"},
 	})
+	mockWeatherTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	expectedArgs := map[string]interface{}{"location": "nearby"}
+	mockWeatherTool.On("Execute", mock.Anything, expectedArgs).Return(core.ToolResult{}, errors.New(errors.LLMGenerationFailed,
+		"weather service down"))
 
-	mockWeatherTool.On("CanHandle", mock.Anything, "weather_check").Return(true)
-	mockWeatherTool.On("Validate", mock.Anything).Return(nil)
-	mockWeatherTool.On("Execute", mock.Anything, mock.Anything).Return(core.ToolResult{}, errors.New(errors.LLMGenerationFailed, "weather service down"))
-
-	// Create ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
@@ -183,147 +135,111 @@ func TestReAct_WithErroredTool(t *testing.T) {
 	react := NewReAct(signature, []core.Tool{mockWeatherTool}, 5)
 	react.SetLLM(mockLLM)
 
-	// Execute with a question
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 	inputs := map[string]any{"question": "What's the weather like today?"}
 	outputs, err := react.Process(ctx, inputs)
 
-	// Verify results
 	assert.NoError(t, err)
+	require.NotNil(t, outputs)
 	answerStr, ok := outputs["answer"].(string)
-	assert.True(t, ok, "answer should be a string")
+	assert.True(t, ok)
 	assert.Contains(t, answerStr, "technical issue")
-
-	// Verify that the mocks were called as expected
 	mockLLM.AssertExpectations(t)
 	mockWeatherTool.AssertExpectations(t)
 }
 
 func TestReAct_MaxIterations(t *testing.T) {
-	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
-	// Create responses that continue to call tools
-	resp1 := &core.LLMResponse{
-		Content: `
-		thought:
-		I'll check the database first
-		
-		action:
-		database_query
-		`,
-	}
+	resp1 := &core.LLMResponse{Content: `
+  thought:
+  I'll check the database first
 
-	resp2 := &core.LLMResponse{
-		Content: `
-		thought:
-		Now I need to check the user profile
-		
-		action:
-		user_profile
-		`,
-	}
+  action:
+  <action><tool_name>database_query</tool_name><arguments><arg key="query">SELECT * FROM
+  data</arg></arguments></action>
+  `}
+	resp2 := &core.LLMResponse{Content: `
+  thought:
+  Now I need to check the user profile
 
-	// Set up the mock behavior to keep calling tools
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp1, nil).Once()
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp2, nil).Once()
+  action:
+  <action><tool_name>user_profile</tool_name><arguments><arg key="user_id">123</arg></arguments></action>
+  `}
 
-	// Create mock tools
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1,
+		nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
+
 	dbTool := testutil.NewMockTool("database_query")
-	dbSchema := models.InputSchema{
-		Type: "object",
-		Properties: map[string]models.ParameterSchema{
-			"query": {
-				Type:        "string",
-				Description: "SQL query",
-				Required:    true,
-			},
-		},
-	}
-
+	// Remove unused variable declaration for dbSchema
 	dbTool.On("Metadata").Return(&core.ToolMetadata{
-		Name:         "database_query",
-		Description:  "Query the database",
-		InputSchema:  dbSchema,
-		Capabilities: []string{"database"},
+		Name: "database_query", Description: "Query the database", InputSchema: models.InputSchema{ /*...*/ }, Capabilities: []string{"database"},
 	})
-
-	dbTool.On("CanHandle", mock.Anything, "database_query").Return(true)
-	dbTool.On("Validate", mock.Anything).Return(nil)
-	dbTool.On("Execute", mock.Anything, mock.Anything).Return(core.ToolResult{
-		Data: "Database results",
-	}, nil)
+	dbTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	dbExpectedArgs := map[string]interface{}{"query": "SELECT * FROM\ndata"}
+	dbTool.On("Execute", mock.Anything, dbExpectedArgs).Return(core.ToolResult{Data: "Database results"}, nil)
 
 	profileTool := testutil.NewMockTool("user_profile")
-	profileSchema := models.InputSchema{
-		Type: "object",
-		Properties: map[string]models.ParameterSchema{
-			"user_id": {
-				Type:        "string",
-				Description: "User ID",
-				Required:    true,
-			},
-		},
-	}
-
+	// Remove unused variable declaration for profileSchema
 	profileTool.On("Metadata").Return(&core.ToolMetadata{
-		Name:         "user_profile",
-		Description:  "Get user profile",
-		InputSchema:  profileSchema,
-		Capabilities: []string{"user", "profile"},
+		Name: "user_profile", Description: "Get user profile", InputSchema: models.InputSchema{ /*...*/ }, Capabilities: []string{"user",
+			"profile"},
 	})
+	profileTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	profileExpectedArgs := map[string]interface{}{"user_id": "123"}
+	profileTool.On("Execute", mock.Anything, profileExpectedArgs).Return(core.ToolResult{Data: "User profile data"}, nil)
 
-	profileTool.On("CanHandle", mock.Anything, "user_profile").Return(true)
-	profileTool.On("Validate", mock.Anything).Return(nil)
-	profileTool.On("Execute", mock.Anything, mock.Anything).Return(core.ToolResult{
-		Data: "User profile data",
-	}, nil)
-
-	// Create ReAct module with max iterations of 2
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	tools := []core.Tool{dbTool, profileTool}
-	react := NewReAct(signature, tools, 2) // Only 2 iterations max
+	react := NewReAct(signature, tools, 2)
 	react.SetLLM(mockLLM)
 
-	// Execute the module
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 	inputs := map[string]any{"question": "Analyze this user data"}
 	outputs, err := react.Process(ctx, inputs)
 
-	// Verify results - we should get an error about max iterations
 	assert.Error(t, err)
-	assert.Nil(t, outputs)
+	assert.NotNil(t, outputs)
 	assert.Contains(t, err.Error(), "max iterations reached")
-
-	// Verify that the mocks were called as expected
 	mockLLM.AssertExpectations(t)
 	dbTool.AssertExpectations(t)
 	profileTool.AssertExpectations(t)
 }
 
 func TestReAct_InvalidAction(t *testing.T) {
-	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
-	// Create response with malformed action
-	resp := &core.LLMResponse{
-		Content: `
-		thought:
-		I need to check something
-		
-		action:
-		`, // Empty action - added comma here
-	}
+	resp1 := &core.LLMResponse{Content: `
+  thought:
+  I need to check something
 
-	// Set up the mock behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp, nil).Once()
+  action:
+  <action><tool_name>some_tool</tool_name><arguments><arg key="p1">val1</arg</arguments></action>
+  `} // Malformed XML
+	resp2 := &core.LLMResponse{Content: `
+  thought:
+  The previous action was invalid. I will stop.
 
-	// Create ReAct module
+  action:
+  Finish
+
+  answer:
+  Failed due to invalid action format.
+  `}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1,
+		nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
+
+	// Fix: Provide arguments to core.NewSignature
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
@@ -331,65 +247,49 @@ func TestReAct_InvalidAction(t *testing.T) {
 	react := NewReAct(signature, []core.Tool{}, 5)
 	react.SetLLM(mockLLM)
 
-	// Execute with a question
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 	inputs := map[string]any{"question": "What's the weather like today?"}
 	outputs, err := react.Process(ctx, inputs)
 
-	// Verify results
-	assert.Error(t, err)
-	assert.Nil(t, outputs)
-	assert.Contains(t, err.Error(), "invalid action")
-
-	// Verify that the mock was called as expected
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "Failed due to invalid action format")
 	mockLLM.AssertExpectations(t)
 }
 
 func TestReAct_NoMatchingTool(t *testing.T) {
-	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
-	// Create response requesting a non-existent tool
-	resp := &core.LLMResponse{
-		Content: `
-        thought:
-        I'll check the calendar
-        
-        action:
-        calendar_check
-        `,
-	}
+	resp := &core.LLMResponse{Content: `
+  thought:
+  I'll check the calendar
 
-	// Set up the mock behavior
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp, nil).Once()
+  action:
+  <action><tool_name>calendar_check</tool_name><arguments></arguments></action>
+  `}
+	resp2 := &core.LLMResponse{Content: `
+  thought:
+  Okay, that tool wasn't available. I'll finish.
 
-	// Create a tool but not the calendar one
+  action:
+  Finish
+
+  answer:
+  Could not check calendar.
+  `}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp,
+		nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
+
 	weatherTool := testutil.NewMockTool("weather_check")
-	weatherSchema := models.InputSchema{
-		Type: "object",
-		Properties: map[string]models.ParameterSchema{
-			"location": {
-				Type:        "string",
-				Description: "Location",
-				Required:    true,
-			},
-		},
-	}
-
+	// Remove unused variable declaration for weatherSchema
 	weatherTool.On("Metadata").Return(&core.ToolMetadata{
-		Name:         "weather_check",
-		Description:  "Check the weather at a location",
-		InputSchema:  weatherSchema,
-		Capabilities: []string{"weather"},
+		Name: "weather_check", Description: "Check weather", InputSchema: models.InputSchema{ /*...*/ }, Capabilities: []string{"weather"},
 	})
 
-	// Just set CanHandle to false - no need to set up Execute expectation since it won't be called
-	weatherTool.On("CanHandle", mock.Anything, "calendar_check").Return(false)
-	weatherTool.On("Execute", mock.Anything, mock.Anything).Return(
-		core.ToolResult{}, errors.New(errors.InvalidInput, "no tool found for action"))
-
-	// Create ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
@@ -397,136 +297,118 @@ func TestReAct_NoMatchingTool(t *testing.T) {
 	react := NewReAct(signature, []core.Tool{weatherTool}, 5)
 	react.SetLLM(mockLLM)
 
-	// Execute with a question
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 	inputs := map[string]any{"question": "What's on my calendar today?"}
 	outputs, err := react.Process(ctx, inputs)
 
-	// Verify results
-	assert.Error(t, err)
-	assert.Nil(t, outputs)
-	assert.Contains(t, err.Error(), "no tool found for action")
-
-	// Verify that the mock was called as expected
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "Could not check calendar")
 	mockLLM.AssertExpectations(t)
-	weatherTool.AssertExpectations(t)
 }
 
 func TestReAct_ToolValidationError(t *testing.T) {
-	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
-	// Create a mock tool
 	mockTool := testutil.NewMockTool("weather_check")
-
-	// Define the signature for the ReAct module
+	mockTool.ExpectedCalls = nil // Clear all default expectations
+	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "weather_check"})
+	mockTool.On("Validate", mock.Anything).Return(errors.New(errors.ValidationFailed, "validation error: missing location"))
+	// Fix: Provide arguments to core.NewSignature
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-
-	// Create the ReAct module with the mock tool
 	react := NewReAct(signature, []core.Tool{mockTool}, 5)
-
-	// Set the mock LLM
 	react.SetLLM(mockLLM)
 
-	// Setup mock LLM response to trigger tool execution
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
-		Content: "Action: weather_check\nAction Input: invalid_params",
-	}, nil)
+	resp1 := &core.LLMResponse{Content: `thought: I need the weather
 
-	// Setup mock tool to expect Execute call and return a validation error
-	mockTool.On("Execute", mock.Anything, mock.Anything).Return("", errors.New(errors.ValidationFailed, "validation error"))
+  action:
+  <action><tool_name>weather_check</tool_name><arguments><arg key="location">invalid-location</arg></arguments></action>
+  `}
+	resp2 := &core.LLMResponse{Content: `thought: Validation failed, cannot proceed.
 
-	// Test input
+  action:
+  Finish
+
+  answer:
+  Failed due to validation error.
+  `}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1,
+		nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
+
+	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "weather_check"})
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(errors.New(errors.ValidationFailed, "validation error: missing location"))
+
 	ctx := context.Background()
-	inputs := map[string]interface{}{
-		"question": "What is the weather like?",
-	}
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]interface{}{"question": "What is the weather like?"}
+	outputs, err := react.Process(ctx, inputs)
 
-	// Execute the ReAct module
-	result, err := react.Process(ctx, inputs)
-
-	// Assertions
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "validation error")
-	assert.Nil(t, result)
-
-	// Verify mock expectations
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "Failed due to validation error")
 	mockLLM.AssertExpectations(t)
 	mockTool.AssertExpectations(t)
 }
 
 func TestReAct_Clone(t *testing.T) {
-	// Create a ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-
 	mockTool := testutil.NewMockTool("test_tool")
+	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "test_tool"})
 	originalReact := NewReAct(signature, []core.Tool{mockTool}, 5)
-
-	// Clone the module
 	clonedModule := originalReact.Clone()
-
-	// Check that it's the right type
 	clonedReact, ok := clonedModule.(*ReAct)
-	assert.True(t, ok, "Cloned module should be a ReAct")
 
-	// Check that values were correctly cloned
+	assert.True(t, ok)
 	assert.Equal(t, originalReact.MaxIters, clonedReact.MaxIters)
 	assert.Equal(t, len(originalReact.Tools), len(clonedReact.Tools))
-
-	// Verify that the Predict module was cloned (not just referenced)
-	assert.NotSame(t, originalReact.Predict, clonedReact.Predict,
-		"The Predict module should be cloned, not just referenced")
+	assert.Equal(t, len(originalReact.toolMap), len(clonedReact.toolMap))
+	assert.Contains(t, clonedReact.toolMap, "test_tool")
+	assert.NotSame(t, originalReact.Predict, clonedReact.Predict)
 }
 
 func TestReAct_WithDefaultOptions(t *testing.T) {
-	// Create a ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-
 	reactModule := NewReAct(signature, []core.Tool{}, 5)
-
-	// Use WithDefaultOptions to set options
 	result := reactModule.WithDefaultOptions(
-		core.WithGenerateOptions(
-			core.WithTemperature(0.7),
-			core.WithMaxTokens(2000),
-		),
+		core.WithGenerateOptions(core.WithTemperature(0.7), core.WithMaxTokens(2000)),
 	)
-
-	// Verify the result is the same module (fluent interface)
-	assert.Same(t, reactModule, result, "WithDefaultOptions should return the same instance")
-
-	// We can't directly verify the options were set since they're encapsulated,
-	// but we can verify the method can be called without errors
+	assert.Same(t, reactModule, result)
 }
 
 func TestReAct_FormatToolResult(t *testing.T) {
-	// Create a tool result
-	result := core.ToolResult{
-		Data: "This is the result data",
-		Metadata: map[string]interface{}{
-			"source": "test_tool",
-			"status": "success",
-		},
-		Annotations: map[string]interface{}{
-			"confidence": "high",
-		},
+	testCases := []struct {
+		name     string
+		input    core.ToolResult
+		expected string
+	}{
+		{name: "String data", input: core.ToolResult{Data: "This is the result data"}, expected: "Observation:\nThis is the result data"},
+		{name: "JSON byte slice data", input: core.ToolResult{Data: []byte(`{"key": "value", "number": 123}`)}, expected: "Observation:\n{\n  \"key\": \"value\",\n  \"number\": 123\n}"},
+		{name: "Non-JSON byte slice data", input: core.ToolResult{Data: []byte("Just plain text")}, expected: "Observation:\nJust plain text"},
+
+		{name: "Struct data", input: core.ToolResult{Data: struct {
+			Name string `json:"name"`
+			Age  int    `json:"age"`
+		}{Name: "Test", Age: 30}}, expected: "Observation:\n{\n  \"name\": \"Test\",\n  \"age\": 30\n}"},
+		{name: "Nil data", input: core.ToolResult{Data: nil}, expected: "Observation:\n<empty result>"},
+		{name: "Long data truncated", input: core.ToolResult{Data: string(make([]byte, 2100))}, expected: "Observation:\n" + string(make([]byte, 1971)) + "\n... (truncated)"},
 	}
-
-	// Format the result
-	observation := formatToolResult(result)
-
-	// Verify the formatting
-	assert.Contains(t, observation, "Result: This is the result data")
-	assert.Contains(t, observation, "Metadata: map[source:test_tool status:success]")
-	assert.Contains(t, observation, "Annotations: map[confidence:high]")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			observation := formatToolResult(tc.input)
+			assert.Equal(t, tc.expected, observation)
+		})
+	}
 }

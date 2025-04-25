@@ -343,12 +343,22 @@ func formatToolResult(result core.ToolResult) string {
 	// Limit observation size? Could truncate dataStr if too long.
 	const maxObservationLength = 2000 // Example limit
 	if len(observation) > maxObservationLength {
-		trimmedDataLen := maxObservationLength - len("Observation:\n... (truncated)")
+		// Calculate exactly how many characters we can keep
+		suffix := "... (truncated)"
+		// Remove an extra byte for the newline before the suffix
+		trimmedDataLen := maxObservationLength - len("Observation:\n") - len(suffix) - 1
 		if trimmedDataLen < 0 {
 			trimmedDataLen = 0
 		}
-		observation = fmt.Sprintf("Observation:\n%s\n... (truncated)", dataStr[:trimmedDataLen])
-		logging.GetLogger().Warn(context.Background(), "Observation truncated to %d characters", maxObservationLength)
+
+		// Format with precise control over the output
+		observation = fmt.Sprintf("Observation:\n%s\n%s",
+			dataStr[:trimmedDataLen],
+			suffix)
+
+		logging.GetLogger().Warn(context.Background(),
+			"Observation truncated to %d characters",
+			maxObservationLength)
 	}
 
 	return observation // Return just the observation string
