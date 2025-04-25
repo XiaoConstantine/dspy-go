@@ -301,7 +301,6 @@ func NewMockTool(name string) *MockTool {
 		metadata:    metadata,
 	}
 	tool.On("Metadata").Return(metadata)
-	tool.On("Validate", mock.Anything).Return(nil)
 
 	return tool
 }

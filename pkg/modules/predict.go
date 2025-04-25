@@ -230,6 +230,10 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 			sb.WriteString(fmt.Sprintf("The %s field should start with '%s' followed by the content on new lines.\n",
 				field.Name, field.Prefix))
 		}
+		if field.Description != "" {
+			sb.WriteString(fmt.Sprintf(" %s", field.Description))
+			sb.WriteString("\n")
+		}
 	}
 	sb.WriteString("\n")
 

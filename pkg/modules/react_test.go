@@ -53,7 +53,7 @@ func TestReAct(t *testing.T) {
   I have the answer
 
   action:
-  Finish
+  <action>Finish</action>
 
   answer:
   42
@@ -105,7 +105,7 @@ func TestReAct_WithErroredTool(t *testing.T) {
   I encountered an error, I'll try another approach
 
   action:
-  Finish
+  <action>Finish</action>
 
   answer:
   I apologize, but I wasn't able to get the weather information due to a technical issue.
@@ -228,7 +228,7 @@ func TestReAct_InvalidAction(t *testing.T) {
   The previous action was invalid. I will stop.
 
   action:
-  Finish
+  <action>Finish</action>
 
   answer:
   Failed due to invalid action format.
@@ -273,7 +273,7 @@ func TestReAct_NoMatchingTool(t *testing.T) {
   Okay, that tool wasn't available. I'll finish.
 
   action:
-  Finish
+  <action>Finish</action>
 
   answer:
   Could not check calendar.
@@ -331,7 +331,7 @@ func TestReAct_ToolValidationError(t *testing.T) {
 	resp2 := &core.LLMResponse{Content: `thought: Validation failed, cannot proceed.
 
   action:
-  Finish
+  <action>Finish</action>
 
   answer:
   Failed due to validation error.

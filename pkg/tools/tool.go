@@ -43,8 +43,10 @@ type XMLArgument struct {
 
 type XMLAction struct {
 	XMLName   xml.Name      `xml:"action"`
-	ToolName  string        `xml:"tool_name"`
-	Arguments []XMLArgument `xml:"arguments>arg"`
+	ToolName  string        `xml:"tool_name,omitempty"`
+	Arguments []XMLArgument `xml:"arguments>arg,omitempty"`
+
+	Content string `xml:",chardata"`
 }
 
 // Helper to convert XML arguments to map[string]interface{}
@@ -53,10 +55,14 @@ type XMLAction struct {
 func (xa *XMLAction) GetArgumentsMap() map[string]interface{} {
 	argsMap := make(map[string]interface{})
 	if xa == nil {
-		return argsMap // Return empty map if xa is nil
+		return argsMap
+	}
+	// If it's a finish action or other simple action, there may be no arguments
+	if len(xa.Arguments) == 0 {
+		return argsMap
 	}
 	for _, arg := range xa.Arguments {
-		argsMap[arg.Key] = arg.Value // Store as string
+		argsMap[arg.Key] = arg.Value
 	}
 	return argsMap
 }
