@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -423,5 +424,162 @@ func TestMCPToolType(t *testing.T) {
 	tool := &MCPTool{}
 	if tool.Type() != ToolTypeMCP {
 		t.Errorf("Expected type '%s', got '%s'", ToolTypeMCP, tool.Type())
+	}
+}
+
+func TestConvertMCPParams(t *testing.T) {
+	// Define common schema parts for reuse
+	schemaInt := models.ParameterSchema{Type: "integer"} // Changed type name
+	schemaNum := models.ParameterSchema{Type: "number"}  // Changed type name
+	schemaStr := models.ParameterSchema{Type: "string"}  // Changed type name
+
+	// Test cases
+	testCases := []struct {
+		name           string
+		schema         models.InputSchema
+		inputParams    map[string]interface{}
+		expectedParams map[string]interface{}
+	}{
+		{
+			name: "String to Integer Success",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"count": schemaInt}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"count": "123"},
+			expectedParams: map[string]interface{}{"count": 123},
+		},
+		{
+			name: "String to Integer Failure (Float String)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"id": schemaInt}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"id": "123.45"},
+			expectedParams: map[string]interface{}{"id": "123.45"}, // Stays string
+		},
+		{
+			name: "String to Integer Failure (Non-numeric)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"id": schemaInt}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"id": "abc"},
+			expectedParams: map[string]interface{}{"id": "abc"}, // Stays string
+		},
+		{
+			name: "String to Number/Float Success (Integer String)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"value": schemaNum}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"value": "42"},
+			expectedParams: map[string]interface{}{"value": 42.0},
+		},
+		{
+			name: "String to Number/Float Success (Float String)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"price": schemaNum}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"price": "19.99"},
+			expectedParams: map[string]interface{}{"price": 19.99},
+		},
+		{
+			name: "String to Number/Float Failure (Non-numeric)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"rating": schemaNum}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"rating": "high"},
+			expectedParams: map[string]interface{}{"rating": "high"}, // Stays string
+		},
+		{
+			name: "No Conversion Needed (String)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"text": schemaStr}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"text": "hello"},
+			expectedParams: map[string]interface{}{"text": "hello"},
+		},
+		{
+			name: "No Conversion Needed (Int)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"count": schemaInt}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"count": 100},
+			expectedParams: map[string]interface{}{"count": 100},
+		},
+		{
+			name: "No Conversion Needed (Float)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"amount": schemaNum}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"amount": 99.9},
+			expectedParams: map[string]interface{}{"amount": 99.9},
+		},
+		{
+			name: "Mixed Types Conversion",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{ // Changed type name
+					"count": schemaInt,
+					"price": schemaNum,
+					"label": schemaStr,
+				},
+			},
+			inputParams: map[string]interface{}{
+				"count": "5",
+				"price": "25.50",
+				"label": "widget",
+			},
+			expectedParams: map[string]interface{}{
+				"count": 5,
+				"price": 25.50,
+				"label": "widget",
+			},
+		},
+		{
+			name: "Parameter Not In Schema",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"known": schemaStr}, // Changed type name
+			},
+			inputParams: map[string]interface{}{
+				"known":   "yes",
+				"unknown": 123,
+			},
+			expectedParams: map[string]interface{}{
+				"known":   "yes",
+				"unknown": 123, // Should pass through unchanged
+			},
+		},
+		{
+			name:           "Empty Input Params",
+			schema:         models.InputSchema{Properties: map[string]models.ParameterSchema{"a": schemaStr}}, // Changed type name
+			inputParams:    map[string]interface{}{},
+			expectedParams: map[string]interface{}{},
+		},
+		{
+			name:           "Empty Schema",
+			schema:         models.InputSchema{Properties: map[string]models.ParameterSchema{}}, // Changed type name
+			inputParams:    map[string]interface{}{"a": "1", "b": 2.0},
+			expectedParams: map[string]interface{}{"a": "1", "b": 2.0}, // Should pass through
+		},
+		{
+			name: "Case Sensitivity Check (Lowercase Schema)",
+			schema: models.InputSchema{
+				Properties: map[string]models.ParameterSchema{"numval": {Type: "number"}}, // Changed type name
+			},
+			inputParams:    map[string]interface{}{"numval": "98.6"},
+			expectedParams: map[string]interface{}{"numval": 98.6},
+		},
+		// Add more tests as needed, e.g., for boolean conversion if implemented
+	}
+
+	// Run test cases
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Use background context as it's not critical for conversion logic itself
+			ctx := context.Background()
+			actualParams := convertMCPParams(ctx, tc.schema, tc.inputParams)
+
+			if !reflect.DeepEqual(actualParams, tc.expectedParams) {
+				t.Errorf("convertMCPParams() failed:\nInput:    %v\nSchema:   %+v\nExpected: %v\nActual:   %v",
+					tc.inputParams, tc.schema, tc.expectedParams, actualParams)
+			}
+		})
 	}
 }

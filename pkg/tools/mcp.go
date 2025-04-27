@@ -3,8 +3,11 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/mcp-go/pkg/client"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
@@ -80,7 +83,9 @@ func (t *MCPTool) Call(ctx context.Context, args map[string]interface{}) (*model
 
 // Execute runs the tool with provided parameters and adapts the result to the core interface.
 func (t *MCPTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
-	result, err := t.Call(ctx, params)
+
+	convertedParams := convertMCPParams(ctx, t.schema, params) // Call the helper function
+	result, err := t.Call(ctx, convertedParams)
 	if err != nil {
 		return core.ToolResult{}, err
 	}
@@ -103,9 +108,6 @@ func (t *MCPTool) Validate(params map[string]interface{}) error {
 			if _, exists := params[name]; !exists {
 				return fmt.Errorf("missing required parameter: %s", name)
 			}
-
-			// We could add type checking here based on param.Type
-			// For example, check if numbers are actually numbers, etc.
 		}
 	}
 
@@ -117,3 +119,49 @@ func (t *MCPTool) Type() ToolType {
 	return ToolTypeMCP
 }
 
+// convertMCPParams attempts to convert parameter values based on the provided MCP schema.
+// It prioritizes converting strings to numbers/integers if the schema specifies.
+func convertMCPParams(ctx context.Context, schema models.InputSchema, params map[string]interface{}) map[string]interface{} {
+	logger := logging.GetLogger()
+	convertedParams := make(map[string]interface{})
+
+	for key, value := range params {
+		convertedParams[key] = value // Default: keep original value
+
+		prop, schemaHasKey := schema.Properties[key]
+		if !schemaHasKey {
+			continue // No schema info for this key, keep original value
+		}
+
+		expectedType := strings.ToLower(prop.Type)
+		currentValueStr, isString := value.(string)
+
+		if isString {
+			var conversionErr error
+			// Attempt conversion if schema expects a number/integer and we have a string
+			switch expectedType {
+			case "number", "float":
+				if floatVal, err := strconv.ParseFloat(currentValueStr, 64); err == nil {
+					convertedParams[key] = floatVal
+					// logger.Debug(ctx, "Converted MCP param '%s' from string to float64", key)
+				} else {
+					conversionErr = err
+				}
+			case "integer":
+				if intVal, err := strconv.Atoi(currentValueStr); err == nil {
+					convertedParams[key] = intVal
+					logger.Debug(ctx, "Converted MCP param '%s' from string to int", key)
+				} else {
+					conversionErr = err
+				}
+			}
+
+			if conversionErr != nil {
+				logger.Warn(ctx, "Failed to convert param '%s' ('%s') to expected type '%s': %v. Using original string.", key, currentValueStr, prop.Type, conversionErr)
+				// Keep original string value if conversion fails
+			}
+		}
+		// Handle cases where the input is already a number but schema expects string? (Less common)
+	}
+	return convertedParams
+}
