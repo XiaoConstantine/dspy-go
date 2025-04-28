@@ -1,253 +1,155 @@
 package tools
 
 import (
-	"context"
-	"errors"
+	"fmt"
 	"testing"
 
-	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
+	pkgErrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// MockTool implements the Tool interface for testing purposes.
-type MockTool struct {
-	name        string
-	description string
-	schema      models.InputSchema
-	callFunc    func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error)
+func TestNewInMemoryRegistry(t *testing.T) {
+	registry := NewInMemoryToolRegistry() // Use the new constructor
+	require.NotNil(t, registry, "Expected non-nil registry")
+	assert.NotNil(t, registry.tools, "Expected tools map to be initialized")
+	assert.Empty(t, registry.tools, "Expected empty tools map")
 }
 
-func (m *MockTool) Name() string {
-	return m.name
-}
+func TestInMemoryRegister(t *testing.T) {
+	registry := NewInMemoryToolRegistry()
 
-func (m *MockTool) Description() string {
-	return m.description
-}
+	// Create a mock core tool using the constructor
+	mockTool := testutil.NewMockCoreTool("test-tool", "A test tool", nil)
 
-func (m *MockTool) InputSchema() models.InputSchema {
-	return m.schema
-}
-
-func (m *MockTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-	return m.callFunc(ctx, args)
-}
-
-func TestNewRegistry(t *testing.T) {
-	registry := NewRegistry()
-	if registry == nil {
-		t.Fatal("Expected non-nil registry")
-	}
-	if registry.tools == nil {
-		t.Fatal("Expected tools map to be initialized")
-	}
-	if len(registry.tools) != 0 {
-		t.Errorf("Expected empty tools map, got %d entries", len(registry.tools))
-	}
-}
-
-func TestRegister(t *testing.T) {
-	registry := NewRegistry()
-	
-	// Create a mock tool
-	mockTool := &MockTool{
-		name:        "test-tool",
-		description: "A test tool",
-		schema: models.InputSchema{
-			Type:       "object",
-			Properties: map[string]models.ParameterSchema{},
-		},
-		callFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return &models.CallToolResult{}, nil
-		},
-	}
-	
 	// Test successful registration
 	err := registry.Register(mockTool)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	
+	assert.NoError(t, err, "Unexpected error during registration")
+
+	// Verify registration
+	retrievedTool, err := registry.Get("test-tool")
+	assert.NoError(t, err, "Failed to get registered tool")
+	assert.Equal(t, mockTool, retrievedTool, "Retrieved tool does not match registered tool")
+
 	// Test duplicate registration
 	err = registry.Register(mockTool)
-	if err == nil {
-		t.Error("Expected error for duplicate registration, got nil")
-	}
-}
-
-func TestGet(t *testing.T) {
-	registry := NewRegistry()
-	
-	// Create a mock tool
-	mockTool := &MockTool{
-		name:        "test-tool",
-		description: "A test tool",
-		schema: models.InputSchema{
-			Type:       "object",
-			Properties: map[string]models.ParameterSchema{},
-		},
-		callFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return &models.CallToolResult{}, nil
-		},
-	}
-	
-	// Register the tool
-	_ = registry.Register(mockTool)
-	
-	// Test successful retrieval
-	tool, err := registry.Get("test-tool")
+	assert.Error(t, err, "Expected error for duplicate registration, got nil")
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if tool == nil {
-		t.Fatal("Expected non-nil tool")
-	}
-	if tool.Name() != "test-tool" {
-		t.Errorf("Expected name 'test-tool', got '%s'", tool.Name())
-	}
-	
-	// Test non-existent tool
-	tool, err = registry.Get("non-existent-tool")
-	if err == nil {
-		t.Error("Expected error for non-existent tool, got nil")
-	}
-	if tool != nil {
-		t.Errorf("Expected nil tool, got %v", tool)
-	}
-}
-
-func TestList(t *testing.T) {
-	registry := NewRegistry()
-	
-	// Check empty list
-	tools := registry.List()
-	if len(tools) != 0 {
-		t.Errorf("Expected empty list, got %d tools", len(tools))
-	}
-	
-	// Add some tools
-	mockTool1 := &MockTool{name: "tool1", description: "Tool 1"}
-	mockTool2 := &MockTool{name: "tool2", description: "Tool 2"}
-	
-	_ = registry.Register(mockTool1)
-	_ = registry.Register(mockTool2)
-	
-	// Check list with tools
-	tools = registry.List()
-	if len(tools) != 2 {
-		t.Errorf("Expected 2 tools, got %d", len(tools))
-	}
-	
-	// Check that all tools are in the list
-	foundTool1 := false
-	foundTool2 := false
-	
-	for _, tool := range tools {
-		switch tool.Name() {
-		case "tool1":
-			foundTool1 = true
-		case "tool2":
-			foundTool2 = true
+		// Check if it's the expected error type using type assertion
+		e, ok := err.(*pkgErrors.Error)
+		assert.True(t, ok, "Error should be of type *pkgErrors.Error")
+		if ok {
+			assert.Equal(t, pkgErrors.InvalidInput, e.Code(), "Expected InvalidInput error code")
 		}
 	}
-	
-	if !foundTool1 {
-		t.Error("Expected tool1 in the list, but not found")
-	}
-	if !foundTool2 {
-		t.Error("Expected tool2 in the list, but not found")
+
+	// Test registering nil tool
+	err = registry.Register(nil)
+	assert.Error(t, err, "Expected error for registering nil tool")
+	if err != nil {
+		e, ok := err.(*pkgErrors.Error)
+		assert.True(t, ok, "Error should be of type *pkgErrors.Error")
+		if ok {
+			assert.Equal(t, pkgErrors.InvalidInput, e.Code(), "Expected InvalidInput error code")
+		}
 	}
 }
 
-func TestUnregister(t *testing.T) {
-	registry := NewRegistry()
-	
-	// Create a mock tool
-	mockTool := &MockTool{
-		name:        "test-tool",
-		description: "A test tool",
-	}
-	
-	// Register the tool
-	_ = registry.Register(mockTool)
-	
-	// Test successful unregistration
-	err := registry.Unregister("test-tool")
+func TestInMemoryGet(t *testing.T) {
+	registry := NewInMemoryToolRegistry()
+
+	// Create and register a mock core tool using the constructor
+	mockTool := testutil.NewMockCoreTool("test-tool", "", nil)
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
+	// Test successful retrieval
+	tool, err := registry.Get("test-tool")
+	assert.NoError(t, err, "Unexpected error getting existing tool")
+	require.NotNil(t, tool, "Expected non-nil tool")
+	assert.Equal(t, "test-tool", tool.Name(), "Expected name 'test-tool'")
+
+	// Test non-existent tool
+	tool, err = registry.Get("non-existent-tool")
+	assert.Error(t, err, "Expected error for non-existent tool, got nil")
+	assert.Nil(t, tool, "Expected nil tool for non-existent name")
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	
-	// Verify the tool is no longer in the registry
-	_, err = registry.Get("test-tool")
-	if err == nil {
-		t.Error("Expected error after unregistration, got nil")
-	}
-	
-	// Test unregistering non-existent tool
-	err = registry.Unregister("non-existent-tool")
-	if err == nil {
-		t.Error("Expected error for non-existent tool, got nil")
+		e, ok := err.(*pkgErrors.Error)
+		assert.True(t, ok, "Error should be of type *pkgErrors.Error")
+		if ok {
+			assert.Equal(t, pkgErrors.ResourceNotFound, e.Code(), "Expected ResourceNotFound error code")
+		}
 	}
 }
 
-func TestCall(t *testing.T) {
-	registry := NewRegistry()
-	
-	// Mock return values
-	mockResult := &models.CallToolResult{
-		Content: []models.Content{
-			models.TextContent{
-				Type: "text",
-				Text: "Test result",
-			},
-		},
+func TestInMemoryList(t *testing.T) {
+	registry := NewInMemoryToolRegistry()
+
+	// Check empty list
+	tools := registry.List()
+	assert.Empty(t, tools, "Expected empty list for new registry")
+
+	// Add some tools using the constructor
+	mockTool1 := testutil.NewMockCoreTool("tool1", "Tool 1", nil)
+	mockTool2 := testutil.NewMockCoreTool("tool2", "Tool 2", nil)
+
+	err := registry.Register(mockTool1)
+	require.NoError(t, err)
+	err = registry.Register(mockTool2)
+	require.NoError(t, err)
+
+	// Check list with tools
+	tools = registry.List()
+	assert.Len(t, tools, 2, "Expected 2 tools in the list")
+
+	// Check that all tools are in the list (order doesn't matter)
+	foundNames := make(map[string]bool)
+	for _, tool := range tools {
+		foundNames[tool.Name()] = true
 	}
-	mockError := errors.New("test error")
-	
-	// Create mock tools
-	successTool := &MockTool{
-		name:        "success-tool",
-		description: "A successful tool",
-		callFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return mockResult, nil
-		},
+	assert.True(t, foundNames["tool1"], "Expected tool1 in the list")
+	assert.True(t, foundNames["tool2"], "Expected tool2 in the list")
+}
+
+func TestInMemoryMatch(t *testing.T) {
+	registry := NewInMemoryToolRegistry()
+
+	// Add some tools using the constructor
+	mockTool1 := testutil.NewMockCoreTool("ReadFile", "Reads a file", nil)
+	mockTool2 := testutil.NewMockCoreTool("WriteFile", "Writes a file", nil)
+	mockTool3 := testutil.NewMockCoreTool("ListFiles", "Lists directory contents", nil)
+
+	err := registry.Register(mockTool1)
+	require.NoError(t, err)
+	err = registry.Register(mockTool2)
+	require.NoError(t, err)
+	err = registry.Register(mockTool3)
+	require.NoError(t, err)
+
+	tests := []struct {
+		intent       string
+		expectedLen  int
+		expectedName string // Only checks first match if len=1
+	}{
+		{"read the input file", 0, ""},             // "read the input file" does NOT contain "readfile"
+		{"I want to WRITE a file", 0, ""},          // "i want to write a file" does NOT contain "writefile"
+		{"list the files in the directory", 0, ""}, // does NOT contain "listfiles"
+		{"something about files", 0, ""},           // does NOT contain "readfile", "writefile", or "listfiles"
+		{"delete everything", 0, ""},               // No matching tool names
+		{"READFILE", 1, "ReadFile"},                // "readfile" contains "readfile"
+		{"use WriteFile command", 1, "WriteFile"},  // "use writefile command" contains "writefile"
+		{"ListFilesPlease", 1, "ListFiles"},        // "listfilesplease" contains "listfiles"
+		{"no match", 0, ""},
 	}
-	
-	errorTool := &MockTool{
-		name:        "error-tool",
-		description: "A failing tool",
-		callFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return nil, mockError
-		},
-	}
-	
-	// Register the tools
-	_ = registry.Register(successTool)
-	_ = registry.Register(errorTool)
-	
-	// Test successful call
-	result, err := registry.Call(context.Background(), "success-tool", nil)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if result != mockResult {
-		t.Error("Expected mock result, got different result")
-	}
-	
-	// Test call with error
-	result, err = registry.Call(context.Background(), "error-tool", nil)
-	if err != mockError {
-		t.Errorf("Expected mock error, got: %v", err)
-	}
-	if result != nil {
-		t.Errorf("Expected nil result, got: %v", result)
-	}
-	
-	// Test call with non-existent tool
-	result, err = registry.Call(context.Background(), "non-existent-tool", nil)
-	if err == nil {
-		t.Error("Expected error for non-existent tool, got nil")
-	}
-	if result != nil {
-		t.Errorf("Expected nil result, got: %v", result)
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("Intent_%s", tt.intent), func(t *testing.T) {
+			matches := registry.Match(tt.intent)
+			assert.Len(t, matches, tt.expectedLen, "Incorrect number of matches for intent: '%s'", tt.intent)
+			if tt.expectedLen == 1 && len(matches) == 1 {
+				assert.Equal(t, tt.expectedName, matches[0].Name(), "Incorrect tool matched for intent: '%s'", tt.intent)
+			}
+		})
 	}
 }

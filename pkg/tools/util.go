@@ -2,16 +2,94 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	pkgErrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/mcp-go/pkg/client"
 	"github.com/XiaoConstantine/mcp-go/pkg/logging"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/XiaoConstantine/mcp-go/pkg/transport"
 )
+
+// This improves testability by allowing mocks.
+type MCPClientInterface interface {
+	ListTools(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error)
+	// Add CallTool if the wrapper's Execute needs it indirectly via the interface
+	CallTool(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error)
+}
+
+// --- Dynamic MCP Tool Wrapper ---
+// mcpCoreToolWrapper dynamically wraps an MCP tool to satisfy the core.Tool interface.
+type mcpCoreToolWrapper struct {
+	name        string
+	description string
+	schema      models.InputSchema
+	// Use the interface type now for flexibility and testing
+	mcpClient MCPClientInterface
+}
+
+func (t *mcpCoreToolWrapper) Name() string {
+	return t.name
+}
+
+func (t *mcpCoreToolWrapper) Description() string {
+	return t.description
+}
+
+func (t *mcpCoreToolWrapper) InputSchema() models.InputSchema {
+	return t.schema
+}
+
+func (t *mcpCoreToolWrapper) Metadata() *core.ToolMetadata {
+	return &core.ToolMetadata{
+		Name:        t.name,
+		Description: t.description,
+		InputSchema: t.schema}
+}
+
+func (t *mcpCoreToolWrapper) CanHandle(ctx context.Context, intent string) bool {
+	// Simple name matching for now
+	return intent == t.name
+}
+
+func (t *mcpCoreToolWrapper) Validate(params map[string]interface{}) error {
+	// Basic validation - could potentially delegate to MCP server or use schema
+	// For now, assume valid if Execute can handle it.
+	return nil
+}
+
+func (t *mcpCoreToolWrapper) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+	if t.mcpClient == nil {
+		return core.ToolResult{}, pkgErrors.New(pkgErrors.InvalidWorkflowState, "MCP client is not set for tool wrapper")
+	}
+
+	// Call the actual MCP tool via the client interface
+	mcpResult, err := t.mcpClient.CallTool(ctx, t.name, params)
+	if err != nil {
+		// Wrap the error for context
+		return core.ToolResult{}, pkgErrors.Wrap(err, pkgErrors.StepExecutionFailed, fmt.Sprintf("failed to execute MCP tool '%s'", t.name))
+	}
+
+	// Convert MCP result to core.ToolResult
+	// Simple conversion: extract text content. Could be more sophisticated.
+	resultData := extractContentText(mcpResult.Content)
+	resultAnnotations := make(map[string]interface{})
+	if mcpResult.IsError {
+		resultAnnotations["mcp_error"] = true
+	}
+
+	return core.ToolResult{
+		Data:        resultData,
+		Annotations: resultAnnotations,
+	}, nil
+}
+
+// Ensure mcpCoreToolWrapper implements core.Tool.
+var _ core.Tool = (*mcpCoreToolWrapper)(nil)
 
 // MCPClientOptions contains configuration options for creating an MCP client.
 type MCPClientOptions struct {
@@ -52,28 +130,30 @@ func NewMCPClientFromStdio(reader io.Reader, writer io.Writer, options MCPClient
 	return mcpClient, nil
 }
 
-// RegisterMCPTools discovers and registers all tools from an MCP server in the provided registry.
-// This automatically bridges MCP tools to the local tool interface.
-func RegisterMCPTools(registry *Registry, mcpClient *client.Client) error {
+// RegisterMCPTools dynamically discovers tools from an MCP client and registers them
+// into a core.ToolRegistry, wrapping them to conform to the core.Tool interface.
+func RegisterMCPTools(registry core.ToolRegistry, mcpClient MCPClientInterface) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	toolsResult, err := mcpClient.ListTools(ctx, nil)
 	if err != nil {
-		return err
+		// Wrap the error for context
+		return pkgErrors.Wrap(err, pkgErrors.ResourceNotFound, "failed to list tools from MCP client")
 	}
 
 	for _, mcpTool := range toolsResult.Tools {
-		tool := NewMCPTool(
-			mcpTool.Name,
-			mcpTool.Description,
-			mcpTool.InputSchema,
-			mcpClient,
-			mcpTool.Name,
-		)
+		// Create the dynamic wrapper
+		wrapper := &mcpCoreToolWrapper{
+			name:        mcpTool.Name,
+			description: mcpTool.Description,
+			schema:      mcpTool.InputSchema,
+			mcpClient:   mcpClient,
+		}
 
-		if err := registry.Register(tool); err != nil {
-			return err
+		if err := registry.Register(wrapper); err != nil {
+			// If registration fails (e.g., duplicate), wrap the error
+			return pkgErrors.Wrap(err, pkgErrors.InvalidInput, fmt.Sprintf("failed to register discovered MCP tool '%s'", mcpTool.Name))
 		}
 	}
 
@@ -87,22 +167,24 @@ func extractContentText(content []models.Content) string {
 	for _, item := range content {
 		if textContent, ok := item.(models.TextContent); ok {
 			if result.Len() > 0 {
-				result.WriteString("\n")
+				result.WriteString("\n") // Add newline between multiple text parts
 			}
 			result.WriteString(textContent.Text)
 		}
+		// TODO: Handle other content types (e.g., JSON) if necessary
 	}
 
 	return result.String()
 }
 
 // Helper function to extract capabilities from description.
+// NOTE: This is a very basic heuristic and might not be reliable.
 func extractCapabilities(description string) []string {
 	capabilities := []string{}
 
 	keywords := []string{"search", "query", "calculate", "fetch", "retrieve",
 		"find", "create", "update", "delete", "git", "status",
-		"commit", "repository", "branch"}
+		"commit", "repository", "branch", "read", "write", "list", "run", "edit"}
 
 	descLower := strings.ToLower(description)
 	for _, keyword := range keywords {
@@ -115,8 +197,9 @@ func extractCapabilities(description string) []string {
 }
 
 // calculateToolMatchScore determines how well a tool matches an action.
+// NOTE: This is a simple heuristic and might not be optimal.
 func calculateToolMatchScore(metadata *core.ToolMetadata, action string) float64 {
-	score := 0.1
+	score := 0.1 // Base score
 	actionLower := strings.ToLower(action)
 
 	// Check if action mentions tool name
@@ -124,10 +207,13 @@ func calculateToolMatchScore(metadata *core.ToolMetadata, action string) float64
 		score += 0.5
 	}
 
-	// Check capabilities
-	for _, capability := range metadata.Capabilities {
-		if strings.Contains(actionLower, strings.ToLower(capability)) {
-			score += 0.3
+	// Check capabilities (if available in metadata)
+	// Ensure metadata.Capabilities is not nil before iterating
+	if metadata.Capabilities != nil {
+		for _, capability := range metadata.Capabilities {
+			if strings.Contains(actionLower, strings.ToLower(capability)) {
+				score += 0.3
+			}
 		}
 	}
 
