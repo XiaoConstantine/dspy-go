@@ -7,6 +7,8 @@ import (
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/tools"
+
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -15,26 +17,9 @@ import (
 
 func TestReAct(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
-	// Define schema inline or ensure it's available if defined globally
-	schema := models.InputSchema{
-		Type: "object",
-		Properties: map[string]models.ParameterSchema{
-			"question": {
-				Type:        "string",
-				Description: "Default parameter",
-				Required:    true,
-			},
-		},
-	}
+	// Removed unused schema definition
 	mockTool := testutil.NewMockTool("test_tool") // Use the actual tool name
-
-	toolMetadata := &core.ToolMetadata{
-		Name:         "test_tool",
-		Description:  "A test tool",
-		InputSchema:  schema, // Use the defined schema
-		Capabilities: []string{"test"},
-	}
-	mockTool.On("Metadata").Return(toolMetadata) // Called during NewReAct
+	mockTool.On("Name").Return("test_tool")
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	expectedArgs := map[string]interface{}{"question": "What is the meaning of\nlife?"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
@@ -64,11 +49,17 @@ func TestReAct(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
 		nil).Once()
 
+	// Create registry and add mock tool
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	react := NewReAct(signature, []core.Tool{mockTool}, 5)
+	// Removed old tool slice initialization
+	react := NewReAct(signature, registry, 2)
 	react.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -117,22 +108,22 @@ func TestReAct_WithErroredTool(t *testing.T) {
 		nil).Once()
 
 	mockWeatherTool := testutil.NewMockTool("weather_check")
-	mockWeatherTool.On("Metadata").Return(&core.ToolMetadata{
-		Name:         "weather_check",
-		Description:  "Check the weather at a location",
-		InputSchema:  models.InputSchema{ /* ... schema ... */ }, // Provide schema directly
-		Capabilities: []string{"weather"},
-	})
+	mockWeatherTool.On("Name").Return("weather_check")
 	mockWeatherTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	expectedArgs := map[string]interface{}{"location": "nearby"}
 	mockWeatherTool.On("Execute", mock.Anything, expectedArgs).Return(core.ToolResult{}, errors.New(errors.LLMGenerationFailed,
 		"weather service down"))
 
+	// Create registry and add mock tool
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockWeatherTool)
+	require.NoError(t, err)
+
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	react := NewReAct(signature, []core.Tool{mockWeatherTool}, 5)
+	react := NewReAct(signature, registry, 5)
 	react.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -174,30 +165,30 @@ func TestReAct_MaxIterations(t *testing.T) {
 		nil).Once()
 
 	dbTool := testutil.NewMockTool("database_query")
-	// Remove unused variable declaration for dbSchema
-	dbTool.On("Metadata").Return(&core.ToolMetadata{
-		Name: "database_query", Description: "Query the database", InputSchema: models.InputSchema{ /*...*/ }, Capabilities: []string{"database"},
-	})
+	dbTool.On("Name").Return("database_query")
 	dbTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	dbExpectedArgs := map[string]interface{}{"query": "SELECT * FROM\ndata"}
 	dbTool.On("Execute", mock.Anything, dbExpectedArgs).Return(core.ToolResult{Data: "Database results"}, nil)
 
 	profileTool := testutil.NewMockTool("user_profile")
-	// Remove unused variable declaration for profileSchema
-	profileTool.On("Metadata").Return(&core.ToolMetadata{
-		Name: "user_profile", Description: "Get user profile", InputSchema: models.InputSchema{ /*...*/ }, Capabilities: []string{"user",
-			"profile"},
-	})
+	profileTool.On("Name").Return("user_profile")
 	profileTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	profileExpectedArgs := map[string]interface{}{"user_id": "123"}
 	profileTool.On("Execute", mock.Anything, profileExpectedArgs).Return(core.ToolResult{Data: "User profile data"}, nil)
+
+	// Create registry and add mock tools
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(dbTool)
+	require.NoError(t, err)
+	err = registry.Register(profileTool)
+	require.NoError(t, err)
 
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	tools := []core.Tool{dbTool, profileTool}
-	react := NewReAct(signature, tools, 2)
+	// tools := []core.Tool{dbTool, profileTool} // Old way
+	react := NewReAct(signature, registry, 2)
 	react.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -239,12 +230,14 @@ func TestReAct_InvalidAction(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
 		nil).Once()
 
-	// Fix: Provide arguments to core.NewSignature
+	// Create registry, but don't add the 'unknown_tool'
+	registry := tools.NewInMemoryToolRegistry()
+
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	react := NewReAct(signature, []core.Tool{}, 5)
+	react := NewReAct(signature, registry, 5)
 	react.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -286,15 +279,19 @@ func TestReAct_NoMatchingTool(t *testing.T) {
 
 	weatherTool := testutil.NewMockTool("weather_check")
 	// Remove unused variable declaration for weatherSchema
+	weatherTool.On("Name").Return("weather_check")
 	weatherTool.On("Metadata").Return(&core.ToolMetadata{
 		Name: "weather_check", Description: "Check weather", InputSchema: models.InputSchema{ /*...*/ }, Capabilities: []string{"weather"},
 	})
+
+	// Create registry, but don't add the 'unknown_tool'
+	registry := tools.NewInMemoryToolRegistry()
 
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	react := NewReAct(signature, []core.Tool{weatherTool}, 5)
+	react := NewReAct(signature, registry, 5)
 	react.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -311,16 +308,22 @@ func TestReAct_NoMatchingTool(t *testing.T) {
 func TestReAct_ToolValidationError(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
 
-	mockTool := testutil.NewMockTool("weather_check")
-	mockTool.ExpectedCalls = nil // Clear all default expectations
-	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "weather_check"})
-	mockTool.On("Validate", mock.Anything).Return(errors.New(errors.ValidationFailed, "validation error: missing location"))
-	// Fix: Provide arguments to core.NewSignature
+	mockValidationTool := testutil.NewMockTool("weather_check")
+	mockValidationTool.On("Name").Return("weather_check")
+	// Removed commented-out Metadata expectation
+	// Add Validate expectation before register
+	mockValidationTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(errors.New(errors.ValidationFailed, "validation error"))
+
+	// Create registry and add mock tool
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockValidationTool)
+	require.NoError(t, err)
+
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
-		[]core.OutputField{{Field: core.NewField("answer")}},
+		[]core.InputField{{Field: core.Field{Name: "data"}}},
+		[]core.OutputField{{Field: core.NewField("status")}},
 	)
-	react := NewReAct(signature, []core.Tool{mockTool}, 5)
+	react := NewReAct(signature, registry, 5)
 	react.SetLLM(mockLLM)
 
 	resp1 := &core.LLMResponse{Content: `thought: I need the weather
@@ -342,19 +345,18 @@ func TestReAct_ToolValidationError(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
 		nil).Once()
 
-	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "weather_check"})
-	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(errors.New(errors.ValidationFailed, "validation error: missing location"))
+	// Ensure no mockValidationTool.On(...) calls happen after Register
 
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
-	inputs := map[string]interface{}{"question": "What is the weather like?"}
+	inputs := map[string]interface{}{"data": "What is the weather like?"}
 	outputs, err := react.Process(ctx, inputs)
 
 	assert.NoError(t, err)
 	require.NotNil(t, outputs)
 	assert.Contains(t, outputs["answer"], "Failed due to validation error")
 	mockLLM.AssertExpectations(t)
-	mockTool.AssertExpectations(t)
+	mockValidationTool.AssertExpectations(t)
 }
 
 func TestReAct_Clone(t *testing.T) {
@@ -363,17 +365,33 @@ func TestReAct_Clone(t *testing.T) {
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	mockTool := testutil.NewMockTool("test_tool")
+	mockTool.On("Name").Return("test_tool")
 	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "test_tool"})
-	originalReact := NewReAct(signature, []core.Tool{mockTool}, 5)
+	// Create registry for original
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+	originalReact := NewReAct(signature, registry, 5)
 	clonedModule := originalReact.Clone()
 	clonedReact, ok := clonedModule.(*ReAct)
 
 	assert.True(t, ok)
 	assert.Equal(t, originalReact.MaxIters, clonedReact.MaxIters)
-	assert.Equal(t, len(originalReact.Tools), len(clonedReact.Tools))
-	assert.Equal(t, len(originalReact.toolMap), len(clonedReact.toolMap))
-	assert.Contains(t, clonedReact.toolMap, "test_tool")
+	// Assert based on registry content
+	originalTools := originalReact.Registry.List()
+	clonedTools := clonedReact.Registry.List()
+	assert.Equal(t, len(originalTools), len(clonedTools))
+	// Check if tool name exists in the cloned list
+	found := false
+	for _, tool := range clonedTools {
+		if tool.Metadata().Name == "test_tool" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Tool 'test_tool' not found in cloned registry")
 	assert.NotSame(t, originalReact.Predict, clonedReact.Predict)
+	// Removed commented-out assert.Same check
 }
 
 func TestReAct_WithDefaultOptions(t *testing.T) {
@@ -381,7 +399,9 @@ func TestReAct_WithDefaultOptions(t *testing.T) {
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	reactModule := NewReAct(signature, []core.Tool{}, 5)
+	// Create empty registry
+	emptyRegistry := tools.NewInMemoryToolRegistry()
+	reactModule := NewReAct(signature, emptyRegistry, 5)
 	result := reactModule.WithDefaultOptions(
 		core.WithGenerateOptions(core.WithTemperature(0.7), core.WithMaxTokens(2000)),
 	)

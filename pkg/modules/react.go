@@ -18,33 +18,22 @@ import (
 type ReAct struct {
 	core.BaseModule
 	Predict  *Predict
-	Tools    []core.Tool
+	Registry *tools.InMemoryToolRegistry
 	MaxIters int
-	// Internal map for quick tool lookup by name
-	toolMap map[string]core.Tool
 }
 
 // NewReAct creates a new ReAct module.
-// It takes a signature (which it modifies), a list of tools, and max iterations.
-func NewReAct(signature core.Signature, tools []core.Tool, maxIters int) *ReAct {
+// It takes a signature (which it modifies), a tool registry pointer, and max iterations.
+func NewReAct(signature core.Signature, registry *tools.InMemoryToolRegistry, maxIters int) *ReAct {
 	modifiedSignature := appendReActFields(signature)
 
 	predict := NewPredict(modifiedSignature)
 
-	// Build the tool map for efficient lookup
-	toolMap := make(map[string]core.Tool)
-	for _, tool := range tools {
-		if tool != nil && tool.Metadata() != nil {
-			toolMap[tool.Metadata().Name] = tool
-		}
-	}
-
 	return &ReAct{
 		BaseModule: *core.NewModule(modifiedSignature),
 		Predict:    predict,
-		Tools:      tools,
+		Registry:   registry,
 		MaxIters:   maxIters,
-		toolMap:    toolMap,
 	}
 }
 
@@ -199,13 +188,14 @@ func (r *ReAct) executeToolByName(ctx context.Context, toolName string, argument
 	span.WithAnnotation("arguments", arguments)
 	logger.Debug(ctx, "Attempting to execute tool '%s'", toolName)
 
-	// Find the tool in the map
-	matchingTool, found := r.toolMap[toolName]
-	if !found {
-		err := fmt.Errorf("no tool registered with name: '%s'", toolName)
+	// Find the tool in the registry
+	matchingTool, err := r.Registry.Get(toolName)
+	if err != nil {
+		// Handle error, e.g., tool not found
 		span.WithError(err)
-		logger.Error(ctx, "%s", err.Error())
-		return core.ToolResult{}, err
+		logger.Error(ctx, "Failed to get tool '%s' from registry: %v", toolName, err)
+		// Return the registry error directly or wrap it
+		return core.ToolResult{}, fmt.Errorf("tool '%s' not found in registry: %w", toolName, err)
 	}
 
 	// Ensure arguments map is not nil for validation/execution
@@ -244,20 +234,10 @@ func (r *ReAct) executeToolByName(ctx context.Context, toolName string, argument
 }
 
 // Clone creates a copy of the ReAct module.
-// Note: Tools and the Predict module are cloned, but the LLM instance is shared.
+// Note: Predict module is cloned, but the LLM instance and ToolRegistry are shared.
+// Cloning the registry itself might be complex and depends on the registry implementation.
+// Sharing the registry is usually acceptable.
 func (r *ReAct) Clone() core.Module {
-	// Rebuild tool map for the clone
-	toolMapClone := make(map[string]core.Tool)
-	clonedTools := make([]core.Tool, len(r.Tools))
-	for i, tool := range r.Tools {
-		// If tools have internal state, they should ideally implement a Clone method.
-		// Assuming shallow copy is sufficient for now.
-		clonedTools[i] = tool // Shallow copy
-		if tool != nil && tool.Metadata() != nil {
-			toolMapClone[tool.Metadata().Name] = tool // Point to the same tool instance
-		}
-	}
-
 	// Ensure Predict module is cloned
 	clonedPredict, ok := r.Predict.Clone().(*Predict)
 	if !ok {
@@ -267,9 +247,8 @@ func (r *ReAct) Clone() core.Module {
 	return &ReAct{
 		BaseModule: *r.BaseModule.Clone().(*core.BaseModule),
 		Predict:    clonedPredict,
-		Tools:      clonedTools,
+		Registry:   r.Registry,
 		MaxIters:   r.MaxIters,
-		toolMap:    toolMapClone,
 	}
 }
 

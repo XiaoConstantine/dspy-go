@@ -105,16 +105,6 @@ func main() {
 		logger.Fatal(ctx, fmt.Sprintf("Failed to register MCP tools: %v", err))
 	}
 
-	// Get the list of tools
-	toolList := registry.List()
-	fmt.Println("Registered tools:")
-	for _, tool := range toolList {
-		fmt.Printf("- %s: %s\n", tool.Name(), tool.Description())
-	}
-
-	// Convert tools.Tool list to core.Tool list
-	var coreTools = toolList // Directly assign the list
-
 	// 4. Create and configure ReAct module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "query"}}},
@@ -127,7 +117,7 @@ func main() {
     `)
 
 	maxIters := 5
-	reactModule := modules.NewReAct(signature, coreTools, maxIters)
+	reactModule := modules.NewReAct(signature, registry, maxIters)
 	llms.EnsureFactory()
 
 	// 5. Set up LLM
