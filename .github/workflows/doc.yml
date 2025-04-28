@@ -22,7 +22,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          args: --timeout=5m -enable=godot
+          args: --timeout=5m --enable=godot
       - name: Generate documentation
         run: |
           mkdir -p _site
