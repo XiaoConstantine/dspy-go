@@ -7,30 +7,15 @@ import (
 	"reflect"
 	"sort"
 	"testing"
-	"time"
 
+	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	pkgErrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/mcp-go/pkg/logging"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-// Mock transport for testing.
-type MockTransport struct {
-	sendFunc    func(ctx context.Context, msg any) error
-	receiveFunc func(ctx context.Context) (any, error)
-}
-
-func (m *MockTransport) Send(ctx context.Context, msg any) error {
-	return m.sendFunc(ctx, msg)
-}
-
-func (m *MockTransport) Receive(ctx context.Context) (any, error) {
-	return m.receiveFunc(ctx)
-}
-
-func (m *MockTransport) Close() error {
-	return nil
-}
 
 // TestExtractContentText tests the extractContentText helper function.
 func TestExtractContentText(t *testing.T) {
@@ -88,9 +73,7 @@ func TestExtractContentText(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := extractContentText(test.content)
-			if result != test.expected {
-				t.Errorf("Expected '%s', got '%s'", test.expected, result)
-			}
+			assert.Equal(t, test.expected, result)
 		})
 	}
 }
@@ -114,8 +97,8 @@ func TestExtractCapabilities(t *testing.T) {
 		},
 		{
 			name:        "description with all keywords",
-			description: "Search, query, calculate, fetch, retrieve, find, create, update, delete, git, status, commit, repository, branch",
-			expected:    []string{"search", "query", "calculate", "fetch", "retrieve", "find", "create", "update", "delete", "git", "status", "commit", "repository", "branch"},
+			description: "Search, query, calculate, fetch, retrieve, find, create, update, delete, git, status, commit, repository, branch, read, write, list, run, edit",
+			expected:    []string{"search", "query", "calculate", "fetch", "retrieve", "find", "create", "update", "delete", "git", "status", "commit", "repository", "branch", "read", "write", "list", "run", "edit"},
 		},
 		{
 			name:        "case insensitivity",
@@ -127,16 +110,11 @@ func TestExtractCapabilities(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			capabilities := extractCapabilities(test.description)
-
-			// Sort both slices for comparison
-			sort.Strings(capabilities)
 			expected := make([]string, len(test.expected))
 			copy(expected, test.expected)
+			sort.Strings(capabilities)
 			sort.Strings(expected)
-
-			if !reflect.DeepEqual(capabilities, expected) {
-				t.Errorf("Expected %v, got %v", expected, capabilities)
-			}
+			assert.True(t, reflect.DeepEqual(capabilities, expected), "Expected %v, got %v", expected, capabilities)
 		})
 	}
 }
@@ -145,21 +123,21 @@ func TestExtractCapabilities(t *testing.T) {
 func TestCalculateToolMatchScore(t *testing.T) {
 	// Small epsilon for floating point comparison
 	epsilon := 0.0001
-	
+
 	tests := []struct {
-		name        string
-		metadata    *core.ToolMetadata
-		action      string
-		minExpected float64
+		name          string
+		metadata      *core.ToolMetadata
+		action        string
+		expectedScore float64 // Changed from minExpected for clarity
 	}{
 		{
 			name: "exact name match",
 			metadata: &core.ToolMetadata{
 				Name:         "search-tool",
-				Capabilities: []string{},
+				Capabilities: []string{}, // Explicitly empty
 			},
-			action:      "I need to use the search-tool",
-			minExpected: 0.5, // Base score (0.1) + name match (0.5)
+			action:        "I need to use the search-tool",
+			expectedScore: 0.6, // Corrected: 0.1 (base) + 0.5 (name)
 		},
 		{
 			name: "capability match",
@@ -167,8 +145,8 @@ func TestCalculateToolMatchScore(t *testing.T) {
 				Name:         "search-tool",
 				Capabilities: []string{"search", "find"},
 			},
-			action:      "I need to search for something",
-			minExpected: 0.4, // Base score (0.1) + capability match (0.3)
+			action:        "I need to search for something",
+			expectedScore: 0.4, // 0.1 (base) + 0.3 (capability)
 		},
 		{
 			name: "name and capability match",
@@ -176,8 +154,8 @@ func TestCalculateToolMatchScore(t *testing.T) {
 				Name:         "search-tool",
 				Capabilities: []string{"search", "find"},
 			},
-			action:      "I need to use the search-tool to search for something",
-			minExpected: 0.9, // Base score (0.1) + name match (0.5) + capability match (0.3)
+			action:        "I need to use the search-tool to search for something",
+			expectedScore: 0.9, // 0.1 (base) + 0.5 (name) + 0.3 (capability)
 		},
 		{
 			name: "no match",
@@ -185,8 +163,8 @@ func TestCalculateToolMatchScore(t *testing.T) {
 				Name:         "search-tool",
 				Capabilities: []string{"search", "find"},
 			},
-			action:      "I want to calculate something",
-			minExpected: 0.1, // Base score only
+			action:        "I want to calculate something",
+			expectedScore: 0.1, // Base score only
 		},
 		{
 			name: "multiple capability matches",
@@ -194,17 +172,21 @@ func TestCalculateToolMatchScore(t *testing.T) {
 				Name:         "repository-tool",
 				Capabilities: []string{"git", "commit", "repository"},
 			},
-			action:      "I need to commit changes to the git repository",
-			minExpected: 0.7, // Base score (0.1) + capability matches (0.3 * 2)
+			action:        "I need to commit changes to the git repository",
+			expectedScore: 1.0, // Corrected: 0.1 (base) + 0.3 (commit) + 0.3 (git) + 0.3 (repository)
+		},
+		{
+			name:          "nil capabilities",
+			metadata:      &core.ToolMetadata{Name: "nil-cap-tool"},
+			action:        "use nil-cap-tool",
+			expectedScore: 0.6, // 0.1 (base) + 0.5 (name)
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			score := calculateToolMatchScore(test.metadata, test.action)
-			if score < test.minExpected-epsilon {
-				t.Errorf("Expected score >= %f, got %f", test.minExpected, score)
-			}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := calculateToolMatchScore(tt.metadata, tt.action)
+			assert.InEpsilon(t, tt.expectedScore, score, epsilon, "Incorrect score calculated")
 		})
 	}
 }
@@ -216,191 +198,88 @@ func TestMCPClientOptionsStructure(t *testing.T) {
 		ClientVersion: "1.0.0",
 		Logger:        logging.NewStdLogger(logging.InfoLevel),
 	}
-
-	// Verify structure fields
-	if options.ClientName != "test-client" {
-		t.Errorf("Expected ClientName 'test-client', got '%s'", options.ClientName)
-	}
-	if options.ClientVersion != "1.0.0" {
-		t.Errorf("Expected ClientVersion '1.0.0', got '%s'", options.ClientVersion)
-	}
-	if options.Logger == nil {
-		t.Error("Expected non-nil Logger")
-	}
+	assert.Equal(t, "test-client", options.ClientName)
+	assert.Equal(t, "1.0.0", options.ClientVersion)
+	assert.NotNil(t, options.Logger)
 }
 
-// Note: We can't properly unit test NewMCPClientFromStdio without significant refactoring
-// because it directly creates and initializes a client that depends on external components.
-// This would be a good candidate for refactoring to use dependency injection.
-
-// MockClient implements a simplified version of the MCP client for testing.
-type MockClient struct {
-	listToolsFunc func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error)
-	callToolFunc  func(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error)
-}
-
-// Helper function to register tools using our MockClient.
-func registerMCPToolsTest(registry *Registry, mcpClient *MockClient) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	toolsResult, err := mcpClient.ListTools(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	for _, mcpTool := range toolsResult.Tools {
-		// Create a TestMCPTool that uses our mocked Call function
-		baseTool := &MCPTool{
-			name:        mcpTool.Name,
-			description: mcpTool.Description,
-			schema:      mcpTool.InputSchema,
-			toolName:    mcpTool.Name,
-			metadata: &core.ToolMetadata{
-				Name:         mcpTool.Name,
-				Description:  mcpTool.Description,
-				InputSchema:  mcpTool.InputSchema,
-				Capabilities: extractCapabilities(mcpTool.Description),
-				Version:      "1.0.0",
-			},
-			matchCutoff: 0.3,
-		}
-
-		// Create a wrapper with our mock functionality
-		tool := &TestMCPTool{
-			MCPTool: baseTool,
-			mockCallFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-				// Forward to our mock client's CallTool
-				return mcpClient.callToolFunc(ctx, mcpTool.Name, args)
-			},
-		}
-
-		if err := registry.Register(tool); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *MockClient) ListTools(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error) {
-	return m.listToolsFunc(ctx, cursor)
-}
-
-func (m *MockClient) CallTool(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error) {
-	return m.callToolFunc(ctx, name, args)
-}
-
-// Test helper to create a MockClient with pre-configured tools.
-func createMockClientWithTools() *MockClient {
-	mockTools := []models.Tool{
-		{
-			Name:        "tool1",
-			Description: "Tool 1 description",
-			InputSchema: models.InputSchema{
-				Type:       "object",
-				Properties: map[string]models.ParameterSchema{},
-			},
-		},
-		{
-			Name:        "tool2",
-			Description: "Tool 2 description",
-			InputSchema: models.InputSchema{
-				Type:       "object",
-				Properties: map[string]models.ParameterSchema{},
-			},
-		},
-	}
-
-	return &MockClient{
-		listToolsFunc: func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error) {
-			return &models.ListToolsResult{Tools: mockTools}, nil
-		},
-		callToolFunc: func(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error) {
-			return &models.CallToolResult{}, nil
-		},
-	}
-}
-
-// TestRegisterMCPTools tests the RegisterMCPTools function.
+// TestRegisterMCPTools tests the RegisterMCPTools function successfully registers wrapped tools.
 func TestRegisterMCPTools(t *testing.T) {
-	// Create a mock client and registry
-	mockClient := createMockClientWithTools()
+	// Create mocks
+	mockClient := testutil.NewMockMCPClientWithTools()
+	registry := NewInMemoryToolRegistry()
 
-	// Create a registry
-	registry := NewRegistry()
+	// Call the function under test, passing the mock client which satisfies the interface
+	err := RegisterMCPTools(registry, mockClient)
 
-	// Use our own helper function to register tools
-	err := registerMCPToolsTest(registry, mockClient)
+	// Assert results
+	require.NoError(t, err, "RegisterMCPTools failed unexpectedly")
+	assert.Len(t, registry.List(), 2, "Expected 2 tools to be registered")
 
-	// Check results
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
+	// Check tool 1
+	tool1, err := registry.Get("mcp-tool1")
+	require.NoError(t, err, "Failed to get tool1")
+	require.NotNil(t, tool1)
+	assert.Equal(t, "mcp-tool1", tool1.Name())
+	assert.Equal(t, "MCP Tool 1 description", tool1.Description())
+	_, ok := tool1.(*mcpCoreToolWrapper)
+	assert.True(t, ok, "Expected tool1 to be type *mcpCoreToolWrapper, got %T", tool1)
 
-	// Verify that the tools were registered
-	if len(registry.List()) != 2 {
-		t.Errorf("Expected 2 tools in registry, got %d", len(registry.List()))
-	}
-
-	// Check the first tool
-	tool1, err := registry.Get("tool1")
-	if err != nil {
-		t.Errorf("Unexpected error getting tool1: %v", err)
-	}
-	if tool1.Name() != "tool1" {
-		t.Errorf("Expected name 'tool1', got '%s'", tool1.Name())
-	}
-	if tool1.Description() != "Tool 1 description" {
-		t.Errorf("Expected description 'Tool 1 description', got '%s'", tool1.Description())
-	}
-
-	// Check the second tool
-	tool2, err := registry.Get("tool2")
-	if err != nil {
-		t.Errorf("Unexpected error getting tool2: %v", err)
-	}
-	if tool2.Name() != "tool2" {
-		t.Errorf("Expected name 'tool2', got '%s'", tool2.Name())
-	}
-	if tool2.Description() != "Tool 2 description" {
-		t.Errorf("Expected description 'Tool 2 description', got '%s'", tool2.Description())
-	}
-
-	// Check the type of the tools
-	testMCPTool, ok := tool1.(*TestMCPTool)
-	if !ok {
-		t.Errorf("Expected tool1 to be a TestMCPTool, got %T", tool1)
-	} else if testMCPTool.Type() != ToolTypeMCP {
-		t.Errorf("Expected tool type %s, got %s", ToolTypeMCP, testMCPTool.Type())
-	}
+	// Check tool 2
+	tool2, err := registry.Get("mcp-tool2")
+	require.NoError(t, err, "Failed to get tool2")
+	require.NotNil(t, tool2)
+	assert.Equal(t, "mcp-tool2", tool2.Name())
+	assert.Equal(t, "MCP Tool 2 description", tool2.Description())
+	_, ok = tool2.(*mcpCoreToolWrapper)
+	assert.True(t, ok, "Expected tool2 to be type *mcpCoreToolWrapper, got %T", tool2)
 }
 
-// TestRegisterMCPToolsError tests error handling in RegisterMCPTools.
+// TestRegisterMCPToolsError tests error handling when ListTools fails.
 func TestRegisterMCPToolsError(t *testing.T) {
-	// Create a mock client with an error response
-	mockClient := &MockClient{
-		listToolsFunc: func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error) {
-			return nil, io.EOF
-		},
-		callToolFunc: func(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error) {
-			return nil, errors.New("should not be called")
+	// Create a mock client that returns an error
+	mockClient := &testutil.MockMCPClient{
+		ListToolsFunc: func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error) {
+			return nil, io.EOF // Simulate an error during ListTools
 		},
 	}
+	registry := NewInMemoryToolRegistry()
 
-	// Create a registry
-	registry := NewRegistry()
+	// Call the function under test
+	err := RegisterMCPTools(registry, mockClient)
 
-	// Use our own helper function to register tools
-	err := registerMCPToolsTest(registry, mockClient)
+	// Assert results
+	require.Error(t, err, "Expected an error from RegisterMCPTools")
+	var e *pkgErrors.Error
+	require.True(t, errors.As(err, &e), "Error should be unwrappable to *pkgErrors.Error")
+	assert.Equal(t, pkgErrors.ResourceNotFound, e.Code(), "Expected ResourceNotFound error code")
+	assert.ErrorIs(t, err, io.EOF, "Expected original error to be io.EOF")
 
-	// Check results
-	if err == nil {
-		t.Error("Expected error, got nil")
-	}
+	assert.Empty(t, registry.List(), "Registry should be empty after error")
+}
 
-	// Verify no tools were registered
-	if len(registry.List()) != 0 {
-		t.Errorf("Expected 0 tools in registry, got %d", len(registry.List()))
-	}
+// TestRegisterMCPToolsDuplicateError tests error handling when a tool registration fails (e.g., duplicate).
+func TestRegisterMCPToolsDuplicateError(t *testing.T) {
+	mockClient := testutil.NewMockMCPClientWithTools()
+	registry := NewInMemoryToolRegistry()
+
+	// Manually register one tool first to create a conflict
+	// Use the new constructor for MockCoreTool
+	manualTool := testutil.NewMockCoreTool("mcp-tool1", "Manual tool 1", nil) // Pass nil for default execute func
+	err := registry.Register(manualTool)
+	require.NoError(t, err)
+
+	// Call the function under test - should fail when trying to register mcp-tool1 again
+	err = RegisterMCPTools(registry, mockClient)
+
+	require.Error(t, err, "Expected an error due to duplicate registration")
+	var e *pkgErrors.Error
+	require.True(t, errors.As(err, &e), "Error should be unwrappable to *pkgErrors.Error")
+	assert.Equal(t, pkgErrors.InvalidInput, e.Code(), "Expected InvalidInput error code for duplicate")
+	assert.Contains(t, err.Error(), "mcp-tool1", "Error message should mention the duplicate tool name")
+
+	assert.LessOrEqual(t, len(registry.List()), 2, "Registry should have at most 2 tools")
+	tool1, getErr := registry.Get("mcp-tool1")
+	require.NoError(t, getErr)
+	assert.IsType(t, &testutil.MockCoreTool{}, tool1, "mcp-tool1 should still be the manually registered MockCoreTool")
 }

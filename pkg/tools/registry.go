@@ -1,90 +1,94 @@
 package tools
 
 import (
-	"context"
-	"fmt"
+	"strings"
 	"sync"
 
-	"github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
-// Registry manages a collection of tools and provides methods for registration,
-// retrieval, and invocation. It safely handles concurrent access to tools.
-type Registry struct {
-	tools map[string]Tool
+// InMemoryToolRegistry provides a basic in-memory implementation of the ToolRegistry interface.
+type InMemoryToolRegistry struct {
 	mu    sync.RWMutex
+	tools map[string]core.Tool
 }
 
-// NewRegistry creates a new empty tool registry.
-func NewRegistry() *Registry {
-	return &Registry{
-		tools: make(map[string]Tool),
+// NewInMemoryToolRegistry creates a new, empty InMemoryToolRegistry.
+func NewInMemoryToolRegistry() *InMemoryToolRegistry {
+	return &InMemoryToolRegistry{
+		tools: make(map[string]core.Tool),
 	}
 }
 
 // Register adds a tool to the registry.
-// Returns an error if a tool with the same name already exists.
-func (r *Registry) Register(tool Tool) error {
+// It returns an error if a tool with the same name already exists.
+func (r *InMemoryToolRegistry) Register(tool core.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if tool == nil {
+		return errors.New(errors.InvalidInput, "cannot register a nil tool")
+	}
+
 	name := tool.Name()
 	if _, exists := r.tools[name]; exists {
-		return fmt.Errorf("tool with name %q already exists", name)
+		return errors.WithFields(errors.New(errors.InvalidInput, "tool already registered"), errors.Fields{
+			"tool_name": name,
+		})
 	}
 
 	r.tools[name] = tool
 	return nil
 }
 
-// Get retrieves a tool by name.
-// Returns an error if the tool doesn't exist.
-func (r *Registry) Get(name string) (Tool, error) {
+// Get retrieves a tool by its name.
+// It returns an error if the tool is not found.
+func (r *InMemoryToolRegistry) Get(name string) (core.Tool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	tool, exists := r.tools[name]
 	if !exists {
-		return nil, fmt.Errorf("tool with name %q not found", name)
+		return nil, errors.WithFields(errors.New(errors.ResourceNotFound, "tool not found"), errors.Fields{
+			"tool_name": name,
+		})
 	}
-
 	return tool, nil
 }
 
-// List returns all registered tools.
-func (r *Registry) List() []Tool {
+// List returns a slice of all registered tools.
+// The order is not guaranteed.
+func (r *InMemoryToolRegistry) List() []core.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	tools := make([]Tool, 0, len(r.tools))
+	list := make([]core.Tool, 0, len(r.tools))
 	for _, tool := range r.tools {
-		tools = append(tools, tool)
+		list = append(list, tool)
 	}
-
-	return tools
+	return list
 }
 
-// Unregister removes a tool from the registry.
-// Returns an error if the tool doesn't exist.
-func (r *Registry) Unregister(name string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// Match finds tools that might match a given intent string.
+// This basic implementation checks if the intent contains the tool name (case-insensitive).
+// More sophisticated matching (e.g., using descriptions or CanHandle) could be added.
+func (r *InMemoryToolRegistry) Match(intent string) []core.Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	if _, exists := r.tools[name]; !exists {
-		return fmt.Errorf("tool with name %q not found", name)
+	var matches []core.Tool
+	lowerIntent := strings.ToLower(intent)
+
+	for name, tool := range r.tools {
+		// Simple substring match on name
+		if strings.Contains(lowerIntent, strings.ToLower(name)) {
+			matches = append(matches, tool)
+			continue
+		}
 	}
-
-	delete(r.tools, name)
-	return nil
+	return matches
 }
 
-// Call invokes a tool by name with the given arguments.
-// This provides a convenient way to call tools without retrieving them first.
-func (r *Registry) Call(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error) {
-	tool, err := r.Get(name)
-	if err != nil {
-		return nil, err
-	}
-
-	return tool.Call(ctx, args)
-}
+// Ensure InMemoryToolRegistry implements the interface.
+var _ core.ToolRegistry = (*InMemoryToolRegistry)(nil)

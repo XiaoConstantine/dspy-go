@@ -99,7 +99,7 @@ func main() {
 	}
 
 	// 3. Create tool registry and register MCP tools
-	registry := tools.NewRegistry()
+	registry := tools.NewInMemoryToolRegistry()
 	err = tools.RegisterMCPTools(registry, mcpClient)
 	if err != nil {
 		logger.Fatal(ctx, fmt.Sprintf("Failed to register MCP tools: %v", err))
@@ -110,21 +110,10 @@ func main() {
 	fmt.Println("Registered tools:")
 	for _, tool := range toolList {
 		fmt.Printf("- %s: %s\n", tool.Name(), tool.Description())
-
-		// Verify that tool satisfies core.Tool interface
-		if _, ok := tool.(core.Tool); !ok {
-			logger.Error(ctx, "Tool %s does not implement core.Tool interface", tool.Name())
-			return
-		}
 	}
 
 	// Convert tools.Tool list to core.Tool list
-	var coreTools []core.Tool
-	for _, tool := range toolList {
-		if coreTool, ok := tool.(core.Tool); ok {
-			coreTools = append(coreTools, coreTool)
-		}
-	}
+	var coreTools = toolList // Directly assign the list
 
 	// 4. Create and configure ReAct module
 	signature := core.NewSignature(

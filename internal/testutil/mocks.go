@@ -2,6 +2,8 @@ package testutil
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -300,8 +302,6 @@ func NewMockTool(name string) *MockTool {
 		description: "Mock tool for testing",
 		metadata:    metadata,
 	}
-	tool.On("Metadata").Return(metadata)
-
 	return tool
 }
 
@@ -370,4 +370,135 @@ func (m *MockTool) Validate(params map[string]interface{}) error {
 func (m *MockTool) InputSchema() models.InputSchema {
 	args := m.Called()
 	return args.Get(0).(models.InputSchema)
+}
+
+// Ensure MockTool implements core.Tool.
+var _ core.Tool = (*MockTool)(nil)
+
+// Copied from pkg/tools/registry_test.go.
+type MockCoreTool struct {
+	name        string
+	description string
+	schema      models.InputSchema
+	metadata    *core.ToolMetadata
+	executeFunc func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error)
+}
+
+// NewMockCoreTool creates a new MockCoreTool instance.
+func NewMockCoreTool(name, description string, executeFunc func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error)) *MockCoreTool {
+	// Provide a default execute func if none is given
+	if executeFunc == nil {
+		executeFunc = func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+			return core.ToolResult{Data: fmt.Sprintf("Executed %s", name)}, nil
+		}
+	}
+	return &MockCoreTool{
+		name:        name,
+		description: description,
+		executeFunc: executeFunc,
+		// schema and metadata will use defaults from methods if not set otherwise
+	}
+}
+
+func (m *MockCoreTool) Name() string {
+	return m.name
+}
+
+func (m *MockCoreTool) Description() string {
+	return m.description
+}
+
+func (m *MockCoreTool) InputSchema() models.InputSchema {
+	if m.schema.Type == "" {
+		return models.InputSchema{Type: "object", Properties: map[string]models.ParameterSchema{}}
+	}
+	return m.schema
+}
+
+func (m *MockCoreTool) Metadata() *core.ToolMetadata {
+	if m.metadata != nil {
+		return m.metadata
+	}
+	// Default metadata if not explicitly set
+	return &core.ToolMetadata{
+		Name:        m.Name(),
+		Description: m.Description(),
+		InputSchema: m.InputSchema(),
+	}
+}
+
+func (m *MockCoreTool) CanHandle(ctx context.Context, intent string) bool {
+	// Simple default implementation for testing
+	return intent == m.name
+}
+
+func (m *MockCoreTool) Validate(params map[string]interface{}) error {
+	// Simple default implementation for testing - always valid
+	return nil
+}
+
+func (m *MockCoreTool) Execute(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	if m.executeFunc != nil {
+		return m.executeFunc(ctx, args)
+	}
+	// Default implementation returns empty result
+	return core.ToolResult{}, nil
+}
+
+// Ensure MockCoreTool implements core.Tool.
+var _ core.Tool = (*MockCoreTool)(nil)
+
+// --- Mock MCP Client ---
+
+// MockMCPClient provides a mock implementation of the MCPClient interface (or relevant parts).
+type MockMCPClient struct {
+	ListToolsFunc func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error)
+	// Corrected CallToolFunc signature again to match MCPClientInterface
+	CallToolFunc func(ctx context.Context, toolName string, arguments map[string]interface{}) (*models.CallToolResult, error)
+}
+
+// ListTools calls the underlying ListToolsFunc.
+func (m *MockMCPClient) ListTools(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error) {
+	if m.ListToolsFunc != nil {
+		return m.ListToolsFunc(ctx, cursor)
+	}
+	// Default behavior if ListToolsFunc is not set
+	return &models.ListToolsResult{Tools: []models.Tool{}}, nil // Return slice of values
+}
+
+// Corrected CallTool signature again to match MCPClientInterface.
+func (m *MockMCPClient) CallTool(ctx context.Context, toolName string, arguments map[string]interface{}) (*models.CallToolResult, error) {
+	if m.CallToolFunc != nil {
+		return m.CallToolFunc(ctx, toolName, arguments)
+	}
+	// Default behavior if CallToolFunc is not set
+	// Return a default CallToolResult to match the required return type
+	return &models.CallToolResult{IsError: true, Content: []models.Content{models.TextContent{Text: "CallToolFunc not implemented in mock"}}}, errors.New("CallToolFunc not implemented in mock")
+}
+
+// NewMockMCPClientWithTools creates a MockMCPClient pre-configured with standard mock tools.
+func NewMockMCPClientWithTools() *MockMCPClient {
+	return &MockMCPClient{
+		ListToolsFunc: func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error) {
+			// Simulate returning two tools of type models.Tool
+			// Use a slice of values []models.Tool
+			mockTools := []models.Tool{
+				{
+					Name:        "mcp-tool1",
+					Description: "MCP Tool 1 description",
+					InputSchema: models.InputSchema{Type: "object"},
+				},
+				{
+					Name:        "mcp-tool2",
+					Description: "MCP Tool 2 description",
+					InputSchema: models.InputSchema{Type: "object"},
+				},
+			}
+			return &models.ListToolsResult{
+				Tools:      mockTools, // Should now match []models.Tool
+				NextCursor: nil,       // No more pages
+			}, nil
+		},
+		// CallToolFunc can be left nil
+	}
 }
