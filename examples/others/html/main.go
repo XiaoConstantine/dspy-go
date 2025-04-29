@@ -38,7 +38,7 @@ func (d *SimpleDataset) Reset() {
 	d.Index = 0
 }
 
-// Function to create the HTML parsing program structure
+// Function to create the HTML parsing program structure.
 func createHTMLParsingProgram() core.Program {
 	// Create a signature for extracting structured data from HTML
 	extractSignature := core.NewSignature(
