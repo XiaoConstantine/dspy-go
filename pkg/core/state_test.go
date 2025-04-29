@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,28 +12,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// StateTestMockModule is a simple mock implementing Module, DemoProvider, and DemoConsumer for state tests.
+// StateTestMockModule is a simple mock implementing Module and all state-related interfaces.
 type StateTestMockModule struct {
-	BaseModule
-	MyDemos []Example
+	// BaseModule // Removed embedding
+	Sig              Signature // Added field
+	CurrentLLM       LLM       // Added field
+	MyDemos          []Example
+	MyParams         map[string]interface{}
+	MyLMIdentifier   map[string]string
+	ReturnParamError bool // Flag to make SetTunedParameters return an error
 }
 
 func NewStateTestMockModule(name string) *StateTestMockModule {
+	llmIdentifier := map[string]string{"provider": "mock", "model": name + "-model"}
 	return &StateTestMockModule{
-		BaseModule: BaseModule{
-			Signature: NewSignature(
-				[]InputField{{Field: Field{Name: name + "_in"}}},
-				[]OutputField{{Field: Field{Name: name + "_out"}}},
-			),
-		},
-		MyDemos: []Example{},
+		Sig: NewSignature(
+			[]InputField{{Field: Field{Name: name + "_in"}}},
+			[]OutputField{{Field: Field{Name: name + "_out"}}},
+		),
+		// CurrentLLM can be left nil for many state tests, or set if needed for LM identifier tests
+		MyDemos:        []Example{},
+		MyParams:       make(map[string]interface{}),
+		MyLMIdentifier: llmIdentifier,
 	}
 }
 
 // Process is a dummy implementation.
 func (m *StateTestMockModule) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
-	// Not needed for state tests
-	return map[string]any{m.Signature.Outputs[0].Name: "mock_output"}, nil
+	return map[string]any{m.Sig.Outputs[0].Name: "mock_output"}, nil
+}
+
+// GetSignature implements Module.
+func (m *StateTestMockModule) GetSignature() Signature {
+	return m.Sig
+}
+
+// SetLLM implements Module.
+func (m *StateTestMockModule) SetLLM(llm LLM) {
+	m.CurrentLLM = llm
+	// Optionally update MyLMIdentifier based on the set LLM
+	if llm != nil {
+		m.MyLMIdentifier = map[string]string{
+			"provider": llm.ProviderName(),
+			"model":    llm.ModelID(),
+		}
+	} else {
+		m.MyLMIdentifier = nil
+	}
 }
 
 // GetDemos implements DemoProvider.
@@ -45,11 +71,46 @@ func (m *StateTestMockModule) SetDemos(demos []Example) {
 	m.MyDemos = demos
 }
 
+// GetLLMIdentifier implements LMConfigProvider.
+func (m *StateTestMockModule) GetLLMIdentifier() map[string]string {
+	if m.CurrentLLM == nil {
+		// Return the stored one if LLM isn't set directly (might happen in some tests)
+		return m.MyLMIdentifier
+	}
+	// Return identifier from the actual LLM if set
+	return map[string]string{
+		"provider": m.CurrentLLM.ProviderName(),
+		"model":    m.CurrentLLM.ModelID(),
+	}
+}
+
+// GetTunedParameters implements ParameterProvider.
+func (m *StateTestMockModule) GetTunedParameters() map[string]interface{} {
+	p := make(map[string]interface{})
+	for k, v := range m.MyParams {
+		p[k] = v
+	}
+	return p
+}
+
+// SetTunedParameters implements ParameterConsumer.
+func (m *StateTestMockModule) SetTunedParameters(params map[string]interface{}) error {
+	if m.ReturnParamError {
+		return fmt.Errorf("mock parameter validation error")
+	}
+	m.MyParams = params
+	return nil
+}
+
 // Clone implements Module.
 func (m *StateTestMockModule) Clone() Module {
-	cloned := NewStateTestMockModule("cloned")         // Name doesn't really matter here
-	cloned.Signature = m.Signature                     // Copy signature
-	cloned.MyDemos = append([]Example{}, m.MyDemos...) // Deep copy demos
+	cloned := NewStateTestMockModule("cloned")
+	cloned.Sig = m.Sig               // Struct copy is fine for Signature
+	cloned.CurrentLLM = m.CurrentLLM // Shallow copy LLM
+	cloned.MyDemos = append([]Example{}, m.MyDemos...)
+	cloned.MyParams = m.GetTunedParameters()
+	cloned.MyLMIdentifier = m.GetLLMIdentifier()
+	cloned.ReturnParamError = m.ReturnParamError
 	return cloned
 }
 
@@ -94,13 +155,18 @@ func TestSaveLoadProgram_Success(t *testing.T) {
 	originalDemosB := []Example{
 		{Inputs: map[string]interface{}{"b_in": "q3"}, Outputs: map[string]interface{}{"b_out": "a3"}},
 	}
+	originalParamsA := map[string]interface{}{"k": 5, "temp": 0.7}
+	originalParamsB := map[string]interface{}{"threshold": 0.5}
+	// LM Identifiers are set by default in NewStateTestMockModule
 
 	mockModuleA.SetDemos(originalDemosA)
+	_ = mockModuleA.SetTunedParameters(originalParamsA) // Error is nil here
 	mockModuleB.SetDemos(originalDemosB)
+	_ = mockModuleB.SetTunedParameters(originalParamsB)
 
 	originalProgram := NewProgram(
 		map[string]Module{"modA": mockModuleA, "modB": mockModuleB},
-		nil, // Forward func not needed for state tests
+		nil,
 	)
 
 	// --- Save Program ---
@@ -116,11 +182,8 @@ func TestSaveLoadProgram_Success(t *testing.T) {
 	err = json.Unmarshal(jsonData, &savedState)
 	require.NoError(t, err, "Failed to unmarshal saved JSON")
 
-	// Check metadata
 	assert.Equal(t, Version, savedState.Metadata["dspy_go_version"])
-
-	// Check modules map
-	require.Len(t, savedState.Modules, 2, "Should have saved state for 2 modules")
+	require.Len(t, savedState.Modules, 2)
 	assert.Contains(t, savedState.Modules, "modA")
 	assert.Contains(t, savedState.Modules, "modB")
 
@@ -133,6 +196,10 @@ func TestSaveLoadProgram_Success(t *testing.T) {
 	assert.Equal(t, originalDemosA[0].Outputs, stateA.Demos[0].Outputs)
 	assert.Equal(t, originalDemosA[1].Inputs, stateA.Demos[1].Inputs)
 	assert.Equal(t, originalDemosA[1].Outputs, stateA.Demos[1].Outputs)
+	assert.Equal(t, mockModuleA.GetLLMIdentifier(), stateA.LMIdentifier) // Verify LM ID
+	require.Len(t, stateA.TunedParameters, len(originalParamsA), "Saved param map A length mismatch")
+	assert.InDelta(t, float64(originalParamsA["k"].(int)), stateA.TunedParameters["k"].(float64), 0.001, "Saved param 'k' should match")
+	assert.InDelta(t, originalParamsA["temp"].(float64), stateA.TunedParameters["temp"].(float64), 0.001, "Saved param 'temp' should match")
 
 	// Check module B state
 	stateB := savedState.Modules["modB"]
@@ -141,9 +208,10 @@ func TestSaveLoadProgram_Success(t *testing.T) {
 	require.Len(t, stateB.Demos, 1)
 	assert.Equal(t, originalDemosB[0].Inputs, stateB.Demos[0].Inputs)
 	assert.Equal(t, originalDemosB[0].Outputs, stateB.Demos[0].Outputs)
+	assert.Equal(t, mockModuleB.GetLLMIdentifier(), stateB.LMIdentifier) // Verify LM ID
+	assert.Equal(t, originalParamsB, stateB.TunedParameters)             // Verify Params
 
 	// --- Load Program ---
-	// Create a NEW program instance with the same structure
 	newMockModuleA := NewStateTestMockModule("moduleA")
 	newMockModuleB := NewStateTestMockModule("moduleB")
 	loadedProgram := NewProgram(
@@ -157,10 +225,16 @@ func TestSaveLoadProgram_Success(t *testing.T) {
 	// --- Verify Loaded State ---
 	loadedDemosA := newMockModuleA.GetDemos()
 	loadedDemosB := newMockModuleB.GetDemos()
+	loadedParamsA := newMockModuleA.GetTunedParameters()
+	loadedParamsB := newMockModuleB.GetTunedParameters()
+	// LM Identifiers aren't loaded back, only checked, so we don't assert them here.
 
-	// Use assert.Equal which handles slices and maps correctly
 	assert.Equal(t, originalDemosA, loadedDemosA, "Demos for module A should match original")
 	assert.Equal(t, originalDemosB, loadedDemosB, "Demos for module B should match original")
+	require.Len(t, loadedParamsA, len(originalParamsA), "Param map A length mismatch")
+	assert.InDelta(t, float64(originalParamsA["k"].(int)), loadedParamsA["k"].(float64), 0.001, "Param 'k' should match")
+	assert.InDelta(t, originalParamsA["temp"].(float64), loadedParamsA["temp"].(float64), 0.001, "Param 'temp' should match")
+	assert.Equal(t, originalParamsB, loadedParamsB, "Params for module B should match original")
 }
 
 func TestLoadProgram_VersionMismatch(t *testing.T) {
@@ -350,6 +424,38 @@ func TestLoadProgram_NoDemoConsumer(t *testing.T) {
 	// TODO: Optionally capture stdout/stderr to verify the warning.
 }
 
+func TestLoadProgram_NoParameterConsumer(t *testing.T) {
+	// --- Setup Saved State with parameters ---
+	paramsA := map[string]interface{}{"k": 10}
+	savedState := SavedProgramState{
+		Modules: map[string]SavedModuleState{
+			"modA": {
+				ModuleType:      "AnotherMockModule", // Use type that doesn't consume params
+				Signature:       "a_in -> a_out",
+				TunedParameters: paramsA,
+			},
+		},
+		Metadata: map[string]string{"dspy_go_version": Version},
+	}
+	jsonData, err := json.Marshal(savedState)
+	require.NoError(t, err)
+
+	tempFile := tempFilePath(t, "no_param_consumer.json")
+	err = os.WriteFile(tempFile, jsonData, 0644)
+	require.NoError(t, err)
+
+	// --- Setup Program with AnotherMockModule ---
+	noConsumerModule := NewAnotherMockModule("moduleA")
+	program := NewProgram(map[string]Module{"modA": noConsumerModule}, nil)
+
+	// --- Load Program ---
+	// Expect warning, no error
+	err = LoadProgram(&program, tempFile)
+	assert.NoError(t, err, "LoadProgram should not error if module doesn't consume params")
+
+	// TODO: Optionally capture stdout/stderr to verify the warning.
+}
+
 func TestSaveProgram_FileError(t *testing.T) {
 	// --- Setup Program ---
 	mockModuleA := NewStateTestMockModule("moduleA")
@@ -395,6 +501,71 @@ func TestLoadProgram_JsonError(t *testing.T) {
 	// --- Verify Error ---
 	require.Error(t, err, "LoadProgram should return an error for invalid JSON")
 	assert.ErrorContains(t, err, "failed to unmarshal program state from JSON")
+}
+
+func TestLoadProgram_ParameterConsumerError(t *testing.T) {
+	// --- Setup Saved State with some parameters ---
+	paramsA := map[string]interface{}{"k": 5}
+	savedState := SavedProgramState{
+		Modules: map[string]SavedModuleState{
+			"modA": {
+				ModuleType:      "AnotherMockModule", // Use type that doesn't consume params
+				Signature:       "a_in -> a_out",
+				TunedParameters: paramsA,
+			},
+		},
+		Metadata: map[string]string{"dspy_go_version": Version},
+	}
+	jsonData, err := json.Marshal(savedState)
+	require.NoError(t, err)
+
+	tempFile := tempFilePath(t, "param_consumer_error.json")
+	err = os.WriteFile(tempFile, jsonData, 0644)
+	require.NoError(t, err)
+
+	// --- Setup Program with AnotherMockModule ---
+	noConsumerModule := NewAnotherMockModule("moduleA")
+	program := NewProgram(map[string]Module{"modA": noConsumerModule}, nil)
+
+	// --- Load Program ---
+	// Expect warning, no error
+	err = LoadProgram(&program, tempFile)
+	assert.NoError(t, err, "LoadProgram should not error if module doesn't consume params")
+
+	// TODO: Optionally capture stdout/stderr to verify the warning.
+}
+
+func TestLoadProgram_LMIdentifierMismatch(t *testing.T) {
+	// --- Setup Saved State with specific LM ID ---
+	savedLMID := map[string]string{"provider": "openai", "model": "gpt-4"}
+	savedState := SavedProgramState{
+		Modules: map[string]SavedModuleState{
+			"modA": {
+				ModuleType:   "StateTestMockModule",
+				Signature:    "a_in -> a_out",
+				LMIdentifier: savedLMID,
+			},
+		},
+		Metadata: map[string]string{"dspy_go_version": Version},
+	}
+	jsonData, err := json.Marshal(savedState)
+	require.NoError(t, err)
+
+	tempFile := tempFilePath(t, "lm_mismatch.json")
+	err = os.WriteFile(tempFile, jsonData, 0644)
+	require.NoError(t, err)
+
+	// --- Setup Program with module having a DIFFERENT LM ID ---
+	mockModuleA := NewStateTestMockModule("moduleA")
+	// Default LM ID set in NewStateTestMockModule is {"provider": "mock", "model": "moduleA-model"}
+	program := NewProgram(map[string]Module{"modA": mockModuleA}, nil)
+
+	// --- Load Program ---
+	// Expect warning, no error
+	err = LoadProgram(&program, tempFile)
+	assert.NoError(t, err, "LoadProgram should not error on LM identifier mismatch")
+
+	// TODO: Optionally capture stdout/stderr to verify the warning.
 }
 
 // Helper function to create a temporary file path.
