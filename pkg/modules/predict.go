@@ -21,6 +21,10 @@ type Predict struct {
 // Ensure Predict implements core.Module.
 var _ core.Module = (*Predict)(nil)
 
+// Ensure Predict implements demo interfaces for saving/loading.
+var _ core.DemoProvider = (*Predict)(nil)
+var _ core.DemoConsumer = (*Predict)(nil)
+
 func NewPredict(signature core.Signature) *Predict {
 	return &Predict{
 		BaseModule: *core.NewModule(signature),
