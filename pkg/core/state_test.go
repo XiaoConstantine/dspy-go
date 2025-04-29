@@ -53,7 +53,7 @@ func (m *StateTestMockModule) Clone() Module {
 	return cloned
 }
 
-// Another mock type for mismatch testing
+// Another mock type for mismatch testing.
 type AnotherMockModule struct {
 	BaseModule
 	// No Demos field
@@ -397,7 +397,7 @@ func TestLoadProgram_JsonError(t *testing.T) {
 	assert.ErrorContains(t, err, "failed to unmarshal program state from JSON")
 }
 
-// Helper function to create a temporary file path
+// Helper function to create a temporary file path.
 func tempFilePath(t *testing.T, pattern string) string {
 	t.Helper()
 	tempDir := t.TempDir()
