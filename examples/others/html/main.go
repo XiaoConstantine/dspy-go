@@ -38,6 +38,31 @@ func (d *SimpleDataset) Reset() {
 	d.Index = 0
 }
 
+// Function to create the HTML parsing program structure
+func createHTMLParsingProgram() core.Program {
+	// Create a signature for extracting structured data from HTML
+	extractSignature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "document"}}},
+		[]core.OutputField{
+			{Field: core.NewField("title")},
+			{Field: core.NewField("headings")},
+			{Field: core.NewField("entity_info")},
+		},
+	)
+
+	// Create a ChainOfThought module for extraction
+	extract := modules.NewChainOfThought(extractSignature)
+
+	// Create the program
+	program := core.NewProgram(
+		map[string]core.Module{"extract_metadata": extract},
+		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			return extract.Process(ctx, inputs)
+		},
+	)
+	return program
+}
+
 func cleanMarkdownCodeBlocks(input string) string {
 	// Remove markdown code fence markers
 	input = strings.TrimPrefix(input, "```html")
@@ -117,22 +142,11 @@ func main() {
 		logger.Fatalf(ctx, "Failed to configure default LLM: %v", err)
 	}
 
-	// Q1: Take a HTML page and generate structured data?
-	// Create a signature for extracting structured data from HTML
-	extractSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "document"}}},
-		[]core.OutputField{
-			{Field: core.NewField("title")},
-			{Field: core.NewField("headings")},
-			{Field: core.NewField("entity_info")},
-		},
-	)
-
-	// Create a ChainOfThought module for extraction
-	extract := modules.NewChainOfThought(extractSignature)
+	// Create the base program structure
+	html_program := createHTMLParsingProgram()
 
 	// Q2: But I don't have HTML documents to use for optimization.
-	// Create a module to synthesize topics
+	// Create modules to synthesize data
 	synthesizeTopicsSignature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "count"}}},
 		[]core.OutputField{{Field: core.NewField("random_technical_topics")}},
@@ -141,7 +155,6 @@ Each topic should be something that could have a web page with headings and enti
 Format your response as a list, DO NOT wrap response in json format`)
 	synthesize_topics := modules.NewPredict(synthesizeTopicsSignature)
 
-	// Create a module to synthesize HTML documents from topics
 	synthesizeDocSignature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "topic"}}},
 		[]core.OutputField{{Field: core.NewField("html_document")}},
@@ -160,25 +173,18 @@ Use proper HTML structure with html, head, and body tags.`)
 	}
 	// Parse topics from the result
 	var topics []string
-
 	if topicsContent, ok := topicsResult["random_technical_topics"]; ok && topicsContent != nil {
 		logger.Info(ctx, "\nTopic content: %v", topicsContent)
-
-		// Handle the case where it's a string
 		if topicsString, ok := topicsContent.(string); ok {
 			logger.Info(ctx, "Parsing topics from multiline string...")
-
-			// Split by lines and take each non-empty line as a topic
 			lines := strings.Split(topicsString, "\n")
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
-				// Skip empty lines and lines that appear to be field names
 				if line != "" && !strings.HasPrefix(strings.ToLower(line), "random_technical_topics") {
 					topics = append(topics, line)
 				}
 			}
 		} else if topicsList, ok := topicsContent.([]interface{}); ok {
-			// Handle the case where it's already a list
 			logger.Info(ctx, "Topics already in list format, extracting...")
 			for _, t := range topicsList {
 				if topic, ok := t.(string); ok {
@@ -197,25 +203,18 @@ Use proper HTML structure with html, head, and body tags.`)
 			logger.Error(ctx, "Failed to generate document for topic %v: %v", t, err)
 			continue
 		}
-		// Extract HTML document from result
 		if htmlDoc, ok := docResult["html_document"]; ok {
 			htmlString, ok := htmlDoc.(string)
 			if ok && htmlString != "" {
-				// Clean up markdown code fences if present
 				htmlString = cleanMarkdownCodeBlocks(htmlString)
-
-				// Create a training example with this document
 				example := core.Example{
 					Inputs: map[string]interface{}{
 						"document": htmlString,
 					},
-					// We're leaving Outputs empty since we want the model to generate them
-					Outputs: make(map[string]interface{}),
+					Outputs: make(map[string]interface{}), // Leave empty for generation
 				}
-
 				trainingExamples = append(trainingExamples, example)
-				logger.Info(ctx, "Created training example from %s document (%d chars)",
-					t, len(htmlString))
+				logger.Info(ctx, "Created training example from %s document (%d chars)", t, len(htmlString))
 			} else {
 				logger.Error(ctx, "Generated document was empty or not a string for %s", t)
 			}
@@ -223,7 +222,6 @@ Use proper HTML structure with html, head, and body tags.`)
 			logger.Error(ctx, "No html_document field in result for %s: %v", t, docResult)
 		}
 	}
-	// Make sure we have at least one example
 	if len(trainingExamples) == 0 {
 		logger.Fatal(ctx, "Failed to generate any valid training examples")
 	}
@@ -233,7 +231,6 @@ Use proper HTML structure with html, head, and body tags.`)
 	metricFunc := createMetricFunc()
 
 	// Q3: How can I teach LLM to be better at this task?
-	// Define a metric function to evaluate extraction quality
 	metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
 		if metricFunc(example, prediction, ctx) {
 			return 1.0
@@ -245,78 +242,88 @@ Use proper HTML structure with html, head, and body tags.`)
 			logger.Error(ctx, "Document not found in example")
 			return 0.0
 		}
-		// Check if required fields exist
 		title, hasTitle := prediction["title"].(string)
 		headings, hasHeadings := prediction["headings"].(string)
-		entityInfo, hasEntityInfo := prediction["entity_info"].(string)
-
-		if !hasTitle || !hasHeadings || !hasEntityInfo {
-			logger.Warn(ctx, "Missing expected fields in prediction")
+		entities, hasEntities := prediction["entity_info"].(string)
+		if !hasTitle || !hasHeadings || !hasEntities {
+			logger.Error(ctx, "Missing required field in prediction: Title=%v, Headings=%v, Entities=%v", hasTitle, hasHeadings, hasEntities)
 			return 0.0
 		}
-
-		// Simple presence checks
-		var score = 0.0
-
-		// If we have a title that's not a placeholder
-		if hasTitle && !strings.Contains(strings.ToLower(title), "no title") {
-			score += 0.3
-			logger.Debug(ctx, "Added 0.3 for having title: %s", title)
+		if len(title) > 0 && len(headings) > 0 && len(entities) > 0 {
+			logger.Info(ctx, "Metric fallback: Prediction seems complete, returning 0.7")
+			return 0.7
 		}
-
-		// If we have headings that aren't placeholders
-		if hasHeadings && !strings.Contains(strings.ToLower(headings), "no headings") {
-			score += 0.3
-			logger.Debug(ctx, "Added 0.3 for having headings: %s", headings)
-		}
-
-		// If we have entity info that's not a placeholder
-		if hasEntityInfo && !strings.Contains(strings.ToLower(entityInfo), "no entities") {
-			score += 0.4
-			logger.Debug(ctx, "Added 0.4 for having entity info: %s", entityInfo)
-		}
-
-		logger.Debug(ctx, "Final metric score: %.2f", score)
-
-		return score
+		logger.Info(ctx, "Metric fallback: Prediction incomplete, returning 0.1")
+		return 0.1
 	}
 
-	dataset := NewSimpleDataset(trainingExamples)
-
-	// Create a program using the extract module
-	program := core.NewProgram(
-		map[string]core.Module{"extract": extract},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return extract.Process(ctx, inputs)
-		},
-	)
-
-	// Optimize the extraction module using MIPROv2
-	optimizer := optimizers.NewMIPRO(metric,
-		optimizers.WithNumTrials(10),
-		optimizers.WithMaxBootstrappedDemos(5),
-		optimizers.WithVerbose(true),
-	)
-	coreMetric := func(expected, actual map[string]interface{}) float64 {
-		return metric(expected, actual, ctx)
+	// Create a bool-returning metric for the BootstrapFewShot constructor
+	optimizerMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+		score := metric(example, prediction, ctx) // Use the float64 metric internally
+		return score >= 0.7                       // Threshold for pass/fail
 	}
 
-	optimized_program, err := optimizer.Compile(ctx, program, dataset, coreMetric)
+	// Create optimizer (BootstrapFewShot)
+	maxDemos := 3
+	optimizer := optimizers.NewBootstrapFewShot(optimizerMetric, maxDemos)
+
+	// Compile the program
+	logger.Info(ctx, "Compiling HTML extraction program...")
+	// Convert trainingExamples ([]core.Example) to the []map[string]interface{} trainset expected by BootstrapFewShot.Compile
+	trainset := make([]map[string]interface{}, len(trainingExamples))
+	for i, ex := range trainingExamples {
+		trainset[i] = ex.Inputs // Use only inputs for the trainset argument
+	}
+	// Note: BootstrapFewShot Compile signature requires student, teacher, trainset.
+	// We'll use the same program for student and teacher in this simple example.
+	compiled_program, err := optimizer.Compile(ctx, html_program, html_program, trainset)
 	if err != nil {
-		logger.Fatalf(ctx, "Optimization failed: %v", err)
+		logger.Fatalf(ctx, "Compilation failed: %v", err)
 	}
+	logger.Info(ctx, "Compilation complete.")
 
-	// Q4: How do I use this now?
-	// Use the optimized program to extract data from a new HTML document
-	result, err := optimized_program.Execute(ctx, map[string]interface{}{
-		"document": `<html lang="en">...</html>`,
-	})
-
+	// --- Demonstrate Save/Load --- //
+	saveFilePath := "optimized_html_parser_state.json"
+	logger.Info(ctx, "Saving optimized program state to %s...", saveFilePath)
+	err = core.SaveProgram(&compiled_program, saveFilePath)
 	if err != nil {
-		logger.Error(ctx, "Extraction failed: %v", err)
-	}
+		logger.Error(ctx, "Failed to save program state: %v", err)
+	} else {
+		logger.Info(ctx, "Program state saved successfully.")
 
-	logger.Info(ctx, "Title: %v\n", result["title"])
-	logger.Info(ctx, "Headings: %v\n", result["headings"])
-	logger.Info(ctx, "Entity Info: %v\n", result["entity_info"])
+		// Create a new program instance and load the state
+		logger.Info(ctx, "Creating new program instance to load state...")
+		loaded_program := createHTMLParsingProgram() // Must recreate the same structure
+
+		logger.Info(ctx, "Loading optimized program state from %s...", saveFilePath)
+		err = core.LoadProgram(&loaded_program, saveFilePath)
+		if err != nil {
+			logger.Error(ctx, "Failed to load program state: %v", err)
+			logger.Warn(ctx, "Using original compiled program due to load error.")
+		} else {
+			logger.Info(ctx, "Program state loaded successfully. Using loaded program.")
+			compiled_program = loaded_program
+		}
+	}
+	// --- End Save/Load Demonstration --- //
+
+	// Evaluate the optimized program on one of the training examples (or a new one)
+	testExample := trainingExamples[0]
+	logger.Info(ctx, "\nEvaluating program on test example...")
+	logger.Info(ctx, "Input Document:\n%s\n", testExample.Inputs["document"])
+
+	result, err := compiled_program.Execute(ctx, testExample.Inputs)
+	if err != nil {
+		logger.Error(ctx, "Error executing compiled program: %v", err)
+	} else {
+		logger.Info(ctx, "\n--- Extracted Metadata ---")
+		logger.Info(ctx, "Title: %s", result["title"])
+		logger.Info(ctx, "Headings:\n%s", result["headings"])
+		logger.Info(ctx, "Entity Info:\n%s", result["entity_info"])
+		logger.Info(ctx, "------------------------")
+
+		// Evaluate using the metric
+		score := metric(testExample.Inputs, result, ctx)
+		logger.Info(ctx, "Metric Score on Test Example: %.2f", score)
+	}
 }
