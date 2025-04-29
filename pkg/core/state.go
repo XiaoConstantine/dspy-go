@@ -22,6 +22,24 @@ type DemoConsumer interface {
 	SetDemos([]Example)
 }
 
+// LMConfigProvider is an interface that modules can optionally implement
+// to allow their LM configuration identifiers to be saved and checked.
+type LMConfigProvider interface {
+	GetLLMIdentifier() map[string]string // Returns map like {"provider": "OpenAI", "model": "gpt-4"}
+}
+
+// ParameterProvider is an interface that modules can optionally implement
+// to allow their tuned parameters to be saved.
+type ParameterProvider interface {
+	GetTunedParameters() map[string]interface{}
+}
+
+// ParameterConsumer is an interface that modules can optionally implement
+// to allow their tuned parameters to be loaded.
+type ParameterConsumer interface {
+	SetTunedParameters(params map[string]interface{}) error // Return error for validation
+}
+
 // SavedExample represents a serializable dspy.Example.
 type SavedExample struct {
 	Inputs  map[string]interface{} `json:"inputs"`
@@ -32,10 +50,11 @@ type SavedExample struct {
 // SavedModuleState represents the serializable state of a single DSPy module.
 // Specific fields might vary depending on the module type (Predict, CoT, etc.).
 type SavedModuleState struct {
-	Signature  string         `json:"signature"`           // Module's signature string representation (READ-ONLY during load)
-	Demos      []SavedExample `json:"demos,omitempty"`     // Saved demos, if the module provides them
-	LMConfig   interface{}    `json:"lm_config,omitempty"` // Placeholder for LM config, omitted if nil (READ-ONLY during load)
-	ModuleType string         `json:"module_type"`         // Concrete type name (e.g., "Predict")
+	Signature       string                 `json:"signature"`                  // Module's signature string representation (READ-ONLY during load)
+	Demos           []SavedExample         `json:"demos,omitempty"`            // Saved demos, if the module provides them
+	LMIdentifier    map[string]string      `json:"lm_identifier,omitempty"`    // Identifying info for the LM used (e.g., provider, model)
+	TunedParameters map[string]interface{} `json:"tuned_parameters,omitempty"` // Module-specific tuned parameters (e.g., k for retriever)
+	ModuleType      string                 `json:"module_type"`                // Concrete type name (e.g., "Predict")
 	// TODO: Add other potential module-specific tuned parameters (e.g., k for retrievers).
 }
 
@@ -69,14 +88,24 @@ func SaveProgram(p *Program, filepath string) error {
 			savedDemos[i] = SavedExample(demo)
 		}
 
-		// Placeholder for LM config extraction - currently not saved
-		var lmConfig interface{}
+		// Get LM Identifier if module provides it
+		var lmIdentifier map[string]string
+		if lmProvider, ok := module.(LMConfigProvider); ok {
+			lmIdentifier = lmProvider.GetLLMIdentifier()
+		}
+
+		// Get Tuned Parameters
+		var tunedParams map[string]interface{}
+		if paramProvider, ok := module.(ParameterProvider); ok {
+			tunedParams = paramProvider.GetTunedParameters()
+		}
 
 		moduleState := SavedModuleState{
-			Signature:  module.GetSignature().String(), // Use String() for representation
-			Demos:      savedDemos,
-			LMConfig:   lmConfig,                             // Store extracted LM config (currently nil)
-			ModuleType: reflect.TypeOf(module).Elem().Name(), // Get concrete type name
+			Signature:       module.GetSignature().String(),
+			Demos:           savedDemos,
+			LMIdentifier:    lmIdentifier,
+			TunedParameters: tunedParams,
+			ModuleType:      reflect.TypeOf(module).Elem().Name(),
 		}
 		state.Modules[name] = moduleState
 	}
@@ -96,13 +125,11 @@ func SaveProgram(p *Program, filepath string) error {
 	return nil // Success
 }
 
-// LoadProgram loads program state (currently only demos) from a JSON file
+// LoadProgram loads program state (demos and tuned parameters) from a JSON file
 // into an existing Program instance.
 // It assumes the Program `p` has already been constructed with the correct
-// architecture (modules and signatures).
+// architecture (modules and signatures) and necessary LLMs configured.
 func LoadProgram(p *Program, filepath string) error {
-	// logger := logging.GetLogger() // Removed to break import cycle
-
 	// 1. Read file
 	jsonData, err := os.ReadFile(filepath)
 	if err != nil {
@@ -119,11 +146,9 @@ func LoadProgram(p *Program, filepath string) error {
 	// 3. Version Check
 	if savedVersion, ok := loadedState.Metadata["dspy_go_version"]; ok {
 		if savedVersion != Version {
-			// logger.Warn(nil, "Loading state saved with dspy-go version '%s' but current version is '%s'. Compatibility not guaranteed.", savedVersion, Version)
 			fmt.Printf("[WARN] Loading state saved with dspy-go version '%s' but current version is '%s'. Compatibility not guaranteed.\n", savedVersion, Version)
 		}
 	} else {
-		// logger.Warn(nil, "Saved state file does not contain dspy-go version information.")
 		fmt.Println("[WARN] Saved state file does not contain dspy-go version information.")
 	}
 
@@ -133,7 +158,6 @@ func LoadProgram(p *Program, filepath string) error {
 	for name, module := range p.Modules {
 		savedModuleState, ok := loadedState.Modules[name]
 		if !ok {
-			// logger.Warn(nil, "No saved state found for module '%s' in program.", name)
 			fmt.Printf("[WARN] No saved state found for module '%s' in program.\n", name)
 			continue // Skip this module if no state was saved for it
 		}
@@ -142,36 +166,65 @@ func LoadProgram(p *Program, filepath string) error {
 		// 5. Module Type Check
 		currentModuleType := reflect.TypeOf(module).Elem().Name()
 		if currentModuleType != savedModuleState.ModuleType {
-			// logger.Warn(nil, "Type mismatch for module '%s': Program has type '%s', saved state has type '%s'. Skipping loading state for this module.", name, currentModuleType, savedModuleState.ModuleType)
 			fmt.Printf("[WARN] Type mismatch for module '%s': Program has type '%s', saved state has type '%s'. Skipping loading state for this module.\n", name, currentModuleType, savedModuleState.ModuleType)
 			continue
 		}
 
-		// 6. Load Demos if module supports it
+		// 6. LM Identifier Check (Warning only)
+		if len(savedModuleState.LMIdentifier) > 0 {
+			if lmProvider, ok := module.(LMConfigProvider); ok {
+				currentIdentifier := lmProvider.GetLLMIdentifier()
+				if !reflect.DeepEqual(savedModuleState.LMIdentifier, currentIdentifier) {
+					fmt.Printf("[WARN] LM mismatch for module '%s': Saved state used %v, current module uses %v. Loaded demos/params may behave differently.\n", name, savedModuleState.LMIdentifier, currentIdentifier)
+				}
+			} else {
+				// Saved state has LM info, but current module doesn't provide it for comparison
+				fmt.Printf("[WARN] Cannot verify LM config for module '%s': Module does not implement LMConfigProvider, but saved state has LM info: %v\n", name, savedModuleState.LMIdentifier)
+			}
+		}
+
+		// 7. Load Demos if module supports it
 		if demoConsumer, implementsDemoConsumer := module.(DemoConsumer); implementsDemoConsumer {
 			if len(savedModuleState.Demos) > 0 {
 				demosToLoad := make([]Example, len(savedModuleState.Demos))
 				for i, savedDemo := range savedModuleState.Demos {
-					// Convert SavedExample back to Example
-					// Note: This assumes Example struct has matching field names/types
+					// Convert SavedExample back to Example.
+					// This direct assignment is type-safe because both SavedExample and Example
+					// use map[string]interface{} for Inputs and Outputs. json.Unmarshal has
+					// already parsed the JSON into this structure. The responsibility for handling
+					// the specific concrete types within the interface{} values lies with the
+					// code that consumes the loaded Example later.
 					demosToLoad[i] = Example(savedDemo)
 				}
 				demoConsumer.SetDemos(demosToLoad)
 			}
 		} else if len(savedModuleState.Demos) > 0 {
 			// Saved state has demos, but the current module doesn't consume them
-			// logger.Warn(nil, "Saved state for module '%s' contains demos, but the module does not implement DemoConsumer. Demos not loaded.", name)
 			fmt.Printf("[WARN] Saved state for module '%s' contains demos, but the module does not implement DemoConsumer. Demos not loaded.\n", name)
 		}
 
-		// NOTE: Signature and LMConfig are not loaded from state in this version.
-		// The program structure (including signatures) must be defined before loading.
+		// 8. Load Tuned Parameters if module supports it
+		if paramConsumer, implementsParamConsumer := module.(ParameterConsumer); implementsParamConsumer {
+			if len(savedModuleState.TunedParameters) > 0 {
+				err := paramConsumer.SetTunedParameters(savedModuleState.TunedParameters)
+				if err != nil {
+					// If SetTunedParameters returns an error (e.g., validation failed),
+					// wrap it and return, as this indicates a problem loading state.
+					return fmt.Errorf("error setting tuned parameters for module '%s': %w", name, err)
+				}
+			}
+		} else if len(savedModuleState.TunedParameters) > 0 {
+			// Saved state has tuned parameters, but the current module doesn't consume them
+			fmt.Printf("[WARN] Saved state for module '%s' contains tuned parameters, but the module does not implement ParameterConsumer. Parameters not loaded.\n", name)
+		}
+
+		// NOTE: Signature and full LMConfig object are not loaded from state in this version.
+		// The program structure (including signatures and LLM instances) must be defined before loading.
 	}
 
-	// 7. Check for unused saved state
+	// 9. Check for unused saved state
 	for savedName := range loadedState.Modules {
 		if !loadedModuleNames[savedName] {
-			// logger.Warn(nil, "Saved state contains data for module '%s', but this module was not found in the current program.", savedName)
 			fmt.Printf("[WARN] Saved state contains data for module '%s', but this module was not found in the current program.\n", savedName)
 		}
 	}

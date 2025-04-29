@@ -25,6 +25,9 @@ var _ core.Module = (*Predict)(nil)
 var _ core.DemoProvider = (*Predict)(nil)
 var _ core.DemoConsumer = (*Predict)(nil)
 
+// Ensure Predict implements LMConfigProvider for saving/loading.
+var _ core.LMConfigProvider = (*Predict)(nil)
+
 func NewPredict(signature core.Signature) *Predict {
 	return &Predict{
 		BaseModule: *core.NewModule(signature),
@@ -562,4 +565,16 @@ func (p *Predict) SetDemos(demos []core.Example) {
 
 func (p *Predict) SetLLM(llm core.LLM) {
 	p.LLM = llm
+}
+
+// GetLLMIdentifier implements the LMConfigProvider interface.
+func (p *Predict) GetLLMIdentifier() map[string]string {
+	if p.LLM == nil {
+		return nil // Or return an empty map? Depends on desired behavior
+	}
+	return map[string]string{
+		"provider": p.LLM.ProviderName(),
+		"model":    p.LLM.ModelID(),
+		// Add other identifiers like BaseURL for Ollama if needed/possible
+	}
 }
