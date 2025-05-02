@@ -34,6 +34,10 @@ func (m *MockModule) Clone() Module {
 	return args.Get(0).(Module)
 }
 
+func (m *MockModule) SetSignature(signature Signature) {
+	m.Called(signature)
+}
+
 func TestProgram(t *testing.T) {
 	t.Run("NewProgram", func(t *testing.T) {
 		mockModule := new(MockModule)

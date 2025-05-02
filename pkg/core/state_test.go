@@ -61,6 +61,11 @@ func (m *StateTestMockModule) SetLLM(llm LLM) {
 	}
 }
 
+// SetSignature implements Module.
+func (m *StateTestMockModule) SetSignature(signature Signature) {
+	m.Sig = signature
+}
+
 // GetDemos implements DemoProvider.
 func (m *StateTestMockModule) GetDemos() []Example {
 	return m.MyDemos

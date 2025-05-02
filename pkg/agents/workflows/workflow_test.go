@@ -53,6 +53,10 @@ func (m *MockModule) GetSignature() core.Signature {
 	return args.Get(0).(core.Signature)
 }
 
+func (m *MockModule) SetSignature(signature core.Signature) {
+	m.Called(signature)
+}
+
 func (m *MockModule) SetLLM(llm core.LLM) {
 	m.Called(llm)
 }

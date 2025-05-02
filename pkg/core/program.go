@@ -120,3 +120,11 @@ func (p *Program) GetModules() []Module {
 	return modules
 
 }
+
+func (p *Program) Predictors() []Module {
+	modules := make([]Module, 0, len(p.Modules))
+	for _, module := range p.Modules {
+		modules = append(modules, module)
+	}
+	return modules
+}
