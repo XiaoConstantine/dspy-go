@@ -3,323 +3,575 @@ package optimizers
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"sync"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
-	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
-type MIPRO struct {
-	Metric               func(example, prediction map[string]interface{}, ctx context.Context) float64
-	NumCandidates        int
-	MaxBootstrappedDemos int
-	MaxLabeledDemos      int
-	NumTrials            int
-	PromptModel          core.LLM
-	TaskModel            core.LLM
-	MiniBatchSize        int
-	FullEvalSteps        int
-	Verbose              bool
+// RunMode defines different optimization intensities for MIPRO.
+type RunMode string
+
+const (
+	LightMode  RunMode = "light"
+	MediumMode RunMode = "medium"
+	HeavyMode  RunMode = "heavy"
+)
+
+// AutoRunSettings defines default configurations for different run modes.
+var AutoRunSettings = map[RunMode]struct {
+	NumTrials int
+	ValSize   int
+}{
+	LightMode:  {NumTrials: 7, ValSize: 100},
+	MediumMode: {NumTrials: 25, ValSize: 300},
+	HeavyMode:  {NumTrials: 50, ValSize: 1000},
 }
 
-func NewMIPRO(metric func(example, prediction map[string]interface{}, ctx context.Context) float64, opts ...MIPROOption) *MIPRO {
-	m := &MIPRO{
-		Metric:               metric,
-		NumCandidates:        10,
-		MaxBootstrappedDemos: 5,
-		MaxLabeledDemos:      5,
-		NumTrials:            100,
-		MiniBatchSize:        32,
-		FullEvalSteps:        10,
-		Verbose:              false,
+// SearchStrategy defines the interface for optimization search algorithms.
+type SearchStrategy interface {
+	SuggestParams(ctx context.Context) (map[string]interface{}, error)
+	UpdateResults(params map[string]interface{}, score float64) error
+	GetBestParams() (map[string]interface{}, float64)
+	Initialize(config SearchConfig) error
+}
+
+// SearchConfig contains configuration for search strategies.
+type SearchConfig struct {
+	ParamSpace  map[string][]interface{}
+	MaxTrials   int
+	Seed        int64
+	Constraints map[string]interface{}
+}
+
+// TeacherStudentOptimizer handles the teacher-student learning dynamic.
+type TeacherStudentOptimizer struct {
+	Teacher         core.LLM
+	Student         core.LLM
+	TeacherSettings map[string]interface{}
+	MaxExamples     int
+
+	state struct {
+		demonstrations []core.Example
+		teacherScores  map[string]float64
 	}
+}
+
+// Initialize sets up the teacher-student optimization.
+func (t *TeacherStudentOptimizer) Initialize(ctx context.Context, program core.Program, dataset core.Dataset) error {
+	t.state.demonstrations = make([]core.Example, 0)
+	t.state.teacherScores = make(map[string]float64)
+	return nil
+}
+
+// GenerateDemonstration creates a high-quality demonstration using the teacher.
+func (t *TeacherStudentOptimizer) GenerateDemonstration(ctx context.Context, input core.Example) (core.Example, error) {
+	response, err := t.Teacher.Generate(ctx, input.Inputs["prompt"].(string))
+	if err != nil {
+		return core.Example{}, fmt.Errorf("teacher generation failed: %w", err)
+	}
+
+	return core.Example{
+		Inputs:  input.Inputs,
+		Outputs: map[string]interface{}{"completion": response.Content},
+	}, nil
+}
+
+// InstructionGenerator handles the generation of instruction candidates.
+type InstructionGenerator struct {
+	PromptModel   core.LLM
+	MaxCandidates int
+	Temperature   float64
+}
+
+// GenerateCandidates creates instruction candidates for each predictor.
+func (g *InstructionGenerator) GenerateCandidates(
+	ctx context.Context,
+	program core.Program,
+	demos []core.Example,
+) (map[int][]string, error) {
+	candidates := make(map[int][]string)
+	modules := program.GetModules() // Get ordered slice of modules
+
+	for i, module := range modules {
+		moduleInstructions := make([]string, g.MaxCandidates)
+
+		// Generate candidates for this module
+		for j := 0; j < g.MaxCandidates; j++ {
+			instruction, err := g.generateSingleCandidate(ctx, module, demos)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate candidate %d for module %d: %w", j, i, err)
+			}
+			moduleInstructions[j] = instruction
+		}
+
+		candidates[i] = moduleInstructions
+	}
+
+	return candidates, nil
+}
+
+func (g *InstructionGenerator) generateSingleCandidate(
+	ctx context.Context,
+	module core.Module,
+	demos []core.Example,
+) (string, error) {
+	prompt := fmt.Sprintf("Generate an instruction for the following signature: %s", module.GetSignature())
+
+	response, err := g.PromptModel.Generate(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("prompt model generation failed: %w", err)
+	}
+
+	return response.Content, nil
+}
+
+// MIPROConfig contains all configuration options for the optimizer.
+type MIPROConfig struct {
+	Mode           RunMode
+	NumTrials      int
+	ValSize        int
+	MiniBatchSize  int
+	AdaptiveParams bool
+	ScalingFactors struct {
+		TrialsPerVariable float64
+		BatchSizeScaling  float64
+	}
+	TeacherSettings map[string]interface{}
+}
+
+// OptimizationState tracks the progress of optimization.
+type OptimizationState struct {
+	SuccessfulPatterns []string
+	PromptEvolution    []PromptVersion
+	TeacherScores      map[string]float64
+	CurrentIteration   int
+	BestScore          float64
+	Convergence        float64
+}
+
+// PromptVersion represents a specific version of a prompt template.
+type PromptVersion struct {
+	Template    string
+	Performance float64
+	Components  []PromptComponent
+}
+
+// PromptComponent represents a specific part of a prompt.
+type PromptComponent struct {
+	Type    string
+	Content string
+	Score   float64
+}
+
+// MIPROMetrics tracks comprehensive optimization metrics.
+type MIPROMetrics struct {
+	TeacherPerformance  float64
+	StudentPerformance  float64
+	PromptEffectiveness map[string]float64
+	OptimizationHistory []OptimizationStep
+	TokenUsage          *core.TokenInfo
+}
+
+// OptimizationStep represents a single step in the optimization process.
+type OptimizationStep struct {
+	Trial         int
+	Performance   float64
+	Improvements  []string
+	FailurePoints []string
+}
+
+// MIPRO is the main optimizer implementing multi-step interactive prompt optimization.
+type MIPRO struct {
+	// Core components
+	metric               func(example, prediction map[string]interface{}, ctx context.Context) float64
+	searchStrategy       SearchStrategy
+	teacherStudent       *TeacherStudentOptimizer
+	instructionGenerator *InstructionGenerator
+
+	// Configuration
+	config  MIPROConfig
+	state   *OptimizationState
+	metrics *MIPROMetrics
+
+	// Models
+	promptModel core.LLM
+	taskModel   core.LLM
+
+	// Optimization parameters
+	maxBootstrappedDemos int
+	numCandidates        int
+
+	// Tracking and logging
+	logger *logging.Logger
+	mu     sync.RWMutex
+}
+
+// MIPROOption defines a function type for configuring MIPRO.
+type MIPROOption func(*MIPRO)
+
+// WithMode sets the optimization mode.
+func WithMode(mode RunMode) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.Mode = mode
+	}
+}
+
+// WithNumTrials sets the number of optimization trials.
+func WithNumTrials(trials int) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.NumTrials = trials
+	}
+}
+
+// WithTeacherSettings configures the teacher model settings.
+func WithTeacherSettings(settings map[string]interface{}) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.TeacherSettings = settings
+	}
+}
+
+// NewMIPRO creates a new MIPRO optimizer instance.
+func NewMIPRO(
+	metric func(example, prediction map[string]interface{}, ctx context.Context) float64,
+	opts ...MIPROOption,
+) *MIPRO {
+	m := &MIPRO{
+		metric: metric,
+		config: MIPROConfig{
+			Mode: MediumMode,
+			ScalingFactors: struct {
+				TrialsPerVariable float64
+				BatchSizeScaling  float64
+			}{
+				TrialsPerVariable: 1.5,
+				BatchSizeScaling:  0.8,
+			},
+		},
+		state: &OptimizationState{
+			TeacherScores: make(map[string]float64),
+		},
+		metrics: &MIPROMetrics{
+			PromptEffectiveness: make(map[string]float64),
+		},
+		logger: logging.GetLogger(),
+	}
+
+	// Apply options
 	for _, opt := range opts {
 		opt(m)
 	}
+
+	// Initialize components
+	m.initComponents()
+
 	return m
 }
 
-type MIPROOption func(*MIPRO)
-
-func WithNumCandidates(n int) MIPROOption {
-	return func(m *MIPRO) { m.NumCandidates = n }
-}
-
-func WithMaxBootstrappedDemos(n int) MIPROOption {
-	return func(m *MIPRO) { m.MaxBootstrappedDemos = n }
-}
-
-func WithMaxLabeledDemos(n int) MIPROOption {
-	return func(m *MIPRO) { m.MaxLabeledDemos = n }
-}
-
-func WithNumTrials(n int) MIPROOption {
-	return func(m *MIPRO) { m.NumTrials = n }
-}
-
-func WithPromptModel(model core.LLM) MIPROOption {
-	return func(m *MIPRO) { m.PromptModel = model }
-}
-
-func WithTaskModel(model core.LLM) MIPROOption {
-	return func(m *MIPRO) { m.TaskModel = model }
-}
-
-func WithMiniBatchSize(n int) MIPROOption {
-	return func(m *MIPRO) { m.MiniBatchSize = n }
-}
-
-func WithFullEvalSteps(n int) MIPROOption {
-	return func(m *MIPRO) { m.FullEvalSteps = n }
-}
-
-func WithVerbose(v bool) MIPROOption {
-	return func(m *MIPRO) { m.Verbose = v }
-}
-
-type Trial struct {
-	Params map[string]int
-	Score  float64
-}
-
-func (m *MIPRO) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
-	if core.GetExecutionState(ctx) == nil {
-		ctx = core.WithExecutionState(ctx)
+// initComponents initializes all required components.
+func (m *MIPRO) initComponents() {
+	m.teacherStudent = &TeacherStudentOptimizer{
+		Teacher:         m.promptModel,
+		Student:         m.taskModel,
+		TeacherSettings: m.config.TeacherSettings,
+		MaxExamples:     m.maxBootstrappedDemos,
 	}
-	compileCtx, compilationSpan := core.StartSpan(ctx, "MIPROCompilation")
-	defer core.EndSpan(compileCtx)
 
-	dataset.Reset()
-	instructionCandidates, err := m.generateInstructionCandidates(compileCtx, program, dataset)
+	m.instructionGenerator = &InstructionGenerator{
+		PromptModel:   m.promptModel,
+		MaxCandidates: m.numCandidates,
+		Temperature:   0.7,
+	}
+}
+
+// Compile implements the main optimization loop.
+func (m *MIPRO) Compile(
+	ctx context.Context,
+	program core.Program,
+	dataset core.Dataset,
+	metric core.Metric,
+) (core.Program, error) {
+	m.logger.Info(ctx, "Starting MIPRO optimization with configuration: %+v", m.config)
+
+	// Step 1: Initialize teacher-student learning
+	if err := m.teacherStudent.Initialize(ctx, program, dataset); err != nil {
+		return program, fmt.Errorf("failed to initialize teacher-student: %w", err)
+	}
+
+	// Step 2: Generate initial demonstrations
+	demos, err := m.generateDemonstrations(ctx, program, dataset)
 	if err != nil {
-
-		compilationSpan.WithError(err)
-		return program, fmt.Errorf("failed to generate instruction candidates: %w", err)
+		return program, fmt.Errorf("failed to generate demonstrations: %w", err)
 	}
 
-	demoCandidates, err := m.generateDemoCandidates(compileCtx, program, dataset)
+	// Step 3: Generate instruction candidates
+	instructions, err := m.instructionGenerator.GenerateCandidates(ctx, program, demos)
 	if err != nil {
-
-		compilationSpan.WithError(err)
-		return program, fmt.Errorf("failed to generate demo candidates: %w", err)
+		return program, fmt.Errorf("failed to generate instructions: %w", err)
 	}
 
-	var bestTrial Trial
+	// Step 4: Run main optimization loop
+	bestProgram, err := m.runOptimizationLoop(ctx, program, dataset, demos, instructions)
+	if err != nil {
+		return program, fmt.Errorf("optimization failed: %w", err)
+	}
+
+	// Step 5: Finalize and validate best program
+	return m.finalizeProgram(ctx, bestProgram, dataset)
+}
+
+func (m *MIPRO) runOptimizationLoop(
+	ctx context.Context,
+	program core.Program,
+	dataset core.Dataset,
+	demos []core.Example,
+	instructions map[int][]string,
+) (core.Program, error) {
+	var bestProgram core.Program
 	var bestScore float64
-	var compilationError error
-	trialsCtx, trialsSpan := core.StartSpan(ctx, "OptimizationTrials")
-	defer core.EndSpan(trialsCtx)
-	for i := 0; i < m.NumTrials; i++ {
 
-		trialCtx, trialSpan := core.StartSpan(trialsCtx, fmt.Sprintf("Trial_%d", i))
-		trial := m.generateTrial(program.GetModules(), len(instructionCandidates), len(demoCandidates))
-		candidateProgram := m.constructProgram(program, trial, instructionCandidates, demoCandidates)
-		// Reset dataset before evaluation to ensure consistent starting point
-		if i == 0 || i%m.FullEvalSteps == 0 {
-			dataset.Reset()
-		}
-
-		score, err := m.evaluateProgram(trialsCtx, candidateProgram, dataset, metric)
-
+	for iteration := 0; iteration < m.config.NumTrials; iteration++ {
+		// Get next parameter combination to try
+		params, err := m.searchStrategy.SuggestParams(ctx)
 		if err != nil {
-			trialSpan.WithError(err)
-			compilationError = err
-			core.EndSpan(trialCtx)
-			continue
+			return program, fmt.Errorf("failed to get parameters: %w", err)
+		}
+		fmt.Println("params:", params) // Add this line
+
+		// Create candidate program with suggested parameters
+		candidate := m.createCandidateProgram(program, params, demos, instructions)
+
+		// Evaluate candidate
+		score, err := m.evaluateCandidate(ctx, candidate, dataset)
+		if err != nil {
+			return program, fmt.Errorf("failed to evaluate candidate: %w", err)
 		}
 
-		trial.Score = score
+		// Update optimization state
+		m.updateOptimizationState(params, score, candidate)
 
-		trialSpan.WithAnnotation("score", score)
-
-		if score > bestTrial.Score || i == 0 {
-			bestTrial = trial
+		// Check if this is the best program so far
+		if score > bestScore {
 			bestScore = score
-			trialSpan.WithAnnotation("new_best", true)
+			bestProgram = candidate.Clone()
+			m.logger.Info(ctx, "New best score: %f", bestScore)
 		}
 
-		if m.Verbose {
-			m.logTrialResult(i, trial)
+		// Check for convergence
+		if m.hasConverged() {
+			m.logger.Info(ctx, "Optimization converged after %d iterations", iteration)
+			break
 		}
-		core.EndSpan(trialCtx)
-
 	}
-	trialsSpan.WithAnnotation("best_score", bestScore)
 
-	if bestTrial.Params == nil {
-		if compilationError != nil {
-			compilationSpan.WithError(compilationError)
-			return program, fmt.Errorf("compilation failed: %w", compilationError)
-		}
-		return program, fmt.Errorf("no successful trials")
-	}
-	result := m.constructProgram(program, bestTrial, instructionCandidates, demoCandidates)
-	compilationSpan.WithAnnotation("final_score", bestScore)
-	return result, nil
-
+	return bestProgram, nil
 }
 
-func (m *MIPRO) generateTrial(modules []core.Module, numInstructions, numDemos int) Trial {
-	params := make(map[string]int)
-	for i := range modules {
-		params[fmt.Sprintf("instruction_%d", i)] = rand.Intn(numInstructions)
-		params[fmt.Sprintf("demo_%d", i)] = rand.Intn(numDemos)
+// Helper functions for the teacher-student dynamic.
+func (m *MIPRO) teacherDemonstration(ctx context.Context, example core.Example) (core.Example, error) {
+	// Get a high-quality demonstration from the teacher model
+	teacherResult, err := m.teacherStudent.Teacher.Generate(ctx, example.Inputs["prompt"].(string))
+	if err != nil {
+		return core.Example{}, fmt.Errorf("teacher demonstration failed: %w", err)
 	}
-	return Trial{Params: params}
+
+	// Create a new example with the teacher's output
+	return core.Example{
+		Inputs:  example.Inputs,
+		Outputs: map[string]interface{}{"completion": teacherResult.Content},
+	}, nil
 }
 
-func (m *MIPRO) constructProgram(baseProgram core.Program, trial Trial, instructionCandidates [][]string, demoCandidates [][][]core.Example) core.Program {
-	program := baseProgram.Clone()
-	modulesList := program.GetModules()
+// Methods for tracking and analyzing performance.
+func (m *MIPRO) updateOptimizationState(params map[string]interface{}, score float64, program core.Program) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	for i, module := range modulesList {
-		if predictor, ok := module.(*modules.Predict); ok {
-			instructionIdx := trial.Params[fmt.Sprintf("instruction_%d", i)]
-			demoIdx := trial.Params[fmt.Sprintf("demo_%d", i)]
+	// Update state
+	m.state.CurrentIteration++
+	if score > m.state.BestScore {
+		m.state.BestScore = score
+	}
 
-			// Ensure we're using the correct index for instructionCandidates and demoCandidates
-			if i < len(instructionCandidates) && instructionIdx < len(instructionCandidates[i]) {
-				predictor.SetSignature(predictor.GetSignature().WithInstruction(instructionCandidates[i][instructionIdx]))
-			}
+	// Track successful patterns
+	if score > m.state.BestScore*0.9 {
+		m.extractAndStorePatterns(program)
+	}
 
-			if i < len(demoCandidates) && demoIdx < len(demoCandidates[i]) {
-				predictor.SetDemos(demoCandidates[i][demoIdx])
-			}
+	// Update convergence measure
+	m.updateConvergence(score)
+}
+
+func (m *MIPRO) extractAndStorePatterns(program core.Program) {
+	// Analyze program structure and extract successful patterns
+	for _, predictor := range program.Predictors() {
+		signature := predictor.GetSignature()
+		if signature.Instruction != "" {
+			m.state.SuccessfulPatterns = append(m.state.SuccessfulPatterns, signature.Instruction)
 		}
 	}
-	return program
 }
 
-func (m *MIPRO) evaluateProgram(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (float64, error) {
+func (m *MIPRO) hasConverged() bool {
+	// Check various convergence criteria
+	return m.state.Convergence > 0.95 ||
+		m.state.CurrentIteration >= m.config.NumTrials ||
+		(m.state.CurrentIteration > 10 && m.state.BestScore > 0.99)
+}
 
-	logger := logging.GetLogger()
+// Utility functions for tracking metrics and logging.
 
-	logger.Debug(ctx, "MIPRO evaluateProgram: Using metric function: %v", m.Metric != nil)
+func (m *MIPRO) updateMetrics(score float64, tokenUsage *core.TokenInfo) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	totalScore := 0.0
-	count := 0
-	ctx = core.WithExecutionState(ctx)
-	ctx, evalSpan := core.StartSpan(ctx, "EvaluateProgram")
-	defer core.EndSpan(ctx)
-	for i := 0; i < m.MiniBatchSize; i++ {
+	m.metrics.OptimizationHistory = append(m.metrics.OptimizationHistory, OptimizationStep{
+		Trial:       m.state.CurrentIteration,
+		Performance: score,
+	})
+
+	if tokenUsage != nil {
+		m.metrics.TokenUsage = tokenUsage
+	}
+}
+
+// generateDemonstrations creates initial demonstrations.
+func (m *MIPRO) generateDemonstrations(
+	ctx context.Context,
+	program core.Program,
+	dataset core.Dataset,
+) ([]core.Example, error) {
+	demos := make([]core.Example, 0, m.maxBootstrappedDemos)
+
+	for i := 0; i < m.maxBootstrappedDemos; i++ {
 		example, ok := dataset.Next()
-
 		if !ok {
-			if i == 0 {
-				return 0, fmt.Errorf("no examples available from dataset")
-			}
 			break
 		}
 
-		// Create a context for each example evaluation
-		exampleCtx, exampleSpan := core.StartSpan(ctx, "EvaluateExample")
-		exampleSpan.WithAnnotation("example_inputs", example.Inputs)
-		prediction, err := program.Execute(exampleCtx, example.Inputs)
+		demo, err := m.teacherStudent.GenerateDemonstration(ctx, example)
 		if err != nil {
-			exampleSpan.WithError(err)
-			core.EndSpan(exampleCtx)
-			return 0, fmt.Errorf("failed to evaluate program: error executing program: %w", err)
+			return nil, fmt.Errorf("failed to generate demonstration: %w", err)
 		}
-		exampleSpan.WithAnnotation("prediction", prediction)
-		metricCtx, metricSpan := core.StartSpan(exampleCtx, "MetricEvaluation")
+		demos = append(demos, demo)
+	}
 
-		// First, try to use the context-aware metric if available
-		var score float64
-		if m.Metric != nil {
-			exampleMap := map[string]interface{}{}
-			for k, v := range example.Inputs {
-				exampleMap[k] = v
+	return demos, nil
+}
+
+// createCandidateProgram creates a new program with the given parameters.
+func (m *MIPRO) createCandidateProgram(
+	baseProgram core.Program,
+	params map[string]interface{},
+	demos []core.Example,
+	instructions map[int][]string,
+) core.Program {
+	newProgram := baseProgram.Clone()
+	modules := newProgram.GetModules() // Get ordered slice of modules
+
+	for i, module := range modules {
+		if moduleInstructions, ok := instructions[i]; ok {
+			// Use the instructions for this module
+			candidateIndex := int(params[fmt.Sprintf("module_%d_instruction", i)].(float64))
+			if candidateIndex < len(moduleInstructions) {
+				// Update the signature with the new instruction
+				signature := module.GetSignature()
+				signature = signature.WithInstruction(moduleInstructions[candidateIndex])
+				module.SetSignature(signature)
 			}
-			score = m.Metric(exampleMap, prediction, metricCtx)
-		} else if metric != nil {
-			// Fall back to the provided non-context metric
-			score = metric(example.Outputs, prediction)
-		} else {
-			// No metrics available
-			score = 0.0
+		}
+	}
+
+	return newProgram
+}
+
+// evaluateCandidate evaluates a candidate program.
+func (m *MIPRO) evaluateCandidate(
+	ctx context.Context,
+	program core.Program,
+	dataset core.Dataset,
+) (float64, error) {
+	var totalScore float64
+	var count int
+
+	dataset.Reset()
+	for {
+		example, ok := dataset.Next()
+
+		if !ok {
+			break
 		}
 
-		logger.Debug(ctx, "SCORE FROM METRIC: %.2f", score)
-		metricSpan.WithAnnotation("score", score)
-		core.EndSpan(metricCtx)
+		result, err := program.Execute(ctx, example.Inputs)
+		if err != nil {
+			return 0, fmt.Errorf("failed to execute program: %w", err)
+		}
+
+		score := m.metric(example.Outputs, result, ctx)
 		totalScore += score
 		count++
-		core.EndSpan(exampleCtx)
-
 	}
 
 	if count == 0 {
-		return 0, fmt.Errorf("failed to evaluate program: no examples evaluated")
+		return 0, fmt.Errorf("no examples evaluated")
 	}
-	averageScore := totalScore / float64(count)
-	evalSpan.WithAnnotation("average_score", averageScore)
-	evalSpan.WithAnnotation("examples_evaluated", count)
-	return averageScore, nil
+
+	return totalScore / float64(count), nil
 }
 
-func (m *MIPRO) logTrialResult(trialNum int, trial Trial) {
-	fmt.Printf("Trial %d: Score %.4f\n", trialNum, trial.Score)
+// finalizeProgram performs final validation and cleanup.
+func (m *MIPRO) finalizeProgram(
+	ctx context.Context,
+	program core.Program,
+	dataset core.Dataset,
+) (core.Program, error) {
+	score, err := m.evaluateCandidate(ctx, program, dataset)
+	if err != nil {
+		return program, fmt.Errorf("final validation failed: %w", err)
+	}
+
+	m.logger.Info(ctx, "Final program validation score: %f", score)
+
+	return program, nil
 }
 
-func (m *MIPRO) generateInstructionCandidates(ctx context.Context, program core.Program, dataset core.Dataset) ([][]string, error) {
-	candidates := make([][]string, len(program.GetModules()))
-	for i, module := range program.GetModules() {
-		if predictor, ok := module.(*modules.Predict); ok {
-			candidates[i] = make([]string, m.NumCandidates)
-			for j := 0; j < m.NumCandidates; j++ {
-				instruction, err := m.PromptModel.Generate(ctx, fmt.Sprintf("Generate an instruction for the following signature: %s", predictor.GetSignature()))
-				if err != nil {
-					return nil, err
-				}
-				candidates[i][j] = instruction.Content
-			}
-		}
+// updateOptimizationState updates the optimization state with new results
+// func (m *MIPRO) updateOptimizationState(params map[string]interface{}, score float64, program core.Program) {
+// 	m.mu.Lock()
+// 	defer m.mu.Unlock()
+//
+// 	m.state.CurrentIteration++
+// 	if score > m.state.BestScore {
+// 		m.state.BestScore = score
+// 	}
+//
+// 	m.updateConvergence(score)
+// 	m.extractAndStorePatterns(program)
+// }
+
+// updateConvergence updates the convergence measure.
+func (m *MIPRO) updateConvergence(score float64) {
+	// Simple convergence calculation based on improvement over best score
+	if score > m.state.BestScore {
+		m.state.Convergence = 1.0
+	} else {
+		m.state.Convergence = score / m.state.BestScore
 	}
-	return candidates, nil
 }
 
-func (m *MIPRO) generateDemoCandidates(ctx context.Context, program core.Program, dataset core.Dataset) ([][][]core.Example, error) {
-	candidates := make([][][]core.Example, len(program.GetModules()))
-	logger := logging.GetLogger()
-
-	// Collect examples just once
-	var allExamples []core.Example
-	maxNeeded := m.MaxBootstrappedDemos + m.MaxLabeledDemos
-
-	// We won't reset the dataset here - it should already be at the beginning
-	for i := 0; i < maxNeeded*m.NumCandidates; i++ {
-		example, ok := dataset.Next()
-		if !ok {
-			break
-		}
-		if len(example.Outputs) > 0 {
-			allExamples = append(allExamples, example)
-		}
-	}
-
-	if len(allExamples) == 0 {
-		return nil, fmt.Errorf("no valid examples found in dataset")
-	}
-
-	logger.Debug(ctx, "Collected %d examples for demo generation", len(allExamples))
-
-	for i, module := range program.GetModules() {
-		if _, ok := module.(*modules.Predict); ok {
-			candidates[i] = make([][]core.Example, m.NumCandidates)
-			for j := 0; j < m.NumCandidates; j++ {
-
-				demos := make([]core.Example, 0, maxNeeded)
-
-				startIdx := (j * maxNeeded) % len(allExamples)
-				for k := 0; k < min(maxNeeded, len(allExamples)); k++ {
-					idx := (startIdx + k) % len(allExamples)
-					demos = append(demos, allExamples[idx])
-				}
-
-				candidates[i][j] = demos
-			}
-		}
-	}
-	return candidates, nil
-}
+// hasConverged checks if optimization has converged
+// func (m *MIPRO) hasConverged() bool {
+// 	return m.state.Convergence > 0.95 ||
+// 		m.state.CurrentIteration >= m.config.NumTrials ||
+// 		(m.state.CurrentIteration > 10 && m.state.BestScore > 0.99)
+// }
+//
+// // extractAndStorePatterns extracts successful patterns from the program
+// func (m *MIPRO) extractAndStorePatterns(program core.Program) {
+// 	for _, module := range program.Modules {
+// 		signature := module.GetSignature()
+// 		if signature.Instruction != "" {
+// 			m.state.SuccessfulPatterns = append(m.state.SuccessfulPatterns, signature.Instruction)
+// 		}
+// 	}
+// }

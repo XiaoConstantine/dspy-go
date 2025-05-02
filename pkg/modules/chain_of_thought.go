@@ -10,8 +10,10 @@ type ChainOfThought struct {
 	Predict *Predict
 }
 
-// Ensure ChainOfThought implements Composable.
-var _ core.Composable = (*ChainOfThought)(nil)
+var (
+	_ core.Module     = (*ChainOfThought)(nil)
+	_ core.Composable = (*ChainOfThought)(nil)
+)
 
 func NewChainOfThought(signature core.Signature) *ChainOfThought {
 	modifiedSignature := appendRationaleField(signature)
@@ -44,6 +46,12 @@ func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opt
 
 func (c *ChainOfThought) GetSignature() core.Signature {
 	return c.Predict.GetSignature()
+}
+
+// SetSignature implements the core.Module interface.
+func (c *ChainOfThought) SetSignature(signature core.Signature) {
+	modifiedSignature := appendRationaleField(signature)
+	c.Predict.SetSignature(modifiedSignature)
 }
 
 func (c *ChainOfThought) SetLLM(llm core.LLM) {

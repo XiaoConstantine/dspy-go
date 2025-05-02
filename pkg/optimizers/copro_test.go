@@ -35,6 +35,10 @@ func (m *MockModule) Clone() core.Module {
 	return args.Get(0).(core.Module)
 }
 
+func (m *MockModule) SetSignature(signature core.Signature) {
+	m.Called(signature)
+}
+
 // MockOptimizer is a mock implementation of core.Optimizer.
 type MockOptimizer struct {
 	mock.Mock

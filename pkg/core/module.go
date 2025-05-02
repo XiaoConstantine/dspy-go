@@ -13,6 +13,8 @@ type Module interface {
 	// GetSignature returns the module's input and output signature
 	GetSignature() Signature
 
+	SetSignature(signature Signature)
+
 	// SetLLM sets the language model for the module
 	SetLLM(llm LLM)
 
