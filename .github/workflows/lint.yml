@@ -23,7 +23,7 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --verbose --timeout=5m
