@@ -106,13 +106,24 @@ func (t *TPEOptimizer) Initialize(config SearchConfig) error {
 func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
 	t.currentTrials++
 
-	// If we don't have enough observations yet, use random sampling
+	var params map[string]interface{}
+
+	// Generate parameters
 	if len(t.observations) < max(5, int(float64(t.maxTrials)*0.1)) {
-		return t.randomSample(), nil
+		params = t.randomSample()
+	} else {
+		params = t.suggestTPE()
 	}
 
-	// Otherwise use TPE to suggest parameters
-	return t.suggestTPE(), nil
+	// Ensure all parameters from the param space are included
+	for key := range t.paramSpace {
+		if _, exists := params[key]; !exists {
+			// If parameter is missing, provide a default value (0)
+			params[key] = float64(0)
+		}
+	}
+
+	return params, nil
 }
 
 // UpdateResults updates the internal state with the results of the last trial.
