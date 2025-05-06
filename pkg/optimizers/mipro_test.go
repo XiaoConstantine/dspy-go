@@ -124,6 +124,10 @@ func TestMIPRO(t *testing.T) {
 
 			// Expectations for Compile flow
 			mockStrategy.On("SuggestParams", mock.Anything).Return(map[string]interface{}{"module_0_instruction": float64(0)}, nil).Once()
+
+			mockStrategy.On("UpdateResults", mock.Anything, mock.AnythingOfType("float64")).Return(nil).Once()
+			mockStrategy.On("GetBestParams").Return(
+				map[string]interface{}{"module_0_instruction": float64(0)}, 0.8).Once()
 			mockModule.On("Clone").Return(mockModule).Maybe()
 			mockModule.On("SetSignature", mock.Anything).Return().Maybe()
 			mockModule.On("SetLLM", mock.Anything).Return().Maybe()
@@ -180,6 +184,11 @@ func TestMIPRO(t *testing.T) {
 			mipro.teacherStudent = &TeacherStudentOptimizer{}    // Simplify
 			mipro.instructionGenerator = &InstructionGenerator{} // Simplify
 			mockStrategy.On("SuggestParams", ctx).Return(map[string]interface{}{"module_0_instruction": float64(0)}, nil).Once()
+
+			mockStrategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Maybe()
+			mockStrategy.On("GetBestParams").Return(map[string]interface{}{"module_0_instruction": float64(0)}, 0.8).Once()
+
+			mockMod.On("Clone").Return(mockMod).Maybe()
 			mockMod.On("Clone").Return(mockMod).Maybe()
 			mockMod.On("SetSignature", mock.Anything).Return().Maybe()
 			mockMod.On("SetLLM", mock.Anything).Return().Maybe()
@@ -249,7 +258,7 @@ func TestMIPRO(t *testing.T) {
 
 			// Add Reset expectation for the mock dataset
 			mockDataset := dataset.(*testutil.MockDataset)
-			mockDataset.On("Reset").Return().Times(2)
+			mockDataset.On("Reset").Return().Times(3)
 			mockDataset.On("Next").Return(core.Example{Inputs: map[string]interface{}{"input": "tpe_test"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{Inputs: map[string]interface{}{"input": "tpe_test2"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{}, false).Maybe()
@@ -285,11 +294,8 @@ func createTestMIPRO(t *testing.T) *MIPRO {
 		}),
 	)
 
-	// Initialize search strategy
-	mipro.searchStrategy = NewTPEOptimizer(TPEConfig{
-		Gamma: 0.25,
-		Seed:  42,
-	})
+	// Initialize search strategy with mock for testing
+	mipro.searchStrategy = NewMockTPEOptimizer(0.25, 42)
 	err := mipro.searchStrategy.Initialize(SearchConfig{
 		MaxTrials: 5,
 		ParamSpace: map[string][]interface{}{
@@ -362,42 +368,36 @@ func TestMIPROOptions(t *testing.T) {
 	assert.Equal(t, 10, mipro.config.NumTrials)
 }
 
-// TPEConfig contains configuration for Tree-structured Parzen Estimators.
-type TPEConfig struct {
-	Gamma float64
-	Seed  int64
-}
-
-// NewTPEOptimizer creates a new TPE optimizer instance.
-func NewTPEOptimizer(config TPEConfig) SearchStrategy {
-	return &TPEOptimizer{
-		gamma: config.Gamma,
-		seed:  config.Seed,
-	}
-}
-
-// TPEOptimizer implements Tree-structured Parzen Estimators.
-type TPEOptimizer struct {
+// MockTPEOptimizer implements a simplified version of Tree-structured Parzen Estimators for testing.
+type MockTPEOptimizer struct {
 	gamma float64
 	seed  int64
 }
 
-func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
+// NewMockTPEOptimizer creates a new mock TPE optimizer instance for testing.
+func NewMockTPEOptimizer(gamma float64, seed int64) SearchStrategy {
+	return &MockTPEOptimizer{
+		gamma: gamma,
+		seed:  seed,
+	}
+}
+
+func (t *MockTPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
 	// Simplified implementation for testing
 	return map[string]interface{}{
 		"module_0_instruction": float64(0), // Return float64 as expected by the code
 	}, nil
 }
 
-func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float64) error {
+func (t *MockTPEOptimizer) UpdateResults(params map[string]interface{}, score float64) error {
 	return nil
 }
 
-func (t *TPEOptimizer) GetBestParams() (map[string]interface{}, float64) {
-	return map[string]interface{}{"param": "value"}, 1.0
+func (t *MockTPEOptimizer) GetBestParams() (map[string]interface{}, float64) {
+	return map[string]interface{}{"module_0_instruction": float64(0)}, 1.0
 }
 
-func (t *TPEOptimizer) Initialize(config SearchConfig) error {
+func (t *MockTPEOptimizer) Initialize(config SearchConfig) error {
 	return nil
 }
 

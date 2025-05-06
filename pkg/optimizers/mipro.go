@@ -138,6 +138,13 @@ type MIPROConfig struct {
 		BatchSizeScaling  float64
 	}
 	TeacherSettings map[string]interface{}
+
+	// TPE specific configuration
+	TPEGamma        float64
+	TPEGenerations  int
+	Seed            int64
+	NumModules      int // Number of modules to optimize (can be inferred from program)
+	MaxLabeledDemos int // Maximum number of labeled demonstrations to use
 }
 
 // OptimizationState tracks the progress of optimization.
@@ -231,6 +238,35 @@ func WithTeacherSettings(settings map[string]interface{}) MIPROOption {
 	}
 }
 
+// WithSearchStrategy sets a custom search strategy.
+func WithSearchStrategy(strategy SearchStrategy) MIPROOption {
+	return func(m *MIPRO) {
+		m.searchStrategy = strategy
+	}
+}
+
+// WithTPEGamma sets the gamma parameter for the TPE optimizer.
+func WithTPEGamma(gamma float64) MIPROOption {
+	return func(m *MIPRO) {
+		// Store in the config for later use when initializing TPE
+		m.config.TPEGamma = gamma
+	}
+}
+
+// WithTPEGenerations sets the number of candidates to generate for each TPE optimization step.
+func WithTPEGenerations(generations int) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.TPEGenerations = generations
+	}
+}
+
+// WithRandomSeed sets a specific random seed for reproducibility.
+func WithRandomSeed(seed int64) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.Seed = seed
+	}
+}
+
 // NewMIPRO creates a new MIPRO optimizer instance.
 func NewMIPRO(
 	metric func(example, prediction map[string]interface{}, ctx context.Context) float64,
@@ -282,6 +318,59 @@ func (m *MIPRO) initComponents() {
 		MaxCandidates: m.numCandidates,
 		Temperature:   0.7,
 	}
+	// Initialize search strategy if not provided via option
+	if m.searchStrategy == nil {
+		paramSpace := make(map[string][]interface{})
+
+		// We need to determine how many modules we'll be optimizing
+		// This would typically come from the program structure or configuration
+		numModules := m.config.NumModules
+		if numModules <= 0 {
+			numModules = 1 // Default to at least one module
+		}
+
+		// For each module, create a parameter for selecting an instruction
+		for i := 0; i < numModules; i++ {
+			// Create a parameter that can select among numCandidates instruction options
+			values := make([]interface{}, m.numCandidates)
+			for j := 0; j < m.numCandidates; j++ {
+				values[j] = float64(j) // Use float64 for consistency
+			}
+			paramSpace[fmt.Sprintf("module_%d_instruction", i)] = values
+		}
+
+		// If we also have demo sets, create parameters for those
+		if m.maxBootstrappedDemos > 0 || m.config.MaxLabeledDemos > 0 {
+			demoSets := 5 // Default to 5 sets of demos
+			values := make([]interface{}, demoSets)
+			for j := 0; j < demoSets; j++ {
+				values[j] = float64(j)
+			}
+
+			for i := 0; i < numModules; i++ {
+				paramSpace[fmt.Sprintf("module_%d_demos", i)] = values
+			}
+		}
+		m.searchStrategy = NewTPEOptimizer(TPEConfig{
+			Gamma:            0.25,
+			Seed:             m.config.Seed,
+			NumEIGenerations: 20,
+			PriorWeight:      1.0,
+			BandwidthFactor:  1.0,
+		})
+
+		// Initialize the search strategy with our parameter space
+		err := m.searchStrategy.Initialize(SearchConfig{
+			ParamSpace: paramSpace,
+			MaxTrials:  m.config.NumTrials,
+			Seed:       m.config.Seed,
+		})
+
+		if err != nil {
+			m.logger.Error(context.Background(), "Failed to initialize search strategy: %v", err)
+		}
+	}
+
 }
 
 // Compile implements the main optimization loop.
@@ -336,20 +425,30 @@ func (m *MIPRO) runOptimizationLoop(
 		if err != nil {
 			return program, fmt.Errorf("failed to get parameters: %w", err)
 		}
-		fmt.Println("params:", params) // Add this line
+		m.logger.Info(ctx, "Trial %d/%d with parameters: %v",
+			iteration+1, m.config.NumTrials, params)
 
 		// Create candidate program with suggested parameters
 		candidate := m.createCandidateProgram(program, params, demos, instructions)
-
-		// Evaluate candidate
-		score, err := m.evaluateCandidate(ctx, candidate, dataset)
+		// Evaluate candidate - using minibatching for efficiency
+		var score float64
+		if m.config.MiniBatchSize > 0 && iteration < m.config.NumTrials-1 {
+			// Use minibatch for all but the last iteration
+			score, err = m.evaluateOnMinibatch(ctx, candidate, dataset, m.config.MiniBatchSize)
+		} else {
+			// Use full evaluation for the final iteration or if minibatching is disabled
+			score, err = m.evaluateCandidate(ctx, candidate, dataset)
+		}
 		if err != nil {
 			return program, fmt.Errorf("failed to evaluate candidate: %w", err)
 		}
+		// Report results back to the TPE optimizer
+		if err := m.searchStrategy.UpdateResults(params, score); err != nil {
+			m.logger.Error(ctx, "Failed to update search results: %v", err)
+		}
 
-		// Update optimization state
+		// Update optimization state and check for best program
 		m.updateOptimizationState(params, score, candidate)
-
 		// Check if this is the best program so far
 		if score > bestScore {
 			bestScore = score
@@ -359,11 +458,26 @@ func (m *MIPRO) runOptimizationLoop(
 
 		// Check for convergence
 		if m.hasConverged() {
-			m.logger.Info(ctx, "Optimization converged after %d iterations", iteration)
+			m.logger.Info(ctx, "Optimization converged after %d iterations", iteration+1)
 			break
 		}
 	}
+	bestParams, bestParamScore := m.searchStrategy.GetBestParams()
+	m.logger.Info(ctx, "Best parameters according to TPE: %v with score %f",
+		bestParams, bestParamScore)
 
+	// If TPE's best is better than our tracked best, create a final candidate
+	if bestParamScore > bestScore {
+		finalCandidate := m.createCandidateProgram(program, bestParams, demos, instructions)
+		finalScore, err := m.evaluateCandidate(ctx, finalCandidate, dataset)
+		if err != nil {
+			m.logger.Error(ctx, "Failed to evaluate final candidate: %v", err)
+		} else if finalScore > bestScore {
+			bestScore = finalScore
+			bestProgram = finalCandidate
+			m.logger.Info(ctx, "Final candidate is best: %f", bestScore)
+		}
+	}
 	return bestProgram, nil
 }
 
@@ -413,6 +527,8 @@ func (m *MIPRO) extractAndStorePatterns(program core.Program) {
 }
 
 func (m *MIPRO) hasConverged() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	// Check various convergence criteria
 	return m.state.Convergence > 0.95 ||
 		m.state.CurrentIteration >= m.config.NumTrials ||
@@ -535,20 +651,6 @@ func (m *MIPRO) finalizeProgram(
 	return program, nil
 }
 
-// updateOptimizationState updates the optimization state with new results
-// func (m *MIPRO) updateOptimizationState(params map[string]interface{}, score float64, program core.Program) {
-// 	m.mu.Lock()
-// 	defer m.mu.Unlock()
-//
-// 	m.state.CurrentIteration++
-// 	if score > m.state.BestScore {
-// 		m.state.BestScore = score
-// 	}
-//
-// 	m.updateConvergence(score)
-// 	m.extractAndStorePatterns(program)
-// }
-
 // updateConvergence updates the convergence measure.
 func (m *MIPRO) updateConvergence(score float64) {
 	// Simple convergence calculation based on improvement over best score
@@ -559,19 +661,41 @@ func (m *MIPRO) updateConvergence(score float64) {
 	}
 }
 
-// hasConverged checks if optimization has converged
-// func (m *MIPRO) hasConverged() bool {
-// 	return m.state.Convergence > 0.95 ||
-// 		m.state.CurrentIteration >= m.config.NumTrials ||
-// 		(m.state.CurrentIteration > 10 && m.state.BestScore > 0.99)
-// }
-//
-// // extractAndStorePatterns extracts successful patterns from the program
-// func (m *MIPRO) extractAndStorePatterns(program core.Program) {
-// 	for _, module := range program.Modules {
-// 		signature := module.GetSignature()
-// 		if signature.Instruction != "" {
-// 			m.state.SuccessfulPatterns = append(m.state.SuccessfulPatterns, signature.Instruction)
-// 		}
-// 	}
-// }
+func (m *MIPRO) evaluateOnMinibatch(
+	ctx context.Context,
+	program core.Program,
+	fullDataset core.Dataset,
+	batchSize int,
+) (float64, error) {
+	// Clone the dataset to avoid affecting the original
+	fullDataset.Reset()
+
+	// Create a minibatch by sampling from the dataset
+	var batch []core.Example
+	for i := 0; i < batchSize; i++ {
+		example, ok := fullDataset.Next()
+		if !ok {
+			break
+		}
+		batch = append(batch, example)
+	}
+
+	if len(batch) == 0 {
+		return 0, fmt.Errorf("no examples in minibatch")
+	}
+
+	// Evaluate on the minibatch
+	var totalScore float64
+	for _, example := range batch {
+		result, err := program.Execute(ctx, example.Inputs)
+		if err != nil {
+			m.logger.Warn(ctx, "Failed to execute program on example: %v", err)
+			continue
+		}
+
+		score := m.metric(example.Outputs, result, ctx)
+		totalScore += score
+	}
+
+	return totalScore / float64(len(batch)), nil
+}

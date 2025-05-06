@@ -28,3 +28,20 @@ func truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
+
+// Max returns the maximum of two integers.
+func Max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// CloneParams creates a deep copy of a parameter map.
+func CloneParams(params map[string]interface{}) map[string]interface{} {
+	clone := make(map[string]interface{})
+	for k, v := range params {
+		clone[k] = v
+	}
+	return clone
+}
