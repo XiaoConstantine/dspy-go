@@ -267,6 +267,40 @@ func WithRandomSeed(seed int64) MIPROOption {
 	}
 }
 
+func WithMiniBatchSize(size int) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.MiniBatchSize = size
+	}
+}
+
+// WithNumModules explicitly sets the number of modules to optimize.
+func WithNumModules(numModules int) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.NumModules = numModules
+	}
+}
+
+func WithNumCandidates(num int) MIPROOption {
+	return func(m *MIPRO) {
+		m.numCandidates = num
+	}
+}
+
+// WithMaxLabeledDemos sets the maximum number of labeled demos to use.
+func WithMaxLabeledDemos(maxDemos int) MIPROOption {
+	return func(m *MIPRO) {
+		m.config.MaxLabeledDemos = maxDemos
+	}
+}
+
+// WithModels explicitly sets the prompt and task models for MIPRO.
+func WithModels(promptModel, taskModel core.LLM) MIPROOption {
+	return func(m *MIPRO) {
+		m.promptModel = promptModel
+		m.taskModel = taskModel
+	}
+}
+
 // NewMIPRO creates a new MIPRO optimizer instance.
 func NewMIPRO(
 	metric func(example, prediction map[string]interface{}, ctx context.Context) float64,
@@ -283,6 +317,8 @@ func NewMIPRO(
 				TrialsPerVariable: 1.5,
 				BatchSizeScaling:  0.8,
 			},
+			TPEGamma:       0.25, // Set default TPE gamma
+			TPEGenerations: 20,   // Set default TPE generations
 		},
 		state: &OptimizationState{
 			TeacherScores: make(map[string]float64),
@@ -290,14 +326,22 @@ func NewMIPRO(
 		metrics: &MIPROMetrics{
 			PromptEffectiveness: make(map[string]float64),
 		},
-		logger: logging.GetLogger(),
+		logger:               logging.GetLogger(),
+		numCandidates:        3, // Default to 3 candidates
+		maxBootstrappedDemos: 3, // Default to 3 bootstrapped demos
 	}
 
 	// Apply options
 	for _, opt := range opts {
 		opt(m)
 	}
+	if m.config.NumModules <= 0 {
+		m.config.NumModules = 2 // Default to 2 modules (most common case)
+	}
 
+	if m.numCandidates <= 0 {
+		m.numCandidates = 3
+	}
 	// Initialize components
 	m.initComponents()
 
@@ -306,6 +350,20 @@ func NewMIPRO(
 
 // initComponents initializes all required components.
 func (m *MIPRO) initComponents() {
+	if m.promptModel == nil {
+		// Try to get the default LLM
+		defaultLLM := core.GetDefaultLLM()
+		if defaultLLM != nil {
+			m.promptModel = defaultLLM
+		} else {
+			m.logger.Error(context.Background(), "Failed to initialize prompt model")
+			return // Cannot continue without a model
+		}
+	}
+
+	if m.taskModel == nil {
+		m.taskModel = m.promptModel // Use prompt model as task model if not specified
+	}
 	m.teacherStudent = &TeacherStudentOptimizer{
 		Teacher:         m.promptModel,
 		Student:         m.taskModel,
@@ -586,14 +644,27 @@ func (m *MIPRO) createCandidateProgram(
 	modules := newProgram.GetModules() // Get ordered slice of modules
 
 	for i, module := range modules {
-		if moduleInstructions, ok := instructions[i]; ok {
-			// Use the instructions for this module
-			candidateIndex := int(params[fmt.Sprintf("module_%d_instruction", i)].(float64))
-			if candidateIndex < len(moduleInstructions) {
-				// Update the signature with the new instruction
-				signature := module.GetSignature()
-				signature = signature.WithInstruction(moduleInstructions[candidateIndex])
-				module.SetSignature(signature)
+		// Check if we have instructions for this module
+		if moduleInstructions, ok := instructions[i]; ok && len(moduleInstructions) > 0 {
+			// Try to get the instruction parameter
+			instructionKey := fmt.Sprintf("module_%d_instruction", i)
+			if instructionValue, ok := params[instructionKey]; ok && instructionValue != nil {
+				// Try to convert to float64
+				if candidateIndex, ok := instructionValue.(float64); ok {
+					if idx := int(candidateIndex); idx >= 0 && idx < len(moduleInstructions) {
+						// Update signature
+						signature := module.GetSignature()
+						signature = signature.WithInstruction(moduleInstructions[idx])
+						module.SetSignature(signature)
+					}
+				}
+			} else {
+				// Parameter missing or nil, use a default
+				if len(moduleInstructions) > 0 {
+					signature := module.GetSignature()
+					signature = signature.WithInstruction(moduleInstructions[0])
+					module.SetSignature(signature)
+				}
 			}
 		}
 	}
