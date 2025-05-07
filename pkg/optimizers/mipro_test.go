@@ -15,7 +15,6 @@ import (
 
 // TestMIPRO contains all tests for the MIPRO optimizer.
 func TestMIPRO(t *testing.T) {
-	// We'll organize our tests into logical groups using subtests
 	t.Run("Constructor and Configuration", func(t *testing.T) {
 		t.Run("NewMIPRO creates instance with default values", func(t *testing.T) {
 			metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
@@ -107,20 +106,24 @@ func TestMIPRO(t *testing.T) {
 			mockModule := program.Modules["test"].(*MockModule)
 			// Sample example
 			sampleExample := core.Example{
-				Inputs:  map[string]interface{}{"input": "sample input"},
-				Outputs: map[string]interface{}{"output": "expected output"},
+				Inputs:  map[string]interface{}{"prompt": "sample input"},
+				Outputs: map[string]interface{}{"completion": "expected output"},
 			}
 
 			dataset := testutil.NewMockDataset([]core.Example{sampleExample})
 
 			// Set up instruction generator with a mock LLM
 			mockLLM := new(testutil.MockLLM)
-			mockLLM.On("Generate", mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "test instruction"}, nil).Maybe()
+			mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
+				&core.LLMResponse{Content: "test instruction"}, nil).Maybe()
 			mipro.instructionGenerator.PromptModel = mockLLM
 
 			// Mock dependencies
-			mipro.teacherStudent = &TeacherStudentOptimizer{}
 			mipro.instructionGenerator = &InstructionGenerator{PromptModel: mockLLM}
+			mipro.teacherStudent = &TeacherStudentOptimizer{
+				Teacher: mockLLM, // Use the same mock LLM
+				Student: mockLLM, // Use the same mock LLM
+			}
 
 			// Expectations for Compile flow
 			mockStrategy.On("SuggestParams", mock.Anything).Return(map[string]interface{}{"module_0_instruction": float64(0)}, nil).Once()
@@ -146,7 +149,7 @@ func TestMIPRO(t *testing.T) {
 			mockModule.AssertExpectations(t)
 			mockStrategy.AssertExpectations(t)
 			dataset.AssertNumberOfCalls(t, "Reset", 2) // Expect 2 Reset calls
-			dataset.AssertNumberOfCalls(t, "Next", 4)  // Expect 4 Next calls (2 per evaluateCandidate)
+			dataset.AssertNumberOfCalls(t, "Next", 6)  // Expect 4 Next calls (2 per evaluateCandidate)
 		})
 
 		t.Run("Handles optimization failures gracefully", func(t *testing.T) {
@@ -162,10 +165,39 @@ func TestMIPRO(t *testing.T) {
 			program := createTestProgram()
 			dataset := createTestDataset()
 
+			// Cast to mock dataset to set expectations
+			mockDataset := dataset.(*testutil.MockDataset)
+
+			// Setup expectations for demonstration generation phase
+			sampleExample := core.Example{
+				Inputs: map[string]interface{}{
+					"prompt": "test example", // Include both field names for compatibility
+				},
+				Outputs: map[string]interface{}{"completion": "expected result"},
+			}
+
+			// Expect Next() to be called during demonstration generation
+			mockDataset.On("Next").Return(sampleExample, true).Times(2)
+			mockDataset.On("Next").Return(core.Example{}, false).Once() // End the loop
+
+			// Set up the teacher in MIPRO if needed
+			if mipro.teacherStudent.Teacher == nil {
+				mockTeacher := new(testutil.MockLLM)
+				mockTeacher.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
+					&core.LLMResponse{Content: "Test response"}, nil)
+				mipro.teacherStudent.Teacher = mockTeacher
+			}
+
+			// Run the test
 			_, err := mipro.Compile(ctx, program, dataset, nil)
 
+			// Assertions
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "search failed")
+
+			// Verify expectations were met
+			mockDataset.AssertExpectations(t)
+			mockStrategy.AssertExpectations(t)
 		})
 
 		t.Run("Converges early with good solution", func(t *testing.T) {
@@ -178,11 +210,17 @@ func TestMIPRO(t *testing.T) {
 			mockMod := program.Modules["test"].(*MockModule)
 			mockDataset := dataset.(*testutil.MockDataset)
 
-			sampleExample := core.Example{Inputs: map[string]interface{}{"input": "converge_test"}}
+			sampleExample := core.Example{Inputs: map[string]interface{}{"prompt": "converge_test"}}
+			mockTeacher := new(testutil.MockLLM)
+			mockTeacher.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
+				&core.LLMResponse{Content: "Test response"}, nil).Times(2)
+			mipro.teacherStudent.Teacher = mockTeacher
+			mockLLM := new(testutil.MockLLM)
+			mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
+				&core.LLMResponse{Content: "test instruction"}, nil).Maybe()
+			mipro.instructionGenerator.PromptModel = mockLLM
 
 			// Mock setup for convergence test
-			mipro.teacherStudent = &TeacherStudentOptimizer{}    // Simplify
-			mipro.instructionGenerator = &InstructionGenerator{} // Simplify
 			mockStrategy.On("SuggestParams", ctx).Return(map[string]interface{}{"module_0_instruction": float64(0)}, nil).Once()
 
 			mockStrategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Maybe()
@@ -324,7 +362,6 @@ func createTestProgram() core.Program {
 
 	program := core.NewProgram(
 		modules, // Pass the map here
-		// *** FIX: Capture the 'modules' map instead of 'program' ***
 		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
 			modInstance, ok := modules["test"] // Use the captured 'modules' map
 			if !ok {
@@ -340,12 +377,12 @@ func createTestProgram() core.Program {
 func createTestDataset() core.Dataset {
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "test1"},
-			Outputs: map[string]interface{}{"output": "result1"},
+			Inputs:  map[string]interface{}{"prompt": "test1"},
+			Outputs: map[string]interface{}{"completion": "result1"},
 		},
 		{
-			Inputs:  map[string]interface{}{"input": "test2"},
-			Outputs: map[string]interface{}{"output": "result2"},
+			Inputs:  map[string]interface{}{"prompt": "test2"},
+			Outputs: map[string]interface{}{"completion": "result2"},
 		},
 	}
 
