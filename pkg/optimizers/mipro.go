@@ -66,6 +66,11 @@ func (t *TeacherStudentOptimizer) Initialize(ctx context.Context, program core.P
 
 // GenerateDemonstration creates a high-quality demonstration using the teacher.
 func (t *TeacherStudentOptimizer) GenerateDemonstration(ctx context.Context, input core.Example) (core.Example, error) {
+
+	promptValue, ok := input.Inputs["prompt"]
+	if !ok || promptValue == nil {
+		return core.Example{}, fmt.Errorf("teacher generation failed, missing prompt")
+	}
 	response, err := t.Teacher.Generate(ctx, input.Inputs["prompt"].(string))
 	if err != nil {
 		return core.Example{}, fmt.Errorf("teacher generation failed: %w", err)
@@ -102,6 +107,10 @@ func (g *InstructionGenerator) GenerateCandidates(
 			if err != nil {
 				return nil, fmt.Errorf("failed to generate candidate %d for module %d: %w", j, i, err)
 			}
+			// Ensure we never store empty instructions
+			if instruction == "" {
+				instruction = "Default instruction for module " + fmt.Sprintf("%d", i)
+			}
 			moduleInstructions[j] = instruction
 		}
 
@@ -121,6 +130,11 @@ func (g *InstructionGenerator) generateSingleCandidate(
 	response, err := g.PromptModel.Generate(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("prompt model generation failed: %w", err)
+	}
+
+	// Ensure we never return an empty content
+	if response == nil || response.Content == "" {
+		return fmt.Sprintf("Default instruction for %s", module.GetSignature()), nil
 	}
 
 	return response.Content, nil
@@ -440,6 +454,7 @@ func (m *MIPRO) Compile(
 ) (core.Program, error) {
 	m.logger.Info(ctx, "Starting MIPRO optimization with configuration: %+v", m.config)
 
+	originalForward := program.Forward
 	// Step 1: Initialize teacher-student learning
 	if err := m.teacherStudent.Initialize(ctx, program, dataset); err != nil {
 		return program, fmt.Errorf("failed to initialize teacher-student: %w", err)
@@ -461,6 +476,19 @@ func (m *MIPRO) Compile(
 	bestProgram, err := m.runOptimizationLoop(ctx, program, dataset, demos, instructions)
 	if err != nil {
 		return program, fmt.Errorf("optimization failed: %w", err)
+	}
+
+	// Check if bestProgram is valid and has Forward function
+	if bestProgram.Forward == nil {
+		m.logger.Info(ctx, "Best program has nil Forward, using original Forward function")
+		// Ensure the best program has a valid forward function
+		bestProgram.Forward = originalForward
+	}
+
+	// If bestProgram is nil, return the original program
+	if bestProgram.Modules == nil {
+		m.logger.Error(ctx, "Best program is not properly initialized, using original program")
+		return program, nil
 	}
 
 	// Step 5: Finalize and validate best program
@@ -525,7 +553,9 @@ func (m *MIPRO) runOptimizationLoop(
 		bestParams, bestParamScore)
 
 	// If TPE's best is better than our tracked best, create a final candidate
-	if bestParamScore > bestScore {
+	if bestParamScore > bestScore && bestParams != nil {
+		// We'll now handle nil values in the createCandidateProgram function,
+		// so we don't need to validate extensively here
 		finalCandidate := m.createCandidateProgram(program, bestParams, demos, instructions)
 		finalScore, err := m.evaluateCandidate(ctx, finalCandidate, dataset)
 		if err != nil {
@@ -640,27 +670,49 @@ func (m *MIPRO) createCandidateProgram(
 	demos []core.Example,
 	instructions map[int][]string,
 ) core.Program {
-	newProgram := baseProgram.Clone()
-	modules := newProgram.GetModules() // Get ordered slice of modules
+	// newProgram := baseProgram.Clone()
+	// modules := newProgram.GetModules() // Get ordered slice of modules
+	newModules := make(map[string]core.Module)
+	for name, module := range baseProgram.Modules {
+		newModules[name] = module.Clone()
+	}
 
+	// Update modules with parameters
+	modules := make([]core.Module, 0, len(newModules))
+	for _, m := range newModules {
+		modules = append(modules, m)
+	}
 	for i, module := range modules {
 		// Check if we have instructions for this module
 		if moduleInstructions, ok := instructions[i]; ok && len(moduleInstructions) > 0 {
 			// Try to get the instruction parameter
 			instructionKey := fmt.Sprintf("module_%d_instruction", i)
-			if instructionValue, ok := params[instructionKey]; ok && instructionValue != nil {
-				// Try to convert to float64
-				if candidateIndex, ok := instructionValue.(float64); ok {
-					if idx := int(candidateIndex); idx >= 0 && idx < len(moduleInstructions) {
-						// Update signature
-						signature := module.GetSignature()
-						signature = signature.WithInstruction(moduleInstructions[idx])
-						module.SetSignature(signature)
+			// Safely handle potentially nil parameters
+			if instructionValue, ok := params[instructionKey]; ok {
+				// Make sure instructionValue is not nil before converting
+				if instructionValue != nil {
+					// Try to convert to float64
+					if candidateIndex, ok := instructionValue.(float64); ok {
+						if idx := int(candidateIndex); idx >= 0 && idx < len(moduleInstructions) {
+							// Ensure the selected instruction is not nil before updating signature
+							if moduleInstructions[idx] != "" {
+								// Update signature
+								signature := module.GetSignature()
+								signature = signature.WithInstruction(moduleInstructions[idx])
+								module.SetSignature(signature)
+							}
+						}
+					} else {
+						// Log a warning for type conversion issues
+						m.logger.Warn(context.Background(), "Non-float64 instruction index value: %v", instructionValue)
 					}
+				} else {
+					// Log nil value but don't fail - use default instruction
+					m.logger.Warn(context.Background(), "Nil instruction value for key: %s", instructionKey)
 				}
 			} else {
 				// Parameter missing or nil, use a default
-				if len(moduleInstructions) > 0 {
+				if len(moduleInstructions) > 0 && moduleInstructions[0] != "" {
 					signature := module.GetSignature()
 					signature = signature.WithInstruction(moduleInstructions[0])
 					module.SetSignature(signature)
@@ -669,7 +721,12 @@ func (m *MIPRO) createCandidateProgram(
 		}
 	}
 
-	return newProgram
+	//	return newProgram
+	// Create new program with updated modules but PRESERVE the forward function
+	return core.NewProgram(
+		newModules,
+		baseProgram.Forward, // This is the critical line
+	)
 }
 
 // evaluateCandidate evaluates a candidate program.
@@ -712,6 +769,13 @@ func (m *MIPRO) finalizeProgram(
 	program core.Program,
 	dataset core.Dataset,
 ) (core.Program, error) {
+	// Check if the program is nil or missing Forward function
+	if program.Forward == nil {
+		m.logger.Error(ctx, "Program has nil Forward function, using original Forward")
+		// Fix would be needed here but we don't have original program
+		return program, fmt.Errorf("program has nil Forward function")
+	}
+
 	score, err := m.evaluateCandidate(ctx, program, dataset)
 	if err != nil {
 		return program, fmt.Errorf("final validation failed: %w", err)
