@@ -232,8 +232,6 @@ func extractFinalAnswer(answerString string, isActualAnswer bool) string {
 		if len(matches) > 1 {
 			return strings.TrimSpace(matches[1])
 		}
-		// If #### pattern not found in actual answer, try to clean it as a last resort,
-		// but prioritize the #### pattern for ground truth.
 	}
 
 	// General cleaner for predicted answers or fallback for actual if #### not found.
@@ -247,14 +245,9 @@ func extractFinalAnswer(answerString string, isActualAnswer bool) string {
 	// This regex tries to find a number at the beginning possibly, or the main numeric part.
 	numRe := regexp.MustCompile(`^-?\d+(\.\d+)?`)
 	if numMatch := numRe.FindString(cleaned); numMatch != "" {
-		// Check if the cleaned string is ONLY the number (with optional surrounding non-alphanumeric noise)
-		// This avoids extracting "3" from "3 dogs" if we want the full "3 dogs"
 		// For GSM8K, we typically want just the number.
 		return numMatch
 	}
-	// Fallback if no leading number is found, return the cleaned string.
-	// This might be useful if the answer is non-numeric (e.g. "yes", "no") or if the number is embedded differently.
-	// For GSM8K, we expect a number, so if #### isn't found and this cleaning doesn't isolate one, it might be an issue.
 	return cleaned
 }
 
