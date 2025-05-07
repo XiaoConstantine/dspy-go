@@ -241,15 +241,7 @@ func TestCloneParams(t *testing.T) {
 				if existingKey != "" {
 					originalValue := tt.params[existingKey]
 					clone[existingKey] = "changed_in_clone" // Change the value
-					if tt.params[existingKey] == clone[existingKey] && originalValue != clone[existingKey] {
-						// This means the original value was not "changed_in_clone" before,
-						// and now original also has "changed_in_clone". This check is a bit tricky
-						// because "changed_in_clone" might have been the original value if we are unlucky.
-						// A better way for simple values is just to ensure they are not the same map instance.
-						// reflect.DeepEqual already checks values. The key is that they are different maps.
-					}
-					// Restore for next DeepEqual check if needed, or better, just check map pointers.
-					clone[existingKey] = originalValue // put it back
+					clone[existingKey] = originalValue      // put it back
 				}
 			}
 			// Test that the maps are not the same instance (relevant for non-nil original)
