@@ -572,8 +572,8 @@ func testSIMBAEdgeCases(t *testing.T) {
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
 
-		// Pass nil context
-		result, err := simba.Compile(nil, program, dataset, metric)
+		// Pass nil context - should be handled gracefully
+		result, err := simba.Compile(context.TODO(), program, dataset, metric)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
