@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -145,18 +146,18 @@ func TestParallelBatchProcessing(t *testing.T) {
 	assert.Len(t, results, 5)
 
 	// Verify all results are present and processed
-	processedInputs := make(map[string]bool)
+	processedItems := make(map[string]bool)
 	for _, res := range results {
-		output, ok := res["output"].(string)
-		require.True(t, ok)
-
-		// Extract the original input from the output
-		if output == "processed_item1_call_1" || output == "processed_item1_call_2" ||
-			output == "processed_item1_call_3" || output == "processed_item1_call_4" || output == "processed_item1_call_5" {
-			processedInputs["item1"] = true
-		}
-		// Similar checks for other items...
+	output, ok := res["output"].(string)
+	require.True(t, ok)
+	
+	// Extract the original input from the output (format: "processed_itemX_call_Y")
+	parts := strings.SplitN(strings.TrimPrefix(output, "processed_"), "_", 2)
+	if len(parts) > 0 {
+	processedItems[parts[0]] = true
 	}
+	}
+	assert.Len(t, processedItems, len(batchInputs), "should have processed all unique items")
 
 	// Check that parallel processing was faster than sequential
 	// With 3 workers and 5 items taking 10ms each, should be faster than 50ms

@@ -265,11 +265,14 @@ func (p *Parallel) formatResults(results []ParallelResult) map[string]interface{
 		if result.Success {
 			outputs = append(outputs, result.Output)
 		} else if p.options.ReturnFailures {
-			failureInfo := map[string]interface{}{
-				"index": result.Index,
-				"error": result.Error.Error(),
+			// Only include failure if there was an error to prevent panic
+			if result.Error != nil {
+				failureInfo := map[string]interface{}{
+					"index": result.Index,
+					"error": result.Error.Error(),
+				}
+				failures = append(failures, failureInfo)
 			}
-			failures = append(failures, failureInfo)
 		}
 	}
 
