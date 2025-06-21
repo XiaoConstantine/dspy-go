@@ -75,8 +75,7 @@ func setupMockLLM() {
 // testSIMBAConstructorAndConfiguration tests SIMBA constructor and options.
 func testSIMBAConstructorAndConfiguration(t *testing.T) {
 	t.Run("Creates instance with default configuration", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		assert.NotNil(t, simba)
 		assert.NotNil(t, simba.state)
@@ -87,37 +86,29 @@ func testSIMBAConstructorAndConfiguration(t *testing.T) {
 		assert.Equal(t, 32, simba.config.BatchSize)
 		assert.Equal(t, 8, simba.config.MaxSteps)
 		assert.Equal(t, 6, simba.config.NumCandidates)
-		assert.Equal(t, 4, simba.config.MaxDemos)
 		assert.Equal(t, 0.2, simba.config.SamplingTemperature)
-		assert.Equal(t, 0.2, simba.config.CandidateTemperature)
 		assert.Equal(t, 2, simba.config.IntrospectionFrequency)
-		assert.Equal(t, 0.3, simba.config.SelfAdviceWeight)
 		assert.Equal(t, 0.001, simba.config.ConvergenceThreshold)
 		assert.Equal(t, 0.05, simba.config.MinImprovementRatio)
 		assert.Equal(t, 10, simba.config.MaxGoroutines)
 	})
 
 	t.Run("Functional options configure SIMBA correctly", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric,
+		simba := NewSIMBA(
 			WithSIMBABatchSize(16),
 			WithSIMBAMaxSteps(12),
 			WithSIMBANumCandidates(8),
-			WithTemperatures(0.3, 0.4),
-			WithMaxDemos(6),
+			WithSamplingTemperature(0.3),
 		)
 
 		assert.Equal(t, 16, simba.config.BatchSize)
 		assert.Equal(t, 12, simba.config.MaxSteps)
 		assert.Equal(t, 8, simba.config.NumCandidates)
 		assert.Equal(t, 0.3, simba.config.SamplingTemperature)
-		assert.Equal(t, 0.4, simba.config.CandidateTemperature)
-		assert.Equal(t, 6, simba.config.MaxDemos)
 	})
 
 	t.Run("State is properly initialized", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		state := simba.GetState()
 		assert.Equal(t, 0, state.CurrentStep)
@@ -132,29 +123,28 @@ func testSIMBAConstructorAndConfiguration(t *testing.T) {
 // testSIMBAPythonCompatibility verifies compatibility with DSPy Python implementation.
 func testSIMBAPythonCompatibility(t *testing.T) {
 	t.Run("Default parameters match DSPy Python SIMBA", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Verify parameters match DSPy Python defaults:
-		// bsize=32, num_candidates=6, max_steps=8, max_demos=4
-		// temperature_for_sampling=0.2, temperature_for_candidates=0.2
+		// bsize=32, num_candidates=6, max_steps=8
+		// temperature_for_sampling=0.2
 		assert.Equal(t, 32, simba.config.BatchSize, "BatchSize should match Python bsize=32")
 		assert.Equal(t, 6, simba.config.NumCandidates, "NumCandidates should match Python num_candidates=6")
 		assert.Equal(t, 8, simba.config.MaxSteps, "MaxSteps should match Python max_steps=8")
-		assert.Equal(t, 4, simba.config.MaxDemos, "MaxDemos should match Python max_demos=4")
 		assert.Equal(t, 0.2, simba.config.SamplingTemperature, "SamplingTemperature should match Python temperature_for_sampling=0.2")
-		assert.Equal(t, 0.2, simba.config.CandidateTemperature, "CandidateTemperature should match Python temperature_for_candidates=0.2")
 	})
 
 	t.Run("Compile method signature is compatible", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Create test program and dataset
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
 
 		ctx := core.WithExecutionState(context.Background())
+
+		// Define metric function
+		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
 
 		// Should be able to call Compile with context, program, dataset, and metric
 		// This matches the pattern: compile(student, trainset, seed=0) in Python
@@ -169,8 +159,7 @@ func testSIMBAPythonCompatibility(t *testing.T) {
 // testSIMBACoreAlgorithm tests core algorithmic components.
 func testSIMBACoreAlgorithm(t *testing.T) {
 	t.Run("Temperature decay function works correctly", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Test temperature decay over steps
 		initialTemp := simba.getCurrentTemperature(0)
@@ -184,8 +173,7 @@ func testSIMBACoreAlgorithm(t *testing.T) {
 	})
 
 	t.Run("Temperature sampling selects candidates probabilistically", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		scores := []float64{0.1, 0.5, 0.9, 0.3}
 
@@ -213,8 +201,7 @@ func testSIMBACoreAlgorithm(t *testing.T) {
 	})
 
 	t.Run("State management is thread-safe", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Test concurrent access to state
 		done := make(chan bool, 10)
@@ -236,8 +223,7 @@ func testSIMBACoreAlgorithm(t *testing.T) {
 // testSIMBAMiniBatchProcessing tests mini-batch sampling and processing.
 func testSIMBAMiniBatchProcessing(t *testing.T) {
 	t.Run("Samples mini-batch from dataset correctly", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric, WithSIMBABatchSize(3))
+		simba := NewSIMBA(WithSIMBABatchSize(3))
 
 		dataset := createSIMBATestDataset()
 		ctx := context.Background()
@@ -255,8 +241,7 @@ func testSIMBAMiniBatchProcessing(t *testing.T) {
 	})
 
 	t.Run("Handles batch size larger than dataset", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric, WithSIMBABatchSize(100))
+		simba := NewSIMBA(WithSIMBABatchSize(100))
 
 		dataset := createSIMBATestDataset() // Has only 3 examples
 		ctx := context.Background()
@@ -268,8 +253,7 @@ func testSIMBAMiniBatchProcessing(t *testing.T) {
 	})
 
 	t.Run("Handles empty dataset gracefully", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		emptyDataset := testutil.NewMockDataset([]core.Example{})
 		emptyDataset.On("Reset").Return()
@@ -287,8 +271,7 @@ func testSIMBAMiniBatchProcessing(t *testing.T) {
 // testSIMBACandidateGeneration tests candidate program generation.
 func testSIMBACandidateGeneration(t *testing.T) {
 	t.Run("Generates correct number of candidates", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric, WithSIMBANumCandidates(5))
+		simba := NewSIMBA(WithSIMBANumCandidates(5))
 
 		program := createSIMBATestProgram()
 		ctx := context.Background()
@@ -301,8 +284,7 @@ func testSIMBACandidateGeneration(t *testing.T) {
 	})
 
 	t.Run("Includes base program as first candidate", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		program := createSIMBATestProgram()
 		ctx := context.Background()
@@ -322,8 +304,7 @@ func testSIMBACandidateGeneration(t *testing.T) {
 	})
 
 	t.Run("Perturbs program instructions", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		program := createSIMBATestProgram()
 		ctx := context.Background()
@@ -337,8 +318,7 @@ func testSIMBACandidateGeneration(t *testing.T) {
 	})
 
 	t.Run("Generates instruction variations", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		ctx := context.Background()
 		originalInstruction := "Answer the question"
@@ -355,8 +335,7 @@ func testSIMBACandidateGeneration(t *testing.T) {
 // testSIMBATemperatureSampling tests temperature-controlled sampling.
 func testSIMBATemperatureSampling(t *testing.T) {
 	t.Run("Selects best candidate with zero temperature", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric, WithTemperatures(0.0, 0.0)) // Set both temperatures to 0
+		simba := NewSIMBA(WithSamplingTemperature(0.0))
 
 		// Create distinct programs
 		program1 := createSIMBATestProgram()
@@ -373,8 +352,7 @@ func testSIMBATemperatureSampling(t *testing.T) {
 	})
 
 	t.Run("Temperature sampling respects probability distribution", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		scores := []float64{0.1, 0.9}
 
@@ -392,8 +370,7 @@ func testSIMBATemperatureSampling(t *testing.T) {
 	})
 
 	t.Run("Handles edge cases in temperature sampling", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Test with single score
 		singleScore := []float64{0.5}
@@ -410,8 +387,7 @@ func testSIMBATemperatureSampling(t *testing.T) {
 // testSIMBAIntrospectiveAnalysis tests introspective learning capabilities.
 func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 	t.Run("Performs introspection with sufficient data", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Add some performance history
 		simba.state.PerformanceLog = []StepResult{
@@ -432,8 +408,7 @@ func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 	})
 
 	t.Run("Handles insufficient data gracefully", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		ctx := context.Background()
 		result := simba.performIntrospection(ctx)
@@ -444,8 +419,7 @@ func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 	})
 
 	t.Run("Identifies performance patterns", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Create improving trend
 		improvingSteps := []StepResult{
@@ -455,7 +429,7 @@ func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 		}
 
 		patterns := simba.identifyPatterns(improvingSteps)
-		assert.Contains(t, patterns, "Consistent improvement trend")
+		assert.Contains(t, patterns, "Strong upward trend detected")
 
 		// Create stagnating trend
 		stagnatingSteps := []StepResult{
@@ -465,12 +439,11 @@ func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 		}
 
 		patterns = simba.identifyPatterns(stagnatingSteps)
-		assert.Contains(t, patterns, "Stagnation detected")
+		assert.Contains(t, patterns, "Consistent stagnation or decline")
 	})
 
 	t.Run("Suggests appropriate adjustments", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Create steps with low improvement
 		lowImprovementSteps := []StepResult{
@@ -491,7 +464,7 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 			// Simple metric that always returns 0.8
 			return 0.8
 		}
-		simba := NewSIMBA(metric, WithSIMBAMaxSteps(2)) // Limit steps for testing
+		simba := NewSIMBA(WithSIMBAMaxSteps(2)) // Limit steps for testing
 
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
@@ -512,7 +485,7 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 
 	t.Run("Records optimization metrics", func(t *testing.T) {
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.75 }
-		simba := NewSIMBA(metric, WithSIMBAMaxSteps(3))
+		simba := NewSIMBA(WithSIMBAMaxSteps(3))
 
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
@@ -538,7 +511,7 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 
 	t.Run("Performs introspection at configured intervals", func(t *testing.T) {
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.6 }
-		simba := NewSIMBA(metric,
+		simba := NewSIMBA(
 			WithSIMBAMaxSteps(5),
 		)
 		// Use default introspection frequency = 2
@@ -566,11 +539,13 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 // testSIMBAEdgeCases tests edge cases and error handling.
 func testSIMBAEdgeCases(t *testing.T) {
 	t.Run("Handles nil context gracefully", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
+
+		// Define metric function
+		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
 
 		// Pass nil context - should be handled gracefully
 		result, err := simba.Compile(context.TODO(), program, dataset, metric)
@@ -580,8 +555,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Handles LLM generation failures", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Set up failing mock LLM
 		failingLLM := new(testutil.MockLLM)
@@ -599,8 +573,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Handles program evaluation failures", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Create a program that fails during Forward
 		failingProgram := core.NewProgram(
@@ -617,8 +590,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Handles zero or negative scores", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return -0.5 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		candidates := []core.Program{createSIMBATestProgram()}
 		scores := []float64{-0.5}
@@ -633,8 +605,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 // testSIMBAConvergence tests convergence detection and performance.
 func testSIMBAConvergence(t *testing.T) {
 	t.Run("Detects convergence with minimal improvements", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Simulate convergence with very small improvements
 		simba.state.PerformanceLog = []StepResult{
@@ -648,8 +619,7 @@ func testSIMBAConvergence(t *testing.T) {
 	})
 
 	t.Run("Does not converge with significant improvements", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Simulate ongoing improvements
 		simba.state.PerformanceLog = []StepResult{
@@ -663,8 +633,7 @@ func testSIMBAConvergence(t *testing.T) {
 	})
 
 	t.Run("Handles insufficient data for convergence", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
-		simba := NewSIMBA(metric)
+		simba := NewSIMBA()
 
 		// Empty performance log
 		simba.state.PerformanceLog = []StepResult{}
@@ -675,7 +644,7 @@ func testSIMBAConvergence(t *testing.T) {
 
 	t.Run("Completes optimization within reasonable time", func(t *testing.T) {
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.9 }
-		simba := NewSIMBA(metric, WithSIMBAMaxSteps(3)) // Small number for fast test
+		simba := NewSIMBA(WithSIMBAMaxSteps(3)) // Small number for fast test
 
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()

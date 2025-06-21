@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,15 +22,12 @@ type SIMBAConfig struct {
 	BatchSize     int `json:"batch_size"`     // Default: 32
 	MaxSteps      int `json:"max_steps"`      // Default: 8
 	NumCandidates int `json:"num_candidates"` // Default: 6
-	MaxDemos      int `json:"max_demos"`      // Default: 4
 
 	// Temperature controls
-	SamplingTemperature  float64 `json:"sampling_temperature"`  // Default: 0.2
-	CandidateTemperature float64 `json:"candidate_temperature"` // Default: 0.2
+	SamplingTemperature float64 `json:"sampling_temperature"` // Default: 0.2
 
 	// Introspective learning
-	IntrospectionFrequency int     `json:"introspection_frequency"` // Default: 2
-	SelfAdviceWeight       float64 `json:"self_advice_weight"`      // Default: 0.3
+	IntrospectionFrequency int `json:"introspection_frequency"` // Default: 2
 
 	// Performance thresholds
 	ConvergenceThreshold float64 `json:"convergence_threshold"` // Default: 0.001
@@ -85,7 +83,7 @@ type SIMBA struct {
 	// Core configuration
 	config SIMBAConfig
 
-	// Evaluation metric
+	// Evaluation metric (set during Compile)
 	metric func(expected, actual map[string]interface{}) float64
 
 	// Language models
@@ -125,38 +123,27 @@ func WithSIMBANumCandidates(num int) SIMBAOption {
 	}
 }
 
-// WithTemperatures sets sampling and candidate temperatures.
-func WithTemperatures(sampling, candidate float64) SIMBAOption {
+// WithSamplingTemperature sets the sampling temperature.
+func WithSamplingTemperature(temperature float64) SIMBAOption {
 	return func(s *SIMBA) {
-		s.config.SamplingTemperature = sampling
-		s.config.CandidateTemperature = candidate
+		s.config.SamplingTemperature = temperature
 	}
 }
 
-// WithMaxDemos sets the maximum demonstrations per predictor.
-func WithMaxDemos(maxDemos int) SIMBAOption {
-	return func(s *SIMBA) {
-		s.config.MaxDemos = maxDemos
-	}
-}
-
-// NewSIMBA creates a new SIMBA optimizer with the given metric function.
-func NewSIMBA(metric func(expected, actual map[string]interface{}) float64, opts ...SIMBAOption) *SIMBA {
+// NewSIMBA creates a new SIMBA optimizer.
+func NewSIMBA(opts ...SIMBAOption) *SIMBA {
 	s := &SIMBA{
 		config: SIMBAConfig{
 			BatchSize:              32,
 			MaxSteps:               8,
 			NumCandidates:          6,
-			MaxDemos:               4,
 			SamplingTemperature:    0.2,
-			CandidateTemperature:   0.2,
 			IntrospectionFrequency: 2,
-			SelfAdviceWeight:       0.3,
 			ConvergenceThreshold:   0.001,
 			MinImprovementRatio:    0.05,
 			MaxGoroutines:          10,
 		},
-		metric: metric,
+		metric: nil, // Will be set during Compile
 		state: &SIMBAState{
 			CurrentStep:      0,
 			BestScore:        0.0,
@@ -341,7 +328,11 @@ func (s *SIMBA) evaluateProgram(ctx context.Context, program core.Program, datas
 
 		prediction, err := program.Forward(ctx, example.Inputs)
 		if err != nil {
-			continue // Skip failed predictions
+			s.logger.Debug(ctx, "Program evaluation failed for example: %v", err)
+			// Assign penalty score for failed predictions
+			totalScore += 0.0
+			count++
+			continue
 		}
 
 		score := s.metric(example.Outputs, prediction)
@@ -490,7 +481,11 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 	for _, example := range batch {
 		prediction, err := candidate.Forward(ctx, example.Inputs)
 		if err != nil {
-			continue // Skip failed predictions
+			s.logger.Debug(ctx, "Candidate evaluation failed for example: %v", err)
+			// Assign penalty score for failed predictions
+			totalScore += 0.0
+			count++
+			continue
 		}
 
 		score := s.metric(example.Outputs, prediction)
@@ -652,9 +647,50 @@ func (s *SIMBA) buildIntrospectionPrompt(steps []StepResult) string {
 // extractRecommendations extracts actionable recommendations from analysis.
 func (s *SIMBA) extractRecommendations(analysis string) []string {
 	recommendations := []string{}
-	if len(analysis) > 50 {
-		recommendations = append(recommendations, "Continue current optimization approach")
+	analysisLower := strings.ToLower(analysis)
+
+	// Look for specific recommendation keywords in the LLM analysis
+	if strings.Contains(analysisLower, "increase temperature") || strings.Contains(analysisLower, "more exploration") {
+		recommendations = append(recommendations, "Increase sampling temperature for more exploration")
 	}
+
+	if strings.Contains(analysisLower, "decrease temperature") || strings.Contains(analysisLower, "less exploration") {
+		recommendations = append(recommendations, "Decrease sampling temperature for more exploitation")
+	}
+
+	if strings.Contains(analysisLower, "batch size") && strings.Contains(analysisLower, "increase") {
+		recommendations = append(recommendations, "Consider increasing batch size for more stable gradients")
+	}
+
+	if strings.Contains(analysisLower, "batch size") && strings.Contains(analysisLower, "decrease") {
+		recommendations = append(recommendations, "Consider decreasing batch size for faster iterations")
+	}
+
+	if strings.Contains(analysisLower, "stagnant") || strings.Contains(analysisLower, "plateau") {
+		recommendations = append(recommendations, "Try different instruction variations to escape local optimum")
+		recommendations = append(recommendations, "Consider restarting with different random seed")
+	}
+
+	if strings.Contains(analysisLower, "overfitting") || strings.Contains(analysisLower, "memorizing") {
+		recommendations = append(recommendations, "Increase diversity in candidate generation")
+		recommendations = append(recommendations, "Consider validation-based stopping criteria")
+	}
+
+	if strings.Contains(analysisLower, "slow progress") || strings.Contains(analysisLower, "small improvement") {
+		recommendations = append(recommendations, "Increase number of candidates per iteration")
+		recommendations = append(recommendations, "Try more aggressive instruction perturbations")
+	}
+
+	if strings.Contains(analysisLower, "unstable") || strings.Contains(analysisLower, "volatile") {
+		recommendations = append(recommendations, "Increase batch size for more stable evaluation")
+		recommendations = append(recommendations, "Consider smoothing or averaging recent scores")
+	}
+
+	// If no specific patterns found but analysis exists, provide generic advice
+	if len(recommendations) == 0 && len(strings.TrimSpace(analysis)) > 20 {
+		recommendations = append(recommendations, "Continue current optimization approach with monitoring")
+	}
+
 	return recommendations
 }
 
@@ -662,25 +698,138 @@ func (s *SIMBA) extractRecommendations(analysis string) []string {
 func (s *SIMBA) identifyPatterns(steps []StepResult) []string {
 	patterns := []string{}
 
-	if len(steps) < 3 {
+	if len(steps) < 2 {
 		return patterns
 	}
 
-	// Check for improvement trends
-	improvingCount := 0
+	// Analyze score improvement trends
+	improvements := make([]float64, 0, len(steps)-1)
 	for i := 1; i < len(steps); i++ {
-		if steps[i].BestScore > steps[i-1].BestScore {
-			improvingCount++
+		improvements = append(improvements, steps[i].BestScore-steps[i-1].BestScore)
+	}
+
+	// Count consecutive non-improving steps
+	consecutiveNoImprovement := 0
+	maxConsecutiveNoImprovement := 0
+	for _, improvement := range improvements {
+		if improvement <= 0.0001 { // Consider very small improvements as no improvement
+			consecutiveNoImprovement++
+			if consecutiveNoImprovement > maxConsecutiveNoImprovement {
+				maxConsecutiveNoImprovement = consecutiveNoImprovement
+			}
+		} else {
+			consecutiveNoImprovement = 0
 		}
 	}
 
-	if improvingCount >= len(steps)/2 {
-		patterns = append(patterns, "Consistent improvement trend")
-	} else {
-		patterns = append(patterns, "Stagnation detected")
+	// Analyze improvement magnitude trends
+	var totalImprovement, avgImprovement float64
+	positiveImprovements := 0
+	for _, improvement := range improvements {
+		totalImprovement += improvement
+		if improvement > 0 {
+			positiveImprovements++
+		}
+	}
+	avgImprovement = totalImprovement / float64(len(improvements))
+
+	// Calculate improvement variance to detect volatility
+	var variance float64
+	for _, improvement := range improvements {
+		variance += (improvement - avgImprovement) * (improvement - avgImprovement)
+	}
+	variance /= float64(len(improvements))
+	stdDev := math.Sqrt(variance)
+
+	// Identify specific patterns
+	improvementRatio := float64(positiveImprovements) / float64(len(improvements))
+
+	if improvementRatio >= 0.7 {
+		patterns = append(patterns, "Strong upward trend detected")
+	} else if improvementRatio >= 0.4 {
+		patterns = append(patterns, "Moderate improvement trend")
+	} else if improvementRatio <= 0.2 {
+		patterns = append(patterns, "Consistent stagnation or decline")
+	}
+
+	if maxConsecutiveNoImprovement >= 3 {
+		patterns = append(patterns, fmt.Sprintf("Extended plateau detected (%d consecutive non-improving steps)", maxConsecutiveNoImprovement))
+	}
+
+	if avgImprovement > 0.01 {
+		patterns = append(patterns, "High magnitude improvements")
+	} else if avgImprovement > 0.001 {
+		patterns = append(patterns, "Small but steady improvements")
+	} else if avgImprovement <= 0 {
+		patterns = append(patterns, "No net improvement or decline")
+	}
+
+	// Detect volatility patterns
+	if stdDev > math.Abs(avgImprovement)*2 && len(improvements) >= 3 {
+		patterns = append(patterns, "High volatility in performance")
+	} else if stdDev < math.Abs(avgImprovement)*0.5 {
+		patterns = append(patterns, "Stable, consistent performance")
+	}
+
+	// Analyze recent vs early performance (if we have enough data)
+	if len(steps) >= 6 {
+		earlyAvg := (steps[0].BestScore + steps[1].BestScore + steps[2].BestScore) / 3
+		recentAvg := (steps[len(steps)-3].BestScore + steps[len(steps)-2].BestScore + steps[len(steps)-1].BestScore) / 3
+
+		if recentAvg > earlyAvg*1.1 {
+			patterns = append(patterns, "Accelerating improvement in recent steps")
+		} else if recentAvg < earlyAvg*0.95 {
+			patterns = append(patterns, "Performance degradation detected")
+		}
+	}
+
+	// Simple trend line analysis (linear regression slope)
+	if len(steps) >= 4 {
+		slope := s.calculateTrendSlope(steps)
+		if slope > 0.01 {
+			patterns = append(patterns, "Strong positive trend (linear fit)")
+		} else if slope > 0.001 {
+			patterns = append(patterns, "Weak positive trend (linear fit)")
+		} else if slope < -0.001 {
+			patterns = append(patterns, "Negative trend detected (linear fit)")
+		} else {
+			patterns = append(patterns, "Flat trend (linear fit)")
+		}
 	}
 
 	return patterns
+}
+
+// calculateTrendSlope performs simple linear regression to calculate trend slope.
+func (s *SIMBA) calculateTrendSlope(steps []StepResult) float64 {
+	n := float64(len(steps))
+	if n < 2 {
+		return 0
+	}
+
+	// Calculate means
+	var sumX, sumY float64
+	for i, step := range steps {
+		sumX += float64(i)
+		sumY += step.BestScore
+	}
+	meanX := sumX / n
+	meanY := sumY / n
+
+	// Calculate slope using least squares formula
+	var numerator, denominator float64
+	for i, step := range steps {
+		x := float64(i)
+		y := step.BestScore
+		numerator += (x - meanX) * (y - meanY)
+		denominator += (x - meanX) * (x - meanX)
+	}
+
+	if denominator == 0 {
+		return 0
+	}
+
+	return numerator / denominator
 }
 
 // suggestAdjustments suggests parameter adjustments based on performance.
