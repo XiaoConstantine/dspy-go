@@ -144,8 +144,12 @@ func runSentimentAnalysisExample(ctx context.Context) {
 	fmt.Printf("Successful: %d, Failed: %d\n\n", len(results), len(failures))
 
 	for i, res := range results {
-		fmt.Printf("Review %d: %s (confidence: %s)\n",
-			i+1, res["sentiment"], res["confidence"])
+	if res != nil {
+	fmt.Printf("Review %d: %s (confidence: %s)\n", 
+	   i+1, res["sentiment"], res["confidence"])
+		} else {
+			fmt.Printf("Review %d: [FAILED]\n", i+1)
+		}
 	}
 
 	if hasFailures && len(failures) > 0 {
@@ -202,9 +206,14 @@ func runTranslationExample(ctx context.Context) {
 	fmt.Printf("Completed %d translations in %v\n\n", len(results), duration)
 
 	for i, res := range results {
-		original := translations[i]
-		fmt.Printf("%s → %s: %s\n",
-			original["text"], original["target_language"], res["translation"])
+	original := translations[i]
+	if res != nil {
+	fmt.Printf("%s → %s: %s\n", 
+	   original["text"], original["target_language"], res["translation"])
+		} else {
+			fmt.Printf("%s → %s: [FAILED]\n", 
+				original["text"], original["target_language"])
+		}
 	}
 	fmt.Println()
 }
@@ -255,6 +264,10 @@ func runQAWithFailuresExample(ctx context.Context) {
 	fmt.Printf("Answered %d questions in %v\n\n", len(results), duration)
 
 	for i, res := range results {
-		fmt.Printf("Q: %s\nA: %s\n\n", questions[i]["question"], res["answer"])
+		if res != nil {
+			fmt.Printf("Q: %s\nA: %s\n\n", questions[i]["question"], res["answer"])
+		} else {
+			fmt.Printf("Q: %s\nA: [FAILED]\n\n", questions[i]["question"])
+		}
 	}
 }

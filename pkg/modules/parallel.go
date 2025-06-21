@@ -257,19 +257,25 @@ func (p *Parallel) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan j
 }
 
 // formatResults converts ParallelResult slice to output format.
+// The outputs slice maintains the same length and order as the input batch,
+// with nil placeholders for failed items to preserve index correspondence.
 func (p *Parallel) formatResults(results []ParallelResult) map[string]interface{} {
-	outputs := make([]map[string]interface{}, 0, len(results))
+	outputs := make([]map[string]interface{}, len(results))
 	failures := make([]map[string]interface{}, 0)
 
-	for _, result := range results {
+	for i, result := range results {
 		if result.Success {
-			outputs = append(outputs, result.Output)
-		} else if p.options.ReturnFailures {
-			// Only include failure if there was an error to prevent panic
-			if result.Error != nil {
+			outputs[i] = result.Output
+		} else {
+			outputs[i] = nil // Use nil to preserve order for failed items
+			if p.options.ReturnFailures {
+				errStr := "an unknown error occurred"
+				if result.Error != nil {
+					errStr = result.Error.Error()
+				}
 				failureInfo := map[string]interface{}{
 					"index": result.Index,
-					"error": result.Error.Error(),
+					"error": errStr,
 				}
 				failures = append(failures, failureInfo)
 			}
