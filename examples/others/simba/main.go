@@ -118,13 +118,13 @@ func RunSIMBAExample(apiKey string) {
 	// Create SIMBA optimizer with configuration optimized for demonstration
 	// This showcases SIMBA's key features and introspective capabilities
 	logger.Info(ctx, "Creating SIMBA optimizer with introspective learning enabled...")
-	
+
 	optimizer := optimizers.NewSIMBA(
 		// Configure for demonstration - smaller values for faster execution
-		optimizers.WithSIMBABatchSize(4),           // Small batches for stochastic optimization
-		optimizers.WithSIMBAMaxSteps(6),            // Enough steps to show convergence
-		optimizers.WithSIMBANumCandidates(4),       // Generate multiple instruction variants
-		optimizers.WithSamplingTemperature(0.3),    // Moderate exploration vs exploitation
+		optimizers.WithSIMBABatchSize(4),        // Small batches for stochastic optimization
+		optimizers.WithSIMBAMaxSteps(6),         // Enough steps to show convergence
+		optimizers.WithSIMBANumCandidates(4),    // Generate multiple instruction variants
+		optimizers.WithSamplingTemperature(0.3), // Moderate exploration vs exploitation
 	)
 
 	// Display initial program state
@@ -161,10 +161,10 @@ func RunSIMBAExample(apiKey string) {
 
 	// Evaluate both original and optimized programs
 	logger.Info(ctx, "Comparing original vs optimized performance...")
-	
+
 	logger.Info(ctx, "\n=== ORIGINAL PROGRAM EVALUATION ===")
 	originalScore := runEvaluation(ctx, program, testExamples, logger, "Original")
-	
+
 	logger.Info(ctx, "\n=== OPTIMIZED PROGRAM EVALUATION ===")
 	optimizedScore := runEvaluation(ctx, optimizedProgram, testExamples, logger, "Optimized")
 
@@ -182,11 +182,11 @@ func RunSIMBAExample(apiKey string) {
 	} else {
 		logger.Info(ctx, "Decrease: %.1f%% (optimization may need different parameters)", improvementPercent)
 	}
-	
+
 	logger.Info(ctx, "Optimization completed in %v", optimizationTime)
 }
 
-// Helper function to create a Dataset from examples
+// Helper function to create a Dataset from examples.
 func createDataset(examples []datasets.GSM8KExample) core.Dataset {
 	data := make([]core.Example, len(examples))
 	for i, ex := range examples {
@@ -202,7 +202,7 @@ func createDataset(examples []datasets.GSM8KExample) core.Dataset {
 	return &exampleDataset{examples: data}
 }
 
-// Custom Dataset implementation
+// Custom Dataset implementation.
 type exampleDataset struct {
 	examples []core.Example
 	position int
@@ -221,30 +221,30 @@ func (d *exampleDataset) Reset() {
 	d.position = 0
 }
 
-// Enhanced answer extraction for GSM8K format
+// Enhanced answer extraction for GSM8K format.
 func extractFinalAnswer(answerString string) string {
 	// Clean the input
 	cleaned := strings.TrimSpace(answerString)
-	
+
 	// Look for #### pattern first (GSM8K standard)
 	re := regexp.MustCompile(`####\s*(-?\d+(?:\.\d+)?)`)
 	if matches := re.FindStringSubmatch(cleaned); len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
 	}
-	
+
 	// Fallback to finding any number in the string
 	cleaned = strings.ReplaceAll(cleaned, "$", "")
 	cleaned = strings.ReplaceAll(cleaned, ",", "")
-	
+
 	numRe := regexp.MustCompile(`-?\d+(?:\.\d+)?`)
 	if numMatch := numRe.FindString(cleaned); numMatch != "" {
 		return numMatch
 	}
-	
+
 	return cleaned
 }
 
-// Display detailed program information
+// Display detailed program information.
 func displayProgramInfo(ctx context.Context, program core.Program, logger *logging.Logger) {
 	for name, module := range program.Modules {
 		signature := module.GetSignature()
@@ -254,25 +254,25 @@ func displayProgramInfo(ctx context.Context, program core.Program, logger *loggi
 	}
 }
 
-// Helper to extract input field names for display
+// Helper to extract input field names for display.
 func getInputFieldNames(fields []core.InputField) []string {
 	names := make([]string, len(fields))
 	for i, field := range fields {
-		names[i] = field.Field.Name
+		names[i] = field.Name
 	}
 	return names
 }
 
-// Helper to extract output field names for display
+// Helper to extract output field names for display.
 func getOutputFieldNames(fields []core.OutputField) []string {
 	names := make([]string, len(fields))
 	for i, field := range fields {
-		names[i] = field.Field.Name
+		names[i] = field.Name
 	}
 	return names
 }
 
-// Display SIMBA's introspective insights and analysis
+// Display SIMBA's introspective insights and analysis.
 func displaySIMBAInsights(ctx context.Context, optimizer *optimizers.SIMBA, logger *logging.Logger) {
 	state := optimizer.GetState()
 	config := optimizer.GetConfig()
@@ -287,9 +287,9 @@ func displaySIMBAInsights(ctx context.Context, optimizer *optimizers.SIMBA, logg
 	if len(state.PerformanceLog) > 0 {
 		logger.Info(ctx, "\nOptimization Progress:")
 		for _, step := range state.PerformanceLog {
-			logger.Info(ctx, "  Step %d: Score=%.4f, Improvement=%.4f, Temperature=%.3f, Batch=%d", 
+			logger.Info(ctx, "  Step %d: Score=%.4f, Improvement=%.4f, Temperature=%.3f, Batch=%d",
 				step.Step, step.BestScore, step.Improvement, step.Temperature, step.BatchSize)
-			
+
 			if step.Introspection != "" {
 				logger.Info(ctx, "    Introspection: %s", truncateString(step.Introspection, 100))
 			}
@@ -307,24 +307,24 @@ func displaySIMBAInsights(ctx context.Context, optimizer *optimizers.SIMBA, logg
 	if len(state.PerformanceLog) >= 3 {
 		recentSteps := state.PerformanceLog[max(0, len(state.PerformanceLog)-3):]
 		logger.Info(ctx, "\nConvergence Analysis:")
-		
+
 		totalImprovement := 0.0
 		for _, step := range recentSteps {
 			totalImprovement += step.Improvement
 		}
 		avgImprovement := totalImprovement / float64(len(recentSteps))
-		
+
 		if avgImprovement < config.ConvergenceThreshold {
-			logger.Info(ctx, "  ✓ Converged: Average improvement (%.6f) below threshold (%.6f)", 
+			logger.Info(ctx, "  ✓ Converged: Average improvement (%.6f) below threshold (%.6f)",
 				avgImprovement, config.ConvergenceThreshold)
 		} else {
-			logger.Info(ctx, "  ○ Still improving: Average improvement (%.6f) above threshold (%.6f)", 
+			logger.Info(ctx, "  ○ Still improving: Average improvement (%.6f) above threshold (%.6f)",
 				avgImprovement, config.ConvergenceThreshold)
 		}
 	}
 }
 
-// Helper function to truncate long strings for display
+// Helper function to truncate long strings for display.
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -332,7 +332,7 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// Helper function for max
+// Helper function for max.
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -340,13 +340,13 @@ func max(a, b int) int {
 	return b
 }
 
-// Enhanced evaluation function with detailed reporting
+// Enhanced evaluation function with detailed reporting.
 func runEvaluation(ctx context.Context, program core.Program, examples []datasets.GSM8KExample, logger *logging.Logger, programType string) float64 {
 	correct := 0
 	total := 0
 
 	logger.Info(ctx, "Evaluating %s program on %d test examples...", programType, len(examples))
-	
+
 	for i, ex := range examples {
 		result, err := program.Execute(ctx, map[string]interface{}{"question": ex.Question})
 		if err != nil {
@@ -379,7 +379,7 @@ func runEvaluation(ctx context.Context, program core.Program, examples []dataset
 			logger.Info(ctx, "  Expected: %s", actualAnswer)
 			logger.Info(ctx, "  Predicted: %s", predictedAnswer)
 			logger.Info(ctx, "  Correct: %v", isCorrect)
-			
+
 			if reasoning, ok := result["reasoning"].(string); ok && reasoning != "" {
 				logger.Info(ctx, "  Reasoning: %s", truncateString(reasoning, 100))
 			}
@@ -388,7 +388,7 @@ func runEvaluation(ctx context.Context, program core.Program, examples []dataset
 	}
 
 	accuracy := float64(correct) / float64(total)
-	logger.Info(ctx, "%s program accuracy: %.1f%% (%d/%d correct)", 
+	logger.Info(ctx, "%s program accuracy: %.1f%% (%d/%d correct)",
 		programType, accuracy*100, correct, total)
 
 	return accuracy

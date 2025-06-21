@@ -194,14 +194,56 @@ optimizer := optimizers.NewBootstrapFewShot(dataset, metrics.NewExactMatchMetric
 optimizedModule, err := optimizer.Optimize(ctx, originalModule)
 ```
 
-#### MIPRO and Copro
+#### MIPRO (Multi-step Interactive Prompt Optimization)
 
-More advanced optimizers for multi-step interactive prompt optimization (MIPRO) and collaborative prompt optimization (Copro).
+Advanced optimizer that uses TPE (Tree-structured Parzen Estimator) search for systematic prompt optimization.
 
 ```go
-// Create a MIPRO optimizer
-mipro := optimizers.NewMIPRO(dataset, metrics.NewRougeMetric("answer"))
-optimizedModule, err := mipro.Optimize(ctx, originalModule)
+// Create a MIPRO optimizer with configuration
+mipro := optimizers.NewMIPRO(
+    metricFunc,
+    optimizers.WithMode(optimizers.LightMode),      // Fast optimization mode
+    optimizers.WithNumTrials(10),                   // Number of optimization trials
+    optimizers.WithTPEGamma(0.25),                  // TPE exploration parameter
+)
+
+optimizedProgram, err := mipro.Compile(ctx, program, dataset, nil)
+```
+
+#### SIMBA (Stochastic Introspective Mini-Batch Ascent)
+
+Cutting-edge optimizer with introspective learning capabilities that analyzes its own optimization progress.
+
+```go
+// Create a SIMBA optimizer with introspective features
+simba := optimizers.NewSIMBA(
+    optimizers.WithSIMBABatchSize(8),            // Mini-batch size for stochastic optimization
+    optimizers.WithSIMBAMaxSteps(12),            // Maximum optimization steps
+    optimizers.WithSIMBANumCandidates(6),        // Candidate programs per iteration
+    optimizers.WithSamplingTemperature(0.2),     // Temperature for exploration vs exploitation
+)
+
+optimizedProgram, err := simba.Compile(ctx, program, dataset, metricFunc)
+
+// Access SIMBA's introspective insights
+state := simba.GetState()
+fmt.Printf("Optimization completed in %d steps with score %.3f\n", 
+    state.CurrentStep, state.BestScore)
+
+// View detailed introspective analysis
+for _, insight := range state.IntrospectionLog {
+    fmt.Printf("Analysis: %s\n", insight)
+}
+```
+
+#### COPRO (Collaborative Prompt Optimization)
+
+Collaborative optimizer for multi-module prompt optimization.
+
+```go
+// Create a COPRO optimizer
+copro := optimizers.NewCopro(dataset, metrics.NewRougeMetric("answer"))
+optimizedModule, err := copro.Optimize(ctx, originalModule)
 ```
 
 ## Agents and Workflows
@@ -399,6 +441,8 @@ Check the examples directory for complete implementations:
 * [examples/agents](examples/agents): Demonstrates different agent patterns
 * [examples/hotpotqa](examples/hotpotqa): Question-answering implementation
 * [examples/gsm8k](examples/gsm8k): Math problem solving
+* [examples/others/mipro](examples/others/mipro): MIPRO optimizer demonstration with GSM8K
+* [examples/others/simba](examples/others/simba): SIMBA optimizer with introspective learning showcase
 
 ## Documentation
 
