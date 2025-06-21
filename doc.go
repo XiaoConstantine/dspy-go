@@ -18,18 +18,22 @@
 //     * Predict: Basic prediction module for simple LLM interactions
 //     * ChainOfThought: Implements step-by-step reasoning with rationale tracking
 //     * ReAct: Implements Reasoning and Acting with tool integration
+//     * Refine: Quality improvement through multiple attempts with reward functions
+//     * Parallel: Concurrent execution wrapper for batch processing with any module
 //
 //   - Optimizers: Tools for improving prompt effectiveness:
 //     * BootstrapFewShot: Automatically selects high-quality examples for few-shot learning
 //     * MIPRO: Multi-step interactive prompt optimization
 //     * Copro: Collaborative prompt optimization
+//     * SIMBA: Stochastic Introspective Mini-Batch Ascent with self-analysis
+//     * TPE: Tree-structured Parzen Estimator for Bayesian optimization
 //
 //   - Agents: Advanced patterns for building sophisticated AI systems:
 //     * Memory: Different memory implementations for tracking conversation history
 //     * Tools: Integration with external tools and APIs
 //     * Workflows:
 //       - Chain: Sequential execution of steps
-//       - Parallel: Concurrent execution with controlled parallelism
+//       - Parallel: Concurrent execution of multiple workflow steps
 //       - Router: Dynamic routing based on classification
 //     * Orchestrator: Flexible task decomposition and execution
 //
