@@ -186,7 +186,12 @@ func TestParallelWithFailures(t *testing.T) {
 
 	results, ok := result["results"].([]map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, results, 0) // No successful results
+	assert.Len(t, results, 2) // Same length as input, but with nil values
+	
+	// Check that failed results are nil
+	for _, res := range results {
+		assert.Nil(t, res)
+	}
 
 	failures, ok := result["failures"].([]map[string]interface{})
 	require.True(t, ok)
@@ -221,8 +226,8 @@ func TestParallelStopOnFirstError(t *testing.T) {
 }
 
 func TestParallelMixedSuccessFailure(t *testing.T) {
-	// Create a module that alternates between success and failure
-	mockModule := &AlternatingModule{
+	// Create a module that succeeds for item1,item3 and fails for item2,item4
+	mockModule := &ConditionalModule{
 		BaseModule: *core.NewModule(core.Signature{
 			Inputs: []core.InputField{
 				{Field: core.Field{Name: "input"}},
@@ -231,16 +236,17 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 				{Field: core.Field{Name: "output"}},
 			},
 		}),
+		failInputs: map[string]bool{"item2": true, "item4": true},
 	}
 
 	parallel := NewParallel(mockModule, WithReturnFailures(true))
 
 	ctx := context.Background()
 	batchInputs := []map[string]interface{}{
-		{"input": "item1"}, // Will succeed (call 1)
-		{"input": "item2"}, // Will fail (call 2)
-		{"input": "item3"}, // Will succeed (call 3)
-		{"input": "item4"}, // Will fail (call 4)
+		{"input": "item1"}, // Will succeed
+		{"input": "item2"}, // Will fail
+		{"input": "item3"}, // Will succeed
+		{"input": "item4"}, // Will fail
 	}
 
 	inputs := map[string]interface{}{
@@ -252,11 +258,35 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 
 	results, ok := result["results"].([]map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, results, 2) // Two successful results
+	assert.Len(t, results, 4) // Same length as input batch
+	
+	// Check results - should have successes for item1,item3 (indices 0,2) and nil for item2,item4 (indices 1,3)
+	successCount := 0
+	nilCount := 0
+	for i, res := range results {
+		if i == 0 || i == 2 { // item1, item3 should succeed
+			assert.NotNil(t, res, "Expected success at index %d", i)
+			if res != nil {
+				successCount++
+				assert.Contains(t, res["output"].(string), fmt.Sprintf("item%d", i+1))
+			}
+		} else { // item2, item4 should fail
+			assert.Nil(t, res, "Expected failure at index %d", i)
+			nilCount++
+		}
+	}
+	assert.Equal(t, 2, successCount)
+	assert.Equal(t, 2, nilCount)
 
 	failures, ok := result["failures"].([]map[string]interface{})
 	require.True(t, ok)
 	assert.Len(t, failures, 2) // Two failures
+	
+	// Check that failure indices are correct
+	for _, failure := range failures {
+		idx := failure["index"].(int)
+		assert.True(t, idx == 1 || idx == 3, "Failure index should be 1 or 3, got %d", idx)
+	}
 }
 
 func TestParallelEmptyBatch(t *testing.T) {
@@ -301,14 +331,15 @@ func TestParallelSetLLM(t *testing.T) {
 	assert.Equal(t, mockLLM, parallel.innerModule.(*MockModule).LLM)
 }
 
-// AlternatingModule succeeds on odd calls, fails on even calls.
-type AlternatingModule struct {
+// ConditionalModule succeeds or fails based on the input value.
+type ConditionalModule struct {
 	core.BaseModule
-	callCount int
-	mu        sync.Mutex
+	failInputs map[string]bool
+	callCount  int
+	mu         sync.Mutex
 }
 
-func (m *AlternatingModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (m *ConditionalModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
 	m.mu.Lock()
 	m.callCount++
 	count := m.callCount
@@ -319,9 +350,9 @@ func (m *AlternatingModule) Process(ctx context.Context, inputs map[string]inter
 		return nil, stderrors.New("invalid input type")
 	}
 
-	// Fail on even calls
-	if count%2 == 0 {
-		return nil, fmt.Errorf("alternating module failed for call %d", count)
+	// Fail if input is in the fail list
+	if m.failInputs[input] {
+		return nil, fmt.Errorf("conditional module failed for input %s", input)
 	}
 
 	return map[string]interface{}{
@@ -329,9 +360,10 @@ func (m *AlternatingModule) Process(ctx context.Context, inputs map[string]inter
 	}, nil
 }
 
-func (m *AlternatingModule) Clone() core.Module {
-	return &AlternatingModule{
+func (m *ConditionalModule) Clone() core.Module {
+	return &ConditionalModule{
 		BaseModule: *m.BaseModule.Clone().(*core.BaseModule),
+		failInputs: m.failInputs,
 	}
 }
 

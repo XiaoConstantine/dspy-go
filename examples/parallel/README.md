@@ -105,15 +105,19 @@ For single inputs, the module automatically falls back to normal processing.
 ```go
 result := map[string]interface{}{
     "results": []map[string]interface{}{
-        {"output_field": "result1"},
-        {"output_field": "result2"},
-        // ... results in same order as inputs
+        {"output_field": "result1"}, // Successful result at index 0
+        nil,                          // Failed result at index 1 (preserves order)
+        {"output_field": "result3"}, // Successful result at index 2
+        // ... results array always same length as input batch
     },
     // Optional: only if WithReturnFailures(true)
     "failures": []map[string]interface{}{
-        {"index": 2, "error": "error message"},
+        {"index": 1, "error": "error message"},
     },
 }
+```
+
+**Important**: The `results` array always has the same length as the input batch. Failed items are represented as `nil` to preserve index correspondence with the original inputs. This ensures you can always correlate `results[i]` with `batchInputs[i]`.
 ```
 
 ## Performance Considerations
