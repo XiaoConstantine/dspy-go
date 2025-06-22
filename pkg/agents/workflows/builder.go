@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -394,7 +395,12 @@ func (wb *WorkflowBuilder) hasError() bool {
 }
 
 func (wb *WorkflowBuilder) validate() error {
-	// Check for cycles in the workflow graph
+	// Check that all referenced next stages exist to ensure graph integrity
+	if err := wb.validateStageReferences(); err != nil {
+		return err
+	}
+
+	// Now that references are valid, check for cycles
 	if err := wb.checkForCycles(); err != nil {
 		return err
 	}
@@ -404,11 +410,6 @@ func (wb *WorkflowBuilder) validate() error {
 		if err := wb.validateStage(stage); err != nil {
 			return fmt.Errorf("stage '%s': %w", stage.ID, err)
 		}
-	}
-
-	// Check that all referenced next stages exist
-	if err := wb.validateStageReferences(); err != nil {
-		return err
 	}
 
 	return nil
@@ -474,6 +475,7 @@ func (wb *WorkflowBuilder) hasCycleDFS(stageID string, visited, recStack map[str
 
 	stage := wb.stepIndex[stageID]
 	if stage == nil {
+		recStack[stageID] = false // Clean up recursion stack for this path
 		return false // Stage doesn't exist, no cycle from this path
 	}
 	for _, nextID := range stage.Next {
@@ -501,6 +503,7 @@ func (wb *WorkflowBuilder) optimize() {
 func (wb *WorkflowBuilder) determineWorkflowType() string {
 	hasParallel := false
 	hasConditional := false
+	hasSequential := false
 
 	for _, stage := range wb.stages {
 		switch stage.Type {
@@ -508,6 +511,8 @@ func (wb *WorkflowBuilder) determineWorkflowType() string {
 			hasParallel = true
 		case StageTypeConditional:
 			hasConditional = true
+		case StageTypeSequential:
+			hasSequential = true
 		}
 	}
 
@@ -515,9 +520,17 @@ func (wb *WorkflowBuilder) determineWorkflowType() string {
 	if hasConditional {
 		return "router"
 	}
-	if hasParallel {
+	
+	// Only use parallel workflow if it's purely parallel stages
+	if hasParallel && !hasSequential && len(wb.stages) == 1 {
 		return "parallel"
 	}
+	
+	// Mixed patterns or complex workflows go to composite
+	if hasParallel && hasSequential {
+		return "composite"
+	}
+	
 	if len(wb.stages) == 1 {
 		return "chain"
 	}
@@ -613,9 +626,15 @@ func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
 		// Full conditional logic will be implemented in Task 1.2
 		var module core.Module
 		if stage.Type == StageTypeConditional {
-			// Use the first branch's module as fallback
-			for _, branch := range stage.Branches {
-				if branch.Module != nil {
+			// Use the first branch's module as fallback (deterministic order)
+			branchKeys := make([]string, 0, len(stage.Branches))
+			for k := range stage.Branches {
+				branchKeys = append(branchKeys, k)
+			}
+			sort.Strings(branchKeys)
+
+			for _, key := range branchKeys {
+				if branch := stage.Branches[key]; branch.Module != nil {
 					module = branch.Module
 					break
 				}
@@ -643,7 +662,65 @@ func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
 }
 
 func (wb *WorkflowBuilder) buildCompositeWorkflow() (Workflow, error) {
-	// For complex workflows that don't fit other patterns
-	// TODO: Implement composite workflow building
-	return nil, fmt.Errorf("composite workflow building not yet implemented")
+	// For complex workflows that don't fit other patterns, use chain workflow as fallback
+	// Full composite workflow implementation is planned for Task 1.2
+	workflow := NewChainWorkflow(wb.memory)
+
+	for _, stage := range wb.stages {
+		if stage.Type == StageTypeParallel {
+			// For parallel stages, add each step as sequential for now
+			for _, step := range stage.Steps {
+				workflowStep := &Step{
+					ID:          step.ID,
+					Module:      step.Module,
+					NextSteps:   []string{},
+					RetryConfig: stage.RetryConfig,
+				}
+				if err := workflow.AddStep(workflowStep); err != nil {
+					return nil, fmt.Errorf("failed to add composite step '%s': %w", step.ID, err)
+				}
+			}
+		} else if stage.Type == StageTypeConditional {
+			// For conditional stages, use first available module
+			var module core.Module
+			branchKeys := make([]string, 0, len(stage.Branches))
+			for k := range stage.Branches {
+				branchKeys = append(branchKeys, k)
+			}
+			sort.Strings(branchKeys)
+
+			for _, key := range branchKeys {
+				if branch := stage.Branches[key]; branch.Module != nil {
+					module = branch.Module
+					break
+				}
+			}
+			if module == nil {
+				return nil, fmt.Errorf("conditional stage '%s' has no valid modules", stage.ID)
+			}
+
+			step := &Step{
+				ID:          stage.ID,
+				Module:      module,
+				NextSteps:   stage.Next,
+				RetryConfig: stage.RetryConfig,
+			}
+			if err := workflow.AddStep(step); err != nil {
+				return nil, fmt.Errorf("failed to add composite step '%s': %w", stage.ID, err)
+			}
+		} else {
+			// Sequential stage
+			step := &Step{
+				ID:          stage.ID,
+				Module:      stage.Module,
+				NextSteps:   stage.Next,
+				RetryConfig: stage.RetryConfig,
+			}
+			if err := workflow.AddStep(step); err != nil {
+				return nil, fmt.Errorf("failed to add composite step '%s': %w", stage.ID, err)
+			}
+		}
+	}
+
+	return workflow, nil
 }
