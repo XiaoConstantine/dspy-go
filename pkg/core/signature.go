@@ -137,3 +137,29 @@ func parseOutputFields(fieldsStr string) []OutputField {
 func ShorthandNotation(notation string) (Signature, error) {
 	return ParseSignature(notation)
 }
+
+// AppendInput adds an input field to the signature.
+func (s Signature) AppendInput(name string, prefix string, description string) Signature {
+	newInput := InputField{
+		Field: Field{
+			Name:        name,
+			Prefix:      prefix,
+			Description: description,
+		},
+	}
+	s.Inputs = append(s.Inputs, newInput)
+	return s
+}
+
+// PrependOutput adds an output field to the beginning of the outputs.
+func (s Signature) PrependOutput(name string, prefix string, description string) Signature {
+	newOutput := OutputField{
+		Field: Field{
+			Name:        name,
+			Prefix:      prefix,
+			Description: description,
+		},
+	}
+	s.Outputs = append([]OutputField{newOutput}, s.Outputs...)
+	return s
+}

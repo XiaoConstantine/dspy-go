@@ -145,6 +145,47 @@ result, err := react.Process(ctx, map[string]interface{}{
 // ReAct will use the search tool to find the population and the calculator to divide it
 ```
 
+#### MultiChainComparison
+
+Compares multiple reasoning attempts and synthesizes a holistic evaluation, useful for improving decision quality through multiple perspectives.
+
+```go
+// Create a signature for problem solving
+signature := core.NewSignature(
+    []core.InputField{
+        {Field: core.NewField("problem", core.WithDescription("The problem to solve"))},
+    },
+    []core.OutputField{
+        {Field: core.NewField("solution", core.WithDescription("The recommended solution"))},
+    },
+)
+
+// Create MultiChainComparison module with 3 reasoning attempts
+multiChain := modules.NewMultiChainComparison(signature, 3, 0.7)
+
+// Provide multiple reasoning attempts for comparison
+completions := []map[string]interface{}{
+    {
+        "rationale": "focus on cost reduction approach",
+        "solution": "Implement automation to reduce operational costs",
+    },
+    {
+        "reasoning": "prioritize customer satisfaction strategy", 
+        "solution": "Invest in customer service improvements",
+    },
+    {
+        "rationale": "balance short-term and long-term objectives",
+        "solution": "Gradual optimization with phased implementation",
+    },
+}
+
+result, err := multiChain.Process(ctx, map[string]interface{}{
+    "problem": "How should we address declining business performance?",
+    "completions": completions,
+})
+// result contains "rationale" with holistic analysis and "solution" with synthesized recommendation
+```
+
 ### Programs
 
 Programs combine modules into executable workflows. They define how inputs flow through the system and how outputs are produced.
@@ -441,6 +482,9 @@ Check the examples directory for complete implementations:
 * [examples/agents](examples/agents): Demonstrates different agent patterns
 * [examples/hotpotqa](examples/hotpotqa): Question-answering implementation
 * [examples/gsm8k](examples/gsm8k): Math problem solving
+* [examples/parallel](examples/parallel): Parallel processing with batch operations
+* [examples/refine](examples/refine): Quality improvement through iterative refinement
+* [examples/multi_chain_comparison](examples/multi_chain_comparison): Multi-perspective reasoning and decision synthesis
 * [examples/others/mipro](examples/others/mipro): MIPRO optimizer demonstration with GSM8K
 * [examples/others/simba](examples/others/simba): SIMBA optimizer with introspective learning showcase
 

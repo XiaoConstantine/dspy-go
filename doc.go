@@ -20,6 +20,7 @@
 //     * ReAct: Implements Reasoning and Acting with tool integration
 //     * Refine: Quality improvement through multiple attempts with reward functions
 //     * Parallel: Concurrent execution wrapper for batch processing with any module
+//     * MultiChainComparison: Compares multiple reasoning attempts and synthesizes holistic evaluation
 //
 //   - Optimizers: Tools for improving prompt effectiveness:
 //     * BootstrapFewShot: Automatically selects high-quality examples for few-shot learning
