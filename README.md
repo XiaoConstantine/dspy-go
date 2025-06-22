@@ -14,7 +14,11 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Systematic Prompt Engineering**: Optimize prompts automatically based on examples and feedback
 - **Flexible Workflows**: Chain, branch, and orchestrate LLM operations with powerful workflow abstractions
 - **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini, Ollama, and LlamaCPP
-- **Advanced Reasoning Patterns**: Implement chain-of-thought, ReAct, and other reasoning techniques
+- **Advanced Reasoning Patterns**: Implement chain-of-thought, ReAct, refinement, and multi-chain comparison techniques
+- **Parallel Processing**: Built-in support for concurrent execution to improve performance
+- **Dataset Management**: Automatic downloading and management of popular datasets like GSM8K and HotPotQA
+- **Tool Integration**: Native support for custom tools and MCP (Model Context Protocol) servers
+- **Quality Optimization**: Advanced optimizers including MIPRO, SIMBA, and BootstrapFewShot for systematic improvement
 
 ## Installation
 
@@ -184,6 +188,72 @@ result, err := multiChain.Process(ctx, map[string]interface{}{
     "completions": completions,
 })
 // result contains "rationale" with holistic analysis and "solution" with synthesized recommendation
+```
+
+#### Refine
+
+Improves prediction quality by running multiple attempts with different temperatures and selecting the best result based on a reward function.
+
+```go
+// Define a reward function that evaluates prediction quality
+rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+    // Custom logic to evaluate the quality of the prediction
+    // Return a score between 0.0 and 1.0
+    answer := outputs["answer"].(string)
+    // Example: longer answers might be better for some tasks
+    return math.Min(1.0, float64(len(answer))/100.0)
+}
+
+// Create a Refine module
+refine := modules.NewRefine(
+    modules.NewPredict(signature),
+    modules.RefineConfig{
+        N:         5,       // Number of refinement attempts
+        RewardFn:  rewardFn,
+        Threshold: 0.8,     // Stop early if this threshold is reached
+    },
+)
+
+result, err := refine.Process(ctx, map[string]interface{}{
+    "question": "Explain quantum computing in detail.",
+})
+// Refine will try multiple times with different temperatures and return the best result
+```
+
+#### Parallel
+
+Wraps any module to enable concurrent execution across multiple inputs, providing significant performance improvements for batch processing.
+
+```go
+// Create any module (e.g., Predict, ChainOfThought, etc.)
+baseModule := modules.NewPredict(signature)
+
+// Wrap it with Parallel for concurrent execution
+parallel := modules.NewParallel(baseModule,
+    modules.WithMaxWorkers(4),              // Use 4 concurrent workers
+    modules.WithReturnFailures(true),       // Include failed results in output
+    modules.WithStopOnFirstError(false),   // Continue processing even if some fail
+)
+
+// Prepare batch inputs
+batchInputs := []map[string]interface{}{
+    {"question": "What is 2+2?"},
+    {"question": "What is 3+3?"},
+    {"question": "What is 4+4?"},
+}
+
+// Process all inputs in parallel
+result, err := parallel.Process(ctx, map[string]interface{}{
+    "batch_inputs": batchInputs,
+})
+
+// Extract results (maintains input order)
+results := result["results"].([]map[string]interface{})
+for i, res := range results {
+    if res != nil {
+        fmt.Printf("Input %d: %s\n", i, res["answer"])
+    }
+}
 ```
 
 ### Programs
@@ -458,6 +528,32 @@ func (t *WeatherTool) Execute(ctx context.Context, action string) (string, error
 react := modules.NewReAct(signature, []core.Tool{&WeatherTool{}})
 ```
 
+### MCP (Model Context Protocol) Integration
+
+DSPy-Go supports integration with MCP servers for accessing external tools and services:
+
+```go
+import (
+    "github.com/XiaoConstantine/dspy-go/pkg/tools"
+    "github.com/XiaoConstantine/mcp-go/pkg/client"
+)
+
+// Connect to an MCP server
+mcpClient, err := client.NewStdioClient("path/to/mcp-server")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create MCP tools from server capabilities
+mcpTools, err := tools.CreateMCPToolsFromServer(mcpClient)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Use MCP tools with ReAct
+react := modules.NewReAct(signature, mcpTools)
+```
+
 ### Streaming Support
 
 Process LLM outputs incrementally as they're generated:
@@ -473,6 +569,41 @@ module.SetStreamingHandler(handler)
 
 // Process with streaming enabled
 result, err := module.Process(ctx, inputs)
+```
+
+### Dataset Management
+
+DSPy-Go provides built-in support for downloading and managing common datasets:
+
+```go
+import "github.com/XiaoConstantine/dspy-go/pkg/datasets"
+
+// Automatically download and get path to GSM8K dataset
+gsm8kPath, err := datasets.EnsureDataset("gsm8k")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Load GSM8K dataset
+gsm8kDataset, err := datasets.LoadGSM8K(gsm8kPath)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Similarly for HotPotQA dataset
+hotpotPath, err := datasets.EnsureDataset("hotpotqa")
+if err != nil {
+    log.Fatal(err)
+}
+
+hotpotDataset, err := datasets.LoadHotPotQA(hotpotPath)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Use datasets with optimizers
+optimizer := optimizers.NewBootstrapFewShot(gsm8kDataset, metricFunc)
+optimizedModule, err := optimizer.Optimize(ctx, module)
 ```
 
 ## Examples
