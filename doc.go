@@ -18,7 +18,7 @@
 //     * Predict: Basic prediction module for simple LLM interactions
 //     * ChainOfThought: Implements step-by-step reasoning with rationale tracking
 //     * ReAct: Implements Reasoning and Acting with tool integration
-//     * Refine: Quality improvement through multiple attempts with reward functions
+//     * Refine: Quality improvement through multiple attempts with reward functions and temperature variation
 //     * Parallel: Concurrent execution wrapper for batch processing with any module
 //     * MultiChainComparison: Compares multiple reasoning attempts and synthesizes holistic evaluation
 //
@@ -31,7 +31,7 @@
 //
 //   - Agents: Advanced patterns for building sophisticated AI systems:
 //     * Memory: Different memory implementations for tracking conversation history
-//     * Tools: Integration with external tools and APIs
+//     * Tools: Integration with external tools and APIs, including MCP (Model Context Protocol) support
 //     * Workflows:
 //       - Chain: Sequential execution of steps
 //       - Parallel: Concurrent execution of multiple workflow steps
@@ -54,6 +54,7 @@
 //	    "github.com/XiaoConstantine/dspy-go/pkg/core"
 //	    "github.com/XiaoConstantine/dspy-go/pkg/llms"
 //	    "github.com/XiaoConstantine/dspy-go/pkg/modules"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/config"
 //	)
 //
 //	func main() {
@@ -108,6 +109,8 @@
 //   - Streaming Support: Process LLM outputs incrementally as they're generated
 //
 //   - Data Storage: Integration with various storage backends for persistence of examples and results
+//
+//   - Dataset Management: Built-in support for downloading and managing datasets like GSM8K and HotPotQA
 //
 //   - Arrow Support: Integration with Apache Arrow for efficient data handling and processing
 //
