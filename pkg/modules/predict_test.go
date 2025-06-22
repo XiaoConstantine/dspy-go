@@ -211,3 +211,111 @@ func TestPredict_WithStreamHandler(t *testing.T) {
 	// Verify the mock was called with streaming
 	mockLLM.AssertExpectations(t)
 }
+
+func TestParseJSONResponse(t *testing.T) {
+	// Create a test signature with multiple output fields
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.OutputField{
+			{Field: core.NewField("rationale", core.WithCustomPrefix("Rationale:"))},
+			{Field: core.NewField("answer", core.WithCustomPrefix("Answer:"))},
+			{Field: core.NewField("confidence", core.WithCustomPrefix("Confidence:"))},
+		},
+	)
+
+	tests := []struct {
+		name     string
+		content  string
+		expected string
+	}{
+		{
+			name: "Valid JSON with all fields",
+			content: "Here's my response:\n\n```json\n{\n  \"rationale\": \"This is the reasoning behind the answer\",\n  \"answer\": \"42\",\n  \"confidence\": \"high\"\n}\n```\n\nThat's the response.",
+			expected: "Rationale:\nThis is the reasoning behind the answer\n\nAnswer:\n42\n\nConfidence:\nhigh",
+		},
+		{
+			name: "Valid JSON with subset of fields",
+			content: "```json\n{\n  \"rationale\": \"Only rationale provided\",\n  \"answer\": \"incomplete\"\n}\n```",
+			expected: "Rationale:\nOnly rationale provided\n\nAnswer:\nincomplete",
+		},
+		{
+			name: "JSON with extra fields (should ignore)",
+			content: "```json\n{\n  \"rationale\": \"Test rationale\",\n  \"answer\": \"test answer\",\n  \"confidence\": \"medium\",\n  \"extra_field\": \"should be ignored\"\n}\n```",
+			expected: "Rationale:\nTest rationale\n\nAnswer:\ntest answer\n\nConfidence:\nmedium",
+		},
+		{
+			name: "JSON with non-string values",
+			content: "```json\n{\n  \"rationale\": \"Number test\",\n  \"answer\": 123,\n  \"confidence\": true\n}\n```",
+			expected: "Rationale:\nNumber test\n\nAnswer:\n123\n\nConfidence:\ntrue",
+		},
+		{
+			name: "Malformed JSON (should fall back)",
+			content: "```json\n{\n  \"rationale\": \"incomplete json\"\n  \"answer\": \"missing comma\"\n}\n```",
+			expected: "```json\n{\n  \"rationale\": \"incomplete json\"\n  \"answer\": \"missing comma\"\n}\n```",
+		},
+		{
+			name: "No JSON markers (should fall back)",
+			content: "This is just plain text\nrationale: Some reasoning\nanswer: Some answer",
+			expected: "This is just plain text\nrationale: Some reasoning\nanswer: Some answer",
+		},
+		{
+			name: "Empty JSON object",
+			content: "```json\n{}\n```",
+			expected: "",
+		},
+		{
+			name: "Missing closing marker (should fall back)",
+			content: "```json\n{\n  \"rationale\": \"test\",\n  \"answer\": \"test\"\n}",
+			expected: "```json\n{\n  \"rationale\": \"test\",\n  \"answer\": \"test\"\n}",
+		},
+		{
+			name: "Multiple JSON blocks (should use first)",
+			content: "First block:\n```json\n{\n  \"rationale\": \"first\",\n  \"answer\": \"first answer\"\n}\n```\n\nSecond block:\n```json\n{\n  \"rationale\": \"second\",\n  \"answer\": \"second answer\"\n}\n```",
+			expected: "Rationale:\nfirst\n\nAnswer:\nfirst answer",
+		},
+		{
+			name: "JSON with newlines in values",
+			content: "```json\n{\n  \"rationale\": \"This is a\\nmulti-line\\nrationale\",\n  \"answer\": \"Simple answer\"\n}\n```",
+			expected: "Rationale:\nThis is a\nmulti-line\nrationale\n\nAnswer:\nSimple answer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseJSONResponse(tt.content, signature)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestParseJSONResponse_EmptySignature(t *testing.T) {
+	// Test with signature that has no output fields
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.OutputField{},
+	)
+
+	content := "```json\n{\n  \"rationale\": \"This won't be used\",\n  \"answer\": \"This won't be used either\"\n}\n```"
+
+	result := parseJSONResponse(content, signature)
+	assert.Equal(t, "", result)
+}
+
+func TestParseJSONResponse_FieldOrderPreservation(t *testing.T) {
+	// Test that fields are processed in signature order, not JSON order
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.OutputField{
+			{Field: core.NewField("third", core.WithCustomPrefix("Third:"))},
+			{Field: core.NewField("first", core.WithCustomPrefix("First:"))},
+			{Field: core.NewField("second", core.WithCustomPrefix("Second:"))},
+		},
+	)
+
+	content := "```json\n{\n  \"first\": \"1st value\",\n  \"second\": \"2nd value\",\n  \"third\": \"3rd value\"\n}\n```"
+
+	expected := "Third:\n3rd value\n\nFirst:\n1st value\n\nSecond:\n2nd value"
+
+	result := parseJSONResponse(content, signature)
+	assert.Equal(t, expected, result)
+}

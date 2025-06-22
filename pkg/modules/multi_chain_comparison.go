@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
@@ -79,8 +78,6 @@ func NewMultiChainComparison(signature core.Signature, M int, temperature float6
 // Process implements the core.Module interface.
 // It takes completions and processes them into reasoning attempts for comparison.
 func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
-	logger := logging.GetLogger()
-	
 	// Extract completions from inputs
 	completionsRaw, ok := inputs["completions"]
 	if !ok {
@@ -124,8 +121,6 @@ func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]in
 				"actual":         len(attempts),
 			})
 	}
-
-	logger.Debug(ctx, "MultiChainComparison processed %d attempts for comparison", len(attempts))
 
 	// Add attempts to inputs for the predict module
 	processedInputs := make(map[string]interface{})
