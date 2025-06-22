@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -276,6 +277,12 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 }
 
 func stripMarkdown(content string, signature core.Signature) string {
+	// First, try to parse as JSON if it looks like JSON
+	if strings.Contains(content, "```json") && strings.Contains(content, "```") {
+		return parseJSONResponse(content, signature)
+	}
+	
+	// Fall back to original prefix-based parsing
 	// Define a map to track each field's content
 	fieldContents := make(map[string][]string)
 
@@ -577,4 +584,48 @@ func (p *Predict) GetLLMIdentifier() map[string]string {
 		"model":    p.LLM.ModelID(),
 		// Add other identifiers like BaseURL for Ollama if needed/possible
 	}
+}
+
+// parseJSONResponse extracts JSON content from markdown code blocks and formats it for field parsing.
+func parseJSONResponse(content string, signature core.Signature) string {
+	// Extract JSON from markdown code blocks
+	jsonStart := strings.Index(content, "```json")
+	if jsonStart == -1 {
+		return content // Fall back to original content if no JSON block found
+	}
+	
+	jsonStart += len("```json")
+	jsonEnd := strings.Index(content[jsonStart:], "```")
+	if jsonEnd == -1 {
+		return content // Fall back if no closing ```
+	}
+	
+	jsonContent := strings.TrimSpace(content[jsonStart : jsonStart+jsonEnd])
+	
+	// Parse the JSON
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonContent), &jsonData); err != nil {
+		return content // Fall back if JSON parsing fails
+	}
+	
+	// Convert JSON to field prefix format expected by parseCompletion
+	var result strings.Builder
+	for _, field := range signature.Outputs {
+		if value, ok := jsonData[field.Name]; ok {
+			// Add the field with its prefix
+			result.WriteString(field.Prefix)
+			result.WriteString("\n")
+			
+			// Add the value, handling both string and other types
+			switch v := value.(type) {
+			case string:
+				result.WriteString(v)
+			default:
+				result.WriteString(fmt.Sprintf("%v", v))
+			}
+			result.WriteString("\n\n")
+		}
+	}
+	
+	return strings.TrimSpace(result.String())
 }
