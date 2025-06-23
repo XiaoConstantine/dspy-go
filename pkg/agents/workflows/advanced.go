@@ -2,7 +2,9 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -100,14 +102,20 @@ func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *
 
 // executeParallelStage executes a parallel stage.
 func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+	var wg sync.WaitGroup
 	results := make(chan map[string]interface{}, len(stage.Steps))
-	errors := make(chan error, len(stage.Steps))
+	var allErrors []error
+	var mu sync.Mutex
 
 	for _, step := range stage.Steps {
+		wg.Add(1)
 		go func(step *BuilderStep) {
+			defer wg.Done()
 			result, err := step.Module.Process(ctx, state)
 			if err != nil {
-				errors <- err
+				mu.Lock()
+				allErrors = append(allErrors, err)
+				mu.Unlock()
 			} else {
 				// Convert map[string]any to map[string]interface{}
 				converted := make(map[string]interface{})
@@ -119,18 +127,18 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 		}(step)
 	}
 
+	wg.Wait()
+	close(results)
+
+	if len(allErrors) > 0 {
+		return nil, errors.Join(allErrors...)
+	}
+
 	// Collect results
 	finalResult := make(map[string]interface{})
-	for i := 0; i < len(stage.Steps); i++ {
-		select {
-		case result := <-results:
-			for k, v := range result {
-				finalResult[k] = v
-			}
-		case err := <-errors:
-			return nil, err
-		case <-ctx.Done():
-			return nil, ctx.Err()
+	for result := range results {
+		for k, v := range result {
+			finalResult[k] = v
 		}
 	}
 
@@ -382,7 +390,11 @@ type conditionalClassifierModule struct {
 }
 
 func (ccm *conditionalClassifierModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
-	result, err := ccm.condition(ctx, inputs)
+	state := make(map[string]interface{}, len(inputs))
+	for k, v := range inputs {
+		state[k] = v
+	}
+	result, err := ccm.condition(ctx, state)
 	if err != nil {
 		return nil, err
 	}
