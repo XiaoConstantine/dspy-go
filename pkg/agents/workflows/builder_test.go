@@ -456,24 +456,23 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, workflow)
 	
-	// Verify it's a chain workflow (current fallback for complex workflows)
-	chainWorkflow, ok := workflow.(*ChainWorkflow)
-	assert.True(t, ok, "Complex workflow should fall back to ChainWorkflow")
-	steps := chainWorkflow.GetSteps()
-	require.Equal(t, 3, len(steps), "Should have 3 stages: analysis, validation, decision")
+	// Verify it's a router workflow (because it contains conditional stages)
+	_, ok := workflow.(*ConditionalRouterWorkflow)
+	assert.True(t, ok, "Complex workflow with conditional stages should create a ConditionalRouterWorkflow")
 	
-	// Verify the steps have the correct IDs and underlying modules from the fallback logic
-	assert.Equal(t, "analysis", steps[0].ID)
-	assert.Equal(t, "analysis", steps[0].Module.(*testModule).id)
+	// The router workflow should handle conditional routing
+	// We can test its basic functionality by executing it
+	result, err := workflow.Execute(context.Background(), map[string]interface{}{
+		"input": "test_input",
+		"analysis_result": map[string]interface{}{
+			"confidence": 0.9, // High confidence should route to "true" branch
+		},
+	})
 	
-	assert.Equal(t, "validation", steps[1].ID)
-	// The fallback for parallel should take the single step's module
-	assert.Equal(t, "context_validator", steps[1].Module.(*testModule).id)
-	
-	assert.Equal(t, "decision", steps[2].ID)
-	// The fallback for conditional sorts branch keys, "false" comes before "true",
-	// so it should pick the "else" branch module.
-	assert.Equal(t, "refinement_processor", steps[2].Module.(*testModule).id)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	// The result should come from the high confidence processor since confidence > 0.8
+	assert.Equal(t, "processed_high_confidence_processor", result["output"])
 }
 
 func TestWorkflowBuilder_ValidationStageReferences(t *testing.T) {
