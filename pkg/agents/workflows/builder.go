@@ -562,11 +562,15 @@ func (wb *WorkflowBuilder) buildChainWorkflow() (Workflow, error) {
 				return nil, fmt.Errorf("conditional stage '%s' has no valid modules", stage.ID)
 			}
 		case StageTypeParallel:
-			// For parallel stages in a chain workflow, just use the first step's module
-			if len(stage.Steps) > 0 {
+			// For parallel stages in a chain workflow, this is a temporary fallback.
+			// It only supports converting a parallel stage if it contains exactly one step.
+			// Full support for mixed parallel/sequential workflows is planned for a future update.
+			if len(stage.Steps) == 1 {
 				module = stage.Steps[0].Module
-			} else {
+			} else if len(stage.Steps) == 0 {
 				return nil, fmt.Errorf("parallel stage '%s' has no steps", stage.ID)
+			} else {
+				return nil, fmt.Errorf("cannot convert parallel stage '%s' with %d steps to a single step in a chain workflow; this feature is not yet supported", stage.ID, len(stage.Steps))
 			}
 		default:
 			return nil, fmt.Errorf("unsupported stage type for chain workflow: %v", stage.Type)
