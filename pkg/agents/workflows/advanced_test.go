@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Mock module for testing advanced patterns
+// Mock module for testing advanced patterns.
 type advancedMockModule struct {
 	id      string
 	outputs map[string]interface{}
@@ -93,8 +93,8 @@ func TestWorkflowBuilder_ForEach(t *testing.T) {
 
 func TestWorkflowBuilder_While(t *testing.T) {
 	tests := []struct {
-		name      string
-		condition LoopConditionFunc
+		name        string
+		condition   LoopConditionFunc
 		expectError bool
 	}{
 		{
@@ -105,8 +105,8 @@ func TestWorkflowBuilder_While(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:      "nil condition",
-			condition: nil,
+			name:        "nil condition",
+			condition:   nil,
 			expectError: true,
 		},
 	}
@@ -132,8 +132,8 @@ func TestWorkflowBuilder_While(t *testing.T) {
 
 func TestWorkflowBuilder_Until(t *testing.T) {
 	tests := []struct {
-		name      string
-		condition LoopConditionFunc
+		name        string
+		condition   LoopConditionFunc
 		expectError bool
 	}{
 		{
@@ -144,8 +144,8 @@ func TestWorkflowBuilder_Until(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:      "nil condition",
-			condition: nil,
+			name:        "nil condition",
+			condition:   nil,
 			expectError: true,
 		},
 	}
@@ -171,9 +171,9 @@ func TestWorkflowBuilder_Until(t *testing.T) {
 
 func TestWorkflowBuilder_Template(t *testing.T) {
 	tests := []struct {
-		name         string
+		name          string
 		parameterFunc TemplateParameterFunc
-		expectError  bool
+		expectError   bool
 	}{
 		{
 			name: "valid template",
@@ -183,9 +183,9 @@ func TestWorkflowBuilder_Template(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:         "nil parameter function",
+			name:          "nil parameter function",
 			parameterFunc: nil,
-			expectError:  true,
+			expectError:   true,
 		},
 	}
 
@@ -248,17 +248,17 @@ func TestWorkflowBuilder_WithTimeout(t *testing.T) {
 
 func TestCompositeWorkflow_ForEachExecution(t *testing.T) {
 	builder := NewBuilder(agents.NewInMemoryStore())
-	
+
 	// Create a forEach workflow
 	workflow, err := builder.
-		ForEach("process_items", 
+		ForEach("process_items",
 			func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
 				return []interface{}{"apple", "banana", "cherry"}, nil
 			},
 			func(bodyBuilder *WorkflowBuilder) *WorkflowBuilder {
-				return bodyBuilder.Stage("process_item", 
+				return bodyBuilder.Stage("process_item",
 					NewAdvancedMockModule("item_processor").WithOutputs(map[string]interface{}{
-						"output": "processed_item",
+						"output":    "processed_item",
 						"processed": true,
 					}))
 			}).
@@ -274,19 +274,19 @@ func TestCompositeWorkflow_ForEachExecution(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	
+
 	// Check that forEach results are present
 	forEachResults, exists := result["forEach_results"]
 	assert.True(t, exists)
 	assert.IsType(t, []map[string]interface{}{}, forEachResults)
-	
+
 	results := forEachResults.([]map[string]interface{})
 	assert.Equal(t, 3, len(results)) // Should have processed 3 items
 }
 
 func TestCompositeWorkflow_WhileExecution(t *testing.T) {
 	builder := NewBuilder(agents.NewInMemoryStore())
-	
+
 	// Create a while workflow that runs 3 times
 	workflow, err := builder.
 		While("count_loop",
@@ -294,10 +294,10 @@ func TestCompositeWorkflow_WhileExecution(t *testing.T) {
 				return iteration < 3, nil
 			},
 			func(bodyBuilder *WorkflowBuilder) *WorkflowBuilder {
-				return bodyBuilder.Stage("increment", 
+				return bodyBuilder.Stage("increment",
 					NewAdvancedMockModule("counter").WithOutputs(map[string]interface{}{
 						"output": "incremented",
-						"count": 1,
+						"count":  1,
 					}))
 			}).
 		Build()
@@ -312,7 +312,7 @@ func TestCompositeWorkflow_WhileExecution(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	
+
 	// Check iteration count
 	iterations, exists := result["while_iterations"]
 	assert.True(t, exists)
@@ -321,20 +321,20 @@ func TestCompositeWorkflow_WhileExecution(t *testing.T) {
 
 func TestCompositeWorkflow_TemplateExecution(t *testing.T) {
 	builder := NewBuilder(agents.NewInMemoryStore())
-	
+
 	// Create a template workflow
 	workflow, err := builder.
 		Template("process_template",
 			func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
 				return map[string]interface{}{
 					"template_param": "resolved_value",
-					"multiplier": 2,
+					"multiplier":     2,
 				}, nil
 			},
 			func(templateBuilder *WorkflowBuilder) *WorkflowBuilder {
-				return templateBuilder.Stage("apply_template", 
+				return templateBuilder.Stage("apply_template",
 					NewAdvancedMockModule("template_applier").WithOutputs(map[string]interface{}{
-						"output": "template_applied",
+						"output":          "template_applied",
 						"template_result": "applied",
 					}))
 			}).
@@ -350,7 +350,7 @@ func TestCompositeWorkflow_TemplateExecution(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	
+
 	// Check that template parameters were resolved
 	assert.Equal(t, "resolved_value", result["template_param"])
 	assert.Equal(t, 2, result["multiplier"])
@@ -359,10 +359,10 @@ func TestCompositeWorkflow_TemplateExecution(t *testing.T) {
 
 func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 	builder := NewBuilder(agents.NewInMemoryStore())
-	
+
 	// Create a conditional workflow
 	workflow, err := builder.
-		Conditional("route_decision", 
+		Conditional("route_decision",
 			func(ctx context.Context, state map[string]interface{}) (bool, error) {
 				confidence, ok := state["confidence"].(float64)
 				if !ok {
@@ -371,11 +371,11 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 				return confidence > 0.8, nil
 			}).
 		If(NewAdvancedMockModule("high_confidence").WithOutputs(map[string]interface{}{
-			"output": "processed_high",
+			"output":      "processed_high",
 			"route_taken": "high_confidence",
 		})).
 		Else(NewAdvancedMockModule("low_confidence").WithOutputs(map[string]interface{}{
-			"output": "processed_low",
+			"output":      "processed_low",
 			"route_taken": "low_confidence",
 		})).
 		End().
@@ -386,7 +386,7 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 
 	// Test high confidence routing
 	result, err := workflow.Execute(context.Background(), map[string]interface{}{
-		"input": "test_data",
+		"input":      "test_data",
 		"confidence": 0.9,
 	})
 
@@ -395,7 +395,7 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 
 	// Test low confidence routing
 	result, err = workflow.Execute(context.Background(), map[string]interface{}{
-		"input": "test_data",
+		"input":      "test_data",
 		"confidence": 0.5,
 	})
 
@@ -405,9 +405,9 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 
 func TestWorkflowBuilder_AdvancedValidation(t *testing.T) {
 	tests := []struct {
-		name         string
+		name          string
 		buildWorkflow func() *WorkflowBuilder
-		expectError  bool
+		expectError   bool
 		errorContains string
 	}{
 		{
@@ -415,7 +415,7 @@ func TestWorkflowBuilder_AdvancedValidation(t *testing.T) {
 			buildWorkflow: func() *WorkflowBuilder {
 				return NewBuilder(nil).ForEach("test", nil, nil)
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "iterator function",
 		},
 		{
@@ -423,7 +423,7 @@ func TestWorkflowBuilder_AdvancedValidation(t *testing.T) {
 			buildWorkflow: func() *WorkflowBuilder {
 				return NewBuilder(nil).While("test", nil, nil)
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "condition function",
 		},
 		{
@@ -431,7 +431,7 @@ func TestWorkflowBuilder_AdvancedValidation(t *testing.T) {
 			buildWorkflow: func() *WorkflowBuilder {
 				return NewBuilder(nil).Template("test", nil, nil)
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "parameter function",
 		},
 	}
