@@ -44,7 +44,7 @@ func DefaultBuilderConfig() *BuilderConfig {
 }
 
 // BuilderStage represents a stage in the workflow builder that can contain
-// multiple execution patterns (sequential, parallel, conditional).
+// multiple execution patterns (sequential, parallel, conditional, loops, templates).
 type BuilderStage struct {
 	ID          string
 	Type        StageType
@@ -55,6 +55,15 @@ type BuilderStage struct {
 	Next        []string                 // IDs of next stages
 	RetryConfig *RetryConfig
 	Metadata    map[string]interface{} // Additional metadata
+	
+	// Advanced pattern fields
+	LoopCondition     LoopConditionFunc     // For while/until loops
+	IteratorFunc      IteratorFunc          // For forEach loops
+	TemplateParams    TemplateParameterFunc // For templates
+	MaxIterations     int                   // Safety limit for loops
+	LoopBody          *WorkflowBuilder      // Nested workflow for loop body
+	TemplateWorkflow  *WorkflowBuilder      // Template workflow definition
+	TimeoutMs         int64                 // Timeout in milliseconds
 }
 
 // BuilderStep represents a single step within a stage.
@@ -73,10 +82,23 @@ const (
 	StageTypeParallel
 	StageTypeConditional
 	StageTypeLoop
+	StageTypeForEach
+	StageTypeWhile
+	StageTypeUntil
+	StageTypeTemplate
 )
 
 // ConditionalFunc defines the signature for conditional execution logic.
 type ConditionalFunc func(ctx context.Context, state map[string]interface{}) (bool, error)
+
+// LoopConditionFunc defines the signature for loop conditions (while/until).
+type LoopConditionFunc func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error)
+
+// IteratorFunc defines the signature for forEach iteration logic.
+type IteratorFunc func(ctx context.Context, state map[string]interface{}) ([]interface{}, error)
+
+// TemplateParameterFunc defines the signature for template parameter resolution.
+type TemplateParameterFunc func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error)
 
 // ConditionResult represents the result of a conditional evaluation.
 type ConditionResult struct {
@@ -233,6 +255,177 @@ func (wb *WorkflowBuilder) WithMetadata(key string, value interface{}) *Workflow
 
 	currentStage := wb.stages[len(wb.stages)-1]
 	currentStage.Metadata[key] = value
+
+	return wb
+}
+
+// WithTimeout adds a timeout to the most recently added stage.
+func (wb *WorkflowBuilder) WithTimeout(timeoutMs int64) *WorkflowBuilder {
+	if len(wb.stages) == 0 {
+		wb.addError(fmt.Errorf("cannot use WithTimeout() without any stages"))
+		return wb
+	}
+
+	currentStage := wb.stages[len(wb.stages)-1]
+	currentStage.TimeoutMs = timeoutMs
+
+	return wb
+}
+
+// ForEach creates a loop stage that iterates over a collection.
+// The iteratorFunc returns the collection to iterate over.
+// The body builder defines the workflow to execute for each item.
+func (wb *WorkflowBuilder) ForEach(id string, iteratorFunc IteratorFunc, bodyBuilder func(*WorkflowBuilder) *WorkflowBuilder) *WorkflowBuilder {
+	if err := wb.validateStageID(id); err != nil {
+		wb.addError(err)
+		return wb
+	}
+
+	if iteratorFunc == nil {
+		wb.addError(fmt.Errorf("forEach stage '%s' must have an iterator function", id))
+		return wb
+	}
+
+	// Create a new builder for the loop body
+	loopBody := NewBuilder(wb.memory)
+	if bodyBuilder != nil {
+		loopBody = bodyBuilder(loopBody)
+	}
+
+	stage := &BuilderStage{
+		ID:           id,
+		Type:         StageTypeForEach,
+		IteratorFunc: iteratorFunc,
+		LoopBody:     loopBody,
+		Branches:     make(map[string]*BuilderStage),
+		Next:         make([]string, 0),
+		Metadata:     make(map[string]interface{}),
+		MaxIterations: 1000, // Default safety limit
+	}
+
+	wb.stages = append(wb.stages, stage)
+	wb.stepIndex[id] = stage
+
+	return wb
+}
+
+// While creates a loop stage that continues while a condition is true.
+func (wb *WorkflowBuilder) While(id string, condition LoopConditionFunc, bodyBuilder func(*WorkflowBuilder) *WorkflowBuilder) *WorkflowBuilder {
+	if err := wb.validateStageID(id); err != nil {
+		wb.addError(err)
+		return wb
+	}
+
+	if condition == nil {
+		wb.addError(fmt.Errorf("while stage '%s' must have a condition function", id))
+		return wb
+	}
+
+	// Create a new builder for the loop body
+	loopBody := NewBuilder(wb.memory)
+	if bodyBuilder != nil {
+		loopBody = bodyBuilder(loopBody)
+	}
+
+	stage := &BuilderStage{
+		ID:            id,
+		Type:          StageTypeWhile,
+		LoopCondition: condition,
+		LoopBody:      loopBody,
+		Branches:      make(map[string]*BuilderStage),
+		Next:          make([]string, 0),
+		Metadata:      make(map[string]interface{}),
+		MaxIterations: 1000, // Default safety limit
+	}
+
+	wb.stages = append(wb.stages, stage)
+	wb.stepIndex[id] = stage
+
+	return wb
+}
+
+// Until creates a loop stage that continues until a condition becomes true.
+func (wb *WorkflowBuilder) Until(id string, condition LoopConditionFunc, bodyBuilder func(*WorkflowBuilder) *WorkflowBuilder) *WorkflowBuilder {
+	if err := wb.validateStageID(id); err != nil {
+		wb.addError(err)
+		return wb
+	}
+
+	if condition == nil {
+		wb.addError(fmt.Errorf("until stage '%s' must have a condition function", id))
+		return wb
+	}
+
+	// Create a new builder for the loop body
+	loopBody := NewBuilder(wb.memory)
+	if bodyBuilder != nil {
+		loopBody = bodyBuilder(loopBody)
+	}
+
+	stage := &BuilderStage{
+		ID:            id,
+		Type:          StageTypeUntil,
+		LoopCondition: condition,
+		LoopBody:      loopBody,
+		Branches:      make(map[string]*BuilderStage),
+		Next:          make([]string, 0),
+		Metadata:      make(map[string]interface{}),
+		MaxIterations: 1000, // Default safety limit
+	}
+
+	wb.stages = append(wb.stages, stage)
+	wb.stepIndex[id] = stage
+
+	return wb
+}
+
+// WithMaxIterations sets the maximum number of iterations for the most recently added loop stage.
+func (wb *WorkflowBuilder) WithMaxIterations(maxIterations int) *WorkflowBuilder {
+	if len(wb.stages) == 0 {
+		wb.addError(fmt.Errorf("cannot use WithMaxIterations() without any stages"))
+		return wb
+	}
+
+	currentStage := wb.stages[len(wb.stages)-1]
+	if currentStage.Type != StageTypeForEach && currentStage.Type != StageTypeWhile && currentStage.Type != StageTypeUntil {
+		wb.addError(fmt.Errorf("WithMaxIterations() can only be used with loop stages"))
+		return wb
+	}
+
+	currentStage.MaxIterations = maxIterations
+	return wb
+}
+
+// Template creates a reusable workflow template that can be instantiated with parameters.
+func (wb *WorkflowBuilder) Template(id string, parameterFunc TemplateParameterFunc, templateBuilder func(*WorkflowBuilder) *WorkflowBuilder) *WorkflowBuilder {
+	if err := wb.validateStageID(id); err != nil {
+		wb.addError(err)
+		return wb
+	}
+
+	if parameterFunc == nil {
+		wb.addError(fmt.Errorf("template stage '%s' must have a parameter function", id))
+		return wb
+	}
+
+	// Create a new builder for the template workflow
+	templateWorkflow := NewBuilder(wb.memory)
+	if templateBuilder != nil {
+		templateWorkflow = templateBuilder(templateWorkflow)
+	}
+
+	stage := &BuilderStage{
+		ID:               id,
+		Type:             StageTypeTemplate,
+		TemplateParams:   parameterFunc,
+		TemplateWorkflow: templateWorkflow,
+		Branches:         make(map[string]*BuilderStage),
+		Next:             make([]string, 0),
+		Metadata:         make(map[string]interface{}),
+	}
+
+	wb.stages = append(wb.stages, stage)
+	wb.stepIndex[id] = stage
 
 	return wb
 }
@@ -437,6 +630,36 @@ func (wb *WorkflowBuilder) validateStage(stage *BuilderStage) error {
 		if len(stage.Branches) == 0 {
 			return fmt.Errorf("conditional stage must have at least one branch")
 		}
+	case StageTypeForEach:
+		if stage.IteratorFunc == nil {
+			return fmt.Errorf("forEach stage must have an iterator function")
+		}
+		if stage.LoopBody == nil {
+			return fmt.Errorf("forEach stage must have a loop body")
+		}
+		if stage.MaxIterations <= 0 {
+			return fmt.Errorf("forEach stage must have a positive maximum iteration count")
+		}
+	case StageTypeWhile, StageTypeUntil:
+		if stage.LoopCondition == nil {
+			return fmt.Errorf("%s stage must have a loop condition function", 
+				map[StageType]string{StageTypeWhile: "while", StageTypeUntil: "until"}[stage.Type])
+		}
+		if stage.LoopBody == nil {
+			return fmt.Errorf("%s stage must have a loop body", 
+				map[StageType]string{StageTypeWhile: "while", StageTypeUntil: "until"}[stage.Type])
+		}
+		if stage.MaxIterations <= 0 {
+			return fmt.Errorf("%s stage must have a positive maximum iteration count", 
+				map[StageType]string{StageTypeWhile: "while", StageTypeUntil: "until"}[stage.Type])
+		}
+	case StageTypeTemplate:
+		if stage.TemplateParams == nil {
+			return fmt.Errorf("template stage must have a parameter function")
+		}
+		if stage.TemplateWorkflow == nil {
+			return fmt.Errorf("template stage must have a template workflow")
+		}
 	}
 
 	return nil
@@ -503,6 +726,8 @@ func (wb *WorkflowBuilder) optimize() {
 func (wb *WorkflowBuilder) determineWorkflowType() string {
 	hasParallel := false
 	hasConditional := false
+	hasLoop := false
+	hasTemplate := false
 
 	for _, stage := range wb.stages {
 		switch stage.Type {
@@ -510,14 +735,21 @@ func (wb *WorkflowBuilder) determineWorkflowType() string {
 			hasParallel = true
 		case StageTypeConditional:
 			hasConditional = true
+		case StageTypeForEach, StageTypeWhile, StageTypeUntil:
+			hasLoop = true
+		case StageTypeTemplate:
+			hasTemplate = true
 		}
 	}
 
-	// For now, only support chain and parallel workflows
-	// Router and composite workflows will be implemented in Task 1.2
+	// Advanced patterns require composite workflow
+	if hasLoop || hasTemplate {
+		return "composite"
+	}
+
+	// Conditional patterns require router workflow
 	if hasConditional {
-		// Fall back to chain workflow for conditional stages
-		return "chain"
+		return "router"
 	}
 	
 	// Only use parallel workflow if it's purely parallel stages
@@ -617,13 +849,48 @@ func (wb *WorkflowBuilder) buildParallelWorkflow() (Workflow, error) {
 }
 
 func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
-	// Router workflow with conditional logic is not yet implemented
-	// Full implementation is planned for Task 1.2
-	return nil, fmt.Errorf("router workflow with conditional stages is not yet implemented")
+	// Find the first conditional stage to use as classifier
+	var classifierStage *BuilderStage
+	for _, stage := range wb.stages {
+		if stage.Type == StageTypeConditional {
+			classifierStage = stage
+			break
+		}
+	}
+
+	if classifierStage == nil {
+		return nil, fmt.Errorf("router workflow requires at least one conditional stage")
+	}
+
+	// Create a simple module that evaluates the condition and returns classification
+	classifierModule := &conditionalClassifierModule{condition: classifierStage.Condition}
+	workflow := NewConditionalRouterWorkflow(wb.memory, classifierModule)
+
+	// Add routes based on branches
+	for branchKey, branchStage := range classifierStage.Branches {
+		if branchStage.Module != nil {
+			step := &Step{
+				ID:          branchStage.ID,
+				Module:      branchStage.Module,
+				NextSteps:   []string{},
+				RetryConfig: branchStage.RetryConfig,
+			}
+			if err := workflow.AddRoute(branchKey, step); err != nil {
+				return nil, fmt.Errorf("failed to add route '%s': %w", branchKey, err)
+			}
+		}
+	}
+
+	return workflow, nil
 }
 
 func (wb *WorkflowBuilder) buildCompositeWorkflow() (Workflow, error) {
-	// Composite workflow for mixed patterns is not yet implemented
-	// Full implementation is planned for Task 1.2
-	return nil, fmt.Errorf("composite workflow with mixed stage types is not yet implemented")
+	workflow := NewCompositeWorkflow(wb.memory)
+
+	// Add all stages to the composite workflow
+	for _, stage := range wb.stages {
+		workflow.AddBuilderStage(stage)
+	}
+
+	return workflow, nil
 }
