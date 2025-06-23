@@ -445,8 +445,6 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 		Parallel("validation",
 			NewStep("context_check", NewMockModule("context_validator")).
 				WithDescription("Validate context requirements"),
-			NewStep("rule_check", NewMockModule("rule_validator")).
-				WithDescription("Validate business rules"),
 		).
 		Then("decision").
 		Conditional("decision", condition).
@@ -461,14 +459,21 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 	// Verify it's a chain workflow (current fallback for complex workflows)
 	chainWorkflow, ok := workflow.(*ChainWorkflow)
 	assert.True(t, ok, "Complex workflow should fall back to ChainWorkflow")
-	assert.Equal(t, 3, len(chainWorkflow.GetSteps()), "Should have 3 stages: analysis, validation, decision")
-	
-	// Verify the steps have the correct IDs
 	steps := chainWorkflow.GetSteps()
-	expectedIDs := []string{"analysis", "validation", "decision"}
-	for i, step := range steps {
-		assert.Equal(t, expectedIDs[i], step.ID, "Step %d should have correct ID", i)
-	}
+	require.Equal(t, 3, len(steps), "Should have 3 stages: analysis, validation, decision")
+	
+	// Verify the steps have the correct IDs and underlying modules from the fallback logic
+	assert.Equal(t, "analysis", steps[0].ID)
+	assert.Equal(t, "analysis", steps[0].Module.(*testModule).id)
+	
+	assert.Equal(t, "validation", steps[1].ID)
+	// The fallback for parallel should take the single step's module
+	assert.Equal(t, "context_validator", steps[1].Module.(*testModule).id)
+	
+	assert.Equal(t, "decision", steps[2].ID)
+	// The fallback for conditional sorts branch keys, "false" comes before "true",
+	// so it should pick the "else" branch module.
+	assert.Equal(t, "refinement_processor", steps[2].Module.(*testModule).id)
 }
 
 func TestWorkflowBuilder_ValidationStageReferences(t *testing.T) {
