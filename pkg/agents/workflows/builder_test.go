@@ -457,6 +457,18 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, workflow)
+	
+	// Verify it's a chain workflow (current fallback for complex workflows)
+	chainWorkflow, ok := workflow.(*ChainWorkflow)
+	assert.True(t, ok, "Complex workflow should fall back to ChainWorkflow")
+	assert.Equal(t, 3, len(chainWorkflow.GetSteps()), "Should have 3 stages: analysis, validation, decision")
+	
+	// Verify the steps have the correct IDs
+	steps := chainWorkflow.GetSteps()
+	expectedIDs := []string{"analysis", "validation", "decision"}
+	for i, step := range steps {
+		assert.Equal(t, expectedIDs[i], step.ID, "Step %d should have correct ID", i)
+	}
 }
 
 func TestWorkflowBuilder_ValidationStageReferences(t *testing.T) {
@@ -482,56 +494,9 @@ func TestDefaultBuilderConfig(t *testing.T) {
 	assert.Equal(t, 3, config.DefaultRetryAttempts)
 }
 
-func TestWorkflowBuilder_IsLinearChain(t *testing.T) {
-	tests := []struct {
-		name     string
-		setup    func(*WorkflowBuilder)
-		expected bool
-	}{
-		{
-			name: "empty workflow",
-			setup: func(wb *WorkflowBuilder) {
-				// No stages
-			},
-			expected: true,
-		},
-		{
-			name: "single stage",
-			setup: func(wb *WorkflowBuilder) {
-				wb.Stage("stage1", NewMockModule("stage1"))
-			},
-			expected: true,
-		},
-		{
-			name: "linear chain",
-			setup: func(wb *WorkflowBuilder) {
-				wb.Stage("stage1", NewMockModule("stage1")).Then("stage2")
-				wb.Stage("stage2", NewMockModule("stage2")).Then("stage3")
-				wb.Stage("stage3", NewMockModule("stage3"))
-			},
-			expected: true,
-		},
-		{
-			name: "non-linear - multiple next",
-			setup: func(wb *WorkflowBuilder) {
-				wb.Stage("stage1", NewMockModule("stage1")).Then("stage2").Then("stage3")
-				wb.Stage("stage2", NewMockModule("stage2"))
-				wb.Stage("stage3", NewMockModule("stage3"))
-			},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			builder := NewBuilder(nil)
-			tt.setup(builder)
-
-			result := builder.isLinearChain()
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
+// TestWorkflowBuilder_IsLinearChain removed as the isLinearChain method
+// was removed due to fragile logic. Workflow type determination is now
+// simplified and doesn't rely on this method.
 
 func TestWorkflowBuilder_ErrorAccumulation(t *testing.T) {
 	builder := NewBuilder(nil)

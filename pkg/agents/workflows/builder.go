@@ -503,7 +503,6 @@ func (wb *WorkflowBuilder) optimize() {
 func (wb *WorkflowBuilder) determineWorkflowType() string {
 	hasParallel := false
 	hasConditional := false
-	hasSequential := false
 
 	for _, stage := range wb.stages {
 		switch stage.Type {
@@ -511,122 +510,42 @@ func (wb *WorkflowBuilder) determineWorkflowType() string {
 			hasParallel = true
 		case StageTypeConditional:
 			hasConditional = true
-		case StageTypeSequential:
-			hasSequential = true
 		}
 	}
 
-	// Determine the most appropriate workflow implementation
+	// For now, only support chain and parallel workflows
+	// Router and composite workflows will be implemented in Task 1.2
 	if hasConditional {
-		return "router"
+		// Fall back to chain workflow for conditional stages
+		return "chain"
 	}
 	
 	// Only use parallel workflow if it's purely parallel stages
-	if hasParallel && !hasSequential && len(wb.stages) == 1 {
+	if hasParallel && len(wb.stages) == 1 {
 		return "parallel"
 	}
 	
-	// Mixed patterns or complex workflows go to composite
-	if hasParallel && hasSequential {
-		return "composite"
-	}
-	
-	if len(wb.stages) == 1 {
-		return "chain"
-	}
-	if wb.isLinearChain() {
-		return "chain"
-	}
-
-	return "composite"
+	// Default to chain workflow for all other cases
+	return "chain"
 }
 
-func (wb *WorkflowBuilder) isLinearChain() bool {
-	// Check if all stages form a simple linear chain
-	if len(wb.stages) <= 1 {
-		return true
-	}
-
-	// Each stage (except the last) should have exactly one next stage
-	for i, stage := range wb.stages[:len(wb.stages)-1] {
-		if len(stage.Next) != 1 {
-			return false
-		}
-		expectedNext := wb.stages[i+1].ID
-		if stage.Next[0] != expectedNext {
-			return false
-		}
-	}
-
-	// Last stage should have no next stages
-	lastStage := wb.stages[len(wb.stages)-1]
-	return len(lastStage.Next) == 0
-}
+// isLinearChain method removed as it had fragile logic that assumed
+// stages were added in execution order. The simplified workflow type
+// determination no longer needs this method.
 
 func (wb *WorkflowBuilder) buildChainWorkflow() (Workflow, error) {
 	workflow := NewChainWorkflow(wb.memory)
 
 	for _, stage := range wb.stages {
-		step := &Step{
-			ID:          stage.ID,
-			Module:      stage.Module,
-			NextSteps:   stage.Next,
-			RetryConfig: stage.RetryConfig,
-		}
-
-		if err := workflow.AddStep(step); err != nil {
-			return nil, fmt.Errorf("failed to add step '%s': %w", stage.ID, err)
-		}
-	}
-
-	return workflow, nil
-}
-
-func (wb *WorkflowBuilder) buildParallelWorkflow() (Workflow, error) {
-	// For now, create a basic parallel workflow
-	// TODO: Implement more sophisticated parallel workflow building
-	workflow := NewParallelWorkflow(wb.memory, wb.config.MaxConcurrency)
-
-	for _, stage := range wb.stages {
-		if stage.Type == StageTypeParallel {
-			for _, step := range stage.Steps {
-				workflowStep := &Step{
-					ID:          step.ID,
-					Module:      step.Module,
-					NextSteps:   []string{},
-					RetryConfig: stage.RetryConfig,
-				}
-				if err := workflow.AddStep(workflowStep); err != nil {
-					return nil, fmt.Errorf("failed to add parallel step '%s': %w", step.ID, err)
-				}
-			}
-		} else {
-			step := &Step{
-				ID:          stage.ID,
-				Module:      stage.Module,
-				NextSteps:   stage.Next,
-				RetryConfig: stage.RetryConfig,
-			}
-			if err := workflow.AddStep(step); err != nil {
-				return nil, fmt.Errorf("failed to add step '%s': %w", stage.ID, err)
-			}
-		}
-	}
-
-	return workflow, nil
-}
-
-func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
-	// For now, build a basic chain workflow that can handle conditionals
-	// Full router workflow implementation is planned for Task 1.2
-	workflow := NewChainWorkflow(wb.memory)
-
-	for _, stage := range wb.stages {
-		// For conditional stages, just add the main module for now
-		// Full conditional logic will be implemented in Task 1.2
 		var module core.Module
-		if stage.Type == StageTypeConditional {
-			// Use the first branch's module as fallback (deterministic order)
+		
+		// Handle different stage types
+		switch stage.Type {
+		case StageTypeSequential:
+			module = stage.Module
+		case StageTypeConditional:
+			// For conditional stages, use the first available module as fallback
+			// Full conditional logic will be implemented in Task 1.2
 			branchKeys := make([]string, 0, len(stage.Branches))
 			for k := range stage.Branches {
 				branchKeys = append(branchKeys, k)
@@ -642,8 +561,15 @@ func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
 			if module == nil {
 				return nil, fmt.Errorf("conditional stage '%s' has no valid modules", stage.ID)
 			}
-		} else {
-			module = stage.Module
+		case StageTypeParallel:
+			// For parallel stages in a chain workflow, just use the first step's module
+			if len(stage.Steps) > 0 {
+				module = stage.Steps[0].Module
+			} else {
+				return nil, fmt.Errorf("parallel stage '%s' has no steps", stage.ID)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported stage type for chain workflow: %v", stage.Type)
 		}
 
 		step := &Step{
@@ -661,66 +587,39 @@ func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
 	return workflow, nil
 }
 
-func (wb *WorkflowBuilder) buildCompositeWorkflow() (Workflow, error) {
-	// For complex workflows that don't fit other patterns, use chain workflow as fallback
-	// Full composite workflow implementation is planned for Task 1.2
-	workflow := NewChainWorkflow(wb.memory)
+func (wb *WorkflowBuilder) buildParallelWorkflow() (Workflow, error) {
+	// This function should only be called for pure parallel workflows
+	workflow := NewParallelWorkflow(wb.memory, wb.config.MaxConcurrency)
 
-	for _, stage := range wb.stages {
-		if stage.Type == StageTypeParallel {
-			// For parallel stages, add each step as sequential for now
-			for _, step := range stage.Steps {
-				workflowStep := &Step{
-					ID:          step.ID,
-					Module:      step.Module,
-					NextSteps:   []string{},
-					RetryConfig: stage.RetryConfig,
-				}
-				if err := workflow.AddStep(workflowStep); err != nil {
-					return nil, fmt.Errorf("failed to add composite step '%s': %w", step.ID, err)
-				}
-			}
-		} else if stage.Type == StageTypeConditional {
-			// For conditional stages, use first available module
-			var module core.Module
-			branchKeys := make([]string, 0, len(stage.Branches))
-			for k := range stage.Branches {
-				branchKeys = append(branchKeys, k)
-			}
-			sort.Strings(branchKeys)
+	// We expect exactly one parallel stage
+	if len(wb.stages) != 1 || wb.stages[0].Type != StageTypeParallel {
+		return nil, fmt.Errorf("buildParallelWorkflow called for non-parallel workflow")
+	}
 
-			for _, key := range branchKeys {
-				if branch := stage.Branches[key]; branch.Module != nil {
-					module = branch.Module
-					break
-				}
-			}
-			if module == nil {
-				return nil, fmt.Errorf("conditional stage '%s' has no valid modules", stage.ID)
-			}
-
-			step := &Step{
-				ID:          stage.ID,
-				Module:      module,
-				NextSteps:   stage.Next,
-				RetryConfig: stage.RetryConfig,
-			}
-			if err := workflow.AddStep(step); err != nil {
-				return nil, fmt.Errorf("failed to add composite step '%s': %w", stage.ID, err)
-			}
-		} else {
-			// Sequential stage
-			step := &Step{
-				ID:          stage.ID,
-				Module:      stage.Module,
-				NextSteps:   stage.Next,
-				RetryConfig: stage.RetryConfig,
-			}
-			if err := workflow.AddStep(step); err != nil {
-				return nil, fmt.Errorf("failed to add composite step '%s': %w", stage.ID, err)
-			}
+	stage := wb.stages[0]
+	for _, step := range stage.Steps {
+		workflowStep := &Step{
+			ID:          step.ID,
+			Module:      step.Module,
+			NextSteps:   []string{},
+			RetryConfig: stage.RetryConfig,
+		}
+		if err := workflow.AddStep(workflowStep); err != nil {
+			return nil, fmt.Errorf("failed to add parallel step '%s': %w", step.ID, err)
 		}
 	}
 
 	return workflow, nil
+}
+
+func (wb *WorkflowBuilder) buildRouterWorkflow() (Workflow, error) {
+	// Router workflow with conditional logic is not yet implemented
+	// Full implementation is planned for Task 1.2
+	return nil, fmt.Errorf("router workflow with conditional stages is not yet implemented")
+}
+
+func (wb *WorkflowBuilder) buildCompositeWorkflow() (Workflow, error) {
+	// Composite workflow for mixed patterns is not yet implemented
+	// Full implementation is planned for Task 1.2
+	return nil, fmt.Errorf("composite workflow with mixed stage types is not yet implemented")
 }
