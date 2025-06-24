@@ -17,6 +17,7 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Advanced Reasoning Patterns**: Implement chain-of-thought, ReAct, refinement, and multi-chain comparison techniques
 - **Parallel Processing**: Built-in support for concurrent execution to improve performance
 - **Dataset Management**: Automatic downloading and management of popular datasets like GSM8K and HotPotQA
+- **Smart Tool Management**: Intelligent tool selection, performance tracking, and auto-discovery from MCP servers
 - **Tool Integration**: Native support for custom tools and MCP (Model Context Protocol) servers
 - **Quality Optimization**: Advanced optimizers including MIPRO, SIMBA, and BootstrapFewShot for systematic improvement
 
@@ -528,6 +529,42 @@ func (t *WeatherTool) Execute(ctx context.Context, action string) (string, error
 react := modules.NewReAct(signature, []core.Tool{&WeatherTool{}})
 ```
 
+### Smart Tool Registry
+
+DSPy-Go includes an intelligent tool management system that uses Bayesian inference for optimal tool selection:
+
+```go
+import "github.com/XiaoConstantine/dspy-go/pkg/tools"
+
+// Create intelligent tool registry
+config := &tools.SmartToolRegistryConfig{
+    AutoDiscoveryEnabled:       true,  // Auto-discover from MCP servers
+    PerformanceTrackingEnabled: true,  // Track tool performance metrics
+    FallbackEnabled:           true,   // Intelligent fallback selection
+}
+registry := tools.NewSmartToolRegistry(config)
+
+// Register tools
+registry.Register(mySearchTool)
+registry.Register(myAnalysisTool)
+
+// Intelligent tool selection based on intent
+tool, err := registry.SelectBest(ctx, "find user information")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Execute with performance tracking
+result, err := registry.ExecuteWithTracking(ctx, tool.Name(), params)
+```
+
+**Key Features:**
+- 🧠 **Bayesian Tool Selection**: Multi-factor scoring with configurable weights
+- 📊 **Performance Tracking**: Real-time metrics and reliability scoring  
+- 🔍 **Capability Analysis**: Automatic capability extraction and matching
+- 🔄 **Auto-Discovery**: Dynamic tool registration from MCP servers
+- 🛡️ **Fallback Mechanisms**: Intelligent fallback when tools fail
+
 ### MCP (Model Context Protocol) Integration
 
 DSPy-Go supports integration with MCP servers for accessing external tools and services:
@@ -552,6 +589,10 @@ if err != nil {
 
 // Use MCP tools with ReAct
 react := modules.NewReAct(signature, mcpTools)
+
+// Or use with Smart Tool Registry for intelligent selection
+registry.Register(mcpTools...)
+selectedTool, err := registry.SelectBest(ctx, "analyze financial data")
 ```
 
 ### Streaming Support
@@ -610,6 +651,7 @@ optimizedModule, err := optimizer.Optimize(ctx, module)
 
 Check the examples directory for complete implementations:
 
+* **[examples/smart_tool_registry](examples/smart_tool_registry)**: Intelligent tool management with Bayesian selection
 * [examples/agents](examples/agents): Demonstrates different agent patterns
 * [examples/hotpotqa](examples/hotpotqa): Question-answering implementation
 * [examples/gsm8k](examples/gsm8k): Math problem solving
@@ -618,6 +660,26 @@ Check the examples directory for complete implementations:
 * [examples/multi_chain_comparison](examples/multi_chain_comparison): Multi-perspective reasoning and decision synthesis
 * [examples/others/mipro](examples/others/mipro): MIPRO optimizer demonstration with GSM8K
 * [examples/others/simba](examples/others/simba): SIMBA optimizer with introspective learning showcase
+
+### Smart Tool Registry Examples
+
+```bash
+# Run basic Smart Tool Registry example
+cd examples/smart_tool_registry
+go run main.go
+
+# Run advanced features demonstration
+# Edit advanced_example.go to uncomment main() function
+go run advanced_example.go
+```
+
+The Smart Tool Registry examples demonstrate:
+- Intelligent tool selection using Bayesian inference
+- Performance tracking and metrics collection
+- Auto-discovery from MCP servers
+- Capability analysis and matching
+- Fallback mechanisms and error handling
+- Custom selector configuration
 
 ## Documentation
 

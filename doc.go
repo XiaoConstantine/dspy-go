@@ -31,11 +31,16 @@
 //
 //   - Agents: Advanced patterns for building sophisticated AI systems:
 //     * Memory: Different memory implementations for tracking conversation history
-//     * Tools: Integration with external tools and APIs, including MCP (Model Context Protocol) support
+//     * Tools: Integration with external tools and APIs, including:
+//       - Smart Tool Registry: Intelligent tool selection using Bayesian inference
+//       - Performance Tracking: Real-time metrics and reliability scoring
+//       - Auto-Discovery: Dynamic tool registration from MCP servers
+//       - MCP (Model Context Protocol) support for seamless integrations
 //     * Workflows:
 //       - Chain: Sequential execution of steps
 //       - Parallel: Concurrent execution of multiple workflow steps
 //       - Router: Dynamic routing based on classification
+//       - Advanced Patterns: ForEach, While, Until loops with conditional execution
 //     * Orchestrator: Flexible task decomposition and execution
 //
 //   - Integration with multiple LLM providers:
@@ -102,6 +107,8 @@
 //
 //   - Metric-Based Optimization: Improve module performance based on custom evaluation metrics
 //
+//   - Smart Tool Management: Intelligent tool selection, performance tracking, and auto-discovery
+//
 //   - Custom Tool Integration: Extend ReAct modules with domain-specific tools
 //
 //   - Workflow Retry Logic: Resilient execution with configurable retry mechanisms and backoff strategies
@@ -113,6 +120,26 @@
 //   - Dataset Management: Built-in support for downloading and managing datasets like GSM8K and HotPotQA
 //
 //   - Arrow Support: Integration with Apache Arrow for efficient data handling and processing
+//
+// Working with Smart Tool Registry:
+//
+//	import "github.com/XiaoConstantine/dspy-go/pkg/tools"
+//
+//	// Create intelligent tool registry
+//	config := &tools.SmartToolRegistryConfig{
+//	    AutoDiscoveryEnabled:       true,
+//	    PerformanceTrackingEnabled: true,
+//	    FallbackEnabled:           true,
+//	}
+//	registry := tools.NewSmartToolRegistry(config)
+//
+//	// Register tools
+//	registry.Register(mySearchTool)
+//	registry.Register(myAnalysisTool)
+//
+//	// Intelligent tool selection based on intent
+//	tool, err := registry.SelectBest(ctx, "find user information")
+//	result, err := registry.ExecuteWithTracking(ctx, tool.Name(), params)
 //
 // Working with Workflows:
 //
