@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -280,9 +281,9 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 		service := NewDefaultMCPDiscoveryService(config)
 		defer service.Stop()
 
-		callbackCalled := false
+		var callbackCalled int32
 		callback := func(tools []core.Tool) {
-			callbackCalled = true
+			atomic.StoreInt32(&callbackCalled, 1)
 		}
 
 		err := service.Subscribe(callback)
@@ -290,8 +291,8 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 
 		// Wait for polling to start and callback to be called
 		time.Sleep(200 * time.Millisecond)
-		assert.True(t, callbackCalled)
-		assert.True(t, service.running)
+		assert.Equal(t, int32(1), atomic.LoadInt32(&callbackCalled))
+		assert.True(t, service.IsRunning())
 	})
 
 	t.Run("nil callback", func(t *testing.T) {
@@ -310,14 +311,13 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 		service := NewDefaultMCPDiscoveryService(config)
 		defer service.Stop()
 
-		callback1Called := false
-		callback2Called := false
+		var callback1Called, callback2Called int32
 
 		callback1 := func(tools []core.Tool) {
-			callback1Called = true
+			atomic.StoreInt32(&callback1Called, 1)
 		}
 		callback2 := func(tools []core.Tool) {
-			callback2Called = true
+			atomic.StoreInt32(&callback2Called, 1)
 		}
 
 		err1 := service.Subscribe(callback1)
@@ -328,8 +328,8 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 
 		// Wait for callbacks to be called
 		time.Sleep(200 * time.Millisecond)
-		assert.True(t, callback1Called)
-		assert.True(t, callback2Called)
+		assert.Equal(t, int32(1), atomic.LoadInt32(&callback1Called))
+		assert.Equal(t, int32(1), atomic.LoadInt32(&callback2Called))
 	})
 }
 
@@ -415,13 +415,13 @@ func TestDefaultMCPDiscoveryService_Stop(t *testing.T) {
 
 	// Wait for service to start
 	time.Sleep(50 * time.Millisecond)
-	assert.True(t, service.running)
+	assert.True(t, service.IsRunning())
 
 	// Stop the service
 	service.Stop()
 
 	// Should stop running and disconnect all servers
-	assert.False(t, service.running)
+	assert.False(t, service.IsRunning())
 	assert.False(t, server1.IsConnected())
 	assert.False(t, server2.IsConnected())
 
@@ -462,9 +462,9 @@ func TestDefaultMCPDiscoveryService_CallbackPanicRecovery(t *testing.T) {
 		panic("test panic")
 	}
 
-	normalCallbackCalled := false
+	var normalCallbackCalled int32
 	normalCallback := func(tools []core.Tool) {
-		normalCallbackCalled = true
+		atomic.StoreInt32(&normalCallbackCalled, 1)
 	}
 
 	// Subscribe both callbacks
@@ -478,7 +478,7 @@ func TestDefaultMCPDiscoveryService_CallbackPanicRecovery(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Normal callback should still be called despite panic in other callback
-	assert.True(t, normalCallbackCalled)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&normalCallbackCalled))
 }
 
 func TestDefaultMCPDiscoveryService_ConcurrentAccess(t *testing.T) {
@@ -641,9 +641,9 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 		service := NewDefaultMCPDiscoveryService(config)
 		defer service.Stop()
 
-		callbackCount := 0
+		var callbackCount int32
 		callback := func(tools []core.Tool) {
-			callbackCount++
+			atomic.AddInt32(&callbackCount, 1)
 		}
 
 		err := service.Subscribe(callback)
@@ -653,7 +653,7 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		// Should have been called multiple times
-		assert.True(t, callbackCount > 1)
+		assert.True(t, atomic.LoadInt32(&callbackCount) > 1)
 	})
 
 	t.Run("server with disconnect error during stop", func(t *testing.T) {
