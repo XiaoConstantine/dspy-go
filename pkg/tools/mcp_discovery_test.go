@@ -13,15 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Mock MCP Server for testing
+// Mock MCP Server for testing.
 type mockMCPServer struct {
-	name        string
-	connected   bool
-	tools       []core.Tool
-	connectErr  error
+	name          string
+	connected     bool
+	tools         []core.Tool
+	connectErr    error
 	disconnectErr error
-	listToolsErr error
-	mu          sync.Mutex
+	listToolsErr  error
+	mu            sync.Mutex
 }
 
 func (m *mockMCPServer) Name() string {
@@ -37,11 +37,11 @@ func (m *mockMCPServer) IsConnected() bool {
 func (m *mockMCPServer) ListTools(ctx context.Context) ([]core.Tool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.listToolsErr != nil {
 		return nil, m.listToolsErr
 	}
-	
+
 	// Return a copy to avoid race conditions
 	toolsCopy := make([]core.Tool, len(m.tools))
 	copy(toolsCopy, m.tools)
@@ -51,11 +51,11 @@ func (m *mockMCPServer) ListTools(ctx context.Context) ([]core.Tool, error) {
 func (m *mockMCPServer) Connect(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.connectErr != nil {
 		return m.connectErr
 	}
-	
+
 	m.connected = true
 	return nil
 }
@@ -63,11 +63,11 @@ func (m *mockMCPServer) Connect(ctx context.Context) error {
 func (m *mockMCPServer) Disconnect(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	if m.disconnectErr != nil {
 		return m.disconnectErr
 	}
-	
+
 	m.connected = false
 	return nil
 }
@@ -94,8 +94,8 @@ func newMockMCPServer(name string) *mockMCPServer {
 
 func TestNewDefaultMCPDiscoveryService(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         *MCPDiscoveryConfig
+		name             string
+		config           *MCPDiscoveryConfig
 		expectedInterval time.Duration
 	}{
 		{
@@ -127,7 +127,7 @@ func TestNewDefaultMCPDiscoveryService(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := NewDefaultMCPDiscoveryService(tt.config)
-			
+
 			assert.NotNil(t, service)
 			assert.Equal(t, tt.expectedInterval, service.pollInterval)
 			assert.Equal(t, len(tt.config.Servers), len(service.servers))
@@ -167,7 +167,7 @@ func TestDefaultMCPDiscoveryService_DiscoverTools(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, tools, 3)
-		
+
 		// Verify tools are from both servers
 		toolNames := make(map[string]bool)
 		for _, tool := range tools {
@@ -383,7 +383,7 @@ func TestDefaultMCPDiscoveryService_RemoveServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, service.servers, 1)
 		assert.Equal(t, "server1", service.servers[0].Name())
-		
+
 		// Should have disconnected the server
 		assert.False(t, server2.IsConnected())
 	})
@@ -490,7 +490,7 @@ func TestDefaultMCPDiscoveryService_ConcurrentAccess(t *testing.T) {
 
 	// Test concurrent server additions and removals
 	var wg sync.WaitGroup
-	
+
 	// Add servers concurrently
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -522,7 +522,7 @@ func TestDefaultMCPDiscoveryService_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
-	
+
 	// Should not panic and should have servers
 	servers := service.GetConnectedServers()
 	assert.True(t, len(servers) >= 0) // Some may be connected, some may not
@@ -565,10 +565,10 @@ func TestDefaultMCPDiscoveryService_ContextCancellation(t *testing.T) {
 func TestDefaultMCPDiscoveryService_InterfaceCompliance(t *testing.T) {
 	// Ensure DefaultMCPDiscoveryService implements the MCPDiscoveryService interface
 	var _ MCPDiscoveryService = (*DefaultMCPDiscoveryService)(nil)
-	
+
 	config := &MCPDiscoveryConfig{}
 	service := NewDefaultMCPDiscoveryService(config)
-	
+
 	// Test that all interface methods are available
 	ctx := context.Background()
 	_, _ = service.DiscoverTools(ctx)
@@ -602,7 +602,7 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 
 	t.Run("server disconnect during discovery", func(t *testing.T) {
 		tool := newMockTool("tool1", "Test tool", []string{"capability"})
-		
+
 		server := newMockMCPServer("disconnect-server")
 		server.setConnected(true)
 		server.setTools([]core.Tool{tool})
@@ -629,7 +629,7 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 
 		err1 := service.AddServer(server1)
 		err2 := service.AddServer(server2)
-		
+
 		assert.NoError(t, err1)
 		assert.Error(t, err2) // Should fail due to duplicate empty name
 	})
@@ -651,7 +651,7 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 
 		// Wait for multiple polling cycles
 		time.Sleep(50 * time.Millisecond)
-		
+
 		// Should have been called multiple times
 		assert.True(t, callbackCount > 1)
 	})
