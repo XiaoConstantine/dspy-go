@@ -43,7 +43,12 @@ func (m *mockProcessingTool) CanHandle(ctx context.Context, intent string) bool 
 
 func (m *mockProcessingTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
 	if m.delay > 0 {
-		time.Sleep(m.delay)
+		// Use context-aware delay that can be interrupted
+		select {
+		case <-time.After(m.delay):
+		case <-ctx.Done():
+			return core.ToolResult{}, ctx.Err()
+		}
 	}
 
 	if m.shouldError {

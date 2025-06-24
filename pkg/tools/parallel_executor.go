@@ -236,7 +236,7 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 	execStart := time.Now()
 	
 	// Get worker ID (approximate)
-	workerID := pe.maxWorkers - len(pe.workerPool)
+	workerID := len(pe.workerPool)
 	
 	// Execute the task with retries
 	var result core.ToolResult
@@ -258,7 +258,7 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 			break // Success
 		}
 		
-		retries = attempt + 1
+		retries = attempt
 		
 		// Don't retry on context cancellation
 		if taskCtx.Err() != nil {
@@ -319,7 +319,7 @@ func (pe *ParallelExecutor) updateMetrics(result ParallelResult) {
 	)
 	
 	// Calculate worker utilization (approximate)
-	activeWorkers := pe.maxWorkers - len(pe.workerPool)
+	activeWorkers := len(pe.workerPool)
 	pe.metrics.WorkerUtilization = float64(activeWorkers) / float64(pe.maxWorkers)
 }
 
@@ -340,8 +340,8 @@ func (pe *ParallelExecutor) GetMetrics() ExecutorMetrics {
 // GetWorkerPoolStatus returns current worker pool status.
 func (pe *ParallelExecutor) GetWorkerPoolStatus() (total, active, available int) {
 	total = pe.maxWorkers
-	available = len(pe.workerPool)
-	active = total - available
+	active = len(pe.workerPool)  // Number of workers currently in use
+	available = total - active   // Number of available workers
 	return
 }
 

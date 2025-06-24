@@ -416,7 +416,7 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 			stepStart := time.Now()
 			
 			// Prepare input from dependencies
-			input, err := dp.prepareToolInput(tName, toolResults)
+			input, err := dp.prepareToolInput(tName, toolResults, &mu)
 			if err != nil {
 				mu.Lock()
 				if firstError == nil {
@@ -461,8 +461,8 @@ func (dp *DependencyPipeline) executePhaseSequential(ctx context.Context, phase 
 		stepID := fmt.Sprintf("phase_%d_step_%d_%s", phaseIdx, toolIdx, toolName)
 		stepStart := time.Now()
 		
-		// Prepare input from dependencies
-		input, err := dp.prepareToolInput(toolName, toolResults)
+		// Prepare input from dependencies (no mutex needed for sequential execution)
+		input, err := dp.prepareToolInput(toolName, toolResults, nil)
 		if err != nil {
 			result.FailedStep = toolName
 			return err
@@ -491,7 +491,7 @@ func (dp *DependencyPipeline) executePhaseSequential(ctx context.Context, phase 
 }
 
 // prepareToolInput prepares input for a tool based on its dependencies.
-func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[string]core.ToolResult) (map[string]interface{}, error) {
+func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[string]core.ToolResult, mu *sync.Mutex) (map[string]interface{}, error) {
 	node, err := dp.graph.GetNode(toolName)
 	if err != nil {
 		return nil, err
@@ -501,7 +501,14 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 	
 	// If no dependencies, use initial input
 	if len(node.Dependencies) == 0 {
-		if initialResult, exists := toolResults["__initial__"]; exists {
+		if mu != nil {
+			mu.Lock()
+		}
+		initialResult, exists := toolResults["__initial__"]
+		if mu != nil {
+			mu.Unlock()
+		}
+		if exists {
 			if initialData, ok := initialResult.Data.(map[string]interface{}); ok {
 				return initialData, nil
 			}
@@ -510,6 +517,9 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 	}
 	
 	// Combine outputs from dependencies
+	if mu != nil {
+		mu.Lock()
+	}
 	for _, dep := range node.Dependencies {
 		if depResult, exists := toolResults[dep]; exists {
 			if depData, ok := depResult.Data.(map[string]interface{}); ok {
@@ -519,11 +529,17 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 				}
 			}
 		} else {
+			if mu != nil {
+				mu.Unlock()
+			}
 			return nil, errors.WithFields(
 				errors.New(errors.Unknown, "dependency result not available"),
 				errors.Fields{"tool": toolName, "dependency": dep},
 			)
 		}
+	}
+	if mu != nil {
+		mu.Unlock()
 	}
 	
 	return input, nil
