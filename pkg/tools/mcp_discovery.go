@@ -99,10 +99,11 @@ func (d *DefaultMCPDiscoveryService) Subscribe(callback func(tools []core.Tool))
 
 	d.mu.Lock()
 	d.callbacks = append(d.callbacks, callback)
+	shouldStartPolling := !d.running
 	d.mu.Unlock()
 
 	// Start polling if this is the first subscriber
-	if !d.running {
+	if shouldStartPolling {
 		go d.startPolling()
 	}
 
@@ -190,6 +191,13 @@ func (d *DefaultMCPDiscoveryService) GetConnectedServers() []string {
 	}
 
 	return connected
+}
+
+// IsRunning returns true if the discovery service is currently running.
+func (d *DefaultMCPDiscoveryService) IsRunning() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.running
 }
 
 // Private methods
