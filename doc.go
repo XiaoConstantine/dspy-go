@@ -36,6 +36,10 @@
 //       - Performance Tracking: Real-time metrics and reliability scoring
 //       - Auto-Discovery: Dynamic tool registration from MCP servers
 //       - MCP (Model Context Protocol) support for seamless integrations
+//       - Tool Chaining: Sequential execution of tools in pipelines with data transformation
+//       - Tool Composition: Combining multiple tools into reusable composite units
+//       - Parallel Execution: Advanced parallel tool execution with intelligent scheduling
+//       - Dependency Resolution: Automatic execution planning based on tool dependencies
 //     * Workflows:
 //       - Chain: Sequential execution of steps
 //       - Parallel: Concurrent execution of multiple workflow steps
@@ -107,7 +111,8 @@
 //
 //   - Metric-Based Optimization: Improve module performance based on custom evaluation metrics
 //
-//   - Smart Tool Management: Intelligent tool selection, performance tracking, and auto-discovery
+//   - Smart Tool Management: Intelligent tool selection, performance tracking, auto-discovery, 
+//     chaining, and composition for building complex tool workflows
 //
 //   - Custom Tool Integration: Extend ReAct modules with domain-specific tools
 //
@@ -140,6 +145,59 @@
 //	// Intelligent tool selection based on intent
 //	tool, err := registry.SelectBest(ctx, "find user information")
 //	result, err := registry.ExecuteWithTracking(ctx, tool.Name(), params)
+//
+//Working with Tool Chaining and Composition:
+//
+//	// Tool Chaining - Sequential execution with data transformation
+//	pipeline, err := tools.NewPipelineBuilder("data_processing", registry).
+//	    Step("data_extractor").
+//	    StepWithTransformer("data_validator", tools.TransformExtractField("result")).
+//	    ConditionalStep("data_enricher", tools.ConditionExists("validated")).
+//	    StepWithRetries("data_transformer", 3).
+//	    FailFast().
+//	    EnableCaching().
+//	    Build()
+//
+//	result, err := pipeline.Execute(ctx, input)
+//
+//	// Dependency-aware execution with automatic parallelization
+//	graph := tools.NewDependencyGraph()
+//	graph.AddNode(&tools.DependencyNode{
+//	    ToolName: "extractor",
+//	    Dependencies: []string{},
+//	    Outputs: []string{"raw_data"},
+//	})
+//	graph.AddNode(&tools.DependencyNode{
+//	    ToolName: "validator", 
+//	    Dependencies: []string{"extractor"},
+//	    Inputs: []string{"raw_data"},
+//	})
+//
+//	depPipeline, err := tools.NewDependencyPipeline("smart_pipeline", registry, graph, options)
+//	result, err := depPipeline.ExecuteWithDependencies(ctx, input)
+//
+//	// Parallel execution with advanced scheduling
+//	executor := tools.NewParallelExecutor(registry, 4)
+//	tasks := []*tools.ParallelTask{
+//	    {ID: "task1", ToolName: "analyzer", Input: data1, Priority: 1},
+//	    {ID: "task2", ToolName: "processor", Input: data2, Priority: 2},
+//	}
+//	results, err := executor.ExecuteParallel(ctx, tasks, &tools.PriorityScheduler{})
+//
+//	// Tool Composition - Create reusable composite tools
+//	type CompositeTool struct {
+//	    name     string
+//	    pipeline *tools.ToolPipeline
+//	}
+//	
+//	textProcessor, err := NewCompositeTool("text_processor", registry, 
+//	    func(builder *tools.PipelineBuilder) *tools.PipelineBuilder {
+//	        return builder.Step("uppercase").Step("reverse").Step("length")
+//	    })
+//	
+//	// Register and use composite tool like any other tool
+//	registry.Register(textProcessor)
+//	result, err := textProcessor.Execute(ctx, input)
 //
 // Working with Workflows:
 //

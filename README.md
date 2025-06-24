@@ -19,6 +19,10 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Dataset Management**: Automatic downloading and management of popular datasets like GSM8K and HotPotQA
 - **Smart Tool Management**: Intelligent tool selection, performance tracking, and auto-discovery from MCP servers
 - **Tool Integration**: Native support for custom tools and MCP (Model Context Protocol) servers
+- **Tool Chaining**: Sequential execution of tools in pipelines with data transformation and conditional logic
+- **Tool Composition**: Create reusable composite tools by combining multiple tools into single units
+- **Advanced Parallel Execution**: High-performance parallel tool execution with intelligent scheduling algorithms
+- **Dependency Resolution**: Automatic execution planning based on tool dependencies with parallel optimization
 - **Quality Optimization**: Advanced optimizers including MIPRO, SIMBA, and BootstrapFewShot for systematic improvement
 
 ## Installation
@@ -565,6 +569,175 @@ result, err := registry.ExecuteWithTracking(ctx, tool.Name(), params)
 - 🔄 **Auto-Discovery**: Dynamic tool registration from MCP servers
 - 🛡️ **Fallback Mechanisms**: Intelligent fallback when tools fail
 
+### Tool Chaining and Composition
+
+DSPy-Go provides powerful capabilities for chaining and composing tools to build complex workflows:
+
+#### Tool Chaining
+
+Create sequential pipelines with data transformation and conditional execution:
+
+```go
+import "github.com/XiaoConstantine/dspy-go/pkg/tools"
+
+// Create a tool pipeline with fluent API
+pipeline, err := tools.NewPipelineBuilder("data_processing", registry).
+    Step("data_extractor").
+    StepWithTransformer("data_validator", tools.TransformExtractField("result")).
+    ConditionalStep("data_enricher", 
+        tools.ConditionExists("validation_result"),
+        tools.ConditionEquals("status", "validated")).
+    StepWithRetries("data_transformer", 3).
+    FailFast().
+    EnableCaching().
+    Build()
+
+// Execute the pipeline
+result, err := pipeline.Execute(ctx, map[string]interface{}{
+    "raw_data": "input data to process",
+})
+```
+
+#### Data Transformations
+
+Transform data between pipeline steps:
+
+```go
+// Extract specific fields
+transformer := tools.TransformExtractField("important_field")
+
+// Rename fields
+transformer := tools.TransformRename(map[string]string{
+    "old_name": "new_name",
+})
+
+// Chain multiple transformations
+transformer := tools.TransformChain(
+    tools.TransformRename(map[string]string{"status": "processing_status"}),
+    tools.TransformAddConstant(map[string]interface{}{"pipeline_id": "001"}),
+    tools.TransformFilter([]string{"result", "pipeline_id", "processing_status"}),
+)
+```
+
+#### Dependency Resolution
+
+Automatic execution planning with parallel optimization:
+
+```go
+// Create dependency graph
+graph := tools.NewDependencyGraph()
+
+// Define tool dependencies
+graph.AddNode(&tools.DependencyNode{
+    ToolName:     "data_extractor",
+    Dependencies: []string{},
+    Outputs:      []string{"raw_data"},
+    Priority:     1,
+})
+
+graph.AddNode(&tools.DependencyNode{
+    ToolName:     "data_validator", 
+    Dependencies: []string{"data_extractor"},
+    Inputs:       []string{"raw_data"},
+    Outputs:      []string{"validated_data"},
+    Priority:     2,
+})
+
+// Create dependency-aware pipeline
+depPipeline, err := tools.NewDependencyPipeline("smart_pipeline", registry, graph, options)
+
+// Execute with automatic parallelization
+result, err := depPipeline.ExecuteWithDependencies(ctx, input)
+```
+
+#### Parallel Execution
+
+High-performance parallel tool execution with advanced scheduling:
+
+```go
+// Create parallel executor
+executor := tools.NewParallelExecutor(registry, 4) // 4 workers
+
+// Define parallel tasks
+tasks := []*tools.ParallelTask{
+    {
+        ID:       "task1",
+        ToolName: "analyzer",
+        Input:    data1,
+        Priority: 1,
+    },
+    {
+        ID:       "task2", 
+        ToolName: "processor",
+        Input:    data2,
+        Priority: 2,
+    },
+}
+
+// Execute with priority scheduling
+results, err := executor.ExecuteParallel(ctx, tasks, &tools.PriorityScheduler{})
+
+// Or use fair share scheduling
+results, err := executor.ExecuteParallel(ctx, tasks, tools.NewFairShareScheduler())
+```
+
+#### Tool Composition
+
+Create reusable composite tools by combining multiple tools:
+
+```go
+// Define a composite tool
+type CompositeTool struct {
+    name     string
+    pipeline *tools.ToolPipeline
+}
+
+// Helper function to create composite tools
+func NewCompositeTool(name string, registry core.ToolRegistry, 
+    builder func(*tools.PipelineBuilder) *tools.PipelineBuilder) (*CompositeTool, error) {
+    
+    pipeline, err := builder(tools.NewPipelineBuilder(name+"_pipeline", registry)).Build()
+    if err != nil {
+        return nil, err
+    }
+    
+    return &CompositeTool{
+        name:     name,
+        pipeline: pipeline,
+    }, nil
+}
+
+// Create a composite tool
+textProcessor, err := NewCompositeTool("text_processor", registry, 
+    func(builder *tools.PipelineBuilder) *tools.PipelineBuilder {
+        return builder.
+            Step("text_uppercase").
+            Step("text_reverse").
+            Step("text_length")
+    })
+
+// Register and use like any other tool
+registry.Register(textProcessor)
+result, err := textProcessor.Execute(ctx, input)
+
+// Use in other pipelines or compositions
+complexPipeline, err := tools.NewPipelineBuilder("complex", registry).
+    Step("text_processor").  // Using our composite tool
+    Step("final_formatter").
+    Build()
+```
+
+**Key Features:**
+- 🔗 **Sequential Chaining**: Build complex workflows by chaining tools together
+- 🔄 **Data Transformation**: Transform data between steps with built-in transformers
+- ⚡ **Conditional Execution**: Execute steps based on previous results
+- 🕸️ **Dependency Resolution**: Automatic execution planning with topological sorting
+- 🚀 **Parallel Optimization**: Execute independent tools concurrently for performance
+- 🧩 **Tool Composition**: Create reusable composite tools as building blocks
+- 💾 **Result Caching**: Cache intermediate results for improved performance
+- 🔄 **Retry Logic**: Configurable retry mechanisms for reliability
+- 📊 **Performance Tracking**: Monitor execution metrics and worker utilization
+
 ### MCP (Model Context Protocol) Integration
 
 DSPy-Go supports integration with MCP servers for accessing external tools and services:
@@ -652,6 +825,8 @@ optimizedModule, err := optimizer.Optimize(ctx, module)
 Check the examples directory for complete implementations:
 
 * **[examples/smart_tool_registry](examples/smart_tool_registry)**: Intelligent tool management with Bayesian selection
+* **[examples/tool_chaining](examples/tool_chaining)**: Sequential tool execution with data transformation, conditional logic, dependency resolution, and parallel execution
+* **[examples/tool_composition](examples/tool_composition)**: Creating reusable composite tools by combining multiple tools into single units
 * [examples/agents](examples/agents): Demonstrates different agent patterns
 * [examples/hotpotqa](examples/hotpotqa): Question-answering implementation
 * [examples/gsm8k](examples/gsm8k): Math problem solving
@@ -680,6 +855,37 @@ The Smart Tool Registry examples demonstrate:
 - Capability analysis and matching
 - Fallback mechanisms and error handling
 - Custom selector configuration
+
+### Tool Chaining and Composition Examples
+
+```bash
+# Run tool chaining examples
+cd examples/tool_chaining
+go run main.go
+
+# Run tool composition examples  
+cd examples/tool_composition
+go run main.go
+```
+
+The Tool Chaining and Composition examples demonstrate:
+
+**Tool Chaining:**
+- Sequential pipeline execution with fluent API
+- Data transformation between pipeline steps
+- Conditional step execution based on previous results
+- Dependency-aware execution with automatic parallelization
+- Advanced parallel tool execution with intelligent scheduling
+- Batch processing with fair share and priority scheduling
+- Result caching and performance optimization
+- Comprehensive error handling and retry mechanisms
+
+**Tool Composition:**
+- Creating reusable composite tools by combining multiple tools
+- Nested composition (composites using other composites)
+- Using composite tools as building blocks in larger pipelines
+- Tool composition with data transformations
+- Registry integration for seamless tool management
 
 ## Documentation
 
