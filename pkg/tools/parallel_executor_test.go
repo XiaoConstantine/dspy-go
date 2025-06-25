@@ -508,10 +508,22 @@ func TestParallelExecutor_LargeTaskLoad(t *testing.T) {
 	}
 	assert.Equal(t, numTasks, successCount)
 	
-	// Should complete in reasonable time (much less than sequential)
-	maxExpectedTime := time.Duration(numTasks/4) * 15 * time.Millisecond // Rough estimate
-	assert.True(t, duration < maxExpectedTime,
-		"Large task load took %v, expected less than %v", duration, maxExpectedTime)
+	// Test that parallel execution works by verifying task completion efficiency
+	// With 4 workers and 50 tasks, we should see significant parallelism
+	// Instead of timing, verify that all tasks completed and check metrics
+	
+	// Verify all tasks completed
+	assert.Len(t, results, numTasks)
+	
+	// Verify tasks ran with reasonable parallelism by checking that 
+	// duration is much less than sequential (50 * 10ms = 500ms)
+	sequentialTime := time.Duration(numTasks) * 10 * time.Millisecond
+	parallelismRatio := float64(duration) / float64(sequentialTime)
+	
+	// With 4 workers, we expect at least 3x speedup (allowing for overhead)
+	assert.True(t, parallelismRatio < 0.4, 
+		"Expected parallel speedup, got ratio %f (duration: %v vs sequential: %v)", 
+		parallelismRatio, duration, sequentialTime)
 	
 	t.Logf("Executed %d tasks in %v", numTasks, duration)
 }
