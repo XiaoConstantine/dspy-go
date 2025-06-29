@@ -10,7 +10,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 )
 
-// Test Unsubscribe functionality
+// Test Unsubscribe functionality.
 func TestEventBus_Unsubscribe(t *testing.T) {
 	bus := NewEventBus(DefaultEventBusConfig())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,7 +69,7 @@ func TestEventBus_Unsubscribe(t *testing.T) {
 	mu.Unlock()
 }
 
-// Test Broadcast functionality
+// Test Broadcast functionality.
 func TestEventBus_Broadcast(t *testing.T) {
 	bus := NewEventBus(DefaultEventBusConfig())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -138,7 +138,7 @@ func TestEventBus_Broadcast(t *testing.T) {
 	mu2.Unlock()
 }
 
-// Test BackpressureDropNewest strategy
+// Test BackpressureDropNewest strategy.
 func TestEventBus_BackpressureDropNewest(t *testing.T) {
 	config := DefaultEventBusConfig()
 	config.BufferSize = 2
@@ -196,7 +196,7 @@ func TestEventBus_BackpressureDropNewest(t *testing.T) {
 	mu.Unlock()
 }
 
-// Test BackpressureDropLowest strategy
+// Test BackpressureDropLowest strategy.
 func TestEventBus_BackpressureDropLowest(t *testing.T) {
 	config := DefaultEventBusConfig()
 	config.BufferSize = 2
@@ -260,7 +260,7 @@ func TestEventBus_BackpressureDropLowest(t *testing.T) {
 	if len(processedEvents) > config.BufferSize {
 		t.Errorf("Expected at most %d events processed, got %d", config.BufferSize, len(processedEvents))
 	}
-	
+
 	// Note: The current implementation doesn't actually implement priority-based dropping
 	// It just drops new events when buffer is full, so we test the actual behavior
 	if len(processedEvents) > 0 {
@@ -272,7 +272,7 @@ func TestEventBus_BackpressureDropLowest(t *testing.T) {
 	mu.Unlock()
 }
 
-// Test BackpressureBlock strategy
+// Test BackpressureBlock strategy.
 func TestEventBus_BackpressureBlock(t *testing.T) {
 	config := DefaultEventBusConfig()
 	config.BufferSize = 1
@@ -342,10 +342,10 @@ func TestEventBus_BackpressureBlock(t *testing.T) {
 	mu.Unlock()
 }
 
-// Test WithEventBus functionality
+// Test WithEventBus functionality.
 func TestReactiveWorkflow_WithEventBus(t *testing.T) {
 	memory := agents.NewInMemoryStore()
-	
+
 	// Create custom event bus
 	customBus := NewEventBus(DefaultEventBusConfig())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -399,7 +399,7 @@ func TestReactiveWorkflow_WithEventBus(t *testing.T) {
 	}
 }
 
-// Test WithConfig functionality
+// Test WithConfig functionality.
 func TestReactiveWorkflow_WithConfig(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	reactive := NewReactiveWorkflow(memory)
@@ -454,7 +454,7 @@ func TestReactiveWorkflow_WithConfig(t *testing.T) {
 	mu.Unlock()
 }
 
-// Test ReactiveWorkflow Request and Respond methods
+// Test ReactiveWorkflow Request and Respond methods.
 func TestReactiveWorkflow_RequestRespond(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	reactive := NewReactiveWorkflow(memory)
@@ -471,13 +471,13 @@ func TestReactiveWorkflow_RequestRespond(t *testing.T) {
 	// Set up responder
 	go func() {
 		time.Sleep(50 * time.Millisecond) // Small delay to ensure request is sent first
-		
+
 		response := Event{
 			ID:   "response_1",
 			Type: "response",
 			Data: "response_data",
 		}
-		
+
 		err := reactive.Respond("request_1", response)
 		if err != nil {
 			t.Logf("Failed to respond: %v", err)
@@ -506,7 +506,7 @@ func TestReactiveWorkflow_RequestRespond(t *testing.T) {
 	}
 }
 
-// Test request timeout
+// Test request timeout.
 func TestEventBus_RequestTimeout(t *testing.T) {
 	bus := NewEventBus(DefaultEventBusConfig())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -531,7 +531,7 @@ func TestEventBus_RequestTimeout(t *testing.T) {
 	}
 }
 
-// Test response channel full error
+// Test response channel full error.
 func TestEventBus_ResponseChannelFull(t *testing.T) {
 	bus := NewEventBus(DefaultEventBusConfig())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -544,7 +544,7 @@ func TestEventBus_ResponseChannelFull(t *testing.T) {
 	defer func() { _ = bus.Stop() }()
 
 	requestID := "full_channel_request"
-	
+
 	// Make the response channel full by not consuming responses
 	request := Event{
 		ID:   requestID,
@@ -579,10 +579,10 @@ func TestEventBus_ResponseChannelFull(t *testing.T) {
 	}
 }
 
-// Test NewReactiveWorkflow with nil memory
+// Test NewReactiveWorkflow with nil memory.
 func TestNewReactiveWorkflow_NilMemory(t *testing.T) {
 	reactive := NewReactiveWorkflow(nil)
-	
+
 	// Should use default memory store when nil is passed
 	if reactive == nil {
 		t.Fatal("NewReactiveWorkflow should not return nil")
@@ -626,7 +626,7 @@ func TestNewReactiveWorkflow_NilMemory(t *testing.T) {
 	mu.Unlock()
 }
 
-// Test handler timeout
+// Test handler timeout.
 func TestEventBus_HandlerTimeout(t *testing.T) {
 	config := DefaultEventBusConfig()
 	config.HandlerTimeout = 50 * time.Millisecond // Short timeout
@@ -660,11 +660,11 @@ func TestEventBus_HandlerTimeout(t *testing.T) {
 
 	// Give enough time for timeout to occur
 	time.Sleep(200 * time.Millisecond)
-	
+
 	// Test passes if no panic occurs - timeout handling should be graceful
 }
 
-// Test error scenarios for Start and Stop
+// Test error scenarios for Start and Stop.
 func TestEventBus_StartStopErrors(t *testing.T) {
 	bus := NewEventBus(DefaultEventBusConfig())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -695,7 +695,7 @@ func TestEventBus_StartStopErrors(t *testing.T) {
 	}
 }
 
-// Test subscribe when maximum handlers reached
+// Test subscribe when maximum handlers reached.
 func TestEventBus_MaxHandlers(t *testing.T) {
 	config := DefaultEventBusConfig()
 	config.MaxHandlers = 2 // Set low limit
