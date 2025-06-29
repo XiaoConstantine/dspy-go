@@ -3,6 +3,7 @@ package communication
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -134,7 +135,9 @@ func (a *Agent) UpdateStatus(status AgentStatus) {
 
 	// Broadcast status update if connected to network
 	if a.network != nil {
-		_ = a.network.BroadcastStatus(a.id, status)
+		if err := a.network.BroadcastStatus(a.id, status); err != nil {
+			log.Printf("failed to broadcast agent status for %s: %v", a.id, err)
+		}
 	}
 }
 
@@ -286,7 +289,9 @@ func (a *Agent) startHeartbeat(ctx context.Context) {
 		case <-ticker.C:
 			if a.network != nil {
 				status := a.GetStatus()
-				_ = a.network.BroadcastStatus(a.id, status)
+				if err := a.network.BroadcastStatus(a.id, status); err != nil {
+					log.Printf("failed to broadcast agent heartbeat status for %s: %v", a.id, err)
+				}
 			}
 		case <-ctx.Done():
 			return

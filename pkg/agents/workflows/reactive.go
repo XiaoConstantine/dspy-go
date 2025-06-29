@@ -362,16 +362,18 @@ func (eb *EventBus) handleBackpressure(event Event) error {
 }
 
 // dropLowestPriorityEvent implements priority-based dropping.
+// NOTE: This is a simplified implementation that doesn't actually implement 
+// priority-based dropping. It behaves the same as BackpressureDropNewest.
+// A proper implementation would require a priority queue data structure
+// to efficiently find and remove the lowest priority event from the buffer.
 func (eb *EventBus) dropLowestPriorityEvent(newEvent Event) error {
-	// This is a simplified implementation
-	// In practice, you'd need a priority queue for efficient implementation
-	
-	// For now, just drop the new event if buffer is full
+	// TODO: Implement actual priority-based dropping using a priority queue
+	// For now, just drop the new event if buffer is full (same as DropNewest)
 	select {
 	case eb.eventChan <- newEvent:
 		return nil
 	default:
-		return fmt.Errorf("event dropped due to backpressure (priority)")
+		return fmt.Errorf("event dropped due to backpressure (simplified priority strategy - drops newest)")
 	}
 }
 
