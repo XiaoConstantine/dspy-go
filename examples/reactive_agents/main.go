@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -696,7 +697,7 @@ func determineRequiredSpecialists(pr GitHubPREvent) []string {
 
 	// Always check style for Go files
 	for _, file := range pr.Files {
-		if file.Filename[len(file.Filename)-3:] == ".go" {
+		if strings.HasSuffix(file.Filename, ".go") {
 			specialists = append(specialists, "style")
 			break
 		}
@@ -734,8 +735,7 @@ func isPerformanceCritical(file GitHubFile) bool {
 
 // contains checks if a string contains a substring (case insensitive).
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s[:len(substr)] == substr || contains(s[1:], substr))
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // simulateGitHubEvents creates mock GitHub PR events for demonstration.

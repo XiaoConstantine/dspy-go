@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -304,10 +305,9 @@ func GitHubReviewDemo() {
 	fmt.Println("✅ Real-time reactive agent communication")
 }
 
-// Helper function for string contains check.
+// Helper function for string contains check (case insensitive).
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		(len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr))))
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 func main() {
@@ -318,9 +318,21 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create two simple agents
+	// Create shared event bus for communication between agents
+	sharedEventBus := workflows.NewEventBus(workflows.DefaultEventBusConfig())
+	err := sharedEventBus.Start(ctx)
+	if err != nil {
+		log.Fatalf("Failed to start shared event bus: %v", err)
+	}
+	defer func() { _ = sharedEventBus.Stop() }()
+
+	// Create two simple agents with shared event bus
 	agentA := NewSimpleAgent("agent_a")
 	agentB := NewSimpleAgent("agent_b")
+	
+	// Configure agents to use the shared event bus
+	agentA.reactive.WithEventBus(sharedEventBus)
+	agentB.reactive.WithEventBus(sharedEventBus)
 
 	// Set up event handlers
 	agentA.OnEvent("user_message", func(ctx context.Context, event workflows.Event) error {
@@ -341,11 +353,8 @@ func main() {
 		return nil
 	})
 
-	// Start agents
-	_ = agentA.Start(ctx)
-	_ = agentB.Start(ctx)
-	defer func() { _ = agentA.Stop() }()
-	defer func() { _ = agentB.Stop() }()
+	// Agents don't need to start their own event bus since they use the shared one
+	// The shared event bus is already started above
 
 	time.Sleep(100 * time.Millisecond)
 
