@@ -49,19 +49,40 @@ func NewRefine(module core.Module, config RefineConfig) *Refine {
 		config.Threshold = 0.7 // Default threshold
 	}
 
+	baseModule := core.NewModule(module.GetSignature())
+	baseModule.ModuleType = "Refine"
+	baseModule.DisplayName = "" // Will be set by user or derived from context
+
 	return &Refine{
-		BaseModule: *core.NewModule(module.GetSignature()),
+		BaseModule: *baseModule,
 		module:     module,
 		config:     config,
 		rng:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
+// WithName sets a semantic name for this Refine instance.
+func (r *Refine) WithName(name string) *Refine {
+	r.DisplayName = name
+	return r
+}
+
 // Process executes the refinement logic by running the module multiple times
 // with different temperatures and selecting the best result based on the reward function.
 func (r *Refine) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
 	logger := logging.GetLogger()
-	ctx, span := core.StartSpan(ctx, "Refine")
+
+	// Use semantic name if set, otherwise fall back to operation name
+	displayName := r.GetDisplayName()
+	if displayName == "" || displayName == "BaseModule" {
+		displayName = "Refine"
+	}
+
+	metadata := map[string]interface{}{
+		"module_type":   r.GetModuleType(),
+		"module_config": r.GetSignature().String(),
+	}
+	ctx, span := core.StartSpanWithContext(ctx, "Refine", displayName, metadata)
 	defer core.EndSpan(ctx)
 
 	span.WithAnnotation("inputs", inputs)

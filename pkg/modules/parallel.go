@@ -81,11 +81,21 @@ func NewParallel(module core.Module, opts ...ParallelOption) *Parallel {
 	// Copy the signature from the inner module
 	signature := module.GetSignature()
 
+	baseModule := core.NewModule(signature)
+	baseModule.ModuleType = "Parallel"
+	baseModule.DisplayName = "" // Will be set by user or derived from context
+
 	return &Parallel{
-		BaseModule:  *core.NewModule(signature),
+		BaseModule:  *baseModule,
 		innerModule: module,
 		options:     options,
 	}
+}
+
+// WithName sets a semantic name for this Parallel instance.
+func (p *Parallel) WithName(name string) *Parallel {
+	p.DisplayName = name
+	return p
 }
 
 // ParallelOption is a function that configures ParallelOptions.

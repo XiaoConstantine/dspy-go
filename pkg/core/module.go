@@ -20,6 +20,12 @@ type Module interface {
 
 	// Clone creates a deep copy of the module
 	Clone() Module
+
+	// GetDisplayName returns a human-readable name for this module instance
+	GetDisplayName() string
+
+	// GetModuleType returns the category/type of this module
+	GetModuleType() string
 }
 
 type Option func(*ModuleOptions)
@@ -86,8 +92,10 @@ func WithOptions(opts ...Option) Option {
 
 // BaseModule provides a basic implementation of the Module interface.
 type BaseModule struct {
-	Signature Signature
-	LLM       LLM
+	Signature   Signature
+	LLM         LLM
+	DisplayName string
+	ModuleType  string
 }
 
 // GetSignature returns the module's signature.
@@ -104,6 +112,22 @@ func (bm *BaseModule) SetSignature(signature Signature) {
 	bm.Signature = signature
 }
 
+// GetDisplayName returns the human-readable name for this module instance.
+func (bm *BaseModule) GetDisplayName() string {
+	if bm.DisplayName != "" {
+		return bm.DisplayName
+	}
+	return bm.GetModuleType()
+}
+
+// GetModuleType returns the category/type of this module.
+func (bm *BaseModule) GetModuleType() string {
+	if bm.ModuleType != "" {
+		return bm.ModuleType
+	}
+	return "BaseModule"
+}
+
 // Process is a placeholder implementation and should be overridden by specific modules.
 func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
 	return nil, errors.New("Process method not implemented")
@@ -112,8 +136,10 @@ func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any, opts .
 // Clone creates a deep copy of the BaseModule.
 func (bm *BaseModule) Clone() Module {
 	return &BaseModule{
-		Signature: bm.Signature,
-		LLM:       bm.LLM, // Note: This is a shallow copy of the LLM
+		Signature:   bm.Signature,
+		LLM:         bm.LLM, // Note: This is a shallow copy of the LLM
+		DisplayName: bm.DisplayName,
+		ModuleType:  bm.ModuleType,
 	}
 }
 

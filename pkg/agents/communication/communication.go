@@ -636,6 +636,14 @@ func (m *MessageHandlerModule) Clone() core.Module {
 	return &MessageHandlerModule{agent: m.agent}
 }
 
+func (m *MessageHandlerModule) GetDisplayName() string {
+	return "MessageHandler"
+}
+
+func (m *MessageHandlerModule) GetModuleType() string {
+	return "MessageHandler"
+}
+
 // HelpRequestHandlerModule handles help requests from other agents.
 type HelpRequestHandlerModule struct {
 	agent *Agent
@@ -709,6 +717,14 @@ func (m *HelpRequestHandlerModule) Clone() core.Module {
 	return &HelpRequestHandlerModule{agent: m.agent}
 }
 
+func (m *HelpRequestHandlerModule) GetDisplayName() string {
+	return "HelpRequestHandler"
+}
+
+func (m *HelpRequestHandlerModule) GetModuleType() string {
+	return "HelpRequestHandler"
+}
+
 // HelpResponseHandlerModule handles responses to help requests.
 type HelpResponseHandlerModule struct {
 	agent *Agent
@@ -745,6 +761,14 @@ func (m *HelpResponseHandlerModule) SetLLM(llm core.LLM)                   {}
 
 func (m *HelpResponseHandlerModule) Clone() core.Module {
 	return &HelpResponseHandlerModule{agent: m.agent}
+}
+
+func (m *HelpResponseHandlerModule) GetDisplayName() string {
+	return "HelpResponseHandler"
+}
+
+func (m *HelpResponseHandlerModule) GetModuleType() string {
+	return "HelpResponseHandler"
 }
 
 // StatusUpdateHandlerModule handles status updates from other agents.
@@ -790,4 +814,12 @@ func (m *StatusUpdateHandlerModule) SetLLM(llm core.LLM)                   {}
 
 func (m *StatusUpdateHandlerModule) Clone() core.Module {
 	return &StatusUpdateHandlerModule{agent: m.agent}
+}
+
+func (m *StatusUpdateHandlerModule) GetDisplayName() string {
+	return "StatusUpdateHandler"
+}
+
+func (m *StatusUpdateHandlerModule) GetModuleType() string {
+	return "StatusUpdateHandler"
 }
