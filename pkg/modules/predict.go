@@ -152,7 +152,7 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 	logger := logging.GetLogger()
 	// Use semantic name if set, otherwise fall back to operation name
 	displayName := p.GetDisplayName()
-	if displayName == "" || displayName == "BaseModule" {
+	if displayName == p.GetModuleType() {
 		displayName = "PredictStream"
 	}
 
