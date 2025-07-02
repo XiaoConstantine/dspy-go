@@ -30,10 +30,9 @@ func (c *ChainOfThought) WithName(name string) *ChainOfThought {
 
 // GetDisplayName returns the display name for this ChainOfThought module.
 func (c *ChainOfThought) GetDisplayName() string {
-	// Use the Predict module's custom name if it was set, otherwise use "ChainOfThought"
-	predictName := c.Predict.GetDisplayName()
-	if predictName != "" && predictName != "Predict" && predictName != "BaseModule" {
-		return predictName
+	// If the inner Predict module has a custom display name, use it.
+	if c.Predict.DisplayName != "" {
+		return c.Predict.DisplayName
 	}
 	return "ChainOfThought"
 }
