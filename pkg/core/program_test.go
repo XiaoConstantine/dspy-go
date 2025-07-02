@@ -38,6 +38,22 @@ func (m *MockModule) SetSignature(signature Signature) {
 	m.Called(signature)
 }
 
+func (m *MockModule) GetDisplayName() string {
+	args := m.Called()
+	if len(args) > 0 {
+		return args.String(0)
+	}
+	return "MockModule"
+}
+
+func (m *MockModule) GetModuleType() string {
+	args := m.Called()
+	if len(args) > 0 {
+		return args.String(0)
+	}
+	return "mock"
+}
+
 func TestProgram(t *testing.T) {
 	t.Run("NewProgram", func(t *testing.T) {
 		mockModule := new(MockModule)

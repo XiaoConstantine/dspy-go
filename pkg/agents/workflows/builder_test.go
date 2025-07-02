@@ -34,6 +34,14 @@ func (m *testModule) SetSignature(signature core.Signature) {}
 func (m *testModule) SetLLM(llm core.LLM)                   {}
 func (m *testModule) Clone() core.Module                    { return &testModule{id: m.id + "_clone"} }
 
+func (m *testModule) GetDisplayName() string {
+	return "TestModule_" + m.id
+}
+
+func (m *testModule) GetModuleType() string {
+	return "test"
+}
+
 func TestWorkflowBuilder_NewBuilder(t *testing.T) {
 	tests := []struct {
 		name   string

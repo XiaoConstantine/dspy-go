@@ -66,6 +66,22 @@ func (m *MockModule) Clone() core.Module {
 	return args.Get(0).(core.Module)
 }
 
+func (m *MockModule) GetDisplayName() string {
+	args := m.Called()
+	if len(args) > 0 {
+		return args.String(0)
+	}
+	return "MockModule"
+}
+
+func (m *MockModule) GetModuleType() string {
+	args := m.Called()
+	if len(args) > 0 {
+		return args.String(0)
+	}
+	return "mock"
+}
+
 func TestBaseWorkflow(t *testing.T) {
 	t.Run("AddStep success", func(t *testing.T) {
 		memory := new(MockMemory)

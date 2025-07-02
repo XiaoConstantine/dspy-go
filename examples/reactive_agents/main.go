@@ -283,6 +283,14 @@ func (h *PROpenedHandler) Clone() core.Module {
 	return &PROpenedHandler{}
 }
 
+func (h *PROpenedHandler) GetDisplayName() string {
+	return "PR Opened Handler"
+}
+
+func (h *PROpenedHandler) GetModuleType() string {
+	return "orchestrator"
+}
+
 // PrimaryReviewHandler handles general code review.
 type PrimaryReviewHandler struct{}
 
@@ -373,6 +381,14 @@ func (h *PrimaryReviewHandler) Clone() core.Module {
 	return &PrimaryReviewHandler{}
 }
 
+func (h *PrimaryReviewHandler) GetDisplayName() string {
+	return "Primary Code Review Handler"
+}
+
+func (h *PrimaryReviewHandler) GetModuleType() string {
+	return "review"
+}
+
 // SecurityReviewHandler handles security-focused review.
 type SecurityReviewHandler struct{}
 
@@ -457,6 +473,14 @@ func (h *SecurityReviewHandler) SetLLM(llm core.LLM)                   {}
 
 func (h *SecurityReviewHandler) Clone() core.Module {
 	return &SecurityReviewHandler{}
+}
+
+func (h *SecurityReviewHandler) GetDisplayName() string {
+	return "Security Review Handler"
+}
+
+func (h *SecurityReviewHandler) GetModuleType() string {
+	return "security_review"
 }
 
 // PerformanceReviewHandler handles performance-focused review.
@@ -545,6 +569,14 @@ func (h *PerformanceReviewHandler) Clone() core.Module {
 	return &PerformanceReviewHandler{}
 }
 
+func (h *PerformanceReviewHandler) GetDisplayName() string {
+	return "Performance Review Handler"
+}
+
+func (h *PerformanceReviewHandler) GetModuleType() string {
+	return "performance_review"
+}
+
 // StyleReviewHandler handles code style review.
 type StyleReviewHandler struct{}
 
@@ -631,6 +663,14 @@ func (h *StyleReviewHandler) Clone() core.Module {
 	return &StyleReviewHandler{}
 }
 
+func (h *StyleReviewHandler) GetDisplayName() string {
+	return "Code Style Review Handler"
+}
+
+func (h *StyleReviewHandler) GetModuleType() string {
+	return "style_review"
+}
+
 // ReviewCompletedHandler aggregates individual review results.
 type ReviewCompletedHandler struct{}
 
@@ -653,6 +693,14 @@ func (h *ReviewCompletedHandler) Clone() core.Module {
 	return &ReviewCompletedHandler{}
 }
 
+func (h *ReviewCompletedHandler) GetDisplayName() string {
+	return "Review Aggregation Handler"
+}
+
+func (h *ReviewCompletedHandler) GetModuleType() string {
+	return "aggregator"
+}
+
 // FinalReviewHandler creates the final review summary.
 type FinalReviewHandler struct{}
 
@@ -673,6 +721,14 @@ func (h *FinalReviewHandler) SetLLM(llm core.LLM)                   {}
 
 func (h *FinalReviewHandler) Clone() core.Module {
 	return &FinalReviewHandler{}
+}
+
+func (h *FinalReviewHandler) GetDisplayName() string {
+	return "Final Review Summary Handler"
+}
+
+func (h *FinalReviewHandler) GetModuleType() string {
+	return "finalizer"
 }
 
 // determineRequiredSpecialists analyzes a PR to determine which specialists are needed.

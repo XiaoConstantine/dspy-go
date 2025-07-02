@@ -771,6 +771,14 @@ func (m *MockModule) Clone() core.Module {
 	return &MockModule{processFunc: m.processFunc, signature: m.signature}
 }
 
+func (m *MockModule) GetDisplayName() string {
+	return "MockModule"
+}
+
+func (m *MockModule) GetModuleType() string {
+	return "MockModule"
+}
+
 // Test MessageHandlerModule.
 func TestMessageHandlerModule(t *testing.T) {
 	memory := agents.NewInMemoryStore()

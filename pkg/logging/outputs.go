@@ -660,6 +660,16 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 	}
 
 	spanInfo := fmt.Sprintf("%s%s %s", prefix, marker, span.Operation)
+	
+	// Add module context information if available
+	if moduleInfo, ok := span.Annotations["module"].(map[string]interface{}); ok {
+		// Module context was already included in span.Operation by StartSpanWithContext
+		// but we can add additional type information if helpful
+		if moduleType, ok := moduleInfo["type"].(string); ok && moduleType != "" {
+			spanInfo += fmt.Sprintf(" [%s]", moduleType)
+		}
+	}
+	
 	if chainInfo, ok := span.Annotations["chain_step"].(map[string]interface{}); ok {
 		if stepName, ok := chainInfo["name"].(string); ok {
 			spanInfo += fmt.Sprintf(" (step=%s)", stepName)

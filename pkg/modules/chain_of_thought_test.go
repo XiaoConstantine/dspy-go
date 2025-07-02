@@ -50,8 +50,8 @@ answer:
 	spans := core.CollectSpans(ctx)
 	require.Len(t, spans, 2, "Should have two spans")
 
-	assert.Equal(t, "ChainOfThought", spans[0].Operation)
-	assert.Equal(t, "Predict", spans[1].Operation)
+	assert.Equal(t, "ChainOfThought (ChainOfThought)", spans[0].Operation)
+	assert.Equal(t, "Predict (Predict)", spans[1].Operation)
 	assert.Equal(t, spans[0].ID, spans[1].ParentID)
 	rootSpan := spans[0]
 

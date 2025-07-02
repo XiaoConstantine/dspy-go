@@ -119,6 +119,16 @@ func (m *StateTestMockModule) Clone() Module {
 	return cloned
 }
 
+// GetDisplayName implements Module.
+func (m *StateTestMockModule) GetDisplayName() string {
+	return "StateTestMockModule"
+}
+
+// GetModuleType implements Module.
+func (m *StateTestMockModule) GetModuleType() string {
+	return "test"
+}
+
 // Another mock type for mismatch testing.
 type AnotherMockModule struct {
 	BaseModule

@@ -52,6 +52,14 @@ func (m *advancedMockModule) Clone() core.Module {
 	return &advancedMockModule{id: m.id + "_clone", outputs: m.outputs}
 }
 
+func (m *advancedMockModule) GetDisplayName() string {
+	return "AdvancedMockModule_" + m.id
+}
+
+func (m *advancedMockModule) GetModuleType() string {
+	return "test"
+}
+
 func TestWorkflowBuilder_ForEach(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -558,6 +566,14 @@ func (m *slowMockModule) Clone() core.Module {
 	return &slowMockModule{id: m.id + "_clone", outputs: m.outputs, delay: m.delay}
 }
 
+func (m *slowMockModule) GetDisplayName() string {
+	return "SlowMockModule_" + m.id
+}
+
+func (m *slowMockModule) GetModuleType() string {
+	return "test"
+}
+
 // Error scenario mock module.
 type errorMockModule struct {
 	id string
@@ -584,6 +600,14 @@ func (m *errorMockModule) Clone() core.Module {
 	return &errorMockModule{id: m.id + "_clone"}
 }
 
+func (m *errorMockModule) GetDisplayName() string {
+	return "ErrorMockModule_" + m.id
+}
+
+func (m *errorMockModule) GetModuleType() string {
+	return "test"
+}
+
 // badFieldClassifierModule returns wrong field name.
 type badFieldClassifierModule struct{}
 
@@ -601,6 +625,14 @@ func (bfcm *badFieldClassifierModule) Clone() core.Module {
 	return &badFieldClassifierModule{}
 }
 
+func (bfcm *badFieldClassifierModule) GetDisplayName() string {
+	return "BadFieldClassifierModule"
+}
+
+func (bfcm *badFieldClassifierModule) GetModuleType() string {
+	return "test"
+}
+
 // intClassifierModule returns integer classification.
 type intClassifierModule struct{}
 
@@ -616,6 +648,14 @@ func (icm *intClassifierModule) SetSignature(signature core.Signature) {}
 func (icm *intClassifierModule) SetLLM(llm core.LLM)                   {}
 func (icm *intClassifierModule) Clone() core.Module {
 	return &intClassifierModule{}
+}
+
+func (icm *intClassifierModule) GetDisplayName() string {
+	return "IntClassifierModule"
+}
+
+func (icm *intClassifierModule) GetModuleType() string {
+	return "test"
 }
 
 func TestCompositeWorkflow_TimeoutHandling(t *testing.T) {

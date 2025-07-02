@@ -39,6 +39,22 @@ func (m *MockModule) SetSignature(signature core.Signature) {
 	m.Called(signature)
 }
 
+func (m *MockModule) GetDisplayName() string {
+	args := m.Called()
+	if len(args) > 0 {
+		return args.String(0)
+	}
+	return "MockModule"
+}
+
+func (m *MockModule) GetModuleType() string {
+	args := m.Called()
+	if len(args) > 0 {
+		return args.String(0)
+	}
+	return "test"
+}
+
 // MockOptimizer is a mock implementation of core.Optimizer.
 type MockOptimizer struct {
 	mock.Mock

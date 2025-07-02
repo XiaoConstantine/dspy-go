@@ -85,6 +85,11 @@ func GetExecutionState(ctx context.Context) *ExecutionState {
 
 // StartSpan begins a new operation span.
 func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
+	return StartSpanWithContext(ctx, operation, "", nil)
+}
+
+// StartSpanWithContext begins a new operation span with additional context information.
+func StartSpanWithContext(ctx context.Context, operation string, moduleName string, metadata map[string]interface{}) (context.Context, *Span) {
 	state := GetExecutionState(ctx)
 	if state == nil {
 		ctx = WithExecutionState(ctx)
@@ -94,11 +99,37 @@ func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
+	// Create display name with module context
+	displayName := operation
+	if moduleName != "" {
+		displayName = fmt.Sprintf("%s (%s)", operation, moduleName)
+	}
+
+	// Initialize annotations with provided metadata
+	annotations := make(map[string]interface{})
+	for k, v := range metadata {
+		annotations[k] = v
+	}
+
+	// Add module information to annotations
+	if moduleName != "" {
+		moduleInfo := map[string]interface{}{
+			"name": moduleName,
+		}
+		if moduleType, ok := metadata["module_type"].(string); ok {
+			moduleInfo["type"] = moduleType
+		}
+		if moduleConfig, ok := metadata["module_config"]; ok {
+			moduleInfo["config"] = moduleConfig
+		}
+		annotations["module"] = moduleInfo
+	}
+
 	span := &Span{
 		ID:          generateSpanID(), // Implementation needed
-		Operation:   operation,
+		Operation:   displayName,
 		StartTime:   time.Now(),
-		Annotations: make(map[string]interface{}),
+		Annotations: annotations,
 	}
 
 	if state.activeSpan != nil {

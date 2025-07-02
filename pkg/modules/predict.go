@@ -30,11 +30,21 @@ var _ core.DemoConsumer = (*Predict)(nil)
 var _ core.LMConfigProvider = (*Predict)(nil)
 
 func NewPredict(signature core.Signature) *Predict {
+	baseModule := core.NewModule(signature)
+	baseModule.ModuleType = "Predict"
+	baseModule.DisplayName = "" // Will be set by user or derived from context
+
 	return &Predict{
-		BaseModule: *core.NewModule(signature),
+		BaseModule: *baseModule,
 		Demos:      []core.Example{},
 		LLM:        core.GetDefaultLLM(),
 	}
+}
+
+// WithName sets a semantic name for this module instance.
+func (p *Predict) WithName(name string) *Predict {
+	p.DisplayName = name
+	return p
 }
 
 func (p *Predict) WithDefaultOptions(opts ...core.Option) *Predict {
@@ -58,7 +68,17 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	if callOptions.StreamHandler != nil {
 		return p.processWithStreaming(ctx, inputs, callOptions.StreamHandler, finalOptions)
 	}
-	ctx, span := core.StartSpan(ctx, "Predict")
+	// Use semantic name if set, otherwise fall back to operation name
+	displayName := p.GetDisplayName()
+	if displayName == "" || displayName == "BaseModule" {
+		displayName = "Predict"
+	}
+
+	metadata := map[string]interface{}{
+		"module_type":   p.GetModuleType(),
+		"module_config": p.GetSignature().String(),
+	}
+	ctx, span := core.StartSpanWithContext(ctx, "Predict", displayName, metadata)
 	defer core.EndSpan(ctx)
 	span.WithAnnotation("inputs", inputs)
 
@@ -130,7 +150,17 @@ func (p *Predict) GetDemos() []core.Example {
 func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]interface{},
 	handler core.StreamHandler, opts *core.ModuleOptions) (map[string]interface{}, error) {
 	logger := logging.GetLogger()
-	ctx, span := core.StartSpan(ctx, "PredictStream")
+	// Use semantic name if set, otherwise fall back to operation name
+	displayName := p.GetDisplayName()
+	if displayName == "" || displayName == "BaseModule" {
+		displayName = "PredictStream"
+	}
+
+	metadata := map[string]interface{}{
+		"module_type":   p.GetModuleType(),
+		"module_config": p.GetSignature().String(),
+	}
+	ctx, span := core.StartSpanWithContext(ctx, "PredictStream", displayName, metadata)
 	defer core.EndSpan(ctx)
 
 	// Validate inputs and build prompt (same as regular Process)
@@ -281,7 +311,7 @@ func stripMarkdown(content string, signature core.Signature) string {
 	if strings.Contains(content, "```json") && strings.Contains(content, "```") {
 		return parseJSONResponse(content, signature)
 	}
-	
+
 	// Fall back to original prefix-based parsing
 	// Define a map to track each field's content
 	fieldContents := make(map[string][]string)
@@ -593,21 +623,21 @@ func parseJSONResponse(content string, signature core.Signature) string {
 	if jsonStart == -1 {
 		return content // Fall back to original content if no JSON block found
 	}
-	
+
 	jsonStart += len("```json")
 	jsonEnd := strings.Index(content[jsonStart:], "```")
 	if jsonEnd == -1 {
 		return content // Fall back if no closing ```
 	}
-	
+
 	jsonContent := strings.TrimSpace(content[jsonStart : jsonStart+jsonEnd])
-	
+
 	// Parse the JSON
 	var jsonData map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonContent), &jsonData); err != nil {
 		return content // Fall back if JSON parsing fails
 	}
-	
+
 	// Convert JSON to field prefix format expected by parseCompletion
 	var result strings.Builder
 	for _, field := range signature.Outputs {
@@ -615,7 +645,7 @@ func parseJSONResponse(content string, signature core.Signature) string {
 			// Add the field with its prefix
 			result.WriteString(field.Prefix)
 			result.WriteString("\n")
-			
+
 			// Add the value, handling both string and other types
 			switch v := value.(type) {
 			case string:
@@ -626,6 +656,6 @@ func parseJSONResponse(content string, signature core.Signature) string {
 			result.WriteString("\n\n")
 		}
 	}
-	
+
 	return strings.TrimSpace(result.String())
 }

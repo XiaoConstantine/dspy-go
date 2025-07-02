@@ -76,9 +76,9 @@ func TestReAct(t *testing.T) {
 	spans := core.CollectSpans(ctx)
 	require.Len(t, spans, 4)
 	assert.Equal(t, "ReAct", spans[0].Operation)
-	assert.Equal(t, "Predict", spans[1].Operation)
+	assert.Equal(t, "Predict (Predict)", spans[1].Operation)
 	assert.Equal(t, "executeToolByName", spans[2].Operation)
-	assert.Equal(t, "Predict", spans[3].Operation)
+	assert.Equal(t, "Predict (Predict)", spans[3].Operation)
 }
 
 func TestReAct_WithErroredTool(t *testing.T) {

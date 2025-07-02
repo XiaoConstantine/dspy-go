@@ -88,6 +88,14 @@ func (m *ReactiveMockModule) Clone() core.Module {
 	return &ReactiveMockModule{processFunc: m.processFunc}
 }
 
+func (m *ReactiveMockModule) GetDisplayName() string {
+	return "ReactiveMockModule"
+}
+
+func (m *ReactiveMockModule) GetModuleType() string {
+	return "test"
+}
+
 func TestEventBus_BasicFunctionality(t *testing.T) {
 	config := DefaultEventBusConfig()
 	config.BufferSize = 10

@@ -13,10 +13,10 @@ import (
 // that compares multiple reasoning attempts and produces a holistic evaluation.
 type MultiChainComparison struct {
 	core.BaseModule
-	M               int             // Number of attempts to compare
-	predict         *Predict        // Internal predict module
-	lastKey         string          // Last key in the original signature
-	defaultOptions  *core.ModuleOptions
+	M              int      // Number of attempts to compare
+	predict        *Predict // Internal predict module
+	lastKey        string   // Last key in the original signature
+	defaultOptions *core.ModuleOptions
 }
 
 // Ensure MultiChainComparison implements core.Module.
@@ -49,13 +49,13 @@ func NewMultiChainComparison(signature core.Signature, M int, temperature float6
 
 	// Create the predict module with modified signature
 	predict := NewPredict(modifiedSignature)
-	
+
 	// Apply temperature and other options to the predict module
 	options := &core.ModuleOptions{}
 	for _, opt := range opts {
 		opt(options)
 	}
-	
+
 	// Set temperature if provided
 	if temperature > 0 {
 		generateOpts := []core.GenerateOption{
@@ -66,13 +66,23 @@ func NewMultiChainComparison(signature core.Signature, M int, temperature float6
 
 	predict = predict.WithDefaultOptions(opts...)
 
+	baseModule := core.NewModule(modifiedSignature)
+	baseModule.ModuleType = "MultiChainComparison"
+	baseModule.DisplayName = "" // Will be set by user or derived from context
+
 	return &MultiChainComparison{
-		BaseModule:     *core.NewModule(modifiedSignature),
+		BaseModule:     *baseModule,
 		M:              M,
 		predict:        predict,
 		lastKey:        lastKey,
 		defaultOptions: options,
 	}
+}
+
+// WithName sets a semantic name for this MultiChainComparison instance.
+func (m *MultiChainComparison) WithName(name string) *MultiChainComparison {
+	m.DisplayName = name
+	return m
 }
 
 // Process implements the core.Module interface.
@@ -116,9 +126,9 @@ func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]in
 		return nil, errors.WithFields(
 			errors.New(errors.ValidationFailed, "number of attempts doesn't match expected M"),
 			errors.Fields{
-				"module":         "MultiChainComparison",
-				"expected":       m.M,
-				"actual":         len(attempts),
+				"module":   "MultiChainComparison",
+				"expected": m.M,
+				"actual":   len(attempts),
 			})
 	}
 

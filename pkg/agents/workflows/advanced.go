@@ -91,7 +91,7 @@ func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert map[string]any to map[string]interface{}
 	converted := make(map[string]interface{})
 	for k, v := range result {
@@ -316,8 +316,8 @@ func (cw *CompositeWorkflow) executeNestedWorkflow(ctx context.Context, nestedBu
 // ConditionalRouterWorkflow handles conditional routing patterns.
 type ConditionalRouterWorkflow struct {
 	*BaseWorkflow
-	classifier core.Module
-	routes     map[string]*Step
+	classifier   core.Module
+	routes       map[string]*Step
 	defaultRoute *Step
 }
 
@@ -424,4 +424,14 @@ func (ccm *conditionalClassifierModule) SetSignature(signature core.Signature) {
 func (ccm *conditionalClassifierModule) SetLLM(llm core.LLM)                   {}
 func (ccm *conditionalClassifierModule) Clone() core.Module {
 	return &conditionalClassifierModule{condition: ccm.condition}
+}
+
+// GetDisplayName returns a display name for the conditional classifier.
+func (ccm *conditionalClassifierModule) GetDisplayName() string {
+	return "ConditionalClassifier"
+}
+
+// GetModuleType returns the module type.
+func (ccm *conditionalClassifierModule) GetModuleType() string {
+	return "ConditionalClassifier"
 }
