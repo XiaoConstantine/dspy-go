@@ -191,6 +191,115 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	}, nil
 }
 
+// NewGeminiLLMFromConfig creates a new GeminiLLM instance from configuration.
+func NewGeminiLLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*GeminiLLM, error) {
+	// Get API key from config or environment
+	apiKey := config.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY")
+	}
+	if apiKey == "" {
+		return nil, errors.New(errors.InvalidInput, "API key is required")
+	}
+
+	// Use default model if none specified
+	if modelID == "" {
+		modelID = core.ModelGoogleGeminiFlash
+	}
+
+	// Validate model ID
+	if !isValidGeminiModel(modelID) {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidInput, "unsupported Gemini model"),
+			errors.Fields{"model": modelID})
+	}
+
+	// Create endpoint configuration
+	baseURL := "https://generativelanguage.googleapis.com/v1beta"
+	if config.BaseURL != "" {
+		baseURL = config.BaseURL
+	}
+
+	endpoint := &core.EndpointConfig{
+		BaseURL: baseURL,
+		Path:    fmt.Sprintf("/models/%s:generateContent", modelID),
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 10 * 60,
+	}
+
+	// Override with config endpoint if provided
+	if config.Endpoint != nil {
+		if config.Endpoint.BaseURL != "" {
+			endpoint.BaseURL = config.Endpoint.BaseURL
+		}
+		if config.Endpoint.TimeoutSec > 0 {
+			endpoint.TimeoutSec = config.Endpoint.TimeoutSec
+		}
+		for k, v := range config.Endpoint.Headers {
+			endpoint.Headers[k] = v
+		}
+	}
+
+	// Set capabilities
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+		core.CapabilityEmbedding,
+	}
+
+	// Check if streaming is supported
+	if supportsGeminiStreaming(modelID) {
+		capabilities = append(capabilities, core.CapabilityStreaming)
+	}
+
+	// Check if function calling is supported
+	if supportsGeminiFunctionCalling(modelID) {
+		capabilities = append(capabilities, core.CapabilityToolCalling)
+	}
+
+	return &GeminiLLM{
+		apiKey:  apiKey,
+		BaseLLM: core.NewBaseLLM("google", modelID, capabilities, endpoint),
+	}, nil
+}
+
+// GeminiProviderFactory creates GeminiLLM instances.
+func GeminiProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
+	return NewGeminiLLMFromConfig(ctx, config, modelID)
+}
+
+// isValidGeminiModel checks if the model is a valid Gemini model.
+func isValidGeminiModel(modelID core.ModelID) bool {
+	validModels := []core.ModelID{
+		core.ModelGoogleGeminiPro,
+		core.ModelGoogleGeminiFlash,
+		core.ModelGoogleGeminiFlashThinking,
+		core.ModelGoogleGeminiFlashLite,
+	}
+
+	for _, validModel := range validModels {
+		if modelID == validModel {
+			return true
+		}
+	}
+	return false
+}
+
+// supportsGeminiStreaming checks if the model supports streaming.
+func supportsGeminiStreaming(modelID core.ModelID) bool {
+	// Most Gemini models support streaming
+	return true
+}
+
+// supportsGeminiFunctionCalling checks if the model supports function calling.
+func supportsGeminiFunctionCalling(modelID core.ModelID) bool {
+	// Most Gemini models support function calling
+	return true
+}
+
 // Generate implements the core.LLM interface.
 func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()

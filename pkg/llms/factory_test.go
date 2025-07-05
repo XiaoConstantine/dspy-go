@@ -3,7 +3,6 @@ package llms
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -66,7 +65,7 @@ func TestNewLLM(t *testing.T) {
 			name:            "Valid Ollama model",
 			apiKey:          "",
 			modelID:         "ollama:llama2",
-			expectedModelID: "llama2",
+			expectedModelID: "ollama:llama2",
 			checkType: func(t *testing.T, llm core.LLM) {
 				underlying := getUnderlyingLLM(llm)
 				_, ok := underlying.(*OllamaLLM)
@@ -79,14 +78,14 @@ func TestNewLLM(t *testing.T) {
 			modelID:         "ollama:",
 			expectedModelID: "",
 			expectErr:       true,
-			errMsg:          "invalid Ollama model ID format. Use 'ollama:<model_name>'",
+			errMsg:          "failed to create LLM with registry and fallback: invalid Ollama model ID format. Use 'ollama:<model_name>'",
 		},
 		{
 			name:      "Unsupported model",
 			apiKey:    "test-api-key",
 			modelID:   "unsupported-model",
 			expectErr: true,
-			errMsg:    "unsupported model ID: unsupported-model",
+			errMsg:    "failed to create LLM with registry and fallback: unsupported model ID: unsupported-model",
 		},
 	}
 
@@ -214,9 +213,8 @@ func TestNewLLMForAllModels(t *testing.T) {
 			ollamaLLM, ok := baseModel.(*OllamaLLM)
 			assert.True(t, ok, "Expected OllamaLLM for model %s", modelStr)
 
-			// Check the model name part is extracted correctly
-			parts := strings.SplitN(modelStr, ":", 2)
-			assert.Equal(t, parts[1], ollamaLLM.ModelID())
+			// Check the full model ID is preserved (new behavior with registry)
+			assert.Equal(t, modelStr, string(ollamaLLM.ModelID()))
 		}
 	})
 

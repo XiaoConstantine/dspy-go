@@ -1,0 +1,594 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/go-playground/validator/v10"
+)
+
+// ValidationError represents a configuration validation error.
+type ValidationError struct {
+	Field   string
+	Tag     string
+	Value   interface{}
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return fmt.Sprintf("validation failed for field '%s' with tag '%s' and value '%v'", e.Field, e.Tag, e.Value)
+}
+
+// ValidationErrors represents multiple validation errors.
+type ValidationErrors []ValidationError
+
+func (e ValidationErrors) Error() string {
+	var messages []string
+	for _, err := range e {
+		messages = append(messages, err.Error())
+	}
+	return fmt.Sprintf("validation failed: %s", strings.Join(messages, "; "))
+}
+
+// Validator provides configuration validation.
+type Validator struct {
+	validate *validator.Validate
+}
+
+// NewValidator creates a new configuration validator.
+func NewValidator() (*Validator, error) {
+	validate := validator.New()
+
+	// Register custom validation functions
+	if err := registerAllValidators(validate); err != nil {
+		return nil, fmt.Errorf("failed to register validators: %w", err)
+	}
+
+	return &Validator{validate: validate}, nil
+}
+
+// ValidateConfig validates a configuration struct.
+func (v *Validator) ValidateConfig(config *Config) error {
+	err := v.validate.Struct(config)
+	if err == nil {
+		return nil
+	}
+
+	// Convert validator errors to our custom error format
+	var validationErrors ValidationErrors
+
+	if errs, ok := err.(validator.ValidationErrors); ok {
+		for _, e := range errs {
+			validationErrors = append(validationErrors, ValidationError{
+				Field:   e.Field(),
+				Tag:     e.Tag(),
+				Value:   e.Value(),
+				Message: getValidationMessage(e),
+			})
+		}
+	} else {
+		validationErrors = append(validationErrors, ValidationError{
+			Message: err.Error(),
+		})
+	}
+
+	// Perform additional custom validations
+	if customErrors := v.validateCustomRules(config); len(customErrors) > 0 {
+		validationErrors = append(validationErrors, customErrors...)
+	}
+
+	if len(validationErrors) > 0 {
+		return validationErrors
+	}
+
+	return nil
+}
+
+// validateCustomRules performs additional custom validation rules.
+func (v *Validator) validateCustomRules(config *Config) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate LLM configuration consistency
+	if errs := v.validateLLMConfig(&config.LLM); len(errs) > 0 {
+		errors = append(errors, errs...)
+	}
+
+	// Validate logging configuration
+	if errs := v.validateLoggingConfig(&config.Logging); len(errs) > 0 {
+		errors = append(errors, errs...)
+	}
+
+	// Validate execution configuration
+	if errs := v.validateExecutionConfig(&config.Execution); len(errs) > 0 {
+		errors = append(errors, errs...)
+	}
+
+	// Validate storage configuration
+	if errs := v.validateStorageConfig(&config.Storage); len(errs) > 0 {
+		errors = append(errors, errs...)
+	}
+
+	return errors
+}
+
+// validateLLMConfig validates LLM configuration.
+func (v *Validator) validateLLMConfig(config *LLMConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate that default LLM provider exists in providers map
+	if config.Default.Provider != "" && len(config.Providers) > 0 {
+		if _, exists := config.Providers[config.Default.Provider]; !exists {
+			errors = append(errors, ValidationError{
+				Field:   "LLM.Default.Provider",
+				Message: fmt.Sprintf("default provider '%s' not found in providers map", config.Default.Provider),
+			})
+		}
+	}
+
+	// Validate that teacher LLM provider exists in providers map
+	if config.Teacher.Provider != "" && len(config.Providers) > 0 {
+		if _, exists := config.Providers[config.Teacher.Provider]; !exists {
+			errors = append(errors, ValidationError{
+				Field:   "LLM.Teacher.Provider",
+				Message: fmt.Sprintf("teacher provider '%s' not found in providers map", config.Teacher.Provider),
+			})
+		}
+	}
+
+	// Validate provider configurations
+	for providerName, provider := range config.Providers {
+		if errs := v.validateLLMProviderConfig(providerName, &provider); len(errs) > 0 {
+			errors = append(errors, errs...)
+		}
+	}
+
+	return errors
+}
+
+// validateLLMProviderConfig validates a specific LLM provider configuration.
+func (v *Validator) validateLLMProviderConfig(providerName string, config *LLMProviderConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate provider-specific requirements
+	switch config.Provider {
+	case "anthropic":
+		if config.APIKey == "" {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.APIKey", providerName),
+				Message: "API key is required for Anthropic provider",
+			})
+		}
+		if !isValidAnthropicModel(config.ModelID) {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.ModelID", providerName),
+				Message: fmt.Sprintf("invalid Anthropic model ID: %s", config.ModelID),
+			})
+		}
+
+	case "google":
+		if config.APIKey == "" {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.APIKey", providerName),
+				Message: "API key is required for Google provider",
+			})
+		}
+		if !isValidGoogleModel(config.ModelID) {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.ModelID", providerName),
+				Message: fmt.Sprintf("invalid Google model ID: %s", config.ModelID),
+			})
+		}
+
+	case "ollama":
+		if config.Endpoint.BaseURL == "" {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.Endpoint.BaseURL", providerName),
+				Message: "base URL is required for Ollama provider",
+			})
+		}
+		if !strings.HasPrefix(config.ModelID, "ollama:") {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.ModelID", providerName),
+				Message: "Ollama model ID must start with 'ollama:'",
+			})
+		}
+
+	case "llamacpp":
+		if config.Endpoint.BaseURL == "" {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("LLM.Providers.%s.Endpoint.BaseURL", providerName),
+				Message: "base URL is required for LlamaCPP provider",
+			})
+		}
+	}
+
+	return errors
+}
+
+// validateLoggingConfig validates logging configuration.
+func (v *Validator) validateLoggingConfig(config *LoggingConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate log outputs
+	for i, output := range config.Outputs {
+		if errs := v.validateLogOutput(i, &output); len(errs) > 0 {
+			errors = append(errors, errs...)
+		}
+	}
+
+	return errors
+}
+
+// validateLogOutput validates a log output configuration.
+func (v *Validator) validateLogOutput(index int, output *LogOutputConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate file output
+	if output.Type == "file" {
+		if output.FilePath == "" {
+			errors = append(errors, ValidationError{
+				Field:   fmt.Sprintf("Logging.Outputs[%d].FilePath", index),
+				Message: "file path is required for file output",
+			})
+		} else {
+			// Validate that the directory exists or can be created
+			dir := filepath.Dir(output.FilePath)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				errors = append(errors, ValidationError{
+					Field:   fmt.Sprintf("Logging.Outputs[%d].FilePath", index),
+					Message: fmt.Sprintf("cannot create log directory: %v", err),
+				})
+			}
+		}
+	}
+
+	return errors
+}
+
+// validateExecutionConfig validates execution configuration.
+func (v *Validator) validateExecutionConfig(config *ExecutionConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate timeout relationships
+	if config.DefaultTimeout > 0 && config.Context.DefaultTimeout > 0 {
+		if config.Context.DefaultTimeout > config.DefaultTimeout {
+			errors = append(errors, ValidationError{
+				Field:   "Execution.Context.DefaultTimeout",
+				Message: "context timeout should not exceed execution timeout",
+			})
+		}
+	}
+
+	// Validate tracing configuration
+	if config.Tracing.Enabled {
+		if config.Tracing.Exporter.Type == "" {
+			errors = append(errors, ValidationError{
+				Field:   "Execution.Tracing.Exporter.Type",
+				Message: "exporter type is required when tracing is enabled",
+			})
+		}
+		if config.Tracing.Exporter.Endpoint == "" {
+			errors = append(errors, ValidationError{
+				Field:   "Execution.Tracing.Exporter.Endpoint",
+				Message: "exporter endpoint is required when tracing is enabled",
+			})
+		}
+	}
+
+	return errors
+}
+
+// validateStorageConfig validates storage configuration.
+func (v *Validator) validateStorageConfig(config *StorageConfig) ValidationErrors {
+	var errors ValidationErrors
+
+	// Validate that default backend exists in backends map
+	if config.DefaultBackend != "" && len(config.Backends) > 0 {
+		if _, exists := config.Backends[config.DefaultBackend]; !exists {
+			errors = append(errors, ValidationError{
+				Field:   "Storage.DefaultBackend",
+				Message: fmt.Sprintf("default backend '%s' not found in backends map", config.DefaultBackend),
+			})
+		}
+	}
+
+	// Validate encryption configuration
+	if config.Encryption.Enabled {
+		if config.Encryption.Key.Source == "" {
+			errors = append(errors, ValidationError{
+				Field:   "Storage.Encryption.Key.Source",
+				Message: "key source is required when encryption is enabled",
+			})
+		}
+		if config.Encryption.Key.Identifier == "" {
+			errors = append(errors, ValidationError{
+				Field:   "Storage.Encryption.Key.Identifier",
+				Message: "key identifier is required when encryption is enabled",
+			})
+		}
+	}
+
+	return errors
+}
+
+// registerAllValidators registers all custom validators.
+func registerAllValidators(validate *validator.Validate) error {
+	validators := map[string]validator.Func{
+		"min_duration":     validateMinDuration,
+		"file_path":        validateFilePath,
+		"url":              validateURL,
+		"provider":         validateProvider,
+		"model_id":         validateModelID,
+		"log_level":        validateLogLevel,
+		"output_type":      validateOutputType,
+		"backend_type":     validateBackendType,
+		"compression_alg":  validateCompressionAlgorithm,
+		"encryption_alg":   validateEncryptionAlgorithm,
+		"key_source":       validateKeySource,
+		"comparison_strat": validateComparisonStrategy,
+		"selection_strat":  validateSelectionStrategy,
+		"exporter_type":    validateExporterType,
+		"sandbox_type":     validateSandboxType,
+	}
+
+	for name, fn := range validators {
+		if err := validate.RegisterValidation(name, fn); err != nil {
+			return fmt.Errorf("failed to register validator '%s': %w", name, err)
+		}
+	}
+
+	return nil
+}
+
+// validateMinDuration validates minimum duration.
+func validateMinDuration(fl validator.FieldLevel) bool {
+	duration := fl.Field().Interface().(time.Duration)
+	minDuration, err := time.ParseDuration(fl.Param())
+	if err != nil {
+		return false
+	}
+	return duration >= minDuration
+}
+
+// validateFilePath validates file paths.
+func validateFilePath(fl validator.FieldLevel) bool {
+	path := fl.Field().String()
+	if path == "" {
+		return true // Allow empty paths
+	}
+	// Check if it's an absolute path
+	return filepath.IsAbs(path)
+}
+
+// validateURL validates URLs.
+func validateURL(fl validator.FieldLevel) bool {
+	url := fl.Field().String()
+	if url == "" {
+		return true // Allow empty URLs
+	}
+	// Basic URL validation
+	urlRegex := regexp.MustCompile(`^https?://[^\s/$.?#].[^\s]*$`)
+	return urlRegex.MatchString(url)
+}
+
+// validateProvider validates LLM provider names.
+func validateProvider(fl validator.FieldLevel) bool {
+	provider := fl.Field().String()
+	validProviders := []string{"anthropic", "google", "ollama", "llamacpp"}
+	for _, valid := range validProviders {
+		if provider == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateModelID validates model IDs.
+func validateModelID(fl validator.FieldLevel) bool {
+	modelID := fl.Field().String()
+	if modelID == "" {
+		return false
+	}
+	// Basic model ID validation - not empty
+	return len(modelID) > 0
+}
+
+// validateLogLevel validates log levels.
+func validateLogLevel(fl validator.FieldLevel) bool {
+	level := fl.Field().String()
+	validLevels := []string{"DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
+	for _, valid := range validLevels {
+		if level == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateOutputType validates output types.
+func validateOutputType(fl validator.FieldLevel) bool {
+	outputType := fl.Field().String()
+	validTypes := []string{"console", "file", "syslog"}
+	for _, valid := range validTypes {
+		if outputType == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateBackendType validates backend types.
+func validateBackendType(fl validator.FieldLevel) bool {
+	backendType := fl.Field().String()
+	validTypes := []string{"file", "sqlite", "redis", "memory"}
+	for _, valid := range validTypes {
+		if backendType == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateCompressionAlgorithm validates compression algorithms.
+func validateCompressionAlgorithm(fl validator.FieldLevel) bool {
+	algorithm := fl.Field().String()
+	validAlgorithms := []string{"gzip", "lz4", "zstd"}
+	for _, valid := range validAlgorithms {
+		if algorithm == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateEncryptionAlgorithm validates encryption algorithms.
+func validateEncryptionAlgorithm(fl validator.FieldLevel) bool {
+	algorithm := fl.Field().String()
+	validAlgorithms := []string{"aes256", "chacha20poly1305"}
+	for _, valid := range validAlgorithms {
+		if algorithm == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateKeySource validates key sources.
+func validateKeySource(fl validator.FieldLevel) bool {
+	source := fl.Field().String()
+	validSources := []string{"env", "file", "kms"}
+	for _, valid := range validSources {
+		if source == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateComparisonStrategy validates comparison strategies.
+func validateComparisonStrategy(fl validator.FieldLevel) bool {
+	strategy := fl.Field().String()
+	validStrategies := []string{"majority_vote", "highest_confidence", "best_score"}
+	for _, valid := range validStrategies {
+		if strategy == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSelectionStrategy validates selection strategies.
+func validateSelectionStrategy(fl validator.FieldLevel) bool {
+	strategy := fl.Field().String()
+	validStrategies := []string{"random", "tournament", "roulette"}
+	for _, valid := range validStrategies {
+		if strategy == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateExporterType validates exporter types.
+func validateExporterType(fl validator.FieldLevel) bool {
+	exporterType := fl.Field().String()
+	validTypes := []string{"jaeger", "zipkin", "otlp"}
+	for _, valid := range validTypes {
+		if exporterType == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSandboxType validates sandbox types.
+func validateSandboxType(fl validator.FieldLevel) bool {
+	sandboxType := fl.Field().String()
+	validTypes := []string{"docker", "wasm", "native"}
+	for _, valid := range validTypes {
+		if sandboxType == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper functions for model validation.
+func isValidAnthropicModel(modelID string) bool {
+	validModels := []string{
+		"claude-3-haiku-20240307",
+		"claude-3-sonnet-20240229",
+		"claude-3-opus-20240229",
+		"claude-3-5-sonnet-20241022",
+		"claude-3-5-haiku-20241022",
+	}
+	for _, valid := range validModels {
+		if modelID == valid {
+			return true
+		}
+	}
+	return false
+}
+
+func isValidGoogleModel(modelID string) bool {
+	validPrefixes := []string{
+		"gemini-",
+		"gemma-",
+		"palm-",
+	}
+	for _, prefix := range validPrefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// getValidationMessage returns a human-readable validation message.
+func getValidationMessage(e validator.FieldError) string {
+	switch e.Tag() {
+	case "required":
+		return fmt.Sprintf("field '%s' is required", e.Field())
+	case "min":
+		return fmt.Sprintf("field '%s' must be at least %s", e.Field(), e.Param())
+	case "max":
+		return fmt.Sprintf("field '%s' must be at most %s", e.Field(), e.Param())
+	case "oneof":
+		return fmt.Sprintf("field '%s' must be one of: %s", e.Field(), e.Param())
+	case "url":
+		return fmt.Sprintf("field '%s' must be a valid URL", e.Field())
+	case "file_path":
+		return fmt.Sprintf("field '%s' must be a valid file path", e.Field())
+	case "min_duration":
+		return fmt.Sprintf("field '%s' must be at least %s", e.Field(), e.Param())
+	default:
+		return fmt.Sprintf("field '%s' failed validation with tag '%s'", e.Field(), e.Tag())
+	}
+}
+
+// Global validator instance.
+var globalValidator *Validator
+
+// GetValidator returns the global validator instance.
+func GetValidator() *Validator {
+	if globalValidator == nil {
+		var err error
+		globalValidator, err = NewValidator()
+		if err != nil {
+			panic(fmt.Sprintf("failed to create global validator: %v", err))
+		}
+	}
+	return globalValidator
+}
+
+// ValidateConfiguration validates a configuration using the global validator.
+func ValidateConfiguration(config *Config) error {
+	return GetValidator().ValidateConfig(config)
+}

@@ -3,6 +3,7 @@ package llms
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 
@@ -35,6 +36,82 @@ func NewAnthropicLLM(apiKey string, model anthropic.ModelID) (*AnthropicLLM, err
 		client:  client,
 		BaseLLM: core.NewBaseLLM("anthropic", core.ModelID(model), capabilities, nil),
 	}, nil
+}
+
+// NewAnthropicLLMFromConfig creates a new AnthropicLLM instance from configuration.
+func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*AnthropicLLM, error) {
+	// Get API key from config or environment
+	apiKey := config.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
+		return nil, errors.New(errors.InvalidInput, "API key is required")
+	}
+
+	// Validate model ID
+	model := anthropic.ModelID(modelID)
+	if !isValidAnthropicModel(model) {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidInput, "unsupported Anthropic model"),
+			errors.Fields{"model": modelID})
+	}
+
+	// Create client with optional configuration
+	clientOpts := []anthropic.ClientOption{anthropic.WithAPIKey(apiKey)}
+
+	// Apply endpoint configuration if provided
+	if config.Endpoint != nil && config.Endpoint.BaseURL != "" {
+		clientOpts = append(clientOpts, anthropic.WithBaseURL(config.Endpoint.BaseURL))
+	}
+
+	client, err := anthropic.NewClient(clientOpts...)
+	if err != nil {
+		return nil, errors.Wrap(err, errors.Unknown, "failed to create Anthropic client")
+	}
+
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
+
+	// Check if streaming is supported
+	if supportsStreaming(model) {
+		capabilities = append(capabilities, core.CapabilityStreaming)
+	}
+
+	return &AnthropicLLM{
+		client:  client,
+		BaseLLM: core.NewBaseLLM("anthropic", modelID, capabilities, config.Endpoint),
+	}, nil
+}
+
+// AnthropicProviderFactory creates AnthropicLLM instances.
+func AnthropicProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
+	return NewAnthropicLLMFromConfig(ctx, config, modelID)
+}
+
+// isValidAnthropicModel checks if the model is a valid Anthropic model.
+func isValidAnthropicModel(model anthropic.ModelID) bool {
+	validModels := []anthropic.ModelID{
+		anthropic.ModelHaiku,
+		anthropic.ModelSonnet,
+		anthropic.ModelOpus,
+	}
+
+	for _, validModel := range validModels {
+		if model == validModel {
+			return true
+		}
+	}
+	return false
+}
+
+// supportsStreaming checks if the model supports streaming.
+func supportsStreaming(model anthropic.ModelID) bool {
+	// All current Anthropic models support streaming
+	return true
 }
 
 // Generate implements the core.LLM interface.
