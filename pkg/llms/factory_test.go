@@ -3,6 +3,7 @@ package llms
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -65,7 +66,7 @@ func TestNewLLM(t *testing.T) {
 			name:            "Valid Ollama model",
 			apiKey:          "",
 			modelID:         "ollama:llama2",
-			expectedModelID: "ollama:llama2",
+			expectedModelID: "llama2", // Model ID is stripped of ollama: prefix
 			checkType: func(t *testing.T, llm core.LLM) {
 				underlying := getUnderlyingLLM(llm)
 				_, ok := underlying.(*OllamaLLM)
@@ -213,8 +214,9 @@ func TestNewLLMForAllModels(t *testing.T) {
 			ollamaLLM, ok := baseModel.(*OllamaLLM)
 			assert.True(t, ok, "Expected OllamaLLM for model %s", modelStr)
 
-			// Check the full model ID is preserved (new behavior with registry)
-			assert.Equal(t, modelStr, string(ollamaLLM.ModelID()))
+			// Check the model ID is stripped (ollama: prefix removed for API calls)
+			expectedStripped := strings.TrimPrefix(modelStr, "ollama:")
+			assert.Equal(t, expectedStripped, string(ollamaLLM.ModelID()))
 		}
 	})
 

@@ -103,7 +103,7 @@ func NewOllamaLLMFromConfig(ctx context.Context, config core.ProviderConfig, mod
 	}
 
 	return &OllamaLLM{
-		BaseLLM: core.NewBaseLLM("ollama", modelID, capabilities, endpointCfg),
+		BaseLLM: core.NewBaseLLM("ollama", core.ModelID(modelName), capabilities, endpointCfg),
 	}, nil
 }
 

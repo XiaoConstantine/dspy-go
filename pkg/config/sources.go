@@ -184,6 +184,14 @@ func (es *EnvironmentSource) setConfigValue(config *Config, key, value string) e
 		return es.setExecutionValue(&config.Execution, strings.TrimPrefix(key, "execution."), value)
 	case strings.HasPrefix(key, "storage."):
 		return es.setStorageValue(&config.Storage, strings.TrimPrefix(key, "storage."), value)
+	case strings.HasPrefix(key, "modules."):
+		return es.setModulesValue(&config.Modules, strings.TrimPrefix(key, "modules."), value)
+	case strings.HasPrefix(key, "agents."):
+		return es.setAgentsValue(&config.Agents, strings.TrimPrefix(key, "agents."), value)
+	case strings.HasPrefix(key, "tools."):
+		return es.setToolsValue(&config.Tools, strings.TrimPrefix(key, "tools."), value)
+	case strings.HasPrefix(key, "optimizers."):
+		return es.setOptimizersValue(&config.Optimizers, strings.TrimPrefix(key, "optimizers."), value)
 	default:
 		// For unhandled paths, simply ignore them rather than failing
 		// This allows for more flexible environment variable usage
@@ -338,6 +346,495 @@ func (es *EnvironmentSource) setStorageValue(storage *StorageConfig, key, value 
 		storage.Encryption.Algorithm = value
 	default:
 		return fmt.Errorf("unsupported storage configuration: %s", key)
+	}
+	return nil
+}
+
+// setModulesValue sets modules configuration values.
+func (es *EnvironmentSource) setModulesValue(modules *ModulesConfig, key, value string) error {
+	switch {
+	case strings.HasPrefix(key, "chainofthought.") || strings.HasPrefix(key, "cot."):
+		subkey := strings.TrimPrefix(key, "chainofthought.")
+		subkey = strings.TrimPrefix(subkey, "cot.")
+		return es.setChainOfThoughtValue(&modules.ChainOfThought, subkey, value)
+	case strings.HasPrefix(key, "multichaincomparison.") || strings.HasPrefix(key, "mcc."):
+		subkey := strings.TrimPrefix(key, "multichaincomparison.")
+		subkey = strings.TrimPrefix(subkey, "mcc.")
+		return es.setMultiChainComparisonValue(&modules.MultiChainComparison, subkey, value)
+	case strings.HasPrefix(key, "react."):
+		return es.setReActValue(&modules.ReAct, strings.TrimPrefix(key, "react."), value)
+	case strings.HasPrefix(key, "refine."):
+		return es.setRefineValue(&modules.Refine, strings.TrimPrefix(key, "refine."), value)
+	case strings.HasPrefix(key, "predict."):
+		return es.setPredictValue(&modules.Predict, strings.TrimPrefix(key, "predict."), value)
+	default:
+		return fmt.Errorf("unsupported modules configuration: %s", key)
+	}
+}
+
+// setChainOfThoughtValue sets Chain of Thought configuration values.
+func (es *EnvironmentSource) setChainOfThoughtValue(cot *ChainOfThoughtConfig, key, value string) error {
+	switch key {
+	case "max.steps", "maxSteps":
+		if maxSteps, err := strconv.Atoi(value); err == nil {
+			cot.MaxSteps = maxSteps
+		} else {
+			return fmt.Errorf("invalid max steps: %s", value)
+		}
+	case "include.reasoning", "includeReasoning":
+		if include, err := strconv.ParseBool(value); err == nil {
+			cot.IncludeReasoning = include
+		} else {
+			return fmt.Errorf("invalid include reasoning flag: %s", value)
+		}
+	case "step.delimiter", "stepDelimiter":
+		cot.StepDelimiter = value
+	default:
+		return fmt.Errorf("unsupported chain of thought configuration: %s", key)
+	}
+	return nil
+}
+
+// setMultiChainComparisonValue sets Multi-Chain Comparison configuration values.
+func (es *EnvironmentSource) setMultiChainComparisonValue(mcc *MultiChainComparisonConfig, key, value string) error {
+	switch key {
+	case "num.chains", "numChains":
+		if numChains, err := strconv.Atoi(value); err == nil {
+			mcc.NumChains = numChains
+		} else {
+			return fmt.Errorf("invalid num chains: %s", value)
+		}
+	case "comparison.strategy", "comparisonStrategy":
+		mcc.ComparisonStrategy = value
+	case "parallel.execution", "parallelExecution":
+		if parallel, err := strconv.ParseBool(value); err == nil {
+			mcc.ParallelExecution = parallel
+		} else {
+			return fmt.Errorf("invalid parallel execution flag: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported multi-chain comparison configuration: %s", key)
+	}
+	return nil
+}
+
+// setReActValue sets ReAct configuration values.
+func (es *EnvironmentSource) setReActValue(react *ReActConfig, key, value string) error {
+	switch key {
+	case "max.cycles", "maxCycles":
+		if maxCycles, err := strconv.Atoi(value); err == nil {
+			react.MaxCycles = maxCycles
+		} else {
+			return fmt.Errorf("invalid max cycles: %s", value)
+		}
+	case "action.timeout", "actionTimeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			react.ActionTimeout = timeout
+		} else {
+			return fmt.Errorf("invalid action timeout: %s", value)
+		}
+	case "include.intermediate.steps", "includeIntermediateSteps":
+		if include, err := strconv.ParseBool(value); err == nil {
+			react.IncludeIntermediateSteps = include
+		} else {
+			return fmt.Errorf("invalid include intermediate steps flag: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported react configuration: %s", key)
+	}
+	return nil
+}
+
+// setRefineValue sets Refine configuration values.
+func (es *EnvironmentSource) setRefineValue(refine *RefineConfig, key, value string) error {
+	switch key {
+	case "max.iterations", "maxIterations":
+		if maxIterations, err := strconv.Atoi(value); err == nil {
+			refine.MaxIterations = maxIterations
+		} else {
+			return fmt.Errorf("invalid max iterations: %s", value)
+		}
+	case "convergence.threshold", "convergenceThreshold":
+		if threshold, err := strconv.ParseFloat(value, 64); err == nil {
+			refine.ConvergenceThreshold = threshold
+		} else {
+			return fmt.Errorf("invalid convergence threshold: %s", value)
+		}
+	case "refinement.strategy", "refinementStrategy":
+		refine.RefinementStrategy = value
+	default:
+		return fmt.Errorf("unsupported refine configuration: %s", key)
+	}
+	return nil
+}
+
+// setPredictValue sets Predict configuration values.
+func (es *EnvironmentSource) setPredictValue(predict *PredictConfig, key, value string) error {
+	switch {
+	case strings.HasPrefix(key, "default.settings.") || strings.HasPrefix(key, "defaults."):
+		subkey := strings.TrimPrefix(key, "default.settings.")
+		subkey = strings.TrimPrefix(subkey, "defaults.")
+		return es.setPredictSettingsValue(&predict.DefaultSettings, subkey, value)
+	case strings.HasPrefix(key, "caching."):
+		return es.setCachingValue(&predict.Caching, strings.TrimPrefix(key, "caching."), value)
+	default:
+		return fmt.Errorf("unsupported predict configuration: %s", key)
+	}
+}
+
+// setPredictSettingsValue sets Predict settings values.
+func (es *EnvironmentSource) setPredictSettingsValue(settings *PredictSettings, key, value string) error {
+	switch key {
+	case "include.confidence", "includeConfidence":
+		if include, err := strconv.ParseBool(value); err == nil {
+			settings.IncludeConfidence = include
+		} else {
+			return fmt.Errorf("invalid include confidence flag: %s", value)
+		}
+	case "temperature":
+		if temp, err := strconv.ParseFloat(value, 64); err == nil {
+			settings.Temperature = temp
+		} else {
+			return fmt.Errorf("invalid temperature: %s", value)
+		}
+	case "top.k", "topK":
+		if topK, err := strconv.Atoi(value); err == nil {
+			settings.TopK = topK
+		} else {
+			return fmt.Errorf("invalid top K: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported predict settings configuration: %s", key)
+	}
+	return nil
+}
+
+// setCachingValue sets Caching configuration values.
+func (es *EnvironmentSource) setCachingValue(caching *CachingConfig, key, value string) error {
+	switch key {
+	case "enabled":
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			caching.Enabled = enabled
+		} else {
+			return fmt.Errorf("invalid enabled flag: %s", value)
+		}
+	case "ttl":
+		if ttl, err := time.ParseDuration(value); err == nil {
+			caching.TTL = ttl
+		} else {
+			return fmt.Errorf("invalid TTL: %s", value)
+		}
+	case "max.size", "maxSize":
+		if maxSize, err := strconv.Atoi(value); err == nil {
+			caching.MaxSize = maxSize
+		} else {
+			return fmt.Errorf("invalid max size: %s", value)
+		}
+	case "type":
+		caching.Type = value
+	default:
+		return fmt.Errorf("unsupported caching configuration: %s", key)
+	}
+	return nil
+}
+
+// setAgentsValue sets agents configuration values.
+func (es *EnvironmentSource) setAgentsValue(agents *AgentsConfig, key, value string) error {
+	switch {
+	case strings.HasPrefix(key, "default."):
+		return es.setAgentValue(&agents.Default, strings.TrimPrefix(key, "default."), value)
+	case strings.HasPrefix(key, "memory."):
+		return es.setAgentMemoryValue(&agents.Memory, strings.TrimPrefix(key, "memory."), value)
+	case strings.HasPrefix(key, "workflows."):
+		return es.setWorkflowsValue(&agents.Workflows, strings.TrimPrefix(key, "workflows."), value)
+	default:
+		return fmt.Errorf("unsupported agents configuration: %s", key)
+	}
+}
+
+// setAgentValue sets Agent configuration values.
+func (es *EnvironmentSource) setAgentValue(agent *AgentConfig, key, value string) error {
+	switch key {
+	case "max.history", "maxHistory":
+		if maxHistory, err := strconv.Atoi(value); err == nil {
+			agent.MaxHistory = maxHistory
+		} else {
+			return fmt.Errorf("invalid max history: %s", value)
+		}
+	case "timeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			agent.Timeout = timeout
+		} else {
+			return fmt.Errorf("invalid timeout: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported agent configuration: %s", key)
+	}
+	return nil
+}
+
+// setAgentMemoryValue sets Agent Memory configuration values.
+func (es *EnvironmentSource) setAgentMemoryValue(memory *AgentMemoryConfig, key, value string) error {
+	switch key {
+	case "type":
+		memory.Type = value
+	case "capacity":
+		if capacity, err := strconv.Atoi(value); err == nil {
+			memory.Capacity = capacity
+		} else {
+			return fmt.Errorf("invalid capacity: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported agent memory configuration: %s", key)
+	}
+	return nil
+}
+
+// setWorkflowsValue sets Workflows configuration values.
+func (es *EnvironmentSource) setWorkflowsValue(workflows *WorkflowsConfig, key, value string) error {
+	switch key {
+	case "default.timeout", "defaultTimeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			workflows.DefaultTimeout = timeout
+		} else {
+			return fmt.Errorf("invalid default timeout: %s", value)
+		}
+	case "max.parallel", "maxParallel":
+		if maxParallel, err := strconv.Atoi(value); err == nil {
+			workflows.MaxParallel = maxParallel
+		} else {
+			return fmt.Errorf("invalid max parallel: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported workflows configuration: %s", key)
+	}
+	return nil
+}
+
+// setToolsValue sets tools configuration values.
+func (es *EnvironmentSource) setToolsValue(tools *ToolsConfig, key, value string) error {
+	switch {
+	case strings.HasPrefix(key, "registry."):
+		return es.setToolRegistryValue(&tools.Registry, strings.TrimPrefix(key, "registry."), value)
+	case strings.HasPrefix(key, "mcp."):
+		return es.setMCPValue(&tools.MCP, strings.TrimPrefix(key, "mcp."), value)
+	case strings.HasPrefix(key, "functions."):
+		return es.setFunctionToolsValue(&tools.Functions, strings.TrimPrefix(key, "functions."), value)
+	default:
+		return fmt.Errorf("unsupported tools configuration: %s", key)
+	}
+}
+
+// setToolRegistryValue sets Tool Registry configuration values.
+func (es *EnvironmentSource) setToolRegistryValue(registry *ToolRegistryConfig, key, value string) error {
+	switch key {
+	case "max.tools", "maxTools":
+		if maxTools, err := strconv.Atoi(value); err == nil {
+			registry.MaxTools = maxTools
+		} else {
+			return fmt.Errorf("invalid max tools: %s", value)
+		}
+	case "auto.discovery", "autoDiscovery":
+		if autoDiscovery, err := strconv.ParseBool(value); err == nil {
+			registry.AutoDiscovery = autoDiscovery
+		} else {
+			return fmt.Errorf("invalid auto discovery flag: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported tool registry configuration: %s", key)
+	}
+	return nil
+}
+
+// setMCPValue sets MCP configuration values.
+func (es *EnvironmentSource) setMCPValue(mcp *MCPConfig, key, value string) error {
+	switch key {
+	case "default.timeout", "defaultTimeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			mcp.DefaultTimeout = timeout
+		} else {
+			return fmt.Errorf("invalid default timeout: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported MCP configuration: %s", key)
+	}
+	return nil
+}
+
+// setFunctionToolsValue sets Function Tools configuration values.
+func (es *EnvironmentSource) setFunctionToolsValue(functions *FunctionToolsConfig, key, value string) error {
+	switch key {
+	case "max.execution.time", "maxExecutionTime":
+		if maxTime, err := time.ParseDuration(value); err == nil {
+			functions.MaxExecutionTime = maxTime
+		} else {
+			return fmt.Errorf("invalid max execution time: %s", value)
+		}
+	case "enable.sandbox", "enableSandbox":
+		if enable, err := strconv.ParseBool(value); err == nil {
+			functions.EnableSandbox = enable
+		} else {
+			return fmt.Errorf("invalid enable sandbox flag: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported function tools configuration: %s", key)
+	}
+	return nil
+}
+
+// setOptimizersValue sets optimizers configuration values.
+func (es *EnvironmentSource) setOptimizersValue(optimizers *OptimizersConfig, key, value string) error {
+	switch {
+	case strings.HasPrefix(key, "bootstrap.") || strings.HasPrefix(key, "bootstrapfewshot."):
+		subkey := strings.TrimPrefix(key, "bootstrap.")
+		subkey = strings.TrimPrefix(subkey, "bootstrapfewshot.")
+		return es.setBootstrapFewShotValue(&optimizers.BootstrapFewShot, subkey, value)
+	case strings.HasPrefix(key, "mipro."):
+		return es.setMIPROValue(&optimizers.MIPRO, strings.TrimPrefix(key, "mipro."), value)
+	case strings.HasPrefix(key, "copro."):
+		return es.setCOPROValue(&optimizers.COPRO, strings.TrimPrefix(key, "copro."), value)
+	case strings.HasPrefix(key, "simba."):
+		return es.setSIMBAValue(&optimizers.SIMBA, strings.TrimPrefix(key, "simba."), value)
+	case strings.HasPrefix(key, "tpe."):
+		return es.setTPEValue(&optimizers.TPE, strings.TrimPrefix(key, "tpe."), value)
+	default:
+		return fmt.Errorf("unsupported optimizers configuration: %s", key)
+	}
+}
+
+// setBootstrapFewShotValue sets Bootstrap Few-Shot configuration values.
+func (es *EnvironmentSource) setBootstrapFewShotValue(bootstrap *BootstrapFewShotConfig, key, value string) error {
+	switch key {
+	case "max.examples", "maxExamples":
+		if maxExamples, err := strconv.Atoi(value); err == nil {
+			bootstrap.MaxExamples = maxExamples
+		} else {
+			return fmt.Errorf("invalid max examples: %s", value)
+		}
+	case "teacher.model", "teacherModel":
+		bootstrap.TeacherModel = value
+	case "student.model", "studentModel":
+		bootstrap.StudentModel = value
+	case "bootstrap.iterations", "bootstrapIterations":
+		if iterations, err := strconv.Atoi(value); err == nil {
+			bootstrap.BootstrapIterations = iterations
+		} else {
+			return fmt.Errorf("invalid bootstrap iterations: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported bootstrap few-shot configuration: %s", key)
+	}
+	return nil
+}
+
+// setMIPROValue sets MIPRO configuration values.
+func (es *EnvironmentSource) setMIPROValue(mipro *MIPROConfig, key, value string) error {
+	switch key {
+	case "population.size", "populationSize":
+		if size, err := strconv.Atoi(value); err == nil {
+			mipro.PopulationSize = size
+		} else {
+			return fmt.Errorf("invalid population size: %s", value)
+		}
+	case "num.generations", "numGenerations":
+		if generations, err := strconv.Atoi(value); err == nil {
+			mipro.NumGenerations = generations
+		} else {
+			return fmt.Errorf("invalid num generations: %s", value)
+		}
+	case "mutation.rate", "mutationRate":
+		if rate, err := strconv.ParseFloat(value, 64); err == nil {
+			mipro.MutationRate = rate
+		} else {
+			return fmt.Errorf("invalid mutation rate: %s", value)
+		}
+	case "crossover.rate", "crossoverRate":
+		if rate, err := strconv.ParseFloat(value, 64); err == nil {
+			mipro.CrossoverRate = rate
+		} else {
+			return fmt.Errorf("invalid crossover rate: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported MIPRO configuration: %s", key)
+	}
+	return nil
+}
+
+// setCOPROValue sets COPRO configuration values.
+func (es *EnvironmentSource) setCOPROValue(copro *COPROConfig, key, value string) error {
+	switch key {
+	case "max.iterations", "maxIterations":
+		if iterations, err := strconv.Atoi(value); err == nil {
+			copro.MaxIterations = iterations
+		} else {
+			return fmt.Errorf("invalid max iterations: %s", value)
+		}
+	case "convergence.threshold", "convergenceThreshold":
+		if threshold, err := strconv.ParseFloat(value, 64); err == nil {
+			copro.ConvergenceThreshold = threshold
+		} else {
+			return fmt.Errorf("invalid convergence threshold: %s", value)
+		}
+	case "learning.rate", "learningRate":
+		if rate, err := strconv.ParseFloat(value, 64); err == nil {
+			copro.LearningRate = rate
+		} else {
+			return fmt.Errorf("invalid learning rate: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported COPRO configuration: %s", key)
+	}
+	return nil
+}
+
+// setSIMBAValue sets SIMBA configuration values.
+func (es *EnvironmentSource) setSIMBAValue(simba *SIMBAConfig, key, value string) error {
+	switch key {
+	case "num.candidates", "numCandidates":
+		if candidates, err := strconv.Atoi(value); err == nil {
+			simba.NumCandidates = candidates
+		} else {
+			return fmt.Errorf("invalid num candidates: %s", value)
+		}
+	case "selection.strategy", "selectionStrategy":
+		simba.SelectionStrategy = value
+	case "evaluation.metric", "evaluationMetric":
+		simba.EvaluationMetric = value
+	default:
+		return fmt.Errorf("unsupported SIMBA configuration: %s", key)
+	}
+	return nil
+}
+
+// setTPEValue sets TPE configuration values.
+func (es *EnvironmentSource) setTPEValue(tpe *TPEConfig, key, value string) error {
+	switch key {
+	case "num.trials", "numTrials":
+		if trials, err := strconv.Atoi(value); err == nil {
+			tpe.NumTrials = trials
+		} else {
+			return fmt.Errorf("invalid num trials: %s", value)
+		}
+	case "num.startup.trials", "numStartupTrials":
+		if trials, err := strconv.Atoi(value); err == nil {
+			tpe.NumStartupTrials = trials
+		} else {
+			return fmt.Errorf("invalid num startup trials: %s", value)
+		}
+	case "percentile":
+		if percentile, err := strconv.ParseFloat(value, 64); err == nil {
+			tpe.Percentile = percentile
+		} else {
+			return fmt.Errorf("invalid percentile: %s", value)
+		}
+	case "random.seed", "randomSeed":
+		if seed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			tpe.RandomSeed = seed
+		} else {
+			return fmt.Errorf("invalid random seed: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported TPE configuration: %s", key)
 	}
 	return nil
 }

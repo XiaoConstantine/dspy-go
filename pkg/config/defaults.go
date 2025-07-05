@@ -537,40 +537,258 @@ func GetDefaultEmbeddingConfig() *EmbeddingConfig {
 	}
 }
 
-// MergeWithDefaults merges a partial configuration with defaults.
+// MergeWithDefaults performs a deep merge of a partial configuration with defaults.
 func MergeWithDefaults(partial *Config) *Config {
 	if partial == nil {
 		return GetDefaultConfig()
 	}
 
 	defaults := GetDefaultConfig()
+	result := *partial // Start with a copy of partial
 
-	// This is a simple merge - for production use, you might want
-	// more sophisticated merging logic using reflection or a library
-	// like mergo
+	// Deep merge LLM configuration
+	result.LLM = mergeLLMConfig(partial.LLM, defaults.LLM)
 
-	if partial.LLM.Default.Provider == "" {
-		partial.LLM.Default = defaults.LLM.Default
+	// Deep merge other sections only if they are completely empty
+	if isEmptyLoggingConfig(partial.Logging) {
+		result.Logging = defaults.Logging
 	}
-	if partial.LLM.Teacher.Provider == "" {
-		partial.LLM.Teacher = defaults.LLM.Teacher
+	if isEmptyExecutionConfig(partial.Execution) {
+		result.Execution = defaults.Execution
 	}
-	if len(partial.LLM.Providers) == 0 {
-		partial.LLM.Providers = defaults.LLM.Providers
+	if isEmptyModulesConfig(partial.Modules) {
+		result.Modules = defaults.Modules
 	}
-	if partial.LLM.GlobalSettings.ConcurrencyLevel == 0 {
-		partial.LLM.GlobalSettings = defaults.LLM.GlobalSettings
+	if isEmptyAgentsConfig(partial.Agents) {
+		result.Agents = defaults.Agents
+	}
+	if isEmptyToolsConfig(partial.Tools) {
+		result.Tools = defaults.Tools
+	}
+	if isEmptyOptimizersConfig(partial.Optimizers) {
+		result.Optimizers = defaults.Optimizers
+	}
+	if isEmptyStorageConfig(partial.Storage) {
+		result.Storage = defaults.Storage
 	}
 
-	if partial.Logging.Level == "" {
-		partial.Logging = defaults.Logging
+	return &result
+}
+
+// mergeLLMConfig performs deep merge of LLM configuration.
+func mergeLLMConfig(partial LLMConfig, defaults LLMConfig) LLMConfig {
+	result := partial
+
+	// Merge Default provider config
+	result.Default = mergeLLMProviderConfig(partial.Default, defaults.Default)
+
+	// Merge Teacher provider config if empty
+	if partial.Teacher.Provider == "" {
+		result.Teacher = defaults.Teacher
+	} else {
+		result.Teacher = mergeLLMProviderConfig(partial.Teacher, defaults.Teacher)
 	}
 
-	if partial.Execution.DefaultTimeout == 0 {
-		partial.Execution = defaults.Execution
+	// Merge providers map - only add defaults if no providers are provided
+	if len(partial.Providers) == 0 {
+		result.Providers = defaults.Providers
+	} else {
+		// If user provided providers, only merge the ones they provided
+		if result.Providers == nil {
+			result.Providers = make(map[string]LLMProviderConfig)
+		}
+		for name, partialProvider := range partial.Providers {
+			if defaultProvider, exists := defaults.Providers[name]; exists {
+				result.Providers[name] = mergeLLMProviderConfig(partialProvider, defaultProvider)
+			} else {
+				result.Providers[name] = partialProvider
+			}
+		}
 	}
 
-	return partial
+	// Merge global settings
+	result.GlobalSettings = mergeLLMGlobalSettings(partial.GlobalSettings, defaults.GlobalSettings)
+
+	return result
+}
+
+// mergeLLMProviderConfig performs deep merge of LLM provider configuration.
+func mergeLLMProviderConfig(partial LLMProviderConfig, defaults LLMProviderConfig) LLMProviderConfig {
+	result := partial
+
+	if result.Provider == "" {
+		result.Provider = defaults.Provider
+	}
+	if result.ModelID == "" {
+		result.ModelID = defaults.ModelID
+	}
+	if result.APIKey == "" {
+		result.APIKey = defaults.APIKey
+	}
+
+	// Merge endpoint config
+	result.Endpoint = mergeEndpointConfig(partial.Endpoint, defaults.Endpoint)
+
+	// Merge generation config
+	result.Generation = mergeGenerationConfig(partial.Generation, defaults.Generation)
+
+	// Merge embedding config
+	result.Embedding = mergeEmbeddingConfig(partial.Embedding, defaults.Embedding)
+
+	// Merge capabilities
+	if len(result.Capabilities) == 0 {
+		result.Capabilities = defaults.Capabilities
+	}
+
+	return result
+}
+
+// mergeEndpointConfig performs deep merge of endpoint configuration.
+func mergeEndpointConfig(partial EndpointConfig, defaults EndpointConfig) EndpointConfig {
+	result := partial
+
+	if result.BaseURL == "" {
+		result.BaseURL = defaults.BaseURL
+	}
+	if result.Path == "" {
+		result.Path = defaults.Path
+	}
+	if result.Headers == nil {
+		result.Headers = make(map[string]string)
+	}
+	for k, v := range defaults.Headers {
+		if _, exists := result.Headers[k]; !exists {
+			result.Headers[k] = v
+		}
+	}
+	if result.Timeout == 0 {
+		result.Timeout = defaults.Timeout
+	}
+
+	// Merge retry config
+	result.Retry = mergeRetryConfig(partial.Retry, defaults.Retry)
+
+	return result
+}
+
+// mergeRetryConfig performs deep merge of retry configuration.
+func mergeRetryConfig(partial RetryConfig, defaults RetryConfig) RetryConfig {
+	result := partial
+
+	if result.MaxRetries == 0 {
+		result.MaxRetries = defaults.MaxRetries
+	}
+	if result.InitialBackoff == 0 {
+		result.InitialBackoff = defaults.InitialBackoff
+	}
+	if result.MaxBackoff == 0 {
+		result.MaxBackoff = defaults.MaxBackoff
+	}
+	if result.BackoffMultiplier == 0 {
+		result.BackoffMultiplier = defaults.BackoffMultiplier
+	}
+
+	return result
+}
+
+// mergeGenerationConfig performs deep merge of generation configuration.
+func mergeGenerationConfig(partial GenerationConfig, defaults GenerationConfig) GenerationConfig {
+	result := partial
+
+	if result.MaxTokens == 0 {
+		result.MaxTokens = defaults.MaxTokens
+	}
+	if result.Temperature == 0 {
+		result.Temperature = defaults.Temperature
+	}
+	if result.TopP == 0 {
+		result.TopP = defaults.TopP
+	}
+	if result.PresencePenalty == 0 {
+		result.PresencePenalty = defaults.PresencePenalty
+	}
+	if result.FrequencyPenalty == 0 {
+		result.FrequencyPenalty = defaults.FrequencyPenalty
+	}
+	if len(result.StopSequences) == 0 {
+		result.StopSequences = defaults.StopSequences
+	}
+
+	return result
+}
+
+// mergeEmbeddingConfig performs deep merge of embedding configuration.
+func mergeEmbeddingConfig(partial EmbeddingConfig, defaults EmbeddingConfig) EmbeddingConfig {
+	result := partial
+
+	if result.Model == "" {
+		result.Model = defaults.Model
+	}
+	if result.BatchSize == 0 {
+		result.BatchSize = defaults.BatchSize
+	}
+	if result.Params == nil {
+		result.Params = make(map[string]interface{})
+	}
+	for k, v := range defaults.Params {
+		if _, exists := result.Params[k]; !exists {
+			result.Params[k] = v
+		}
+	}
+
+	return result
+}
+
+// mergeLLMGlobalSettings performs deep merge of LLM global settings.
+func mergeLLMGlobalSettings(partial LLMGlobalSettings, defaults LLMGlobalSettings) LLMGlobalSettings {
+	result := partial
+
+	if result.ConcurrencyLevel == 0 {
+		result.ConcurrencyLevel = defaults.ConcurrencyLevel
+	}
+	// Note: boolean fields keep their explicit values (including false)
+
+	return result
+}
+
+// Helper functions to check if configs are empty.
+func isEmptyLoggingConfig(config LoggingConfig) bool {
+	return config.Level == "" && len(config.Outputs) == 0
+}
+
+func isEmptyExecutionConfig(config ExecutionConfig) bool {
+	return config.DefaultTimeout == 0 && config.MaxConcurrency == 0
+}
+
+func isEmptyModulesConfig(config ModulesConfig) bool {
+	return config.ChainOfThought.MaxSteps == 0 &&
+		config.MultiChainComparison.NumChains == 0 &&
+		config.ReAct.MaxCycles == 0 &&
+		config.Refine.MaxIterations == 0
+}
+
+func isEmptyAgentsConfig(config AgentsConfig) bool {
+	return config.Default.MaxHistory == 0 &&
+		config.Memory.Type == "" &&
+		config.Workflows.DefaultTimeout == 0
+}
+
+func isEmptyToolsConfig(config ToolsConfig) bool {
+	return config.Registry.MaxTools == 0 &&
+		len(config.MCP.Servers) == 0 &&
+		config.Functions.MaxExecutionTime == 0
+}
+
+func isEmptyOptimizersConfig(config OptimizersConfig) bool {
+	return config.BootstrapFewShot.MaxExamples == 0 &&
+		config.MIPRO.PopulationSize == 0 &&
+		config.COPRO.MaxIterations == 0 &&
+		config.SIMBA.NumCandidates == 0 &&
+		config.TPE.NumTrials == 0
+}
+
+func isEmptyStorageConfig(config StorageConfig) bool {
+	return config.DefaultBackend == "" && len(config.Backends) == 0
 }
 
 // ValidateDefaults validates that the default configuration is valid.
