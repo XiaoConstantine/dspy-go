@@ -1,0 +1,25 @@
+# Realistic GSM8K Configuration - Only what's actually used
+llm:
+  default:
+    provider: "google"
+    model_id: "gemini-2.0-flash"
+    generation:
+      max_tokens: 8192
+      temperature: 0.7
+      top_p: 0.9
+
+logging:
+  level: "INFO"
+  outputs:
+    - type: "console"
+      format: "text"
+      colors: true
+
+modules:
+  chain_of_thought:
+    rationale_field: "reasoning"
+    rationale_description: "Let me work through this step by step"
+
+optimizers:
+  bootstrap_fewshot:
+    max_examples: 5

@@ -22,6 +22,9 @@ const (
 	LLMGenerationFailed
 	TokenLimitExceeded
 	InvalidResponse
+	ModelNotSupported
+	ProviderNotFound
+	ConfigurationError
 
 	// Workflow errors.
 	WorkflowExecutionFailed

@@ -43,6 +43,57 @@ func NewLlamacppLLM(endpoint string) (*LlamacppLLM, error) {
 	}, nil
 }
 
+// NewLlamacppLLMFromConfig creates a new LlamacppLLM instance from configuration.
+func NewLlamacppLLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*LlamacppLLM, error) {
+	// Note: modelID is passed directly to BaseLLM, no need to extract model name here
+
+	// Default endpoint
+	endpoint := "http://localhost:8080"
+	if config.BaseURL != "" {
+		endpoint = config.BaseURL
+	}
+
+	// Create endpoint configuration
+	endpointCfg := &core.EndpointConfig{
+		BaseURL: endpoint,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 10 * 60,
+	}
+
+	// Override with config endpoint if provided
+	if config.Endpoint != nil {
+		if config.Endpoint.BaseURL != "" {
+			endpointCfg.BaseURL = config.Endpoint.BaseURL
+		}
+		if config.Endpoint.TimeoutSec > 0 {
+			endpointCfg.TimeoutSec = config.Endpoint.TimeoutSec
+		}
+		for k, v := range config.Endpoint.Headers {
+			endpointCfg.Headers[k] = v
+		}
+	}
+
+	// Set capabilities
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+		core.CapabilityStreaming,
+		core.CapabilityEmbedding,
+	}
+
+	return &LlamacppLLM{
+		BaseLLM: core.NewBaseLLM("llamacpp", modelID, capabilities, endpointCfg),
+	}, nil
+}
+
+// LlamacppProviderFactory creates LlamacppLLM instances.
+func LlamacppProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
+	return NewLlamacppLLMFromConfig(ctx, config, modelID)
+}
+
 type llamacppRequest struct {
 	Model       string  `json:"model"`
 	Prompt      string  `json:"prompt"`

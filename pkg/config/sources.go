@@ -1,0 +1,563 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Source represents a configuration source.
+type Source interface {
+	// Load loads configuration from the source into the provided config
+	Load(config *Config, paths []string) error
+
+	// Name returns the name of the source
+	Name() string
+
+	// Priority returns the priority of the source (higher priority overrides lower)
+	Priority() int
+}
+
+// FileSource loads configuration from YAML files.
+type FileSource struct {
+	priority int
+}
+
+// NewFileSource creates a new file source.
+func NewFileSource() *FileSource {
+	return &FileSource{priority: 100}
+}
+
+// NewFileSourceWithPriority creates a new file source with custom priority.
+func NewFileSourceWithPriority(priority int) *FileSource {
+	return &FileSource{priority: priority}
+}
+
+// Name returns the name of the file source.
+func (fs *FileSource) Name() string {
+	return "file"
+}
+
+// Priority returns the priority of the file source.
+func (fs *FileSource) Priority() int {
+	return fs.priority
+}
+
+// Load loads configuration from YAML files.
+func (fs *FileSource) Load(config *Config, paths []string) error {
+	for _, path := range paths {
+		if !fileExists(path) {
+			continue
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read config file %s: %w", path, err)
+		}
+
+		// Parse YAML and merge into config
+		var fileConfig Config
+		if err := yaml.Unmarshal(data, &fileConfig); err != nil {
+			return fmt.Errorf("failed to parse YAML from %s: %w", path, err)
+		}
+
+		// Merge the file config into the main config
+		if err := fs.mergeConfig(config, &fileConfig); err != nil {
+			return fmt.Errorf("failed to merge config from %s: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
+// mergeConfig merges source config into target config.
+func (fs *FileSource) mergeConfig(target, source *Config) error {
+	// Use YAML marshaling for deep merge
+	sourceData, err := yaml.Marshal(source)
+	if err != nil {
+		return fmt.Errorf("failed to marshal source config: %w", err)
+	}
+
+	// Unmarshal into target to override fields
+	if err := yaml.Unmarshal(sourceData, target); err != nil {
+		return fmt.Errorf("failed to unmarshal into target config: %w", err)
+	}
+
+	return nil
+}
+
+// EnvironmentSource loads configuration from environment variables.
+type EnvironmentSource struct {
+	priority int
+	prefix   string
+}
+
+// NewEnvironmentSource creates a new environment source.
+func NewEnvironmentSource() *EnvironmentSource {
+	return &EnvironmentSource{
+		priority: 200, // Higher priority than file source
+		prefix:   "DSPY_",
+	}
+}
+
+// NewEnvironmentSourceWithPrefix creates a new environment source with custom prefix.
+func NewEnvironmentSourceWithPrefix(prefix string) *EnvironmentSource {
+	return &EnvironmentSource{
+		priority: 200,
+		prefix:   prefix,
+	}
+}
+
+// NewEnvironmentSourceWithOptions creates a new environment source with custom options.
+func NewEnvironmentSourceWithOptions(priority int, prefix string) *EnvironmentSource {
+	return &EnvironmentSource{
+		priority: priority,
+		prefix:   prefix,
+	}
+}
+
+// Name returns the name of the environment source.
+func (es *EnvironmentSource) Name() string {
+	return "environment"
+}
+
+// Priority returns the priority of the environment source.
+func (es *EnvironmentSource) Priority() int {
+	return es.priority
+}
+
+// Load loads configuration from environment variables.
+func (es *EnvironmentSource) Load(config *Config, paths []string) error {
+	envVars := es.getEnvironmentVariables()
+
+	// Apply environment variable overrides
+	for key, value := range envVars {
+		if err := es.setConfigValue(config, key, value); err != nil {
+			return fmt.Errorf("failed to set config value %s=%s: %w", key, value, err)
+		}
+	}
+
+	return nil
+}
+
+// getEnvironmentVariables gets all environment variables with the configured prefix.
+func (es *EnvironmentSource) getEnvironmentVariables() map[string]string {
+	envVars := make(map[string]string)
+
+	for _, env := range os.Environ() {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key, value := parts[0], parts[1]
+
+		// Only process environment variables with our specific prefix
+		if strings.HasPrefix(key, es.prefix) {
+			// Convert environment variable to config key
+			configKey := strings.ToLower(strings.TrimPrefix(key, es.prefix))
+			configKey = strings.ReplaceAll(configKey, "_", ".")
+			envVars[configKey] = value
+		}
+	}
+
+	return envVars
+}
+
+// setConfigValue sets a configuration value using dot notation.
+func (es *EnvironmentSource) setConfigValue(config *Config, key, value string) error {
+	// Handle common configuration paths
+	switch {
+	case strings.HasPrefix(key, "llm.default."):
+		return es.setLLMProviderValue(&config.LLM.Default, strings.TrimPrefix(key, "llm.default."), value)
+	case strings.HasPrefix(key, "llm.teacher."):
+		return es.setLLMProviderValue(&config.LLM.Teacher, strings.TrimPrefix(key, "llm.teacher."), value)
+	case strings.HasPrefix(key, "llm.global."):
+		return es.setLLMGlobalValue(&config.LLM.GlobalSettings, strings.TrimPrefix(key, "llm.global."), value)
+	case strings.HasPrefix(key, "logging."):
+		return es.setLoggingValue(&config.Logging, strings.TrimPrefix(key, "logging."), value)
+	case strings.HasPrefix(key, "execution."):
+		return es.setExecutionValue(&config.Execution, strings.TrimPrefix(key, "execution."), value)
+	case strings.HasPrefix(key, "storage."):
+		return es.setStorageValue(&config.Storage, strings.TrimPrefix(key, "storage."), value)
+	default:
+		// For unhandled paths, simply ignore them rather than failing
+		// This allows for more flexible environment variable usage
+		return nil
+	}
+}
+
+// setLLMProviderValue sets LLM provider configuration values.
+func (es *EnvironmentSource) setLLMProviderValue(provider *LLMProviderConfig, key, value string) error {
+	switch key {
+	case "provider":
+		provider.Provider = value
+	case "model.id", "modelid":
+		provider.ModelID = value
+	case "api.key", "apikey":
+		provider.APIKey = value
+	case "endpoint.baseurl", "endpoint.base.url":
+		provider.Endpoint.BaseURL = value
+	case "endpoint.timeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			provider.Endpoint.Timeout = timeout
+		} else {
+			return fmt.Errorf("invalid timeout duration: %s", value)
+		}
+	case "generation.maxTokens", "generation.max.tokens":
+		if maxTokens, err := strconv.Atoi(value); err == nil {
+			provider.Generation.MaxTokens = maxTokens
+		} else {
+			return fmt.Errorf("invalid max tokens: %s", value)
+		}
+	case "generation.temperature":
+		if temperature, err := strconv.ParseFloat(value, 64); err == nil {
+			provider.Generation.Temperature = temperature
+		} else {
+			return fmt.Errorf("invalid temperature: %s", value)
+		}
+	case "generation.topp", "generation.top.p":
+		if topP, err := strconv.ParseFloat(value, 64); err == nil {
+			provider.Generation.TopP = topP
+		} else {
+			return fmt.Errorf("invalid top-p: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported LLM provider configuration: %s", key)
+	}
+	return nil
+}
+
+// setLLMGlobalValue sets LLM global configuration values.
+func (es *EnvironmentSource) setLLMGlobalValue(global *LLMGlobalSettings, key, value string) error {
+	switch key {
+	case "concurrency.level", "concurrencyLevel":
+		if level, err := strconv.Atoi(value); err == nil {
+			global.ConcurrencyLevel = level
+		} else {
+			return fmt.Errorf("invalid concurrency level: %s", value)
+		}
+	case "log.requests", "logRequests":
+		if logRequests, err := strconv.ParseBool(value); err == nil {
+			global.LogRequests = logRequests
+		} else {
+			return fmt.Errorf("invalid log requests flag: %s", value)
+		}
+	case "track.token.usage", "trackTokenUsage":
+		if trackTokenUsage, err := strconv.ParseBool(value); err == nil {
+			global.TrackTokenUsage = trackTokenUsage
+		} else {
+			return fmt.Errorf("invalid track token usage flag: %s", value)
+		}
+	case "enable.metrics", "enableMetrics":
+		if enableMetrics, err := strconv.ParseBool(value); err == nil {
+			global.EnableMetrics = enableMetrics
+		} else {
+			return fmt.Errorf("invalid enable metrics flag: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported LLM global configuration: %s", key)
+	}
+	return nil
+}
+
+// setLoggingValue sets logging configuration values.
+func (es *EnvironmentSource) setLoggingValue(logging *LoggingConfig, key, value string) error {
+	switch key {
+	case "level":
+		logging.Level = value
+	case "sample.rate", "sampleRate":
+		if sampleRate, err := strconv.ParseUint(value, 10, 32); err == nil {
+			logging.SampleRate = uint32(sampleRate)
+		} else {
+			return fmt.Errorf("invalid sample rate: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported logging configuration: %s", key)
+	}
+	return nil
+}
+
+// setExecutionValue sets execution configuration values.
+func (es *EnvironmentSource) setExecutionValue(execution *ExecutionConfig, key, value string) error {
+	switch key {
+	case "default.timeout", "defaultTimeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			execution.DefaultTimeout = timeout
+		} else {
+			return fmt.Errorf("invalid default timeout: %s", value)
+		}
+	case "max.concurrency", "maxConcurrency":
+		if maxConcurrency, err := strconv.Atoi(value); err == nil {
+			execution.MaxConcurrency = maxConcurrency
+		} else {
+			return fmt.Errorf("invalid max concurrency: %s", value)
+		}
+	case "tracing.enabled":
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			execution.Tracing.Enabled = enabled
+		} else {
+			return fmt.Errorf("invalid tracing enabled flag: %s", value)
+		}
+	case "tracing.sampling.rate":
+		if rate, err := strconv.ParseFloat(value, 64); err == nil {
+			execution.Tracing.SamplingRate = rate
+		} else {
+			return fmt.Errorf("invalid tracing sampling rate: %s", value)
+		}
+	default:
+		return fmt.Errorf("unsupported execution configuration: %s", key)
+	}
+	return nil
+}
+
+// setStorageValue sets storage configuration values.
+func (es *EnvironmentSource) setStorageValue(storage *StorageConfig, key, value string) error {
+	switch key {
+	case "default.backend", "defaultBackend":
+		storage.DefaultBackend = value
+	case "compression.enabled":
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			storage.Compression.Enabled = enabled
+		} else {
+			return fmt.Errorf("invalid compression enabled flag: %s", value)
+		}
+	case "compression.algorithm":
+		storage.Compression.Algorithm = value
+	case "encryption.enabled":
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			storage.Encryption.Enabled = enabled
+		} else {
+			return fmt.Errorf("invalid encryption enabled flag: %s", value)
+		}
+	case "encryption.algorithm":
+		storage.Encryption.Algorithm = value
+	default:
+		return fmt.Errorf("unsupported storage configuration: %s", key)
+	}
+	return nil
+}
+
+// CommandLineSource loads configuration from command line arguments.
+type CommandLineSource struct {
+	priority int
+	args     []string
+}
+
+// NewCommandLineSource creates a new command line source.
+func NewCommandLineSource(args []string) *CommandLineSource {
+	return &CommandLineSource{
+		priority: 300, // Highest priority
+		args:     args,
+	}
+}
+
+// NewCommandLineSourceWithPriority creates a new command line source with custom priority.
+func NewCommandLineSourceWithPriority(priority int, args []string) *CommandLineSource {
+	return &CommandLineSource{
+		priority: priority,
+		args:     args,
+	}
+}
+
+// Name returns the name of the command line source.
+func (cls *CommandLineSource) Name() string {
+	return "command_line"
+}
+
+// Priority returns the priority of the command line source.
+func (cls *CommandLineSource) Priority() int {
+	return cls.priority
+}
+
+// Load loads configuration from command line arguments.
+func (cls *CommandLineSource) Load(config *Config, paths []string) error {
+	// Parse command line arguments
+	configArgs := cls.parseConfigArgs()
+
+	// Apply command line overrides
+	for key, value := range configArgs {
+		es := &EnvironmentSource{} // Reuse environment source logic
+		if err := es.setConfigValue(config, key, value); err != nil {
+			return fmt.Errorf("failed to set config value from command line %s=%s: %w", key, value, err)
+		}
+	}
+
+	return nil
+}
+
+// parseConfigArgs parses configuration arguments from command line.
+func (cls *CommandLineSource) parseConfigArgs() map[string]string {
+	configArgs := make(map[string]string)
+
+	for i, arg := range cls.args {
+		// Handle --config-key=value format
+		if strings.HasPrefix(arg, "--config.") || strings.HasPrefix(arg, "--config-") {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimPrefix(parts[0], "--config.")
+				key = strings.TrimPrefix(key, "--config-")
+				key = strings.ReplaceAll(key, "-", ".")
+				configArgs[key] = parts[1]
+			} else if i+1 < len(cls.args) && !strings.HasPrefix(cls.args[i+1], "--") {
+				// Handle --config-key value format
+				key := strings.TrimPrefix(arg, "--config.")
+				key = strings.TrimPrefix(key, "--config-")
+				key = strings.ReplaceAll(key, "-", ".")
+				configArgs[key] = cls.args[i+1]
+			}
+		}
+
+		// Handle -c key=value format
+		if arg == "-c" && i+1 < len(cls.args) {
+			parts := strings.SplitN(cls.args[i+1], "=", 2)
+			if len(parts) == 2 {
+				configArgs[parts[0]] = parts[1]
+			}
+		}
+	}
+
+	return configArgs
+}
+
+// MultiSource combines multiple configuration sources.
+type MultiSource struct {
+	sources []Source
+}
+
+// NewMultiSource creates a new multi-source configuration loader.
+func NewMultiSource(sources ...Source) *MultiSource {
+	return &MultiSource{sources: sources}
+}
+
+// Name returns the name of the multi-source.
+func (ms *MultiSource) Name() string {
+	return "multi_source"
+}
+
+// Priority returns the highest priority among all sources.
+func (ms *MultiSource) Priority() int {
+	maxPriority := 0
+	for _, source := range ms.sources {
+		if priority := source.Priority(); priority > maxPriority {
+			maxPriority = priority
+		}
+	}
+	return maxPriority
+}
+
+// Load loads configuration from all sources in priority order.
+func (ms *MultiSource) Load(config *Config, paths []string) error {
+	// Sort sources by priority (lowest first, so higher priority overrides)
+	sources := ms.sortSourcesByPriority()
+
+	// Load from each source
+	for _, source := range sources {
+		if err := source.Load(config, paths); err != nil {
+			return fmt.Errorf("failed to load from source %s: %w", source.Name(), err)
+		}
+	}
+
+	return nil
+}
+
+// sortSourcesByPriority sorts sources by priority (ascending).
+func (ms *MultiSource) sortSourcesByPriority() []Source {
+	sources := make([]Source, len(ms.sources))
+	copy(sources, ms.sources)
+
+	// Simple bubble sort by priority
+	for i := 0; i < len(sources)-1; i++ {
+		for j := 0; j < len(sources)-i-1; j++ {
+			if sources[j].Priority() > sources[j+1].Priority() {
+				sources[j], sources[j+1] = sources[j+1], sources[j]
+			}
+		}
+	}
+
+	return sources
+}
+
+// AddSource adds a source to the multi-source.
+func (ms *MultiSource) AddSource(source Source) {
+	ms.sources = append(ms.sources, source)
+}
+
+// RemoveSource removes a source from the multi-source.
+func (ms *MultiSource) RemoveSource(sourceName string) {
+	for i, source := range ms.sources {
+		if source.Name() == sourceName {
+			ms.sources = append(ms.sources[:i], ms.sources[i+1:]...)
+			break
+		}
+	}
+}
+
+// GetSources returns all sources.
+func (ms *MultiSource) GetSources() []Source {
+	return ms.sources
+}
+
+// RemoteSource loads configuration from a remote URL (placeholder for future implementation).
+type RemoteSource struct {
+	priority int
+	url      string
+	headers  map[string]string
+	timeout  time.Duration
+}
+
+// NewRemoteSource creates a new remote source (placeholder).
+func NewRemoteSource(url string) *RemoteSource {
+	return &RemoteSource{
+		priority: 50, // Lower priority than file source
+		url:      url,
+		headers:  make(map[string]string),
+		timeout:  30 * time.Second,
+	}
+}
+
+// Name returns the name of the remote source.
+func (rs *RemoteSource) Name() string {
+	return "remote"
+}
+
+// Priority returns the priority of the remote source.
+func (rs *RemoteSource) Priority() int {
+	return rs.priority
+}
+
+// Load loads configuration from a remote URL (placeholder implementation).
+func (rs *RemoteSource) Load(config *Config, paths []string) error {
+	// This would implement HTTP(S) fetching of configuration
+	// For now, it's a placeholder
+	return fmt.Errorf("remote source not implemented")
+}
+
+// Convenience functions
+
+// CreateDefaultSources creates the default set of configuration sources.
+func CreateDefaultSources() []Source {
+	return []Source{
+		NewFileSource(),
+		NewEnvironmentSource(),
+	}
+}
+
+// CreateAllSources creates all available configuration sources.
+func CreateAllSources(args []string) []Source {
+	return []Source{
+		NewFileSource(),
+		NewEnvironmentSource(),
+		NewCommandLineSource(args),
+	}
+}
+
+// LoadFromSources loads configuration from multiple sources.
+func LoadFromSources(config *Config, sources []Source, paths []string) error {
+	multiSource := NewMultiSource(sources...)
+	return multiSource.Load(config, paths)
+}

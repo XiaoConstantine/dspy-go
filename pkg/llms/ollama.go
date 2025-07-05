@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -41,6 +42,104 @@ func NewOllamaLLM(endpoint, model string) (*OllamaLLM, error) {
 	return &OllamaLLM{
 		BaseLLM: core.NewBaseLLM("ollama", core.ModelID(model), capabilities, endpointCfg),
 	}, nil
+}
+
+// NewOllamaLLMFromConfig creates a new OllamaLLM instance from configuration.
+func NewOllamaLLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*OllamaLLM, error) {
+	// Extract model name from modelID (remove "ollama:" prefix if present)
+	modelName := strings.TrimPrefix(string(modelID), "ollama:")
+
+	if modelName == "" {
+		return nil, errors.New(errors.InvalidInput, "model name is required")
+	}
+
+	// Default endpoint
+	endpoint := "http://localhost:11434"
+	if config.BaseURL != "" {
+		endpoint = config.BaseURL
+	}
+
+	// Create endpoint configuration
+	endpointCfg := &core.EndpointConfig{
+		BaseURL: endpoint,
+		Path:    "api/generate",
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		TimeoutSec: 10 * 60,
+	}
+
+	// Override with config endpoint if provided
+	if config.Endpoint != nil {
+		if config.Endpoint.BaseURL != "" {
+			endpointCfg.BaseURL = config.Endpoint.BaseURL
+		}
+		if config.Endpoint.Path != "" {
+			endpointCfg.Path = config.Endpoint.Path
+		}
+		if config.Endpoint.TimeoutSec > 0 {
+			endpointCfg.TimeoutSec = config.Endpoint.TimeoutSec
+		}
+		for k, v := range config.Endpoint.Headers {
+			endpointCfg.Headers[k] = v
+		}
+	}
+
+	// Set capabilities
+	capabilities := []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+	}
+
+	// Check if streaming is supported (most Ollama models support it)
+	if supportsOllamaStreaming(modelName) {
+		capabilities = append(capabilities, core.CapabilityStreaming)
+	}
+
+	// Check if embedding is supported
+	if supportsOllamaEmbedding(modelName) {
+		capabilities = append(capabilities, core.CapabilityEmbedding)
+	}
+
+	return &OllamaLLM{
+		BaseLLM: core.NewBaseLLM("ollama", modelID, capabilities, endpointCfg),
+	}, nil
+}
+
+// OllamaProviderFactory creates OllamaLLM instances.
+func OllamaProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
+	return NewOllamaLLMFromConfig(ctx, config, modelID)
+}
+
+// supportsOllamaStreaming checks if the model supports streaming.
+func supportsOllamaStreaming(modelName string) bool {
+	// Most Ollama models support streaming
+	return true
+}
+
+// supportsOllamaEmbedding checks if the model supports embedding.
+func supportsOllamaEmbedding(modelName string) bool {
+	// Common embedding models in Ollama
+	embeddingModels := []string{
+		"nomic-embed-text",
+		"mxbai-embed-large",
+		"snowflake-arctic-embed",
+		"all-minilm",
+	}
+
+	for _, embeddingModel := range embeddingModels {
+		if strings.Contains(strings.ToLower(modelName), embeddingModel) {
+			return true
+		}
+	}
+
+	// Check for common embedding model patterns
+	if strings.Contains(strings.ToLower(modelName), "embed") {
+		return true
+	}
+
+	return false
 }
 
 type ollamaRequest struct {
