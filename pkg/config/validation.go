@@ -159,12 +159,7 @@ func (v *Validator) validateLLMProviderConfig(providerName string, config *LLMPr
 	// Validate provider-specific requirements
 	switch config.Provider {
 	case "anthropic":
-		if config.APIKey == "" {
-			errors = append(errors, ValidationError{
-				Field:   fmt.Sprintf("LLM.Providers.%s.APIKey", providerName),
-				Message: "API key is required for Anthropic provider",
-			})
-		}
+		// Note: API key validation removed - secrets should be loaded from environment
 		if !isValidAnthropicModel(config.ModelID) {
 			errors = append(errors, ValidationError{
 				Field:   fmt.Sprintf("LLM.Providers.%s.ModelID", providerName),
@@ -173,12 +168,7 @@ func (v *Validator) validateLLMProviderConfig(providerName string, config *LLMPr
 		}
 
 	case "google":
-		if config.APIKey == "" {
-			errors = append(errors, ValidationError{
-				Field:   fmt.Sprintf("LLM.Providers.%s.APIKey", providerName),
-				Message: "API key is required for Google provider",
-			})
-		}
+		// Note: API key validation removed - secrets should be loaded from environment
 		if !isValidGoogleModel(config.ModelID) {
 			errors = append(errors, ValidationError{
 				Field:   fmt.Sprintf("LLM.Providers.%s.ModelID", providerName),
