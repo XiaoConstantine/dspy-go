@@ -347,13 +347,14 @@ func TestGetValidationMessage(t *testing.T) {
 
 
 func TestGetValidator(t *testing.T) {
-	// Reset global validator
-	globalValidator = nil
-	
+	// Test that GetValidator returns a non-nil validator
 	validator1 := GetValidator()
-	validator2 := GetValidator()
+	assert.NotNil(t, validator1)
 	
-	// Should return the same instance
+	validator2 := GetValidator()
+	assert.NotNil(t, validator2)
+	
+	// Should return the same instance (singleton behavior)
 	assert.Same(t, validator1, validator2)
 }
 
