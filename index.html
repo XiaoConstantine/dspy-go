@@ -1,154 +1,718 @@
-<h1 id="dspy-go">dspy-go</h1>
-<p><a href="https://goreportcard.com/report/github.com/XiaoConstantine/dspy-go"><img src="https://goreportcard.com/badge/github.com/XiaoConstantine/dspy-go" alt="Go Report Card"></a>
-<a href="https://codecov.io/gh/XiaoConstantine/dspy-go"><img src="https://codecov.io/gh/XiaoConstantine/dspy-go/graph/badge.svg?token=GGKRLMLXJ9" alt="codecov"></a>
-<a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go"><img src="https://pkg.go.dev/badge/github.com/XiaoConstantine/dspy-go" alt="Go Reference"></a></p>
-<p>DSPy-Go is a Go implementation of DSPy, bringing systematic prompt engineering and automated reasoning capabilities to Go applications. It provides a flexible framework for building reliable and effective Language Model (LLM) applications through composable modules and workflows.</p>
-<h3 id="installation">Installation</h3>
-<pre><code class="lang-go"><span class="hljs-keyword">go</span> <span class="hljs-built_in">get</span> github.<span class="hljs-keyword">com</span>/XiaoConstantine/dspy-<span class="hljs-keyword">go</span>
-</code></pre>
-<h3 id="quick-start">Quick Start</h3>
-<p>Here&#39;s a simple example to get you started with DSPy-Go:</p>
-<pre><code class="lang-go"><span class="hljs-keyword">import</span> (
-    <span class="hljs-string">"context"</span>
-    <span class="hljs-string">"fmt"</span>
-    <span class="hljs-string">"log"</span>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DSPy-Go | Systematic Prompt Engineering for Go</title>
+    <meta name="description" content="DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic prompt engineering and automated reasoning capabilities to Go applications.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <style>
+        :root {
+            --primary: #0070f3;
+            --primary-dark: #0051cc;
+            --secondary: #7c3aed;
+            --accent: #06b6d4;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --bg: #ffffff;
+            --bg-secondary: #f8fafc;
+            --text: #1e293b;
+            --text-secondary: #64748b;
+            --border: #e2e8f0;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
 
-    <span class="hljs-string">"github.com/XiaoConstantine/dspy-go/pkg/core"</span>
-    <span class="hljs-string">"github.com/XiaoConstantine/dspy-go/pkg/modules"</span>
-    <span class="hljs-string">"github.com/XiaoConstantine/dspy-go/pkg/config"</span>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background: var(--bg);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        /* Header */
+        header {
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo::before {
+            content: '🚀';
+            font-size: 1.2em;
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: var(--text);
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 8rem 0 4rem;
+            text-align: center;
+            margin-top: 80px;
+        }
+
+        .hero h1 {
+            font-size: 3.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+
+        .hero p {
+            font-size: 1.25rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: white;
+            color: var(--primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--bg-secondary);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        /* Badges */
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.875rem;
+            backdrop-filter: blur(10px);
+        }
+
+        /* Features Section */
+        .features {
+            padding: 4rem 0;
+            background: var(--bg-secondary);
+        }
+
+        .features h2 {
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+            color: var(--text);
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text);
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* Quick Start Section */
+        .quick-start {
+            padding: 4rem 0;
+        }
+
+        .quick-start h2 {
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+            color: var(--text);
+        }
+
+        .code-example {
+            background: #1e293b;
+            border-radius: 1rem;
+            padding: 2rem;
+            margin: 2rem 0;
+            overflow-x: auto;
+        }
+
+        .code-example pre {
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            line-height: 1.6;
+        }
+
+        .code-example code {
+            color: #e2e8f0;
+        }
+
+        /* Stats Section */
+        .stats {
+            background: var(--text);
+            color: white;
+            padding: 4rem 0;
+            text-align: center;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+        }
+
+        .stat-item h3 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+        }
+
+        .stat-item p {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* Documentation Preview */
+        .docs-preview {
+            padding: 4rem 0;
+            background: var(--bg-secondary);
+        }
+
+        .docs-preview h2 {
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+            color: var(--text);
+        }
+
+        .docs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .doc-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: var(--shadow);
+            transition: transform 0.2s;
+        }
+
+        .doc-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .doc-card h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text);
+        }
+
+        .doc-card p {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        .doc-card a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .doc-card a:hover {
+            text-decoration: underline;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--text);
+            color: white;
+            padding: 3rem 0 1rem;
+            text-align: center;
+        }
+
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .footer-section h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--accent);
+        }
+
+        .footer-section ul {
+            list-style: none;
+        }
+
+        .footer-section li {
+            margin-bottom: 0.5rem;
+        }
+
+        .footer-section a {
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer-section a:hover {
+            color: white;
+        }
+
+        .footer-bottom {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 2rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .hero p {
+                font-size: 1.125rem;
+            }
+            
+            .nav-links {
+                display: none;
+            }
+            
+            .cta-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .badges {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .feature-card {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .feature-card:nth-child(1) { animation-delay: 0.1s; }
+        .feature-card:nth-child(2) { animation-delay: 0.2s; }
+        .feature-card:nth-child(3) { animation-delay: 0.3s; }
+        .feature-card:nth-child(4) { animation-delay: 0.4s; }
+        .feature-card:nth-child(5) { animation-delay: 0.5s; }
+        .feature-card:nth-child(6) { animation-delay: 0.6s; }
+    </style>
+</head>
+<body>
+    <header>
+        <nav class="container">
+            <a href="#" class="logo">DSPy-Go</a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#quickstart">Quick Start</a></li>
+                <li><a href="#docs">Documentation</a></li>
+                <li><a href="https://github.com/XiaoConstantine/dspy-go">GitHub</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="container">
+                <h1>Systematic Prompt Engineering for Go</h1>
+                <p>DSPy-Go brings systematic prompt engineering and automated reasoning capabilities to Go applications through composable modules and intelligent workflows.</p>
+                
+                <div class="cta-buttons">
+                    <a href="#quickstart" class="btn btn-primary">Get Started</a>
+                    <a href="https://github.com/XiaoConstantine/dspy-go" class="btn btn-secondary">
+                        View on GitHub
+                    </a>
+                </div>
+
+                <div class="badges">
+                    <div class="badge">
+                        <img src="https://goreportcard.com/badge/github.com/XiaoConstantine/dspy-go" alt="Go Report Card">
+                    </div>
+                    <div class="badge">
+                        <img src="https://codecov.io/gh/XiaoConstantine/dspy-go/graph/badge.svg?token=GGKRLMLXJ9" alt="Code Coverage">
+                    </div>
+                    <div class="badge">
+                        <img src="https://pkg.go.dev/badge/github.com/XiaoConstantine/dspy-go" alt="Go Reference">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="features" class="features">
+            <div class="container">
+                <h2>Powerful Features</h2>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">🧩</div>
+                        <h3>Modular Architecture</h3>
+                        <p>Build complex LLM applications by composing simple, reusable components. Chain modules together to create sophisticated reasoning pipelines.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🎯</div>
+                        <h3>Systematic Optimization</h3>
+                        <p>Automatically optimize prompts with advanced algorithms like MIPRO, SIMBA, and BootstrapFewShot for improved performance.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h3>Parallel Processing</h3>
+                        <p>Built-in support for concurrent execution and intelligent scheduling to maximize performance and throughput.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔧</div>
+                        <h3>Smart Tool Management</h3>
+                        <p>Intelligent tool selection with Bayesian inference, performance tracking, and auto-discovery from MCP servers.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🤖</div>
+                        <h3>Advanced Reasoning</h3>
+                        <p>Implement chain-of-thought, ReAct, refinement, and multi-chain comparison techniques for sophisticated AI workflows.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🌐</div>
+                        <h3>Multi-Provider Support</h3>
+                        <p>Native support for Anthropic Claude, Google Gemini, Ollama, and LlamaCPP with seamless provider switching.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="stats">
+            <div class="container">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <h3>15+</h3>
+                        <p>Core Modules</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>4+</h3>
+                        <p>LLM Providers</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>10+</h3>
+                        <p>Examples</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>100%</h3>
+                        <p>Go Native</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="quickstart" class="quick-start">
+            <div class="container">
+                <h2>Quick Start</h2>
+                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+                    Get started with DSPy-Go in just a few minutes
+                </p>
+                
+                <div class="code-example">
+                    <pre><code class="language-bash">go get github.com/XiaoConstantine/dspy-go</code></pre>
+                </div>
+
+                <div class="code-example">
+                    <pre><code class="language-go">package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/XiaoConstantine/dspy-go/pkg/core"
+    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+    "github.com/XiaoConstantine/dspy-go/pkg/modules"
+    "github.com/XiaoConstantine/dspy-go/pkg/config"
 )
 
-<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-title">main</span><span class="hljs-params">()</span></span> {
-    <span class="hljs-comment">// Configure the default LLM</span>
-    err := config.ConfigureDefaultLLM(<span class="hljs-string">"your-api-key"</span>, core.ModelAnthropicSonnet)
-    <span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
-        log.Fatalf(<span class="hljs-string">"Failed to configure LLM: %v"</span>, err)
+func main() {
+    // Configure the default LLM
+    llms.EnsureFactory()
+    err := config.ConfigureDefaultLLM("your-api-key", core.ModelAnthropicSonnet)
+    if err != nil {
+        log.Fatalf("Failed to configure LLM: %v", err)
     }
 
-    <span class="hljs-comment">// Create a signature for question answering</span>
+    // Create a signature for question answering
     signature := core.NewSignature(
-        []core.InputField{{Field: core.Field{Name: <span class="hljs-string">"question"</span>}}},
-        []core.OutputField{{Field: core.Field{Name: <span class="hljs-string">"answer"</span>}}},
+        []core.InputField{{Field: core.Field{Name: "question"}}},
+        []core.OutputField{{Field: core.Field{Name: "answer"}}},
     )
 
-    <span class="hljs-comment">// Create a ChainOfThought module</span>
+    // Create a ChainOfThought module
     cot := modules.NewChainOfThought(signature)
 
-    <span class="hljs-comment">// Create a program</span>
+    // Create a program
     program := core.NewProgram(
-        <span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]core.Module{<span class="hljs-string">"cot"</span>: cot},
-        <span class="hljs-function"><span class="hljs-keyword">func</span><span class="hljs-params">(ctx context.Context, inputs <span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]<span class="hljs-keyword">interface</span>{})</span> <span class="hljs-params">(<span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]<span class="hljs-keyword">interface</span>{}, error)</span></span> {
-            <span class="hljs-keyword">return</span> cot.Process(ctx, inputs)
+        map[string]core.Module{"cot": cot},
+        func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+            return cot.Process(ctx, inputs)
         },
     )
 
-    <span class="hljs-comment">// Execute the program</span>
-    result, err := program.Execute(context.Background(), <span class="hljs-keyword">map</span>[<span class="hljs-keyword">string</span>]<span class="hljs-keyword">interface</span>{}{
-        <span class="hljs-string">"question"</span>: <span class="hljs-string">"What is the capital of France?"</span>,
+    // Execute the program
+    result, err := program.Execute(context.Background(), map[string]interface{}{
+        "question": "What is the capital of France?",
     })
-    <span class="hljs-keyword">if</span> err != <span class="hljs-literal">nil</span> {
-        log.Fatalf(<span class="hljs-string">"Error executing program: %v"</span>, err)
+    if err != nil {
+        log.Fatalf("Error executing program: %v", err)
     }
 
-    fmt.Printf(<span class="hljs-string">"Answer: %s\n"</span>, result[<span class="hljs-string">"answer"</span>])
-}
-</code></pre>
-<h3 id="core-concepts">Core Concepts</h3>
-<h4 id="signatures">Signatures</h4>
-<p>Signatures define the input and output fields for modules. They help in creating type-safe and well-defined interfaces for your AI components.</p>
-<h4 id="modules">Modules</h4>
-<p>Modules are the building blocks of DSPy-Go programs. They encapsulate specific functionalities and can be composed to create complex pipelines. Some key modules include:</p>
-<ul>
-<li>Predict: Basic prediction module</li>
-<li>ChainOfThought: Implements chain-of-thought reasoning</li>
-<li>ReAct: Implements the ReAct (Reasoning and Acting) paradigm</li>
-</ul>
-<h4 id="optimizers">Optimizers</h4>
-<p>Optimizers help improve the performance of your DSPy-Go programs by automatically tuning prompts and module parameters. Including:</p>
-<ul>
-<li>BootstrapFewShot: Automatic few-shot example selection</li>
-<li>MIPRO: Multi-step interactive prompt optimization</li>
-<li>Copro: Collaborative prompt optimization</li>
-</ul>
-<h4 id="agents">Agents</h4>
-<p>Use dspy&#39;s core concepts as building blocks, impl <a href="https://github.com/anthropics/anthropic-cookbook/tree/main/patterns/agents">Building Effective Agents</a></p>
-<ul>
-<li>Chain Workflow: Sequential execution of steps</li>
-<li>Parallel Workflow: Concurrent execution with controlled parallelism</li>
-<li>Router Workflow: Dynamic routing based on classification</li>
-<li>Orchestrator: Flexible task decomposition and execution</li>
-</ul>
-<p>See <a href="/examples/agents/main.go">agent examples</a></p>
-<pre><code class="lang-go"><span class="hljs-comment">// Chain</span>
-workflow := workflows.NewChainWorkflow(store)
-workflow.AddStep(<span class="hljs-variable">&amp;workflows</span>.Step{
-<span class="hljs-symbol">    ID:</span> <span class="hljs-string">"step1"</span>,
-<span class="hljs-symbol">    Module:</span> modules.NewPredict(signature1),
-})
-workflow.AddStep(<span class="hljs-variable">&amp;workflows</span>.Step{
-<span class="hljs-symbol">    ID:</span> <span class="hljs-string">"step2"</span>, 
-<span class="hljs-symbol">    Module:</span> modules.NewPredict(signature2),
-})
-</code></pre>
-<p>Each workflow step can be configured with:</p>
-<ul>
-<li>Retry logic with exponential backoff</li>
-<li>Conditional execution based on workflow state</li>
-<li>Custom error handling</li>
-</ul>
-<pre><code class="lang-go">
-step := &amp;workflows.Step{
-    ID: <span class="hljs-string">"retry_example"</span>,
-    Module: myModule,
-    RetryConfig: &amp;workflows.RetryConfig{
-        MaxAttempts: <span class="hljs-number">3</span>,
-        BackoffMultiplier: <span class="hljs-number">2.0</span>,
-    },
-    Condition: func(<span class="hljs-keyword">state</span> map[string]interface{}) bool {
-        return someCondition(<span class="hljs-keyword">state</span>)
-    },
-}
-</code></pre>
-<h3 id="advanced-features">Advanced Features</h3>
-<h4 id="tracing-and-logging">Tracing and Logging</h4>
-<pre><code class="lang-go">// Enable detailed tracing
-ctx = core.WithExecutionState(context.Background())
+    fmt.Printf("Answer: %s\n", result["answer"])
+}</code></pre>
+                </div>
+            </div>
+        </section>
 
-// Configure logging
-logger := logging.NewLogger(logging.Config{
-    <span class="hljs-attribute">Severity</span>: logging<span class="hljs-variable">.DEBUG</span>,
-    Outputs:  []logging<span class="hljs-variable">.Output</span>{logging<span class="hljs-variable">.NewConsoleOutput</span>(true)},
-})
-logging<span class="hljs-variable">.SetLogger</span>(logger)
-</code></pre>
-<h4 id="custom-tools">Custom Tools</h4>
-<p>You can extend ReAct modules with custom tools:</p>
-<pre><code class="lang-go">
-<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *CustomTool)</span> <span class="hljs-title">CanHandle</span><span class="hljs-params">(action <span class="hljs-keyword">string</span>)</span> <span class="hljs-title">bool</span></span> {
-    <span class="hljs-keyword">return</span> strings.HasPrefix(action, <span class="hljs-string">"custom_"</span>)
-}
+        <section id="docs" class="docs-preview">
+            <div class="container">
+                <h2>Documentation</h2>
+                <div class="docs-grid">
+                    <div class="doc-card">
+                        <h3>Core Concepts</h3>
+                        <p>Learn about signatures, modules, and programs - the building blocks of DSPy-Go.</p>
+                        <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go">Read More →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Modules</h3>
+                        <p>Explore Predict, ChainOfThought, ReAct, and other powerful reasoning modules.</p>
+                        <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/modules">Browse Modules →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Optimizers</h3>
+                        <p>Discover MIPRO, SIMBA, and BootstrapFewShot for automatic prompt optimization.</p>
+                        <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/optimizers">Learn Optimizers →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Examples</h3>
+                        <p>Complete implementations for agents, Q&A, math solving, and more.</p>
+                        <a href="https://github.com/XiaoConstantine/dspy-go/tree/main/examples">View Examples →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Tool System</h3>
+                        <p>Smart tool registry, chaining, composition, and MCP integration.</p>
+                        <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/tools">Explore Tools →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Workflows</h3>
+                        <p>Chain, parallel, and router workflows for building complex agent systems.</p>
+                        <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/agents/workflows">Learn Workflows →</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
 
-<span class="hljs-function"><span class="hljs-keyword">func</span> <span class="hljs-params">(t *CustomTool)</span> <span class="hljs-title">Execute</span><span class="hljs-params">(ctx context.Context, action <span class="hljs-keyword">string</span>)</span> <span class="hljs-params">(<span class="hljs-keyword">string</span>, error)</span></span> {
-    <span class="hljs-comment">// Implement tool logic</span>
-    <span class="hljs-keyword">return</span> <span class="hljs-string">"Tool result"</span>, <span class="hljs-literal">nil</span>
-}
-</code></pre>
-<h4 id="working-with-different-llm-providers">Working with Different LLM Providers</h4>
-<pre><code class="lang-go"><span class="hljs-comment">// Using Anthropic Claude</span>
-llm, _ := llms.NewAnthropicLLM(<span class="hljs-string">"api-key"</span>, anthropic.ModelSonnet)
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3>Resources</h3>
+                    <ul>
+                        <li><a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go">API Documentation</a></li>
+                        <li><a href="https://github.com/XiaoConstantine/dspy-go/tree/main/examples">Examples</a></li>
+                        <li><a href="https://github.com/XiaoConstantine/maestro">Maestro App</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3>Community</h3>
+                    <ul>
+                        <li><a href="https://github.com/XiaoConstantine/dspy-go">GitHub</a></li>
+                        <li><a href="https://github.com/XiaoConstantine/dspy-go/issues">Issues</a></li>
+                        <li><a href="https://github.com/XiaoConstantine/dspy-go/discussions">Discussions</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3>About</h3>
+                    <ul>
+                        <li><a href="https://github.com/XiaoConstantine/dspy-go/blob/main/LICENSE">License</a></li>
+                        <li><a href="https://github.com/XiaoConstantine/dspy-go/releases">Releases</a></li>
+                        <li><a href="https://goreportcard.com/report/github.com/XiaoConstantine/dspy-go">Go Report</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 DSPy-Go. Released under the MIT License.</p>
+            </div>
+        </div>
+    </footer>
 
-<span class="hljs-comment">// Using Ollama</span>
-llm, _ := llms.NewOllamaLLM(<span class="hljs-string">"http://localhost:11434"</span>, <span class="hljs-string">"llama2"</span>)
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script>
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
 
-<span class="hljs-comment">// Using LlamaCPP</span>
-llm, _ := llms.NewLlamacppLLM(<span class="hljs-string">"http://localhost:8080"</span>)
-</code></pre>
-<h3 id="examples">Examples</h3>
-<p>Check the examples directory for complete implementations:</p>
-<ul>
-<li>examples/agents: Demonstrates different agent patterns</li>
-<li>examples/hotpotqa: Question-answering implementation</li>
-<li>examples/gsm8k: Math problem solving</li>
-</ul>
-<h3 id="license">License</h3>
-<p>DSPy-Go is released under the MIT License. See the LICENSE file for details.</p>
+        // Add animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.feature-card, .doc-card').forEach(card => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(20px)';
+            card.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(card);
+        });
+    </script>
+</body>
+</html>
