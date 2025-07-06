@@ -345,7 +345,10 @@ func (r *DefaultLLMRegistry) inferProviderFromModelID(modelID ModelID) string {
 }
 
 // GlobalRegistry is the global registry instance.
-var GlobalRegistry LLMRegistry
+var (
+	GlobalRegistry LLMRegistry
+	registryOnce   sync.Once
+)
 
 // RegistryConfig represents the configuration for the registry system.
 type RegistryConfig struct {
@@ -390,10 +393,12 @@ func InitializeRegistry(ctx context.Context, config RegistryConfig) error {
 
 // GetRegistry returns the global registry instance.
 func GetRegistry() LLMRegistry {
-	if GlobalRegistry == nil {
-		// Initialize with empty config for backward compatibility
-		GlobalRegistry = NewLLMRegistry()
-	}
+	registryOnce.Do(func() {
+		if GlobalRegistry == nil {
+			// Initialize with empty config for backward compatibility
+			GlobalRegistry = NewLLMRegistry()
+		}
+	})
 	return GlobalRegistry
 }
 

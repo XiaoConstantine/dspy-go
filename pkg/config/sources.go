@@ -235,7 +235,7 @@ func (es *EnvironmentSource) setLLMProviderValue(provider *LLMProviderConfig, ke
 			return fmt.Errorf("invalid top-p: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported LLM provider configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -268,7 +268,7 @@ func (es *EnvironmentSource) setLLMGlobalValue(global *LLMGlobalSettings, key, v
 			return fmt.Errorf("invalid enable metrics flag: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported LLM global configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -285,7 +285,7 @@ func (es *EnvironmentSource) setLoggingValue(logging *LoggingConfig, key, value 
 			return fmt.Errorf("invalid sample rate: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported logging configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -318,7 +318,7 @@ func (es *EnvironmentSource) setExecutionValue(execution *ExecutionConfig, key, 
 			return fmt.Errorf("invalid tracing sampling rate: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported execution configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -345,7 +345,7 @@ func (es *EnvironmentSource) setStorageValue(storage *StorageConfig, key, value 
 	case "encryption.algorithm":
 		storage.Encryption.Algorithm = value
 	default:
-		return fmt.Errorf("unsupported storage configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -368,7 +368,7 @@ func (es *EnvironmentSource) setModulesValue(modules *ModulesConfig, key, value 
 	case strings.HasPrefix(key, "predict."):
 		return es.setPredictValue(&modules.Predict, strings.TrimPrefix(key, "predict."), value)
 	default:
-		return fmt.Errorf("unsupported modules configuration: %s", key)
+		return nil
 	}
 }
 
@@ -390,7 +390,7 @@ func (es *EnvironmentSource) setChainOfThoughtValue(cot *ChainOfThoughtConfig, k
 	case "step.delimiter", "stepDelimiter":
 		cot.StepDelimiter = value
 	default:
-		return fmt.Errorf("unsupported chain of thought configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -413,7 +413,7 @@ func (es *EnvironmentSource) setMultiChainComparisonValue(mcc *MultiChainCompari
 			return fmt.Errorf("invalid parallel execution flag: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported multi-chain comparison configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -440,7 +440,7 @@ func (es *EnvironmentSource) setReActValue(react *ReActConfig, key, value string
 			return fmt.Errorf("invalid include intermediate steps flag: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported react configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -463,7 +463,7 @@ func (es *EnvironmentSource) setRefineValue(refine *RefineConfig, key, value str
 	case "refinement.strategy", "refinementStrategy":
 		refine.RefinementStrategy = value
 	default:
-		return fmt.Errorf("unsupported refine configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -478,7 +478,7 @@ func (es *EnvironmentSource) setPredictValue(predict *PredictConfig, key, value 
 	case strings.HasPrefix(key, "caching."):
 		return es.setCachingValue(&predict.Caching, strings.TrimPrefix(key, "caching."), value)
 	default:
-		return fmt.Errorf("unsupported predict configuration: %s", key)
+		return nil
 	}
 }
 
@@ -504,7 +504,7 @@ func (es *EnvironmentSource) setPredictSettingsValue(settings *PredictSettings, 
 			return fmt.Errorf("invalid top K: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported predict settings configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -533,7 +533,7 @@ func (es *EnvironmentSource) setCachingValue(caching *CachingConfig, key, value 
 	case "type":
 		caching.Type = value
 	default:
-		return fmt.Errorf("unsupported caching configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -548,7 +548,7 @@ func (es *EnvironmentSource) setAgentsValue(agents *AgentsConfig, key, value str
 	case strings.HasPrefix(key, "workflows."):
 		return es.setWorkflowsValue(&agents.Workflows, strings.TrimPrefix(key, "workflows."), value)
 	default:
-		return fmt.Errorf("unsupported agents configuration: %s", key)
+		return nil
 	}
 }
 
@@ -568,7 +568,7 @@ func (es *EnvironmentSource) setAgentValue(agent *AgentConfig, key, value string
 			return fmt.Errorf("invalid timeout: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported agent configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -585,7 +585,7 @@ func (es *EnvironmentSource) setAgentMemoryValue(memory *AgentMemoryConfig, key,
 			return fmt.Errorf("invalid capacity: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported agent memory configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -606,7 +606,7 @@ func (es *EnvironmentSource) setWorkflowsValue(workflows *WorkflowsConfig, key, 
 			return fmt.Errorf("invalid max parallel: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported workflows configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -621,7 +621,7 @@ func (es *EnvironmentSource) setToolsValue(tools *ToolsConfig, key, value string
 	case strings.HasPrefix(key, "functions."):
 		return es.setFunctionToolsValue(&tools.Functions, strings.TrimPrefix(key, "functions."), value)
 	default:
-		return fmt.Errorf("unsupported tools configuration: %s", key)
+		return nil
 	}
 }
 
@@ -641,7 +641,7 @@ func (es *EnvironmentSource) setToolRegistryValue(registry *ToolRegistryConfig, 
 			return fmt.Errorf("invalid auto discovery flag: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported tool registry configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -656,7 +656,7 @@ func (es *EnvironmentSource) setMCPValue(mcp *MCPConfig, key, value string) erro
 			return fmt.Errorf("invalid default timeout: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported MCP configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -677,7 +677,7 @@ func (es *EnvironmentSource) setFunctionToolsValue(functions *FunctionToolsConfi
 			return fmt.Errorf("invalid enable sandbox flag: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported function tools configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -698,7 +698,7 @@ func (es *EnvironmentSource) setOptimizersValue(optimizers *OptimizersConfig, ke
 	case strings.HasPrefix(key, "tpe."):
 		return es.setTPEValue(&optimizers.TPE, strings.TrimPrefix(key, "tpe."), value)
 	default:
-		return fmt.Errorf("unsupported optimizers configuration: %s", key)
+		return nil
 	}
 }
 
@@ -722,7 +722,7 @@ func (es *EnvironmentSource) setBootstrapFewShotValue(bootstrap *BootstrapFewSho
 			return fmt.Errorf("invalid bootstrap iterations: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported bootstrap few-shot configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -755,7 +755,7 @@ func (es *EnvironmentSource) setMIPROValue(mipro *MIPROConfig, key, value string
 			return fmt.Errorf("invalid crossover rate: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported MIPRO configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -782,7 +782,7 @@ func (es *EnvironmentSource) setCOPROValue(copro *COPROConfig, key, value string
 			return fmt.Errorf("invalid learning rate: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported COPRO configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -801,7 +801,7 @@ func (es *EnvironmentSource) setSIMBAValue(simba *SIMBAConfig, key, value string
 	case "evaluation.metric", "evaluationMetric":
 		simba.EvaluationMetric = value
 	default:
-		return fmt.Errorf("unsupported SIMBA configuration: %s", key)
+		return nil
 	}
 	return nil
 }
@@ -834,7 +834,7 @@ func (es *EnvironmentSource) setTPEValue(tpe *TPEConfig, key, value string) erro
 			return fmt.Errorf("invalid random seed: %s", value)
 		}
 	default:
-		return fmt.Errorf("unsupported TPE configuration: %s", key)
+		return nil
 	}
 	return nil
 }

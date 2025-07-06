@@ -90,10 +90,9 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		maxTokens := 8192
 		
 		// Use config values if available
-		if cfg != nil && cfg.LLM.Default.Generation.Temperature > 0 {
+		if cfg != nil {
+			// The config manager handles defaults, so we can use the values directly.
 			temperature = cfg.LLM.Default.Generation.Temperature
-		}
-		if cfg != nil && cfg.LLM.Default.Generation.MaxTokens > 0 {
 			maxTokens = cfg.LLM.Default.Generation.MaxTokens
 		}
 		

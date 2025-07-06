@@ -549,28 +549,14 @@ func MergeWithDefaults(partial *Config) *Config {
 	// Deep merge LLM configuration
 	result.LLM = mergeLLMConfig(partial.LLM, defaults.LLM)
 
-	// Deep merge other sections only if they are completely empty
-	if isEmptyLoggingConfig(partial.Logging) {
-		result.Logging = defaults.Logging
-	}
-	if isEmptyExecutionConfig(partial.Execution) {
-		result.Execution = defaults.Execution
-	}
-	if isEmptyModulesConfig(partial.Modules) {
-		result.Modules = defaults.Modules
-	}
-	if isEmptyAgentsConfig(partial.Agents) {
-		result.Agents = defaults.Agents
-	}
-	if isEmptyToolsConfig(partial.Tools) {
-		result.Tools = defaults.Tools
-	}
-	if isEmptyOptimizersConfig(partial.Optimizers) {
-		result.Optimizers = defaults.Optimizers
-	}
-	if isEmptyStorageConfig(partial.Storage) {
-		result.Storage = defaults.Storage
-	}
+	// Deep merge other sections
+	result.Logging = mergeLoggingConfig(partial.Logging, defaults.Logging)
+	result.Execution = mergeExecutionConfig(partial.Execution, defaults.Execution)
+	result.Modules = mergeModulesConfig(partial.Modules, defaults.Modules)
+	result.Agents = mergeAgentsConfig(partial.Agents, defaults.Agents)
+	result.Tools = mergeToolsConfig(partial.Tools, defaults.Tools)
+	result.Optimizers = mergeOptimizersConfig(partial.Optimizers, defaults.Optimizers)
+	result.Storage = mergeStorageConfig(partial.Storage, defaults.Storage)
 
 	return &result
 }
@@ -751,48 +737,706 @@ func mergeLLMGlobalSettings(partial LLMGlobalSettings, defaults LLMGlobalSetting
 	return result
 }
 
-// Helper functions to check if configs are empty.
-func isEmptyLoggingConfig(config LoggingConfig) bool {
-	return config.Level == "" && len(config.Outputs) == 0
-}
-
-func isEmptyExecutionConfig(config ExecutionConfig) bool {
-	return config.DefaultTimeout == 0 && config.MaxConcurrency == 0
-}
-
-func isEmptyModulesConfig(config ModulesConfig) bool {
-	return config.ChainOfThought.MaxSteps == 0 &&
-		config.MultiChainComparison.NumChains == 0 &&
-		config.ReAct.MaxCycles == 0 &&
-		config.Refine.MaxIterations == 0
-}
-
-func isEmptyAgentsConfig(config AgentsConfig) bool {
-	return config.Default.MaxHistory == 0 &&
-		config.Memory.Type == "" &&
-		config.Workflows.DefaultTimeout == 0
-}
-
-func isEmptyToolsConfig(config ToolsConfig) bool {
-	return config.Registry.MaxTools == 0 &&
-		len(config.MCP.Servers) == 0 &&
-		config.Functions.MaxExecutionTime == 0
-}
-
-func isEmptyOptimizersConfig(config OptimizersConfig) bool {
-	return config.BootstrapFewShot.MaxExamples == 0 &&
-		config.MIPRO.PopulationSize == 0 &&
-		config.COPRO.MaxIterations == 0 &&
-		config.SIMBA.NumCandidates == 0 &&
-		config.TPE.NumTrials == 0
-}
-
-func isEmptyStorageConfig(config StorageConfig) bool {
-	return config.DefaultBackend == "" && len(config.Backends) == 0
-}
 
 // ValidateDefaults validates that the default configuration is valid.
 func ValidateDefaults() error {
 	defaults := GetDefaultConfig()
 	return defaults.Validate()
+}
+
+// mergeLoggingConfig performs deep merge of logging configuration.
+func mergeLoggingConfig(partial LoggingConfig, defaults LoggingConfig) LoggingConfig {
+	result := partial
+
+	// Merge basic fields
+	if result.Level == "" {
+		result.Level = defaults.Level
+	}
+
+	// Merge outputs slice
+	if len(result.Outputs) == 0 {
+		result.Outputs = defaults.Outputs
+	}
+
+	// Merge sample rate
+	if result.SampleRate == 0 {
+		result.SampleRate = defaults.SampleRate
+	}
+
+	// Merge default fields map
+	if result.DefaultFields == nil {
+		result.DefaultFields = defaults.DefaultFields
+	} else {
+		for key, value := range defaults.DefaultFields {
+			if _, exists := result.DefaultFields[key]; !exists {
+				result.DefaultFields[key] = value
+			}
+		}
+	}
+
+	return result
+}
+
+// mergeExecutionConfig performs deep merge of execution configuration.
+func mergeExecutionConfig(partial ExecutionConfig, defaults ExecutionConfig) ExecutionConfig {
+	result := partial
+
+	if result.DefaultTimeout == 0 {
+		result.DefaultTimeout = defaults.DefaultTimeout
+	}
+	if result.MaxConcurrency == 0 {
+		result.MaxConcurrency = defaults.MaxConcurrency
+	}
+
+	// Merge context configuration
+	result.Context = mergeContextConfig(partial.Context, defaults.Context)
+
+	// Merge tracing configuration
+	result.Tracing = mergeTracingConfig(partial.Tracing, defaults.Tracing)
+
+	return result
+}
+
+// mergeContextConfig performs deep merge of context configuration.
+func mergeContextConfig(partial ContextConfig, defaults ContextConfig) ContextConfig {
+	result := partial
+
+	if result.DefaultTimeout == 0 {
+		result.DefaultTimeout = defaults.DefaultTimeout
+	}
+	if result.BufferSize == 0 {
+		result.BufferSize = defaults.BufferSize
+	}
+
+	return result
+}
+
+// mergeTracingConfig performs deep merge of tracing configuration.
+func mergeTracingConfig(partial TracingConfig, defaults TracingConfig) TracingConfig {
+	result := partial
+
+	// Note: Enabled is a boolean, so we don't override false values
+	if result.SamplingRate == 0 {
+		result.SamplingRate = defaults.SamplingRate
+	}
+
+	// Merge exporter configuration
+	result.Exporter = mergeTracingExporterConfig(partial.Exporter, defaults.Exporter)
+
+	return result
+}
+
+// mergeTracingExporterConfig performs deep merge of tracing exporter configuration.
+func mergeTracingExporterConfig(partial TracingExporterConfig, defaults TracingExporterConfig) TracingExporterConfig {
+	result := partial
+
+	if result.Type == "" {
+		result.Type = defaults.Type
+	}
+	if result.Endpoint == "" {
+		result.Endpoint = defaults.Endpoint
+	}
+
+	// Merge headers map
+	if result.Headers == nil {
+		result.Headers = defaults.Headers
+	} else {
+		for key, value := range defaults.Headers {
+			if _, exists := result.Headers[key]; !exists {
+				result.Headers[key] = value
+			}
+		}
+	}
+
+	return result
+}
+
+// mergeModulesConfig performs deep merge of modules configuration.
+func mergeModulesConfig(partial ModulesConfig, defaults ModulesConfig) ModulesConfig {
+	result := partial
+
+	// Merge ChainOfThought
+	result.ChainOfThought = mergeChainOfThoughtConfig(partial.ChainOfThought, defaults.ChainOfThought)
+
+	// Merge MultiChainComparison
+	result.MultiChainComparison = mergeMultiChainComparisonConfig(partial.MultiChainComparison, defaults.MultiChainComparison)
+
+	// Merge ReAct
+	result.ReAct = mergeReActConfig(partial.ReAct, defaults.ReAct)
+
+	// Merge Refine
+	result.Refine = mergeRefineConfig(partial.Refine, defaults.Refine)
+
+	// Merge Predict
+	result.Predict = mergePredictConfig(partial.Predict, defaults.Predict)
+
+	return result
+}
+
+// mergeChainOfThoughtConfig performs deep merge of chain of thought configuration.
+func mergeChainOfThoughtConfig(partial ChainOfThoughtConfig, defaults ChainOfThoughtConfig) ChainOfThoughtConfig {
+	result := partial
+
+	if result.MaxSteps == 0 {
+		result.MaxSteps = defaults.MaxSteps
+	}
+	// IncludeReasoning is a boolean, so we don't override false values
+	if result.StepDelimiter == "" {
+		result.StepDelimiter = defaults.StepDelimiter
+	}
+
+	return result
+}
+
+// mergeMultiChainComparisonConfig performs deep merge of multi-chain comparison configuration.
+func mergeMultiChainComparisonConfig(partial MultiChainComparisonConfig, defaults MultiChainComparisonConfig) MultiChainComparisonConfig {
+	result := partial
+
+	if result.NumChains == 0 {
+		result.NumChains = defaults.NumChains
+	}
+	if result.ComparisonStrategy == "" {
+		result.ComparisonStrategy = defaults.ComparisonStrategy
+	}
+	// ParallelExecution is a boolean, so we don't override false values
+
+	return result
+}
+
+// mergeReActConfig performs deep merge of ReAct configuration.
+func mergeReActConfig(partial ReActConfig, defaults ReActConfig) ReActConfig {
+	result := partial
+
+	if result.MaxCycles == 0 {
+		result.MaxCycles = defaults.MaxCycles
+	}
+	if result.ActionTimeout == 0 {
+		result.ActionTimeout = defaults.ActionTimeout
+	}
+	// IncludeIntermediateSteps is a boolean, so we don't override false values
+
+	return result
+}
+
+// mergeRefineConfig performs deep merge of refine configuration.
+func mergeRefineConfig(partial RefineConfig, defaults RefineConfig) RefineConfig {
+	result := partial
+
+	if result.MaxIterations == 0 {
+		result.MaxIterations = defaults.MaxIterations
+	}
+	if result.ConvergenceThreshold == 0 {
+		result.ConvergenceThreshold = defaults.ConvergenceThreshold
+	}
+	if result.RefinementStrategy == "" {
+		result.RefinementStrategy = defaults.RefinementStrategy
+	}
+
+	return result
+}
+
+// mergePredictConfig performs deep merge of predict configuration.
+func mergePredictConfig(partial PredictConfig, defaults PredictConfig) PredictConfig {
+	result := partial
+
+	// Merge default settings
+	result.DefaultSettings = mergePredictSettings(partial.DefaultSettings, defaults.DefaultSettings)
+
+	// Merge caching configuration
+	result.Caching = mergeCachingConfig(partial.Caching, defaults.Caching)
+
+	return result
+}
+
+// mergePredictSettings performs deep merge of predict settings.
+func mergePredictSettings(partial PredictSettings, defaults PredictSettings) PredictSettings {
+	result := partial
+
+	// IncludeConfidence is a boolean, so we don't override false values
+	if result.Temperature == 0 {
+		result.Temperature = defaults.Temperature
+	}
+	if result.TopK == 0 {
+		result.TopK = defaults.TopK
+	}
+
+	return result
+}
+
+// mergeCachingConfig performs deep merge of caching configuration.
+func mergeCachingConfig(partial CachingConfig, defaults CachingConfig) CachingConfig {
+	result := partial
+
+	// Enabled is a boolean, so we don't override false values
+	if result.TTL == 0 {
+		result.TTL = defaults.TTL
+	}
+	if result.MaxSize == 0 {
+		result.MaxSize = defaults.MaxSize
+	}
+	if result.Type == "" {
+		result.Type = defaults.Type
+	}
+
+	// Merge config map
+	if result.Config == nil {
+		result.Config = defaults.Config
+	} else {
+		for key, value := range defaults.Config {
+			if _, exists := result.Config[key]; !exists {
+				result.Config[key] = value
+			}
+		}
+	}
+
+	return result
+}
+
+// mergeAgentsConfig performs deep merge of agents configuration.
+func mergeAgentsConfig(partial AgentsConfig, defaults AgentsConfig) AgentsConfig {
+	result := partial
+
+	// Merge Default agent settings
+	result.Default = mergeAgentConfig(partial.Default, defaults.Default)
+
+	// Merge Memory settings
+	result.Memory = mergeAgentMemoryConfig(partial.Memory, defaults.Memory)
+
+	// Merge Workflows settings
+	result.Workflows = mergeWorkflowsConfig(partial.Workflows, defaults.Workflows)
+
+	return result
+}
+
+// mergeAgentConfig performs deep merge of agent configuration.
+func mergeAgentConfig(partial AgentConfig, defaults AgentConfig) AgentConfig {
+	result := partial
+
+	if result.MaxHistory == 0 {
+		result.MaxHistory = defaults.MaxHistory
+	}
+	if result.Timeout == 0 {
+		result.Timeout = defaults.Timeout
+	}
+
+	// Merge tool use configuration
+	result.ToolUse = mergeToolUseConfig(partial.ToolUse, defaults.ToolUse)
+
+	return result
+}
+
+// mergeAgentMemoryConfig performs deep merge of agent memory configuration.
+func mergeAgentMemoryConfig(partial AgentMemoryConfig, defaults AgentMemoryConfig) AgentMemoryConfig {
+	result := partial
+
+	if result.Type == "" {
+		result.Type = defaults.Type
+	}
+	if result.Capacity == 0 {
+		result.Capacity = defaults.Capacity
+	}
+
+	// Merge persistence configuration
+	result.Persistence = mergeMemoryPersistenceConfig(partial.Persistence, defaults.Persistence)
+
+	return result
+}
+
+// mergeWorkflowsConfig performs deep merge of workflows configuration.
+func mergeWorkflowsConfig(partial WorkflowsConfig, defaults WorkflowsConfig) WorkflowsConfig {
+	result := partial
+
+	if result.DefaultTimeout == 0 {
+		result.DefaultTimeout = defaults.DefaultTimeout
+	}
+	if result.MaxParallel == 0 {
+		result.MaxParallel = defaults.MaxParallel
+	}
+
+	// Merge persistence configuration
+	result.Persistence = mergeWorkflowPersistenceConfig(partial.Persistence, defaults.Persistence)
+
+	return result
+}
+
+// mergeToolUseConfig performs deep merge of tool use configuration.
+func mergeToolUseConfig(partial ToolUseConfig, defaults ToolUseConfig) ToolUseConfig {
+	result := partial
+
+	if result.MaxTools == 0 {
+		result.MaxTools = defaults.MaxTools
+	}
+	if result.Timeout == 0 {
+		result.Timeout = defaults.Timeout
+	}
+	// ParallelExecution is a boolean, so we don't override false values
+
+	return result
+}
+
+// mergeMemoryPersistenceConfig performs deep merge of memory persistence configuration.
+func mergeMemoryPersistenceConfig(partial MemoryPersistenceConfig, defaults MemoryPersistenceConfig) MemoryPersistenceConfig {
+	result := partial
+
+	// Enabled is a boolean, so we don't override false values
+	if result.Path == "" {
+		result.Path = defaults.Path
+	}
+	if result.SyncInterval == 0 {
+		result.SyncInterval = defaults.SyncInterval
+	}
+
+	return result
+}
+
+// mergeWorkflowPersistenceConfig performs deep merge of workflow persistence configuration.
+func mergeWorkflowPersistenceConfig(partial WorkflowPersistenceConfig, defaults WorkflowPersistenceConfig) WorkflowPersistenceConfig {
+	result := partial
+
+	// Enabled is a boolean, so we don't override false values
+	if result.Backend == "" {
+		result.Backend = defaults.Backend
+	}
+
+	// Merge config map
+	if result.Config == nil {
+		result.Config = defaults.Config
+	} else {
+		for key, value := range defaults.Config {
+			if _, exists := result.Config[key]; !exists {
+				result.Config[key] = value
+			}
+		}
+	}
+
+	return result
+}
+
+// mergeToolsConfig performs deep merge of tools configuration.
+func mergeToolsConfig(partial ToolsConfig, defaults ToolsConfig) ToolsConfig {
+	result := partial
+
+	// Merge Registry
+	result.Registry = mergeToolRegistryConfig(partial.Registry, defaults.Registry)
+
+	// Merge MCP
+	result.MCP = mergeMCPConfig(partial.MCP, defaults.MCP)
+
+	// Merge Functions
+	result.Functions = mergeFunctionToolsConfig(partial.Functions, defaults.Functions)
+
+	return result
+}
+
+// mergeToolRegistryConfig performs deep merge of tool registry configuration.
+func mergeToolRegistryConfig(partial ToolRegistryConfig, defaults ToolRegistryConfig) ToolRegistryConfig {
+	result := partial
+
+	if result.MaxTools == 0 {
+		result.MaxTools = defaults.MaxTools
+	}
+
+	// Merge discovery paths slice
+	if len(result.DiscoveryPaths) == 0 {
+		result.DiscoveryPaths = defaults.DiscoveryPaths
+	}
+
+	// AutoDiscovery is a boolean, so we don't override false values
+
+	return result
+}
+
+// mergeMCPConfig performs deep merge of MCP configuration.
+func mergeMCPConfig(partial MCPConfig, defaults MCPConfig) MCPConfig {
+	result := partial
+
+	// Merge servers slice
+	if len(result.Servers) == 0 {
+		result.Servers = defaults.Servers
+	}
+
+	if result.DefaultTimeout == 0 {
+		result.DefaultTimeout = defaults.DefaultTimeout
+	}
+
+	// Merge connection pool configuration
+	result.ConnectionPool = mergeMCPConnectionPoolConfig(partial.ConnectionPool, defaults.ConnectionPool)
+
+	return result
+}
+
+// mergeFunctionToolsConfig performs deep merge of function tools configuration.
+func mergeFunctionToolsConfig(partial FunctionToolsConfig, defaults FunctionToolsConfig) FunctionToolsConfig {
+	result := partial
+
+	if result.MaxExecutionTime == 0 {
+		result.MaxExecutionTime = defaults.MaxExecutionTime
+	}
+
+	// EnableSandbox is a boolean, so we don't override false values
+
+	// Merge sandbox configuration
+	result.Sandbox = mergeSandboxConfig(partial.Sandbox, defaults.Sandbox)
+
+	return result
+}
+
+// mergeMCPConnectionPoolConfig performs deep merge of MCP connection pool configuration.
+func mergeMCPConnectionPoolConfig(partial MCPConnectionPoolConfig, defaults MCPConnectionPoolConfig) MCPConnectionPoolConfig {
+	result := partial
+
+	if result.MaxConnections == 0 {
+		result.MaxConnections = defaults.MaxConnections
+	}
+	if result.ConnectionTimeout == 0 {
+		result.ConnectionTimeout = defaults.ConnectionTimeout
+	}
+	if result.IdleTimeout == 0 {
+		result.IdleTimeout = defaults.IdleTimeout
+	}
+
+	return result
+}
+
+// mergeSandboxConfig performs deep merge of sandbox configuration.
+func mergeSandboxConfig(partial SandboxConfig, defaults SandboxConfig) SandboxConfig {
+	result := partial
+
+	if result.Type == "" {
+		result.Type = defaults.Type
+	}
+
+	// Merge resource limits configuration
+	result.ResourceLimits = mergeResourceLimitsConfig(partial.ResourceLimits, defaults.ResourceLimits)
+
+	// Merge allowed capabilities slice
+	if len(result.AllowedCapabilities) == 0 {
+		result.AllowedCapabilities = defaults.AllowedCapabilities
+	}
+
+	return result
+}
+
+// mergeResourceLimitsConfig performs deep merge of resource limits configuration.
+func mergeResourceLimitsConfig(partial ResourceLimitsConfig, defaults ResourceLimitsConfig) ResourceLimitsConfig {
+	result := partial
+
+	if result.MemoryMB == 0 {
+		result.MemoryMB = defaults.MemoryMB
+	}
+	if result.CPUCores == 0 {
+		result.CPUCores = defaults.CPUCores
+	}
+	if result.ExecutionTimeout == 0 {
+		result.ExecutionTimeout = defaults.ExecutionTimeout
+	}
+
+	return result
+}
+
+// mergeOptimizersConfig performs deep merge of optimizers configuration.
+func mergeOptimizersConfig(partial OptimizersConfig, defaults OptimizersConfig) OptimizersConfig {
+	result := partial
+
+	// Merge BootstrapFewShot
+	result.BootstrapFewShot = mergeBootstrapFewShotConfig(partial.BootstrapFewShot, defaults.BootstrapFewShot)
+
+	// Merge MIPRO
+	result.MIPRO = mergeMIPROConfig(partial.MIPRO, defaults.MIPRO)
+
+	// Merge COPRO
+	result.COPRO = mergeCOPROConfig(partial.COPRO, defaults.COPRO)
+
+	// Merge SIMBA
+	result.SIMBA = mergeSIMBAConfig(partial.SIMBA, defaults.SIMBA)
+
+	// Merge TPE
+	result.TPE = mergeTPEConfig(partial.TPE, defaults.TPE)
+
+	return result
+}
+
+// mergeBootstrapFewShotConfig performs deep merge of bootstrap few-shot configuration.
+func mergeBootstrapFewShotConfig(partial BootstrapFewShotConfig, defaults BootstrapFewShotConfig) BootstrapFewShotConfig {
+	result := partial
+
+	if result.MaxExamples == 0 {
+		result.MaxExamples = defaults.MaxExamples
+	}
+	if result.TeacherModel == "" {
+		result.TeacherModel = defaults.TeacherModel
+	}
+	if result.StudentModel == "" {
+		result.StudentModel = defaults.StudentModel
+	}
+	if result.BootstrapIterations == 0 {
+		result.BootstrapIterations = defaults.BootstrapIterations
+	}
+
+	return result
+}
+
+// mergeMIPROConfig performs deep merge of MIPRO configuration.
+func mergeMIPROConfig(partial MIPROConfig, defaults MIPROConfig) MIPROConfig {
+	result := partial
+
+	if result.PopulationSize == 0 {
+		result.PopulationSize = defaults.PopulationSize
+	}
+	if result.NumGenerations == 0 {
+		result.NumGenerations = defaults.NumGenerations
+	}
+	if result.MutationRate == 0 {
+		result.MutationRate = defaults.MutationRate
+	}
+	if result.CrossoverRate == 0 {
+		result.CrossoverRate = defaults.CrossoverRate
+	}
+
+	return result
+}
+
+// mergeCOPROConfig performs deep merge of COPRO configuration.
+func mergeCOPROConfig(partial COPROConfig, defaults COPROConfig) COPROConfig {
+	result := partial
+
+	if result.MaxIterations == 0 {
+		result.MaxIterations = defaults.MaxIterations
+	}
+	if result.ConvergenceThreshold == 0 {
+		result.ConvergenceThreshold = defaults.ConvergenceThreshold
+	}
+	if result.LearningRate == 0 {
+		result.LearningRate = defaults.LearningRate
+	}
+
+	return result
+}
+
+// mergeSIMBAConfig performs deep merge of SIMBA configuration.
+func mergeSIMBAConfig(partial SIMBAConfig, defaults SIMBAConfig) SIMBAConfig {
+	result := partial
+
+	if result.NumCandidates == 0 {
+		result.NumCandidates = defaults.NumCandidates
+	}
+	if result.SelectionStrategy == "" {
+		result.SelectionStrategy = defaults.SelectionStrategy
+	}
+	if result.EvaluationMetric == "" {
+		result.EvaluationMetric = defaults.EvaluationMetric
+	}
+
+	return result
+}
+
+// mergeTPEConfig performs deep merge of TPE configuration.
+func mergeTPEConfig(partial TPEConfig, defaults TPEConfig) TPEConfig {
+	result := partial
+
+	if result.NumTrials == 0 {
+		result.NumTrials = defaults.NumTrials
+	}
+	if result.NumStartupTrials == 0 {
+		result.NumStartupTrials = defaults.NumStartupTrials
+	}
+	if result.Percentile == 0 {
+		result.Percentile = defaults.Percentile
+	}
+	if result.RandomSeed == 0 {
+		result.RandomSeed = defaults.RandomSeed
+	}
+
+	return result
+}
+
+// mergeStorageConfig performs deep merge of storage configuration.
+func mergeStorageConfig(partial StorageConfig, defaults StorageConfig) StorageConfig {
+	result := partial
+
+	if result.DefaultBackend == "" {
+		result.DefaultBackend = defaults.DefaultBackend
+	}
+
+	// Merge backends map
+	if result.Backends == nil {
+		result.Backends = defaults.Backends
+	} else {
+		for name, defaultBackend := range defaults.Backends {
+			if _, exists := result.Backends[name]; !exists {
+				result.Backends[name] = defaultBackend
+			}
+		}
+	}
+
+	// Merge compression configuration
+	result.Compression = mergeCompressionConfig(partial.Compression, defaults.Compression)
+
+	// Merge encryption configuration
+	result.Encryption = mergeEncryptionConfig(partial.Encryption, defaults.Encryption)
+
+	return result
+}
+
+// mergeCompressionConfig performs deep merge of compression configuration.
+func mergeCompressionConfig(partial CompressionConfig, defaults CompressionConfig) CompressionConfig {
+	result := partial
+
+	// Enabled is a boolean, so we don't override false values
+	if result.Algorithm == "" {
+		result.Algorithm = defaults.Algorithm
+	}
+	if result.Level == 0 {
+		result.Level = defaults.Level
+	}
+
+	return result
+}
+
+// mergeEncryptionConfig performs deep merge of encryption configuration.
+func mergeEncryptionConfig(partial EncryptionConfig, defaults EncryptionConfig) EncryptionConfig {
+	result := partial
+
+	// Enabled is a boolean, so we don't override false values
+	if result.Algorithm == "" {
+		result.Algorithm = defaults.Algorithm
+	}
+	if result.KeyDerivation == "" {
+		result.KeyDerivation = defaults.KeyDerivation
+	}
+
+	// Merge key configuration
+	result.Key = mergeEncryptionKeyConfig(partial.Key, defaults.Key)
+
+	return result
+}
+
+// mergeEncryptionKeyConfig performs deep merge of encryption key configuration.
+func mergeEncryptionKeyConfig(partial EncryptionKeyConfig, defaults EncryptionKeyConfig) EncryptionKeyConfig {
+	result := partial
+
+	if result.Source == "" {
+		result.Source = defaults.Source
+	}
+	if result.Identifier == "" {
+		result.Identifier = defaults.Identifier
+	}
+
+	// Merge rotation configuration
+	result.Rotation = mergeKeyRotationConfig(partial.Rotation, defaults.Rotation)
+
+	return result
+}
+
+// mergeKeyRotationConfig performs deep merge of key rotation configuration.
+func mergeKeyRotationConfig(partial KeyRotationConfig, defaults KeyRotationConfig) KeyRotationConfig {
+	result := partial
+
+	// Enabled is a boolean, so we don't override false values
+	if result.Interval == 0 {
+		result.Interval = defaults.Interval
+	}
+	// BackupOldKeys is a boolean, so we don't override false values
+
+	return result
 }
