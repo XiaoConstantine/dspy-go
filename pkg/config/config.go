@@ -2,8 +2,6 @@ package config
 
 import (
 	"time"
-
-	"github.com/go-playground/validator/v10"
 )
 
 // Config represents the complete configuration for the dspy-go system.
@@ -720,20 +718,8 @@ type KeyRotationConfig struct {
 	BackupOldKeys bool `yaml:"backup_old_keys"`
 }
 
-// Validate validates the configuration using the validator.
+// Validate validates the configuration using the singleton validator.
 func (c *Config) Validate() error {
-	validate := validator.New()
-
-	// Register custom validators
-	if err := registerCustomValidators(validate); err != nil {
-		return err
-	}
-
-	return validate.Struct(c)
+	return ValidateConfiguration(c)
 }
 
-// registerCustomValidators registers custom validation functions.
-func registerCustomValidators(validate *validator.Validate) error {
-	// Use the validators from validation.go
-	return registerAllValidators(validate)
-}

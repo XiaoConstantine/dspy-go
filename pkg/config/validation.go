@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -229,12 +228,12 @@ func (v *Validator) validateLogOutput(index int, output *LogOutputConfig) Valida
 				Message: "file path is required for file output",
 			})
 		} else {
-			// Validate that the directory exists or can be created
+			// Validate that the directory path is valid
 			dir := filepath.Dir(output.FilePath)
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if !filepath.IsAbs(dir) {
 				errors = append(errors, ValidationError{
 					Field:   fmt.Sprintf("Logging.Outputs[%d].FilePath", index),
-					Message: fmt.Sprintf("cannot create log directory: %v", err),
+					Message: "log file path must be absolute",
 				})
 			}
 		}
