@@ -91,7 +91,7 @@ func TestEnvironmentSourceSetLLMProviderValue(t *testing.T) {
 	assert.Error(t, err)
 	
 	err = source.setLLMProviderValue(provider, "unsupported.key", "value")
-	assert.Error(t, err)
+	assert.NoError(t, err) // Unknown keys are now silently ignored
 }
 
 func TestEnvironmentSourceSetLLMGlobalValue(t *testing.T) {
@@ -140,7 +140,7 @@ func TestEnvironmentSourceSetLLMGlobalValue(t *testing.T) {
 	assert.Error(t, err)
 	
 	err = source.setLLMGlobalValue(global, "unsupported.key", "value")
-	assert.Error(t, err)
+	assert.NoError(t, err) // Unknown keys are now silently ignored
 }
 
 func TestEnvironmentSourceSetLoggingValue(t *testing.T) {
@@ -164,7 +164,7 @@ func TestEnvironmentSourceSetLoggingValue(t *testing.T) {
 	assert.Error(t, err)
 	
 	err = source.setLoggingValue(logging, "unsupported.key", "value")
-	assert.Error(t, err)
+	assert.NoError(t, err) // Unknown keys are now silently ignored
 }
 
 func TestEnvironmentSourceSetExecutionValue(t *testing.T) {
@@ -195,7 +195,7 @@ func TestEnvironmentSourceSetExecutionValue(t *testing.T) {
 	assert.Error(t, err)
 	
 	err = source.setExecutionValue(execution, "unsupported.key", "value")
-	assert.Error(t, err)
+	assert.NoError(t, err) // Unknown keys are now silently ignored
 }
 
 func TestEnvironmentSourceSetStorageValue(t *testing.T) {
@@ -227,7 +227,7 @@ func TestEnvironmentSourceSetStorageValue(t *testing.T) {
 	assert.Error(t, err)
 	
 	err = source.setStorageValue(storage, "unsupported.key", "value")
-	assert.Error(t, err)
+	assert.NoError(t, err) // Unknown keys are now silently ignored
 }
 
 func TestCommandLineSource(t *testing.T) {

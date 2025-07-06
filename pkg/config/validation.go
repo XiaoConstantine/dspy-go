@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -511,23 +512,15 @@ func validateSandboxType(fl validator.FieldLevel) bool {
 }
 
 // Helper functions for model validation.
+// Note: These functions provide basic validation. Full validation is performed
+// by the provider-specific packages during LLM initialization.
 func isValidAnthropicModel(modelID string) bool {
-	validModels := []string{
-		"claude-3-haiku-20240307",
-		"claude-3-sonnet-20240229",
-		"claude-3-opus-20240229",
-		"claude-3-5-sonnet-20241022",
-		"claude-3-5-haiku-20241022",
-	}
-	for _, valid := range validModels {
-		if modelID == valid {
-			return true
-		}
-	}
-	return false
+	// Allow claude-3 models - full validation happens in the provider
+	return strings.HasPrefix(modelID, "claude-3")
 }
 
 func isValidGoogleModel(modelID string) bool {
+	// Allow any gemini, gemma, or palm model - full validation happens in the provider
 	validPrefixes := []string{
 		"gemini-",
 		"gemma-",
@@ -564,17 +557,20 @@ func getValidationMessage(e validator.FieldError) string {
 }
 
 // Global validator instance.
-var globalValidator *Validator
+var (
+	globalValidator *Validator
+	validatorOnce   sync.Once
+)
 
 // GetValidator returns the global validator instance.
 func GetValidator() *Validator {
-	if globalValidator == nil {
+	validatorOnce.Do(func() {
 		var err error
 		globalValidator, err = NewValidator()
 		if err != nil {
 			panic(fmt.Sprintf("failed to create global validator: %v", err))
 		}
-	}
+	})
 	return globalValidator
 }
 
