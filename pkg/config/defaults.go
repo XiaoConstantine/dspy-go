@@ -14,7 +14,6 @@ func GetDefaultConfig() *Config {
 		Agents:     getDefaultAgentsConfig(),
 		Tools:      getDefaultToolsConfig(),
 		Optimizers: getDefaultOptimizersConfig(),
-		Storage:    getDefaultStorageConfig(),
 	}
 }
 
@@ -367,16 +366,6 @@ func getDefaultToolsConfig() ToolsConfig {
 		},
 		Functions: FunctionToolsConfig{
 			MaxExecutionTime: 30 * time.Second,
-			EnableSandbox:    true,
-			Sandbox: SandboxConfig{
-				Type: "native",
-				ResourceLimits: ResourceLimitsConfig{
-					MemoryMB:         512,
-					CPUCores:         1.0,
-					ExecutionTimeout: 30 * time.Second,
-				},
-				AllowedCapabilities: []string{"read", "write", "execute"},
-			},
 		},
 	}
 }
@@ -415,66 +404,6 @@ func getDefaultOptimizersConfig() OptimizersConfig {
 	}
 }
 
-// getDefaultStorageConfig returns default storage configuration.
-func getDefaultStorageConfig() StorageConfig {
-	return StorageConfig{
-		DefaultBackend: "file",
-		Backends: map[string]StorageBackendConfig{
-			"file": {
-				Type: "file",
-				Config: map[string]interface{}{
-					"base_path": "./data",
-				},
-				ConnectionPool: StorageConnectionPoolConfig{
-					MaxConnections:    10,
-					ConnectionTimeout: 5 * time.Second,
-					IdleTimeout:       1 * time.Minute,
-				},
-			},
-			"sqlite": {
-				Type: "sqlite",
-				Config: map[string]interface{}{
-					"database": "./data/dspy.db",
-				},
-				ConnectionPool: StorageConnectionPoolConfig{
-					MaxConnections:    5,
-					ConnectionTimeout: 5 * time.Second,
-					IdleTimeout:       1 * time.Minute,
-				},
-			},
-			"memory": {
-				Type: "memory",
-				Config: map[string]interface{}{
-					"max_size": 1000,
-				},
-				ConnectionPool: StorageConnectionPoolConfig{
-					MaxConnections:    1,
-					ConnectionTimeout: 1 * time.Second,
-					IdleTimeout:       1 * time.Minute,
-				},
-			},
-		},
-		Compression: CompressionConfig{
-			Enabled:   false,
-			Algorithm: "gzip",
-			Level:     6,
-		},
-		Encryption: EncryptionConfig{
-			Enabled:       false,
-			Algorithm:     "aes256",
-			KeyDerivation: "pbkdf2",
-			Key: EncryptionKeyConfig{
-				Source:     "env",
-				Identifier: "DSPY_ENCRYPTION_KEY",
-				Rotation: KeyRotationConfig{
-					Enabled:       false,
-					Interval:      24 * time.Hour,
-					BackupOldKeys: true,
-				},
-			},
-		},
-	}
-}
 
 // GetDefaultLLMProviderConfig returns a default LLM provider configuration.
 func GetDefaultLLMProviderConfig(provider string) *LLMProviderConfig {
@@ -556,7 +485,6 @@ func MergeWithDefaults(partial *Config) *Config {
 	result.Agents = mergeAgentsConfig(partial.Agents, defaults.Agents)
 	result.Tools = mergeToolsConfig(partial.Tools, defaults.Tools)
 	result.Optimizers = mergeOptimizersConfig(partial.Optimizers, defaults.Optimizers)
-	result.Storage = mergeStorageConfig(partial.Storage, defaults.Storage)
 
 	return &result
 }
@@ -1173,11 +1101,6 @@ func mergeFunctionToolsConfig(partial FunctionToolsConfig, defaults FunctionTool
 		result.MaxExecutionTime = defaults.MaxExecutionTime
 	}
 
-	// EnableSandbox is a boolean, so we don't override false values
-
-	// Merge sandbox configuration
-	result.Sandbox = mergeSandboxConfig(partial.Sandbox, defaults.Sandbox)
-
 	return result
 }
 
@@ -1198,41 +1121,6 @@ func mergeMCPConnectionPoolConfig(partial MCPConnectionPoolConfig, defaults MCPC
 	return result
 }
 
-// mergeSandboxConfig performs deep merge of sandbox configuration.
-func mergeSandboxConfig(partial SandboxConfig, defaults SandboxConfig) SandboxConfig {
-	result := partial
-
-	if result.Type == "" {
-		result.Type = defaults.Type
-	}
-
-	// Merge resource limits configuration
-	result.ResourceLimits = mergeResourceLimitsConfig(partial.ResourceLimits, defaults.ResourceLimits)
-
-	// Merge allowed capabilities slice
-	if len(result.AllowedCapabilities) == 0 {
-		result.AllowedCapabilities = defaults.AllowedCapabilities
-	}
-
-	return result
-}
-
-// mergeResourceLimitsConfig performs deep merge of resource limits configuration.
-func mergeResourceLimitsConfig(partial ResourceLimitsConfig, defaults ResourceLimitsConfig) ResourceLimitsConfig {
-	result := partial
-
-	if result.MemoryMB == 0 {
-		result.MemoryMB = defaults.MemoryMB
-	}
-	if result.CPUCores == 0 {
-		result.CPUCores = defaults.CPUCores
-	}
-	if result.ExecutionTimeout == 0 {
-		result.ExecutionTimeout = defaults.ExecutionTimeout
-	}
-
-	return result
-}
 
 // mergeOptimizersConfig performs deep merge of optimizers configuration.
 func mergeOptimizersConfig(partial OptimizersConfig, defaults OptimizersConfig) OptimizersConfig {
@@ -1350,93 +1238,3 @@ func mergeTPEConfig(partial TPEConfig, defaults TPEConfig) TPEConfig {
 	return result
 }
 
-// mergeStorageConfig performs deep merge of storage configuration.
-func mergeStorageConfig(partial StorageConfig, defaults StorageConfig) StorageConfig {
-	result := partial
-
-	if result.DefaultBackend == "" {
-		result.DefaultBackend = defaults.DefaultBackend
-	}
-
-	// Merge backends map
-	if result.Backends == nil {
-		result.Backends = defaults.Backends
-	} else {
-		for name, defaultBackend := range defaults.Backends {
-			if _, exists := result.Backends[name]; !exists {
-				result.Backends[name] = defaultBackend
-			}
-		}
-	}
-
-	// Merge compression configuration
-	result.Compression = mergeCompressionConfig(partial.Compression, defaults.Compression)
-
-	// Merge encryption configuration
-	result.Encryption = mergeEncryptionConfig(partial.Encryption, defaults.Encryption)
-
-	return result
-}
-
-// mergeCompressionConfig performs deep merge of compression configuration.
-func mergeCompressionConfig(partial CompressionConfig, defaults CompressionConfig) CompressionConfig {
-	result := partial
-
-	// Enabled is a boolean, so we don't override false values
-	if result.Algorithm == "" {
-		result.Algorithm = defaults.Algorithm
-	}
-	if result.Level == 0 {
-		result.Level = defaults.Level
-	}
-
-	return result
-}
-
-// mergeEncryptionConfig performs deep merge of encryption configuration.
-func mergeEncryptionConfig(partial EncryptionConfig, defaults EncryptionConfig) EncryptionConfig {
-	result := partial
-
-	// Enabled is a boolean, so we don't override false values
-	if result.Algorithm == "" {
-		result.Algorithm = defaults.Algorithm
-	}
-	if result.KeyDerivation == "" {
-		result.KeyDerivation = defaults.KeyDerivation
-	}
-
-	// Merge key configuration
-	result.Key = mergeEncryptionKeyConfig(partial.Key, defaults.Key)
-
-	return result
-}
-
-// mergeEncryptionKeyConfig performs deep merge of encryption key configuration.
-func mergeEncryptionKeyConfig(partial EncryptionKeyConfig, defaults EncryptionKeyConfig) EncryptionKeyConfig {
-	result := partial
-
-	if result.Source == "" {
-		result.Source = defaults.Source
-	}
-	if result.Identifier == "" {
-		result.Identifier = defaults.Identifier
-	}
-
-	// Merge rotation configuration
-	result.Rotation = mergeKeyRotationConfig(partial.Rotation, defaults.Rotation)
-
-	return result
-}
-
-// mergeKeyRotationConfig performs deep merge of key rotation configuration.
-func mergeKeyRotationConfig(partial KeyRotationConfig, defaults KeyRotationConfig) KeyRotationConfig {
-	result := partial
-
-	// Enabled is a boolean, so we don't override false values
-	if result.Interval == 0 {
-		result.Interval = defaults.Interval
-	}
-	// BackupOldKeys is a boolean, so we don't override false values
-
-	return result
-}

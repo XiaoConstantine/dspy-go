@@ -24,3 +24,25 @@ func TestSeverityString(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSeverity(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected Severity
+	}{
+		{"DEBUG", DEBUG},
+		{"INFO", INFO},
+		{"WARN", WARN},
+		{"ERROR", ERROR},
+		{"FATAL", FATAL},
+		{"unknown", INFO}, // Default case
+		{"", INFO},        // Default case
+		{"debug", INFO},   // Case sensitive - defaults to INFO
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, ParseSeverity(tt.input))
+		})
+	}
+}

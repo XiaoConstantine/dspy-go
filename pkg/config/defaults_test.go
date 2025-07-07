@@ -316,12 +316,6 @@ func TestDefaultConfigTools(t *testing.T) {
 	
 	// Functions
 	assert.Equal(t, 30*time.Second, config.Tools.Functions.MaxExecutionTime)
-	assert.True(t, config.Tools.Functions.EnableSandbox)
-	assert.Equal(t, "native", config.Tools.Functions.Sandbox.Type)
-	assert.Equal(t, 512, config.Tools.Functions.Sandbox.ResourceLimits.MemoryMB)
-	assert.Equal(t, 1.0, config.Tools.Functions.Sandbox.ResourceLimits.CPUCores)
-	assert.Equal(t, 30*time.Second, config.Tools.Functions.Sandbox.ResourceLimits.ExecutionTimeout)
-	assert.Contains(t, config.Tools.Functions.Sandbox.AllowedCapabilities, "read")
 }
 
 func TestDefaultConfigOptimizers(t *testing.T) {
@@ -356,41 +350,3 @@ func TestDefaultConfigOptimizers(t *testing.T) {
 	assert.Equal(t, int64(42), config.Optimizers.TPE.RandomSeed)
 }
 
-func TestDefaultConfigStorage(t *testing.T) {
-	config := GetDefaultConfig()
-	
-	assert.Equal(t, "file", config.Storage.DefaultBackend)
-	assert.Len(t, config.Storage.Backends, 3)
-	
-	// File backend
-	fileBackend := config.Storage.Backends["file"]
-	assert.Equal(t, "file", fileBackend.Type)
-	assert.Equal(t, "./data", fileBackend.Config["base_path"])
-	assert.Equal(t, 10, fileBackend.ConnectionPool.MaxConnections)
-	
-	// SQLite backend
-	sqliteBackend := config.Storage.Backends["sqlite"]
-	assert.Equal(t, "sqlite", sqliteBackend.Type)
-	assert.Equal(t, "./data/dspy.db", sqliteBackend.Config["database"])
-	assert.Equal(t, 5, sqliteBackend.ConnectionPool.MaxConnections)
-	
-	// Memory backend
-	memoryBackend := config.Storage.Backends["memory"]
-	assert.Equal(t, "memory", memoryBackend.Type)
-	assert.Equal(t, 1000, memoryBackend.Config["max_size"])
-	assert.Equal(t, 1, memoryBackend.ConnectionPool.MaxConnections)
-	
-	// Compression
-	assert.False(t, config.Storage.Compression.Enabled)
-	assert.Equal(t, "gzip", config.Storage.Compression.Algorithm)
-	assert.Equal(t, 6, config.Storage.Compression.Level)
-	
-	// Encryption
-	assert.False(t, config.Storage.Encryption.Enabled)
-	assert.Equal(t, "aes256", config.Storage.Encryption.Algorithm)
-	assert.Equal(t, "pbkdf2", config.Storage.Encryption.KeyDerivation)
-	assert.Equal(t, "env", config.Storage.Encryption.Key.Source)
-	assert.Equal(t, "DSPY_ENCRYPTION_KEY", config.Storage.Encryption.Key.Identifier)
-	assert.False(t, config.Storage.Encryption.Key.Rotation.Enabled)
-	assert.Equal(t, 24*time.Hour, config.Storage.Encryption.Key.Rotation.Interval)
-}

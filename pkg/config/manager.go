@@ -231,15 +231,6 @@ func (m *Manager) GetOptimizersConfig() *OptimizersConfig {
 	return &m.config.Optimizers
 }
 
-// GetStorageConfig returns the storage configuration.
-func (m *Manager) GetStorageConfig() *StorageConfig {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.config == nil {
-		return nil
-	}
-	return &m.config.Storage
-}
 
 // Reload reloads the configuration from sources.
 func (m *Manager) Reload() error {

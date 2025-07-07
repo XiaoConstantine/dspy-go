@@ -51,9 +51,9 @@ func getDefaultSearchPaths() []string {
 		".", // Current directory
 	}
 
-	// Add user home directory
+	// Add user home directory subdirectories only (no direct $HOME search to avoid conflicts)
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, homeDir)
+		// Standard XDG and application-specific directories
 		paths = append(paths, filepath.Join(homeDir, ".config", "dspy-go"))
 		paths = append(paths, filepath.Join(homeDir, ".dspy-go"))
 	}

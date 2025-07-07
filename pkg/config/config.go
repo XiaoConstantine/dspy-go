@@ -27,8 +27,6 @@ type Config struct {
 	// Optimizer configuration
 	Optimizers OptimizersConfig `yaml:"optimizers,omitempty" validate:"omitempty"`
 
-	// Storage configuration
-	Storage StorageConfig `yaml:"storage,omitempty" validate:"omitempty"`
 }
 
 // LLMConfig holds configuration for Language Learning Models.
@@ -451,25 +449,25 @@ type ToolsConfig struct {
 // ToolRegistryConfig holds tool registry configuration.
 type ToolRegistryConfig struct {
 	// Maximum registered tools
-	MaxTools int `yaml:"max_tools" validate:"min=1"`
+	MaxTools int `yaml:"max_tools,omitempty" validate:"omitempty,min=1"`
 
 	// Tool discovery paths
-	DiscoveryPaths []string `yaml:"discovery_paths"`
+	DiscoveryPaths []string `yaml:"discovery_paths,omitempty"`
 
 	// Auto-discovery enabled
-	AutoDiscovery bool `yaml:"auto_discovery"`
+	AutoDiscovery bool `yaml:"auto_discovery,omitempty"`
 }
 
 // MCPConfig holds MCP (Model Context Protocol) configuration.
 type MCPConfig struct {
 	// MCP servers configuration
-	Servers []MCPServerConfig `yaml:"servers"`
+	Servers []MCPServerConfig `yaml:"servers,omitempty"`
 
 	// Default timeout for MCP operations
-	DefaultTimeout time.Duration `yaml:"default_timeout" validate:"min=1s"`
+	DefaultTimeout time.Duration `yaml:"default_timeout,omitempty" validate:"omitempty,min=1s"`
 
 	// Connection pool settings
-	ConnectionPool MCPConnectionPoolConfig `yaml:"connection_pool"`
+	ConnectionPool MCPConnectionPoolConfig `yaml:"connection_pool,omitempty"`
 }
 
 // MCPServerConfig holds individual MCP server configuration.
@@ -496,49 +494,19 @@ type MCPServerConfig struct {
 // MCPConnectionPoolConfig holds MCP connection pool configuration.
 type MCPConnectionPoolConfig struct {
 	// Maximum connections per server
-	MaxConnections int `yaml:"max_connections" validate:"min=1"`
+	MaxConnections int `yaml:"max_connections,omitempty" validate:"omitempty,min=1"`
 
 	// Connection timeout
-	ConnectionTimeout time.Duration `yaml:"connection_timeout" validate:"min=1s"`
+	ConnectionTimeout time.Duration `yaml:"connection_timeout,omitempty" validate:"omitempty,min=1s"`
 
 	// Idle timeout
-	IdleTimeout time.Duration `yaml:"idle_timeout" validate:"min=1s"`
+	IdleTimeout time.Duration `yaml:"idle_timeout,omitempty" validate:"omitempty,min=1s"`
 }
 
 // FunctionToolsConfig holds function tools configuration.
 type FunctionToolsConfig struct {
 	// Maximum execution time
-	MaxExecutionTime time.Duration `yaml:"max_execution_time" validate:"min=1s"`
-
-	// Enable sandboxing
-	EnableSandbox bool `yaml:"enable_sandbox"`
-
-	// Sandbox configuration
-	Sandbox SandboxConfig `yaml:"sandbox"`
-}
-
-// SandboxConfig holds sandbox configuration.
-type SandboxConfig struct {
-	// Sandbox type (docker, wasm, native)
-	Type string `yaml:"type" validate:"oneof=docker wasm native"`
-
-	// Resource limits
-	ResourceLimits ResourceLimitsConfig `yaml:"resource_limits"`
-
-	// Allowed capabilities
-	AllowedCapabilities []string `yaml:"allowed_capabilities"`
-}
-
-// ResourceLimitsConfig holds resource limits configuration.
-type ResourceLimitsConfig struct {
-	// Memory limit in MB
-	MemoryMB int `yaml:"memory_mb" validate:"min=1"`
-
-	// CPU limit (number of cores)
-	CPUCores float64 `yaml:"cpu_cores" validate:"min=0.1"`
-
-	// Execution timeout
-	ExecutionTimeout time.Duration `yaml:"execution_timeout" validate:"min=1s"`
+	MaxExecutionTime time.Duration `yaml:"max_execution_time,omitempty" validate:"omitempty,min=1s"`
 }
 
 // OptimizersConfig holds optimizer configuration.
@@ -628,95 +596,6 @@ type TPEConfig struct {
 	RandomSeed int64 `yaml:"random_seed"`
 }
 
-// StorageConfig holds storage configuration.
-type StorageConfig struct {
-	// Default storage backend
-	DefaultBackend string `yaml:"default_backend" validate:"oneof=file sqlite redis"`
-
-	// Storage backends configuration
-	Backends map[string]StorageBackendConfig `yaml:"backends"`
-
-	// Compression settings
-	Compression CompressionConfig `yaml:"compression"`
-
-	// Encryption settings
-	Encryption EncryptionConfig `yaml:"encryption"`
-}
-
-// StorageBackendConfig holds storage backend configuration.
-type StorageBackendConfig struct {
-	// Backend type
-	Type string `yaml:"type" validate:"required"`
-
-	// Connection string or configuration
-	Config map[string]interface{} `yaml:"config"`
-
-	// Connection pool settings
-	ConnectionPool StorageConnectionPoolConfig `yaml:"connection_pool"`
-}
-
-// StorageConnectionPoolConfig holds storage connection pool configuration.
-type StorageConnectionPoolConfig struct {
-	// Maximum connections
-	MaxConnections int `yaml:"max_connections" validate:"min=1"`
-
-	// Connection timeout
-	ConnectionTimeout time.Duration `yaml:"connection_timeout" validate:"min=1s"`
-
-	// Idle timeout
-	IdleTimeout time.Duration `yaml:"idle_timeout" validate:"min=1s"`
-}
-
-// CompressionConfig holds compression configuration.
-type CompressionConfig struct {
-	// Enable compression
-	Enabled bool `yaml:"enabled"`
-
-	// Compression algorithm (gzip, lz4, zstd)
-	Algorithm string `yaml:"algorithm" validate:"oneof=gzip lz4 zstd"`
-
-	// Compression level
-	Level int `yaml:"level" validate:"min=1"`
-}
-
-// EncryptionConfig holds encryption configuration.
-type EncryptionConfig struct {
-	// Enable encryption
-	Enabled bool `yaml:"enabled"`
-
-	// Encryption algorithm (aes256, chacha20poly1305)
-	Algorithm string `yaml:"algorithm" validate:"oneof=aes256 chacha20poly1305"`
-
-	// Key derivation function
-	KeyDerivation string `yaml:"key_derivation" validate:"oneof=pbkdf2 scrypt argon2"`
-
-	// Key configuration
-	Key EncryptionKeyConfig `yaml:"key"`
-}
-
-// EncryptionKeyConfig holds encryption key configuration.
-type EncryptionKeyConfig struct {
-	// Key source (env, file, kms)
-	Source string `yaml:"source" validate:"oneof=env file kms"`
-
-	// Key identifier (env var name, file path, KMS key ID)
-	Identifier string `yaml:"identifier" validate:"required"`
-
-	// Key rotation settings
-	Rotation KeyRotationConfig `yaml:"rotation"`
-}
-
-// KeyRotationConfig holds key rotation configuration.
-type KeyRotationConfig struct {
-	// Enable key rotation
-	Enabled bool `yaml:"enabled"`
-
-	// Rotation interval
-	Interval time.Duration `yaml:"interval" validate:"min=1h"`
-
-	// Backup old keys
-	BackupOldKeys bool `yaml:"backup_old_keys"`
-}
 
 // Validate validates the configuration using the singleton validator.
 func (c *Config) Validate() error {
