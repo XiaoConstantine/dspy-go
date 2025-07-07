@@ -110,10 +110,6 @@ func (v *Validator) validateCustomRules(config *Config) ValidationErrors {
 		errors = append(errors, errs...)
 	}
 
-	// Validate storage configuration
-	if errs := v.validateStorageConfig(&config.Storage); len(errs) > 0 {
-		errors = append(errors, errs...)
-	}
 
 	return errors
 }
@@ -275,38 +271,6 @@ func (v *Validator) validateExecutionConfig(config *ExecutionConfig) ValidationE
 	return errors
 }
 
-// validateStorageConfig validates storage configuration.
-func (v *Validator) validateStorageConfig(config *StorageConfig) ValidationErrors {
-	var errors ValidationErrors
-
-	// Validate that default backend exists in backends map
-	if config.DefaultBackend != "" && len(config.Backends) > 0 {
-		if _, exists := config.Backends[config.DefaultBackend]; !exists {
-			errors = append(errors, ValidationError{
-				Field:   "Storage.DefaultBackend",
-				Message: fmt.Sprintf("default backend '%s' not found in backends map", config.DefaultBackend),
-			})
-		}
-	}
-
-	// Validate encryption configuration
-	if config.Encryption.Enabled {
-		if config.Encryption.Key.Source == "" {
-			errors = append(errors, ValidationError{
-				Field:   "Storage.Encryption.Key.Source",
-				Message: "key source is required when encryption is enabled",
-			})
-		}
-		if config.Encryption.Key.Identifier == "" {
-			errors = append(errors, ValidationError{
-				Field:   "Storage.Encryption.Key.Identifier",
-				Message: "key identifier is required when encryption is enabled",
-			})
-		}
-	}
-
-	return errors
-}
 
 // registerAllValidators registers all custom validators.
 func registerAllValidators(validate *validator.Validate) error {
@@ -319,13 +283,9 @@ func registerAllValidators(validate *validator.Validate) error {
 		"log_level":        validateLogLevel,
 		"output_type":      validateOutputType,
 		"backend_type":     validateBackendType,
-		"compression_alg":  validateCompressionAlgorithm,
-		"encryption_alg":   validateEncryptionAlgorithm,
-		"key_source":       validateKeySource,
 		"comparison_strat": validateComparisonStrategy,
 		"selection_strat":  validateSelectionStrategy,
 		"exporter_type":    validateExporterType,
-		"sandbox_type":     validateSandboxType,
 	}
 
 	for name, fn := range validators {
@@ -426,41 +386,7 @@ func validateBackendType(fl validator.FieldLevel) bool {
 	return false
 }
 
-// validateCompressionAlgorithm validates compression algorithms.
-func validateCompressionAlgorithm(fl validator.FieldLevel) bool {
-	algorithm := fl.Field().String()
-	validAlgorithms := []string{"gzip", "lz4", "zstd"}
-	for _, valid := range validAlgorithms {
-		if algorithm == valid {
-			return true
-		}
-	}
-	return false
-}
 
-// validateEncryptionAlgorithm validates encryption algorithms.
-func validateEncryptionAlgorithm(fl validator.FieldLevel) bool {
-	algorithm := fl.Field().String()
-	validAlgorithms := []string{"aes256", "chacha20poly1305"}
-	for _, valid := range validAlgorithms {
-		if algorithm == valid {
-			return true
-		}
-	}
-	return false
-}
-
-// validateKeySource validates key sources.
-func validateKeySource(fl validator.FieldLevel) bool {
-	source := fl.Field().String()
-	validSources := []string{"env", "file", "kms"}
-	for _, valid := range validSources {
-		if source == valid {
-			return true
-		}
-	}
-	return false
-}
 
 // validateComparisonStrategy validates comparison strategies.
 func validateComparisonStrategy(fl validator.FieldLevel) bool {
@@ -498,17 +424,6 @@ func validateExporterType(fl validator.FieldLevel) bool {
 	return false
 }
 
-// validateSandboxType validates sandbox types.
-func validateSandboxType(fl validator.FieldLevel) bool {
-	sandboxType := fl.Field().String()
-	validTypes := []string{"docker", "wasm", "native"}
-	for _, valid := range validTypes {
-		if sandboxType == valid {
-			return true
-		}
-	}
-	return false
-}
 
 // Helper functions for model validation.
 // Note: These functions provide basic validation. Full validation is performed

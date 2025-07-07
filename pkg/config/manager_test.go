@@ -45,9 +45,6 @@ func TestManagerConfigSectionGetters(t *testing.T) {
 	require.NotNil(t, optimizersConfig)
 	assert.Equal(t, 50, optimizersConfig.BootstrapFewShot.MaxExamples)
 	
-	storageConfig := manager.GetStorageConfig()
-	require.NotNil(t, storageConfig)
-	assert.Equal(t, "file", storageConfig.DefaultBackend)
 }
 
 func TestManagerConfigSectionGettersWithNilConfig(t *testing.T) {
@@ -60,7 +57,6 @@ func TestManagerConfigSectionGettersWithNilConfig(t *testing.T) {
 	assert.Nil(t, manager.GetAgentsConfig())
 	assert.Nil(t, manager.GetToolsConfig())
 	assert.Nil(t, manager.GetOptimizersConfig())
-	assert.Nil(t, manager.GetStorageConfig())
 }
 
 func TestManagerReload(t *testing.T) {

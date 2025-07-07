@@ -15,3 +15,22 @@ const (
 func (s Severity) String() string {
 	return [...]string{"DEBUG", "INFO", "WARN", "ERROR", "FATAL"}[s]
 }
+
+// ParseSeverity converts a string to a Severity level.
+// Returns INFO level for unknown strings.
+func ParseSeverity(level string) Severity {
+	switch level {
+	case "DEBUG":
+		return DEBUG
+	case "INFO":
+		return INFO
+	case "WARN":
+		return WARN
+	case "ERROR":
+		return ERROR
+	case "FATAL":
+		return FATAL
+	default:
+		return INFO
+	}
+}

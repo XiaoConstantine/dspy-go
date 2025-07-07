@@ -198,37 +198,6 @@ func TestEnvironmentSourceSetExecutionValue(t *testing.T) {
 	assert.NoError(t, err) // Unknown keys are now silently ignored
 }
 
-func TestEnvironmentSourceSetStorageValue(t *testing.T) {
-	source := NewEnvironmentSource()
-	storage := &StorageConfig{}
-	
-	err := source.setStorageValue(storage, "default.backend", "redis")
-	require.NoError(t, err)
-	assert.Equal(t, "redis", storage.DefaultBackend)
-	
-	err = source.setStorageValue(storage, "compression.enabled", "true")
-	require.NoError(t, err)
-	assert.Equal(t, true, storage.Compression.Enabled)
-	
-	err = source.setStorageValue(storage, "compression.algorithm", "gzip")
-	require.NoError(t, err)
-	assert.Equal(t, "gzip", storage.Compression.Algorithm)
-	
-	err = source.setStorageValue(storage, "encryption.enabled", "true")
-	require.NoError(t, err)
-	assert.Equal(t, true, storage.Encryption.Enabled)
-	
-	err = source.setStorageValue(storage, "encryption.algorithm", "aes256")
-	require.NoError(t, err)
-	assert.Equal(t, "aes256", storage.Encryption.Algorithm)
-	
-	// Test invalid values
-	err = source.setStorageValue(storage, "compression.enabled", "invalid")
-	assert.Error(t, err)
-	
-	err = source.setStorageValue(storage, "unsupported.key", "value")
-	assert.NoError(t, err) // Unknown keys are now silently ignored
-}
 
 func TestCommandLineSource(t *testing.T) {
 	args := []string{

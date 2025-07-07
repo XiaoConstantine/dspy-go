@@ -183,7 +183,8 @@ func (es *EnvironmentSource) setConfigValue(config *Config, key, value string) e
 	case strings.HasPrefix(key, "execution."):
 		return es.setExecutionValue(&config.Execution, strings.TrimPrefix(key, "execution."), value)
 	case strings.HasPrefix(key, "storage."):
-		return es.setStorageValue(&config.Storage, strings.TrimPrefix(key, "storage."), value)
+		// Storage configuration removed
+		return nil
 	case strings.HasPrefix(key, "modules."):
 		return es.setModulesValue(&config.Modules, strings.TrimPrefix(key, "modules."), value)
 	case strings.HasPrefix(key, "agents."):
@@ -323,32 +324,6 @@ func (es *EnvironmentSource) setExecutionValue(execution *ExecutionConfig, key, 
 	return nil
 }
 
-// setStorageValue sets storage configuration values.
-func (es *EnvironmentSource) setStorageValue(storage *StorageConfig, key, value string) error {
-	switch key {
-	case "default.backend", "defaultBackend":
-		storage.DefaultBackend = value
-	case "compression.enabled":
-		if enabled, err := strconv.ParseBool(value); err == nil {
-			storage.Compression.Enabled = enabled
-		} else {
-			return fmt.Errorf("invalid compression enabled flag: %s", value)
-		}
-	case "compression.algorithm":
-		storage.Compression.Algorithm = value
-	case "encryption.enabled":
-		if enabled, err := strconv.ParseBool(value); err == nil {
-			storage.Encryption.Enabled = enabled
-		} else {
-			return fmt.Errorf("invalid encryption enabled flag: %s", value)
-		}
-	case "encryption.algorithm":
-		storage.Encryption.Algorithm = value
-	default:
-		return nil
-	}
-	return nil
-}
 
 // setModulesValue sets modules configuration values.
 func (es *EnvironmentSource) setModulesValue(modules *ModulesConfig, key, value string) error {
@@ -670,12 +645,7 @@ func (es *EnvironmentSource) setFunctionToolsValue(functions *FunctionToolsConfi
 		} else {
 			return fmt.Errorf("invalid max execution time: %s", value)
 		}
-	case "enable.sandbox", "enableSandbox":
-		if enable, err := strconv.ParseBool(value); err == nil {
-			functions.EnableSandbox = enable
-		} else {
-			return fmt.Errorf("invalid enable sandbox flag: %s", value)
-		}
+	// Note: sandbox configuration removed as it's not implemented
 	default:
 		return nil
 	}

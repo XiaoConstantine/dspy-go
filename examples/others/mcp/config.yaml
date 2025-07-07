@@ -1,0 +1,20 @@
+# Minimal MCP Configuration - Only implemented features
+llm:
+  default:
+    provider: "google"
+    model_id: "gemini-2.0-flash"
+
+logging:
+  level: "INFO"
+  outputs:
+    - type: "console"
+      format: "text"
+      colors: true
+
+tools:
+  mcp:
+    servers:
+      - name: "git-mcp"
+        command: "./examples/others/mcp/git-mcp-server"
+        args: []
+        timeout: 30s

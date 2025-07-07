@@ -216,40 +216,6 @@ func TestValidateExecutionConfig(t *testing.T) {
 	assert.Contains(t, err.Error(), "exporter type is required when tracing is enabled")
 }
 
-func TestValidateStorageConfig(t *testing.T) {
-	validator, err := NewValidator()
-	require.NoError(t, err)
-	
-	// Test default backend not in backends map
-	config := &Config{
-		Storage: StorageConfig{
-			DefaultBackend: "nonexistent",
-			Backends: map[string]StorageBackendConfig{
-				"file": {Type: "file"},
-			},
-		},
-	}
-	
-	err = validator.ValidateConfig(config)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "default backend 'nonexistent' not found")
-	
-	// Test encryption enabled without key source
-	config = &Config{
-		Storage: StorageConfig{
-			Encryption: EncryptionConfig{
-				Enabled: true,
-				Key: EncryptionKeyConfig{
-					// Missing Source and Identifier
-				},
-			},
-		},
-	}
-	
-	err = validator.ValidateConfig(config)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "key source is required when encryption is enabled")
-}
 
 func TestCustomValidators(t *testing.T) {
 	// Test custom validators through integration rather than unit testing
