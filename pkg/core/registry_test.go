@@ -53,6 +53,35 @@ func (m *RegistryMockLLM) StreamGenerate(ctx context.Context, prompt string, opt
 	return &StreamResponse{ChunkChannel: chunkChan, Cancel: func() {}}, nil
 }
 
+func (m *RegistryMockLLM) GenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*LLMResponse, error) {
+	// Convert content blocks to a simple text representation for mock response
+	var textContent string
+	for _, block := range content {
+		textContent += block.String() + " "
+	}
+	return &LLMResponse{Content: "mock response for " + textContent}, nil
+}
+
+func (m *RegistryMockLLM) StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error) {
+	// Create a simple mock stream response
+	chunkChan := make(chan StreamChunk, 1)
+	var textContent string
+	for _, block := range content {
+		textContent += block.String() + " "
+	}
+	
+	chunkChan <- StreamChunk{
+		Content: "mock stream response for " + textContent,
+		Done:    true,
+	}
+	close(chunkChan)
+	
+	return &StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       func() {},
+	}, nil
+}
+
 // MockProviderFactory creates RegistryMockLLM instances.
 func MockProviderFactory(ctx context.Context, config ProviderConfig, modelID ModelID) (LLM, error) {
 	return NewRegistryMockLLM(config.Name, string(modelID)), nil

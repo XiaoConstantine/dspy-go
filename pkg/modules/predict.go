@@ -93,8 +93,47 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	}
 
 	signature := p.GetSignature()
+	
+	// Check if inputs contain multimodal content
+	if core.IsMultimodalContent(signature, inputs) {
+		// Use structured content approach
+		content := core.ConvertInputsToContentBlocks(signature, inputs)
+		logger.Debug(ctx, "Using multimodal content generation with %d blocks", len(content))
+		
+		resp, err := p.LLM.GenerateWithContent(ctx, content, finalOptions.GenerateOptions...)
+		if err != nil {
+			span.WithError(err)
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate multimodal prediction"),
+				errors.Fields{
+					"module": "Predict",
+					"content_blocks": len(content),
+					"model":  p.LLM,
+				})
+		}
+		
+		logger.Debug(ctx, "LLM Multimodal Completion: %v", resp.Content)
+		
+		if resp.Usage != nil {
+			if state := core.GetExecutionState(ctx); state != nil {
+				state.WithTokenUsage(&core.TokenUsage{
+					PromptTokens:     resp.Usage.PromptTokens,
+					CompletionTokens: resp.Usage.CompletionTokens,
+					TotalTokens:      resp.Usage.TotalTokens,
+				})
+			}
+		}
+		
+		// Parse the response (same as text-based)
+		cleaned := stripMarkdown(resp.Content, signature)
+		outputs := parseCompletion(cleaned, signature)
+		formattedOutputs := p.FormatOutputs(outputs)
+		
+		return formattedOutputs, nil
+	}
+	
+	// Fall back to traditional text-based approach
 	prompt := formatPrompt(signature, p.Demos, inputs)
-
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
 	resp, err := p.LLM.Generate(ctx, prompt, finalOptions.GenerateOptions...)
@@ -300,7 +339,33 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	// Write the current input
 	sb.WriteString("---\n\n")
 	for _, field := range signature.Inputs {
-		sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, inputs[field.Name]))
+		value := inputs[field.Name]
+		
+		// Handle multimodal content appropriately
+		switch field.Type {
+		case core.FieldTypeText:
+			// Standard text handling
+			sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
+		case core.FieldTypeImage:
+			// Check if it's a ContentBlock
+			if block, ok := value.(core.ContentBlock); ok && block.Type == core.FieldTypeImage {
+				sb.WriteString(fmt.Sprintf("%s: %s\n", field.Name, block.String()))
+			} else {
+				// Fallback to string representation
+				sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
+			}
+		case core.FieldTypeAudio:
+			// Check if it's a ContentBlock
+			if block, ok := value.(core.ContentBlock); ok && block.Type == core.FieldTypeAudio {
+				sb.WriteString(fmt.Sprintf("%s: %s\n", field.Name, block.String()))
+			} else {
+				// Fallback to string representation
+				sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
+			}
+		default:
+			// Default to existing behavior
+			sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
+		}
 	}
 
 	return sb.String()

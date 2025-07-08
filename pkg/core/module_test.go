@@ -78,6 +78,35 @@ func (m *MockLLM) Capabilities() []Capability {
 	return []Capability{}
 }
 
+func (m *MockLLM) GenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*LLMResponse, error) {
+	// Convert content blocks to a simple text representation for mock response
+	var textContent string
+	for _, block := range content {
+		textContent += block.String() + " "
+	}
+	return &LLMResponse{Content: "mock response for content: " + textContent}, nil
+}
+
+func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error) {
+	// Create a simple mock stream response
+	chunkChan := make(chan StreamChunk, 1)
+	var textContent string
+	for _, block := range content {
+		textContent += block.String() + " "
+	}
+	
+	chunkChan <- StreamChunk{
+		Content: "mock stream response for content: " + textContent,
+		Done:    true,
+	}
+	close(chunkChan)
+	
+	return &StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       func() {},
+	}, nil
+}
+
 // // TestBaseModule tests the BaseModule struct and its methods.
 func TestBaseModule(t *testing.T) {
 	sig := NewSignature(

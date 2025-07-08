@@ -5,11 +5,21 @@ import (
 	"strings"
 )
 
+// FieldType represents the type of data a field can contain.
+type FieldType string
+
+const (
+	FieldTypeText  FieldType = "text"
+	FieldTypeImage FieldType = "image"
+	FieldTypeAudio FieldType = "audio"
+)
+
 // Field represents a single field in a signature.
 type Field struct {
 	Name        string
 	Description string
 	Prefix      string
+	Type        FieldType // Default is FieldTypeText for backward compatibility
 }
 
 // NewField creates a new Field with smart defaults.
@@ -17,7 +27,8 @@ func NewField(name string, opts ...FieldOption) Field {
 	// Start with sensible defaults
 	f := Field{
 		Name:   name,
-		Prefix: name + ":", // Default prefix is the field name with colon
+		Prefix: name + ":",    // Default prefix is the field name with colon
+		Type:   FieldTypeText, // Default to text for backward compatibility
 	}
 
 	// Apply any custom options
@@ -50,6 +61,31 @@ func WithNoPrefix() FieldOption {
 	return func(f *Field) {
 		f.Prefix = ""
 	}
+}
+
+// WithFieldType sets the field type.
+func WithFieldType(fieldType FieldType) FieldOption {
+	return func(f *Field) {
+		f.Type = fieldType
+	}
+}
+
+// NewImageField creates a new image field.
+func NewImageField(name string, opts ...FieldOption) Field {
+	opts = append(opts, WithFieldType(FieldTypeImage))
+	return NewField(name, opts...)
+}
+
+// NewAudioField creates a new audio field.
+func NewAudioField(name string, opts ...FieldOption) Field {
+	opts = append(opts, WithFieldType(FieldTypeAudio))
+	return NewField(name, opts...)
+}
+
+// NewTextField creates a new text field (explicit version of NewField).
+func NewTextField(name string, opts ...FieldOption) Field {
+	opts = append(opts, WithFieldType(FieldTypeText))
+	return NewField(name, opts...)
 }
 
 // InputField represents an input field.
@@ -88,11 +124,19 @@ func (s Signature) String() string {
 	var sb strings.Builder
 	sb.WriteString("Inputs:\n")
 	for _, input := range s.Inputs {
-		sb.WriteString(fmt.Sprintf("  - %s (%s)\n", input.Name, input.Description))
+		typeStr := ""
+		if input.Type != FieldTypeText {
+			typeStr = fmt.Sprintf(" [%s]", input.Type)
+		}
+		sb.WriteString(fmt.Sprintf("  - %s%s (%s)\n", input.Name, typeStr, input.Description))
 	}
 	sb.WriteString("Outputs:\n")
 	for _, output := range s.Outputs {
-		sb.WriteString(fmt.Sprintf("  - %s (%s)\n", output.Name, output.Description))
+		typeStr := ""
+		if output.Type != FieldTypeText {
+			typeStr = fmt.Sprintf(" [%s]", output.Type)
+		}
+		sb.WriteString(fmt.Sprintf("  - %s%s (%s)\n", output.Name, typeStr, output.Description))
 	}
 	if s.Instruction != "" {
 		sb.WriteString(fmt.Sprintf("Instruction: %s\n", s.Instruction))

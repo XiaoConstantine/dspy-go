@@ -56,14 +56,14 @@ func TestSignature(t *testing.T) {
 
 	t.Run("String representation", func(t *testing.T) {
 		sig := NewSignature(
-			[]InputField{{Field: Field{Name: "input", Description: "input desc"}}},
-			[]OutputField{{Field: Field{Name: "output", Description: "output desc"}}},
+			[]InputField{{Field: NewField("input", WithDescription("input desc"))}},
+			[]OutputField{{Field: NewField("output", WithDescription("output desc"))}},
 		).WithInstruction("test instruction")
 
 		str := sig.String()
 		assert.Contains(t, str, "Inputs:")
 		assert.Contains(t, str, "input (input desc)")
-		assert.Contains(t, str, "Outputs:")
+		assert.Contains(t, str, "Outputs:")  
 		assert.Contains(t, str, "output (output desc)")
 		assert.Contains(t, str, "Instruction: test instruction")
 	})

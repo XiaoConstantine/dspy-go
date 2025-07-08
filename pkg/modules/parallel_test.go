@@ -406,6 +406,35 @@ func (m *MockLLM) CreateEmbeddings(ctx context.Context, inputs []string, opts ..
 	return nil, stderrors.New("not implemented")
 }
 
+func (m *MockLLM) GenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.LLMResponse, error) {
+	// Convert content blocks to a simple text representation for mock response
+	var textContent string
+	for _, block := range content {
+		textContent += block.String() + " "
+	}
+	return &core.LLMResponse{Content: "mock response for content: " + textContent}, nil
+}
+
+func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	// Create a simple mock stream response
+	chunkChan := make(chan core.StreamChunk, 1)
+	var textContent string
+	for _, block := range content {
+		textContent += block.String() + " "
+	}
+	
+	chunkChan <- core.StreamChunk{
+		Content: "mock stream response for content: " + textContent,
+		Done:    true,
+	}
+	close(chunkChan)
+	
+	return &core.StreamResponse{
+		ChunkChannel: chunkChan,
+		Cancel:       func() {},
+	}, nil
+}
+
 func TestParallelConcurrencyControl(t *testing.T) {
 	// Test that we don't exceed the worker limit
 	mockModule := NewMockModule(false, 50*time.Millisecond)

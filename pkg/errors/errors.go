@@ -25,6 +25,7 @@ const (
 	ModelNotSupported
 	ProviderNotFound
 	ConfigurationError
+	UnsupportedOperation
 
 	// Workflow errors.
 	WorkflowExecutionFailed
