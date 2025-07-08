@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -45,7 +46,61 @@ const (
 	CapabilityJSON        Capability = "json"
 	CapabilityStreaming   Capability = "streaming"
 	CapabilityToolCalling Capability = "tool-calling"
+	// New multimodal capabilities.
+	CapabilityMultimodal Capability = "multimodal"
+	CapabilityVision     Capability = "vision"
+	CapabilityAudio      Capability = "audio"
 )
+
+// It's provider-agnostic - each LLM provider handles its own format conversion.
+type ContentBlock struct {
+	Type     FieldType `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	Data     []byte    `json:"-"` // Binary data for images/audio (base64 encoded)
+	MimeType string    `json:"mime_type,omitempty"`
+	// Optional metadata for extensibility
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// NewTextBlock creates a text content block.
+func NewTextBlock(text string) ContentBlock {
+	return ContentBlock{
+		Type: FieldTypeText,
+		Text: text,
+	}
+}
+
+// NewImageBlock creates an image content block.
+func NewImageBlock(data []byte, mimeType string) ContentBlock {
+	return ContentBlock{
+		Type:     FieldTypeImage,
+		Data:     data,
+		MimeType: mimeType,
+	}
+}
+
+// NewAudioBlock creates an audio content block.
+func NewAudioBlock(data []byte, mimeType string) ContentBlock {
+	return ContentBlock{
+		Type:     FieldTypeAudio,
+		Data:     data,
+		MimeType: mimeType,
+	}
+}
+
+// String returns a string representation of the content block.
+func (cb ContentBlock) String() string {
+	switch cb.Type {
+	case FieldTypeText:
+		return cb.Text
+	case FieldTypeImage:
+		return fmt.Sprintf("[Image: %s, %d bytes]", cb.MimeType, len(cb.Data))
+	case FieldTypeAudio:
+		return fmt.Sprintf("[Audio: %s, %d bytes]", cb.MimeType, len(cb.Data))
+	default:
+		return fmt.Sprintf("[Unknown content type: %s]", cb.Type)
+	}
+}
 
 // LLM represents an interface for language models.
 type LLM interface {
@@ -60,6 +115,10 @@ type LLM interface {
 	CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error)
 
 	StreamGenerate(ctx context.Context, prompt string, options ...GenerateOption) (*StreamResponse, error)
+
+	// Multimodal methods - new additions that don't break existing interface
+	GenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*LLMResponse, error)
+	StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error)
 
 	ProviderName() string
 	ModelID() string
@@ -268,6 +327,84 @@ func (b *BaseLLM) GetEndpointConfig() *EndpointConfig {
 // GetHTTPClient returns the HTTP client.
 func (b *BaseLLM) GetHTTPClient() *http.Client {
 	return b.client
+}
+
+// Default implementations for multimodal methods
+// These provide fallback behavior for LLM implementations that don't support multimodal content
+
+// Default implementations for multimodal methods that can be embedded in concrete LLM implementations
+
+// Concrete LLM implementations should override this if they support multimodal content.
+func (b *BaseLLM) GenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*LLMResponse, error) {
+	return nil, errors.New(errors.UnsupportedOperation, "multimodal content not supported by this LLM provider")
+}
+
+// Concrete LLM implementations should override this if they support multimodal streaming.
+func (b *BaseLLM) StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error) {
+	return nil, errors.New(errors.UnsupportedOperation, "multimodal streaming not supported by this LLM provider")
+}
+
+// Helper functions for converting between map[string]any and ContentBlock formats
+// These maintain backward compatibility with existing code
+
+// This enables backward compatibility while supporting multimodal content.
+func ConvertInputsToContentBlocks(signature Signature, inputs map[string]any) []ContentBlock {
+	var blocks []ContentBlock
+
+	for _, field := range signature.Inputs {
+		value, exists := inputs[field.Name]
+		if !exists {
+			continue
+		}
+
+		// Type detection based on field type and value type
+		switch field.Type {
+		case FieldTypeText:
+			// Handle text content
+			if str, ok := value.(string); ok {
+				blocks = append(blocks, NewTextBlock(str))
+			} else {
+				// Convert any type to string as fallback
+				blocks = append(blocks, NewTextBlock(fmt.Sprintf("%v", value)))
+			}
+		case FieldTypeImage:
+			// Handle image content - check if it's already a ContentBlock or needs conversion
+			if block, ok := value.(ContentBlock); ok && block.Type == FieldTypeImage {
+				blocks = append(blocks, block)
+			} else if str, ok := value.(string); ok {
+				// Assume it's a text description of an image for now
+				blocks = append(blocks, NewTextBlock(fmt.Sprintf("[Image: %s]", str)))
+			}
+		case FieldTypeAudio:
+			// Handle audio content
+			if block, ok := value.(ContentBlock); ok && block.Type == FieldTypeAudio {
+				blocks = append(blocks, block)
+			} else if str, ok := value.(string); ok {
+				// Assume it's a text description of audio for now
+				blocks = append(blocks, NewTextBlock(fmt.Sprintf("[Audio: %s]", str)))
+			}
+		default:
+			// Default to text for unknown types
+			blocks = append(blocks, NewTextBlock(fmt.Sprintf("%v", value)))
+		}
+	}
+
+	return blocks
+}
+
+// IsMultimodalContent checks if the inputs contain any non-text content.
+func IsMultimodalContent(signature Signature, inputs map[string]any) bool {
+	for _, field := range signature.Inputs {
+		if field.Type != FieldTypeText {
+			if value, exists := inputs[field.Name]; exists {
+				// Check if it's a ContentBlock with non-text type
+				if block, ok := value.(ContentBlock); ok && block.Type != FieldTypeText {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // DefaultLLM represents the default LLM to be used when none is specified.

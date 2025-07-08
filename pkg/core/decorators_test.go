@@ -225,6 +225,22 @@ func (m *MockBaseLLM) Capabilities() []Capability {
 	return args.Get(0).([]Capability)
 }
 
+func (m *MockBaseLLM) GenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*LLMResponse, error) {
+	args := m.Called(ctx, content, options)
+	if resp, ok := args.Get(0).(*LLMResponse); ok {
+		return resp, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockBaseLLM) StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error) {
+	args := m.Called(ctx, content, options)
+	if resp, ok := args.Get(0).(*StreamResponse); ok {
+		return resp, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func TestBaseDecorator_Unwrap(t *testing.T) {
 	// Test that Unwrap correctly returns the wrapped LLM
 	baseLLM := new(MockBaseLLM)
