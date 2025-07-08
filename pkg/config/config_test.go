@@ -521,6 +521,7 @@ execution:
     sampling_rate: 0.1
     exporter:
       type: "jaeger"
+      endpoint: "http://localhost:14268"
 
 modules:
   chain_of_thought:

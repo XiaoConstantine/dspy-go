@@ -2,6 +2,7 @@ package llms
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	stdErr "errors"
@@ -281,4 +282,173 @@ func TestAnthropicLLM_Implementation(t *testing.T) {
 
 	// Check model ID
 	assert.Equal(t, string(anthropic.ModelOpus), llm.ModelID())
+}
+
+// Test the actual implementation coverage that was missing.
+func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Valid config with API key", func(t *testing.T) {
+		config := core.ProviderConfig{
+			Name:   "anthropic",
+			APIKey: "test-api-key",
+		}
+
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelHaiku))
+		assert.NoError(t, err)
+		assert.NotNil(t, llm)
+		assert.Equal(t, "anthropic", llm.ProviderName())
+		assert.Equal(t, string(anthropic.ModelHaiku), llm.ModelID())
+	})
+
+	t.Run("Config with custom endpoint", func(t *testing.T) {
+		config := core.ProviderConfig{
+			Name:   "anthropic",
+			APIKey: "test-api-key",
+			Endpoint: &core.EndpointConfig{
+				BaseURL: "https://custom.anthropic.com",
+			},
+		}
+
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelSonnet))
+		assert.NoError(t, err)
+		assert.NotNil(t, llm)
+		assert.Equal(t, "anthropic", llm.ProviderName())
+		assert.Equal(t, string(anthropic.ModelSonnet), llm.ModelID())
+	})
+
+	t.Run("Config with empty API key falls back to env var", func(t *testing.T) {
+		// Set environment variable
+		oldKey := os.Getenv("ANTHROPIC_API_KEY")
+		defer func() {
+			if oldKey != "" {
+				os.Setenv("ANTHROPIC_API_KEY", oldKey)
+			} else {
+				os.Unsetenv("ANTHROPIC_API_KEY")
+			}
+		}()
+		os.Setenv("ANTHROPIC_API_KEY", "env-test-key")
+
+		config := core.ProviderConfig{
+			Name: "anthropic",
+		}
+
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelOpus))
+		assert.NoError(t, err)
+		assert.NotNil(t, llm)
+	})
+
+	t.Run("Config with no API key and no env var", func(t *testing.T) {
+		// Unset environment variable
+		oldKey := os.Getenv("ANTHROPIC_API_KEY")
+		defer func() {
+			if oldKey != "" {
+				os.Setenv("ANTHROPIC_API_KEY", oldKey)
+			}
+		}()
+		os.Unsetenv("ANTHROPIC_API_KEY")
+
+		config := core.ProviderConfig{
+			Name: "anthropic",
+		}
+
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelOpus))
+		assert.Error(t, err)
+		assert.Nil(t, llm)
+		assert.Contains(t, err.Error(), "API key is required")
+	})
+
+	t.Run("Config with invalid model", func(t *testing.T) {
+		config := core.ProviderConfig{
+			Name:   "anthropic",
+			APIKey: "test-api-key",
+		}
+
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID("invalid-model"))
+		assert.Error(t, err)
+		assert.Nil(t, llm)
+		assert.Contains(t, err.Error(), "unsupported Anthropic model")
+	})
+}
+
+func TestAnthropicLLM_isValidAnthropicModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    anthropic.ModelID
+		expected bool
+	}{
+		{
+			name:     "Valid Haiku model",
+			model:    anthropic.ModelHaiku,
+			expected: true,
+		},
+		{
+			name:     "Valid Sonnet model",
+			model:    anthropic.ModelSonnet,
+			expected: true,
+		},
+		{
+			name:     "Valid Opus model",
+			model:    anthropic.ModelOpus,
+			expected: true,
+		},
+		{
+			name:     "Invalid model",
+			model:    "invalid-model",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isValidAnthropicModel(tt.model)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestAnthropicLLM_supportsStreaming(t *testing.T) {
+	// Test that all models support streaming
+	models := []anthropic.ModelID{
+		anthropic.ModelHaiku,
+		anthropic.ModelSonnet,
+		anthropic.ModelOpus,
+	}
+
+	for _, model := range models {
+		t.Run(string(model), func(t *testing.T) {
+			result := supportsStreaming(model)
+			assert.True(t, result, "Model %s should support streaming", model)
+		})
+	}
+}
+
+func TestAnthropicProviderFactory(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Valid factory creation", func(t *testing.T) {
+		config := core.ProviderConfig{
+			Name:   "anthropic",
+			APIKey: "test-api-key",
+		}
+
+		llm, err := AnthropicProviderFactory(ctx, config, core.ModelID(anthropic.ModelHaiku))
+		assert.NoError(t, err)
+		assert.NotNil(t, llm)
+
+		// Check that it's an AnthropicLLM
+		anthropicLLM, ok := llm.(*AnthropicLLM)
+		assert.True(t, ok)
+		assert.Equal(t, "anthropic", anthropicLLM.ProviderName())
+	})
+
+	t.Run("Factory with invalid config", func(t *testing.T) {
+		config := core.ProviderConfig{
+			Name: "anthropic",
+		}
+
+		llm, err := AnthropicProviderFactory(ctx, config, core.ModelID("invalid-model"))
+		assert.Error(t, err)
+		assert.Nil(t, llm)
+	})
 }

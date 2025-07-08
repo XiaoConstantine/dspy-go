@@ -23,13 +23,33 @@ func (e *ValidationError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
-	return fmt.Sprintf("validation failed for field '%s' with tag '%s' and value '%v'", e.Field, e.Tag, e.Value)
+	
+	// Generate custom message based on tag
+	switch e.Tag {
+	case "required":
+		return fmt.Sprintf("%s is required", e.Field)
+	case "min":
+		return fmt.Sprintf("%s must be at least", e.Field)
+	case "max":
+		return fmt.Sprintf("%s must be at most", e.Field)
+	case "oneof":
+		return fmt.Sprintf("%s must be one of", e.Field)
+	case "url":
+		return fmt.Sprintf("%s must be a valid URL", e.Field)
+	case "":
+		return fmt.Sprintf("%s failed validation", e.Field)
+	default:
+		return fmt.Sprintf("%s failed validation", e.Field)
+	}
 }
 
 // ValidationErrors represents multiple validation errors.
 type ValidationErrors []ValidationError
 
 func (e ValidationErrors) Error() string {
+	if len(e) == 0 {
+		return ""
+	}
 	var messages []string
 	for _, err := range e {
 		messages = append(messages, err.Error())
@@ -56,8 +76,24 @@ func NewValidator() (*Validator, error) {
 
 // ValidateConfig validates a configuration struct.
 func (v *Validator) ValidateConfig(config *Config) error {
+	// Check for nil config first
+	if config == nil {
+		return ValidationErrors{
+			ValidationError{
+				Field:   "config",
+				Tag:     "required",
+				Value:   nil,
+				Message: "config is nil",
+			},
+		}
+	}
+
 	err := v.validate.Struct(config)
 	if err == nil {
+		// Perform additional custom validations if struct validation passes
+		if customErrors := v.validateCustomRules(config); len(customErrors) > 0 {
+			return customErrors
+		}
 		return nil
 	}
 
@@ -94,6 +130,17 @@ func (v *Validator) ValidateConfig(config *Config) error {
 // validateCustomRules performs additional custom validation rules.
 func (v *Validator) validateCustomRules(config *Config) ValidationErrors {
 	var errors ValidationErrors
+
+	// Check for nil config
+	if config == nil {
+		errors = append(errors, ValidationError{
+			Field:   "config",
+			Tag:     "required",
+			Value:   nil,
+			Message: "config cannot be nil",
+		})
+		return errors
+	}
 
 	// Validate LLM configuration consistency
 	if errs := v.validateLLMConfig(&config.LLM); len(errs) > 0 {
@@ -452,21 +499,21 @@ func isValidGoogleModel(modelID string) bool {
 func getValidationMessage(e validator.FieldError) string {
 	switch e.Tag() {
 	case "required":
-		return fmt.Sprintf("field '%s' is required", e.Field())
+		return fmt.Sprintf("%s is required", e.Field())
 	case "min":
-		return fmt.Sprintf("field '%s' must be at least %s", e.Field(), e.Param())
+		return fmt.Sprintf("%s must be at least %s", e.Field(), e.Param())
 	case "max":
-		return fmt.Sprintf("field '%s' must be at most %s", e.Field(), e.Param())
+		return fmt.Sprintf("%s must be at most %s", e.Field(), e.Param())
 	case "oneof":
-		return fmt.Sprintf("field '%s' must be one of: %s", e.Field(), e.Param())
+		return fmt.Sprintf("%s must be one of: %s", e.Field(), e.Param())
 	case "url":
-		return fmt.Sprintf("field '%s' must be a valid URL", e.Field())
+		return fmt.Sprintf("%s must be a valid URL", e.Field())
 	case "file_path":
-		return fmt.Sprintf("field '%s' must be a valid file path", e.Field())
+		return fmt.Sprintf("%s must be a valid file path", e.Field())
 	case "min_duration":
-		return fmt.Sprintf("field '%s' must be at least %s", e.Field(), e.Param())
+		return fmt.Sprintf("%s must be at least %s", e.Field(), e.Param())
 	default:
-		return fmt.Sprintf("field '%s' failed validation with tag '%s'", e.Field(), e.Tag())
+		return fmt.Sprintf("%s failed validation", e.Field())
 	}
 }
 

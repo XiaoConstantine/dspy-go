@@ -170,7 +170,7 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case strings.HasPrefix(string(modelID), "ollama:"):
 		parts := strings.SplitN(string(modelID), ":", 2)
-		if len(parts) != 2 || parts[1] == "" {
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
 			return nil, fmt.Errorf("invalid Ollama model ID format. Use 'ollama:<model_name>'")
 		}
 		llm, err = NewOllamaLLM("http://localhost:11434", parts[1])
