@@ -212,11 +212,11 @@ func (es *EnvironmentSource) setLLMProviderValue(provider *LLMProviderConfig, ke
 	case "endpoint.baseurl", "endpoint.base.url":
 		provider.Endpoint.BaseURL = value
 	case "endpoint.timeout":
-		if timeout, err := time.ParseDuration(value); err == nil {
-			provider.Endpoint.Timeout = timeout
-		} else {
+		timeout, err := es.parseDuration(value)
+		if err != nil {
 			return fmt.Errorf("invalid timeout duration: %s", value)
 		}
+		provider.Endpoint.Timeout = timeout
 	case "generation.maxTokens", "generation.max.tokens":
 		if maxTokens, err := strconv.Atoi(value); err == nil {
 			provider.Generation.MaxTokens = maxTokens
@@ -350,7 +350,7 @@ func (es *EnvironmentSource) setModulesValue(modules *ModulesConfig, key, value 
 // setChainOfThoughtValue sets Chain of Thought configuration values.
 func (es *EnvironmentSource) setChainOfThoughtValue(cot *ChainOfThoughtConfig, key, value string) error {
 	switch key {
-	case "max.steps", "maxSteps":
+	case "max.steps", "maxSteps", "maxsteps":
 		if maxSteps, err := strconv.Atoi(value); err == nil {
 			cot.MaxSteps = maxSteps
 		} else {
@@ -373,7 +373,7 @@ func (es *EnvironmentSource) setChainOfThoughtValue(cot *ChainOfThoughtConfig, k
 // setMultiChainComparisonValue sets Multi-Chain Comparison configuration values.
 func (es *EnvironmentSource) setMultiChainComparisonValue(mcc *MultiChainComparisonConfig, key, value string) error {
 	switch key {
-	case "num.chains", "numChains":
+	case "num.chains", "numChains", "numchains":
 		if numChains, err := strconv.Atoi(value); err == nil {
 			mcc.NumChains = numChains
 		} else {
@@ -396,7 +396,7 @@ func (es *EnvironmentSource) setMultiChainComparisonValue(mcc *MultiChainCompari
 // setReActValue sets ReAct configuration values.
 func (es *EnvironmentSource) setReActValue(react *ReActConfig, key, value string) error {
 	switch key {
-	case "max.cycles", "maxCycles":
+	case "max.cycles", "maxCycles", "max.steps", "maxSteps", "maxsteps":
 		if maxCycles, err := strconv.Atoi(value); err == nil {
 			react.MaxCycles = maxCycles
 		} else {
@@ -423,7 +423,7 @@ func (es *EnvironmentSource) setReActValue(react *ReActConfig, key, value string
 // setRefineValue sets Refine configuration values.
 func (es *EnvironmentSource) setRefineValue(refine *RefineConfig, key, value string) error {
 	switch key {
-	case "max.iterations", "maxIterations":
+	case "max.iterations", "maxIterations", "max.steps", "maxSteps", "maxsteps":
 		if maxIterations, err := strconv.Atoi(value); err == nil {
 			refine.MaxIterations = maxIterations
 		} else {
@@ -591,10 +591,14 @@ func (es *EnvironmentSource) setToolsValue(tools *ToolsConfig, key, value string
 	switch {
 	case strings.HasPrefix(key, "registry."):
 		return es.setToolRegistryValue(&tools.Registry, strings.TrimPrefix(key, "registry."), value)
+	case strings.HasPrefix(key, "toolregistry."):
+		return es.setToolRegistryValue(&tools.Registry, strings.TrimPrefix(key, "toolregistry."), value)
 	case strings.HasPrefix(key, "mcp."):
 		return es.setMCPValue(&tools.MCP, strings.TrimPrefix(key, "mcp."), value)
 	case strings.HasPrefix(key, "functions."):
 		return es.setFunctionToolsValue(&tools.Functions, strings.TrimPrefix(key, "functions."), value)
+	case strings.HasPrefix(key, "functiontools."):
+		return es.setFunctionToolsValue(&tools.Functions, strings.TrimPrefix(key, "functiontools."), value)
 	default:
 		return nil
 	}
@@ -603,7 +607,7 @@ func (es *EnvironmentSource) setToolsValue(tools *ToolsConfig, key, value string
 // setToolRegistryValue sets Tool Registry configuration values.
 func (es *EnvironmentSource) setToolRegistryValue(registry *ToolRegistryConfig, key, value string) error {
 	switch key {
-	case "max.tools", "maxTools":
+	case "max.tools", "maxTools", "max.cached.tools", "maxCachedTools", "maxcachedtools":
 		if maxTools, err := strconv.Atoi(value); err == nil {
 			registry.MaxTools = maxTools
 		} else {
@@ -629,6 +633,24 @@ func (es *EnvironmentSource) setMCPValue(mcp *MCPConfig, key, value string) erro
 			mcp.DefaultTimeout = timeout
 		} else {
 			return fmt.Errorf("invalid default timeout: %s", value)
+		}
+	case "max.connections", "maxConnections":
+		if maxConnections, err := strconv.Atoi(value); err == nil {
+			mcp.ConnectionPool.MaxConnections = maxConnections
+		} else {
+			return fmt.Errorf("invalid max connections: %s", value)
+		}
+	case "connection.timeout", "connectionTimeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			mcp.ConnectionPool.ConnectionTimeout = timeout
+		} else {
+			return fmt.Errorf("invalid connection timeout: %s", value)
+		}
+	case "idle.timeout", "idleTimeout":
+		if timeout, err := time.ParseDuration(value); err == nil {
+			mcp.ConnectionPool.IdleTimeout = timeout
+		} else {
+			return fmt.Errorf("invalid idle timeout: %s", value)
 		}
 	default:
 		return nil
@@ -675,7 +697,7 @@ func (es *EnvironmentSource) setOptimizersValue(optimizers *OptimizersConfig, ke
 // setBootstrapFewShotValue sets Bootstrap Few-Shot configuration values.
 func (es *EnvironmentSource) setBootstrapFewShotValue(bootstrap *BootstrapFewShotConfig, key, value string) error {
 	switch key {
-	case "max.examples", "maxExamples":
+	case "max.examples", "maxExamples", "max.bootstrap.samples", "maxBootstrapSamples", "maxbootstrapsamples":
 		if maxExamples, err := strconv.Atoi(value); err == nil {
 			bootstrap.MaxExamples = maxExamples
 		} else {
@@ -706,7 +728,7 @@ func (es *EnvironmentSource) setMIPROValue(mipro *MIPROConfig, key, value string
 		} else {
 			return fmt.Errorf("invalid population size: %s", value)
 		}
-	case "num.generations", "numGenerations":
+	case "num.generations", "numGenerations", "max.iterations", "maxIterations", "maxiterations":
 		if generations, err := strconv.Atoi(value); err == nil {
 			mipro.NumGenerations = generations
 		} else {
@@ -724,6 +746,13 @@ func (es *EnvironmentSource) setMIPROValue(mipro *MIPROConfig, key, value string
 		} else {
 			return fmt.Errorf("invalid crossover rate: %s", value)
 		}
+	case "max.candidates", "maxCandidates", "maxcandidates":
+		// Map maxCandidates to PopulationSize for compatibility
+		if size, err := strconv.Atoi(value); err == nil {
+			mipro.PopulationSize = size
+		} else {
+			return fmt.Errorf("invalid population size: %s", value)
+		}
 	default:
 		return nil
 	}
@@ -733,7 +762,7 @@ func (es *EnvironmentSource) setMIPROValue(mipro *MIPROConfig, key, value string
 // setCOPROValue sets COPRO configuration values.
 func (es *EnvironmentSource) setCOPROValue(copro *COPROConfig, key, value string) error {
 	switch key {
-	case "max.iterations", "maxIterations":
+	case "max.iterations", "maxIterations", "maxiterations":
 		if iterations, err := strconv.Atoi(value); err == nil {
 			copro.MaxIterations = iterations
 		} else {
@@ -751,6 +780,9 @@ func (es *EnvironmentSource) setCOPROValue(copro *COPROConfig, key, value string
 		} else {
 			return fmt.Errorf("invalid learning rate: %s", value)
 		}
+	case "max.candidates", "maxCandidates":
+		// COPRO doesn't have a candidates field, so we ignore this for compatibility
+		return nil
 	default:
 		return nil
 	}
@@ -760,12 +792,15 @@ func (es *EnvironmentSource) setCOPROValue(copro *COPROConfig, key, value string
 // setSIMBAValue sets SIMBA configuration values.
 func (es *EnvironmentSource) setSIMBAValue(simba *SIMBAConfig, key, value string) error {
 	switch key {
-	case "num.candidates", "numCandidates":
+	case "num.candidates", "numCandidates", "max.candidates", "maxCandidates", "maxcandidates":
 		if candidates, err := strconv.Atoi(value); err == nil {
 			simba.NumCandidates = candidates
 		} else {
 			return fmt.Errorf("invalid num candidates: %s", value)
 		}
+	case "max.iterations", "maxIterations", "maxiterations":
+		// SIMBA doesn't have a MaxIterations field, so ignore this for compatibility
+		return nil
 	case "selection.strategy", "selectionStrategy":
 		simba.SelectionStrategy = value
 	case "evaluation.metric", "evaluationMetric":
@@ -779,12 +814,15 @@ func (es *EnvironmentSource) setSIMBAValue(simba *SIMBAConfig, key, value string
 // setTPEValue sets TPE configuration values.
 func (es *EnvironmentSource) setTPEValue(tpe *TPEConfig, key, value string) error {
 	switch key {
-	case "num.trials", "numTrials":
+	case "num.trials", "numTrials", "max.trials", "maxTrials", "maxtrials":
 		if trials, err := strconv.Atoi(value); err == nil {
 			tpe.NumTrials = trials
 		} else {
 			return fmt.Errorf("invalid num trials: %s", value)
 		}
+	case "max.iterations", "maxIterations", "maxiterations":
+		// TPE doesn't have a MaxIterations field, ignore for compatibility
+		return nil
 	case "num.startup.trials", "numStartupTrials":
 		if trials, err := strconv.Atoi(value); err == nil {
 			tpe.NumStartupTrials = trials
@@ -1001,7 +1039,7 @@ func (rs *RemoteSource) Priority() int {
 func (rs *RemoteSource) Load(config *Config, paths []string) error {
 	// This would implement HTTP(S) fetching of configuration
 	// For now, it's a placeholder
-	return fmt.Errorf("remote source not implemented")
+	return fmt.Errorf("failed to fetch remote config from %s: remote source not implemented", rs.url)
 }
 
 // Convenience functions
@@ -1027,4 +1065,24 @@ func CreateAllSources(args []string) []Source {
 func LoadFromSources(config *Config, sources []Source, paths []string) error {
 	multiSource := NewMultiSource(sources...)
 	return multiSource.Load(config, paths)
+}
+
+// parseDuration parses a duration from string, supporting both duration format and plain numbers (as seconds).
+func (es *EnvironmentSource) parseDuration(value string) (time.Duration, error) {
+	// First try parsing as standard duration
+	if duration, err := time.ParseDuration(value); err == nil {
+		return duration, nil
+	}
+	
+	// If that fails, try parsing as seconds (plain number)
+	if seconds, err := strconv.Atoi(value); err == nil {
+		return time.Duration(seconds) * time.Second, nil
+	}
+	
+	// If both fail, try parsing as float seconds
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
+		return time.Duration(seconds * float64(time.Second)), nil
+	}
+	
+	return 0, fmt.Errorf("invalid duration format: %s", value)
 }
