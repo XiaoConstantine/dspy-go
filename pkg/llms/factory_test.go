@@ -460,10 +460,20 @@ func TestFactoryEdgeCases(t *testing.T) {
 	factory := &DefaultLLMFactory{}
 
 	t.Run("Factory with empty API key for Anthropic", func(t *testing.T) {
-		// API key validation happens at request time, not creation time
+		// Temporarily unset ANTHROPIC_API_KEY to test the behavior without any API key
+		originalAPIKey := os.Getenv("ANTHROPIC_API_KEY")
+		os.Unsetenv("ANTHROPIC_API_KEY")
+		defer func() {
+			if originalAPIKey != "" {
+				os.Setenv("ANTHROPIC_API_KEY", originalAPIKey)
+			}
+		}()
+
+		// With no API key available, creation should fail
 		llm, err := factory.CreateLLM("", core.ModelAnthropicHaiku)
-		assert.NoError(t, err)
-		assert.NotNil(t, llm)
+		assert.Error(t, err)
+		assert.Nil(t, llm)
+		assert.Contains(t, err.Error(), "no API key provided")
 	})
 
 	t.Run("Factory with valid Ollama model", func(t *testing.T) {
