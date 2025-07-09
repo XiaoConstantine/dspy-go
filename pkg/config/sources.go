@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -134,8 +135,24 @@ func (es *EnvironmentSource) Priority() int {
 func (es *EnvironmentSource) Load(config *Config, paths []string) error {
 	envVars := es.getEnvironmentVariables()
 
-	// Apply environment variable overrides
-	for key, value := range envVars {
+	// Sort keys to ensure consistent processing order
+	// Process longer keys first, then shorter ones (so shorter/abbreviated forms take precedence)
+	keys := make([]string, 0, len(envVars))
+	for key := range envVars {
+		keys = append(keys, key)
+	}
+	
+	// Sort by length (descending) then alphabetically for consistent ordering
+	sort.Slice(keys, func(i, j int) bool {
+		if len(keys[i]) != len(keys[j]) {
+			return len(keys[i]) > len(keys[j])
+		}
+		return keys[i] < keys[j]
+	})
+
+	// Apply environment variable overrides in sorted order
+	for _, key := range keys {
+		value := envVars[key]
 		if err := es.setConfigValue(config, key, value); err != nil {
 			return fmt.Errorf("failed to set config value %s=%s: %w", key, value, err)
 		}
