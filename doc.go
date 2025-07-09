@@ -49,9 +49,17 @@
 //
 //   - Integration with multiple LLM providers:
 //     * Anthropic Claude
-//     * Google Gemini
+//     * Google Gemini (with multimodal support)
 //     * Ollama
 //     * LlamaCPP
+//
+//   - Multimodal Capabilities:
+//     * Image Analysis: Analyze and describe images with natural language
+//     * Vision Question Answering: Ask specific questions about visual content
+//     * Multimodal Chat: Interactive conversations with images
+//     * Streaming Multimodal: Real-time processing of multimodal content
+//     * Multiple Image Analysis: Compare and analyze multiple images simultaneously
+//     * Content Block System: Flexible handling of text, image, and future audio content
 //
 // Simple Example:
 //
@@ -102,6 +110,60 @@
 //	    fmt.Printf("Answer: %s\n", result["answer"])
 //	}
 //
+// Multimodal Example:
+//
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "log"
+//	    "os"
+//
+//	    "github.com/XiaoConstantine/dspy-go/pkg/core"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/modules"
+//	)
+//
+//	func main() {
+//	    // Create Gemini LLM instance with multimodal support
+//	    llm, err := llms.NewGeminiLLM(os.Getenv("GEMINI_API_KEY"), core.ModelGoogleGeminiFlash)
+//	    if err != nil {
+//	        log.Fatalf("Failed to create Gemini LLM: %v", err)
+//	    }
+//
+//	    // Define multimodal signature for image analysis
+//	    signature := core.NewSignature(
+//	        []core.InputField{
+//	            {Field: core.NewImageField("image", core.WithDescription("The image to analyze"))},
+//	            {Field: core.NewTextField("question", core.WithDescription("Question about the image"))},
+//	        },
+//	        []core.OutputField{
+//	            {Field: core.NewTextField("answer", core.WithDescription("Analysis result"))},
+//	        },
+//	    ).WithInstruction("Analyze the provided image and answer the given question about it.")
+//
+//	    // Create prediction module
+//	    predictor := modules.NewPredict(signature)
+//	    predictor.SetLLM(llm)
+//
+//	    // Load and process image
+//	    imageData, err := os.ReadFile("path/to/image.jpg")
+//	    if err != nil {
+//	        log.Fatalf("Failed to load image: %v", err)
+//	    }
+//
+//	    // Execute multimodal prediction
+//	    ctx := core.WithExecutionState(context.Background())
+//	    result, err := predictor.Process(ctx, map[string]interface{}{
+//	        "image":    core.NewImageBlock(imageData, "image/jpeg"),
+//	        "question": "What objects can you see in this image?",
+//	    })
+//	    if err != nil {
+//	        log.Fatalf("Error processing image: %v", err)
+//	    }
+//
+//	    fmt.Printf("Answer: %s\n", result["answer"])
+//	}
+//
 // Advanced Features:
 //
 //   - Tracing and Logging: Detailed tracing and structured logging for debugging and optimization
@@ -119,6 +181,8 @@
 //   - Workflow Retry Logic: Resilient execution with configurable retry mechanisms and backoff strategies
 //
 //   - Streaming Support: Process LLM outputs incrementally as they're generated
+//     * Text streaming for regular LLM interactions
+//     * Multimodal streaming for image analysis and vision tasks
 //
 //   - Data Storage: Integration with various storage backends for persistence of examples and results
 //
@@ -198,6 +262,29 @@
 //	// Register and use composite tool like any other tool
 //	registry.Register(textProcessor)
 //	result, err := textProcessor.Execute(ctx, input)
+//
+// Working with Multimodal Streaming:
+//
+//	// Create multimodal content with text and image
+//	content := []core.ContentBlock{
+//	    core.NewTextBlock("Please describe this image in detail:"),
+//	    core.NewImageBlock(imageData, "image/jpeg"),
+//	}
+//
+//	// Stream multimodal response
+//	streamResp, err := llm.StreamGenerateWithContent(ctx, content)
+//	if err != nil {
+//	    log.Fatalf("Failed to start streaming: %v", err)
+//	}
+//
+//	// Process streaming chunks
+//	for chunk := range streamResp.ChunkChannel {
+//	    if chunk.Error != nil {
+//	        log.Printf("Streaming error: %v", chunk.Error)
+//	        break
+//	    }
+//	    fmt.Print(chunk.Content)
+//	}
 //
 // Working with Workflows:
 //

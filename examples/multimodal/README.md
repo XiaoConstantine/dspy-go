@@ -214,11 +214,22 @@ conversation := []core.ContentBlock{
 ### Debug Mode
 Enable debug logging to see detailed request/response information:
 ```go
-// Add this to see detailed API interactions
+// Initialize logging with DEBUG level
 import "github.com/XiaoConstantine/dspy-go/pkg/logging"
-logger := logging.GetLogger()
-logger.SetLevel("debug")
+
+output := logging.NewConsoleOutput(true, logging.WithColor(true))
+logger := logging.NewLogger(logging.Config{
+    Severity: logging.DEBUG,
+    Outputs:  []logging.Output{output},
+})
+logging.SetLogger(logger)
 ```
+
+This will show detailed information about:
+- Multimodal content generation
+- LLM completion responses
+- Response parsing and field extraction
+- Token usage statistics
 
 ## Next Steps
 

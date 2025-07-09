@@ -13,7 +13,8 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Modular Architecture**: Build complex LLM applications by composing simple, reusable components
 - **Systematic Prompt Engineering**: Optimize prompts automatically based on examples and feedback
 - **Flexible Workflows**: Chain, branch, and orchestrate LLM operations with powerful workflow abstractions
-- **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini, Ollama, and LlamaCPP
+- **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini (with multimodal support), Ollama, and LlamaCPP
+- **Multimodal Processing**: Native support for image analysis, vision Q&A, and multimodal chat with streaming capabilities
 - **Advanced Reasoning Patterns**: Implement chain-of-thought, ReAct, refinement, and multi-chain comparison techniques
 - **Parallel Processing**: Built-in support for concurrent execution to improve performance
 - **Dataset Management**: Automatic downloading and management of popular datasets like GSM8K and HotPotQA
@@ -886,6 +887,23 @@ The Tool Chaining and Composition examples demonstrate:
 - Using composite tools as building blocks in larger pipelines
 - Tool composition with data transformations
 - Registry integration for seamless tool management
+
+### Multimodal Processing Example
+
+```bash
+# Run multimodal example (requires GEMINI_API_KEY)
+cd examples/multimodal
+export GEMINI_API_KEY="your-api-key-here"
+go run main.go
+```
+
+The Multimodal Processing example demonstrates:
+- **Image Analysis**: Basic image analysis with natural language questions
+- **Vision Question Answering**: Structured visual analysis with detailed observations
+- **Multimodal Chat**: Interactive conversations with images
+- **Streaming Multimodal**: Real-time processing of multimodal content
+- **Multiple Image Analysis**: Comparing and analyzing multiple images simultaneously
+- **Content Block System**: Flexible handling of text, image, and future audio content
 
 ## Documentation
 
