@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -411,6 +412,14 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 	if len(geminiResp.Candidates) == 0 {
 		return nil, errors.WithFields(
 			errors.New(errors.InvalidResponse, "InvalidResponse: no candidates in response"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
+	if len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "InvalidResponse: no parts in response candidate"),
 			errors.Fields{
 				"model": g.ModelID(),
 			})
@@ -951,33 +960,13 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 	}, nil
 }
 
-// StreamGenerate for Gemini.
-func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
-	opts := core.NewGenerateOptions()
-	for _, opt := range options {
-		opt(opts)
-	}
-
-	reqBody := geminiRequest{
-		Contents: []geminiContent{
-			{
-				Parts: []geminiPart{
-					{Text: prompt},
-				},
-			},
-		},
-		GenerationConfig: geminiGenerationConfig{
-			Temperature:     opts.Temperature,
-			MaxOutputTokens: opts.MaxTokens,
-			TopP:            opts.TopP,
-		},
-	}
-
+// streamRequest handles the common streaming logic for both StreamGenerate and StreamGenerateWithContent.
+func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody interface{}) (*core.StreamResponse, error) {
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, errors.WithFields(
-			errors.New(errors.InvalidInput, fmt.Sprintf("InvalidInput: failed to marshal request body: %v", err)),
-			errors.Fields{"prompt": prompt, "model": g.ModelID()})
+			errors.New(errors.InvalidInput, fmt.Sprintf("failed to marshal request body: %v", err)),
+			errors.Fields{"model": g.ModelID()})
 	}
 
 	// Add streaming parameter
@@ -986,7 +975,7 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	req, err := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, errors.WithFields(
-			errors.New(errors.InvalidInput, fmt.Sprintf("InvalidInput: failed to create request: %v", err)),
+			errors.New(errors.InvalidInput, fmt.Sprintf("failed to create request: %v", err)),
 			errors.Fields{"model": g.ModelID()})
 	}
 
@@ -1012,26 +1001,22 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	response := &core.StreamResponse{
 		ChunkChannel: chunkChan,
 		Cancel: func() {
-			// Cancel the context first
 			cancelStream()
 		},
 	}
 
 	// Start streaming goroutine
 	go func() {
-		// Always close the channel when done
 		defer safeCloseChannel()
 
-		// Create a client that will properly cancel on context cancellation
 		client := g.GetHTTPClient()
 		resp, err := client.Do(req)
 		if err != nil {
-			// Check if context is already cancelled
 			if streamCtx.Err() != nil {
 				return
 			}
 			chunkChan <- core.StreamChunk{
-				Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: request failed: %v", err)),
+				Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("request failed: %v", err)),
 			}
 			return
 		}
@@ -1039,20 +1024,15 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 
 		reader := bufio.NewReader(resp.Body)
 
-		// Process stream until we're done or cancelled
 		for {
-			// Check if context is cancelled first
 			select {
 			case <-streamCtx.Done():
 				return
 			default:
-				// Continue processing
 			}
 
-			// Create a timeout for reading
 			readCtx, cancel := context.WithTimeout(streamCtx, 500*time.Millisecond)
 
-			// Read with a timeout
 			ch := make(chan struct {
 				line string
 				err  error
@@ -1066,7 +1046,6 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 				}{line, err}
 			}()
 
-			// Wait for read completion or timeout
 			var line string
 			var readErr error
 
@@ -1074,34 +1053,27 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 			case result := <-ch:
 				line = result.line
 				readErr = result.err
-				cancel() // Cancel the read context
+				cancel()
 			case <-readCtx.Done():
-				cancel() // Explicit cancel
-				// Check if main context is cancelled
+				cancel()
 				if streamCtx.Err() != nil {
 					return
 				}
-				// Just timed out, try again
 				continue
 			}
 
-			// Process read results
 			if readErr != nil {
-				// Check for end of stream or cancelled context
 				if readErr == io.EOF || streamCtx.Err() != nil {
 					return
 				}
-
-				// Only send error if context not cancelled
 				if streamCtx.Err() == nil {
 					chunkChan <- core.StreamChunk{
-						Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: stream read error: %v", readErr)),
+						Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("stream read error: %v", readErr)),
 					}
 				}
 				return
 			}
 
-			// Process the line if context not cancelled
 			if streamCtx.Err() != nil {
 				return
 			}
@@ -1110,20 +1082,17 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 
-				// Check for end marker
 				if data == "[DONE]" {
 					return
 				}
 
-				// Parse the response
 				var chunk geminiResponse
 				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-					continue // Skip invalid chunks
+					continue
 				}
 
 				if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
 					content := chunk.Candidates[0].Content.Parts[0].Text
-					// Only send if context not cancelled
 					if streamCtx.Err() == nil {
 						chunkChan <- core.StreamChunk{Content: content}
 					}
@@ -1133,6 +1102,31 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 	}()
 
 	return response, nil
+}
+
+// StreamGenerate for Gemini.
+func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{
+				Parts: []geminiPart{
+					{Text: prompt},
+				},
+			},
+		},
+		GenerationConfig: geminiGenerationConfig{
+			Temperature:     opts.Temperature,
+			MaxOutputTokens: opts.MaxTokens,
+			TopP:            opts.TopP,
+		},
+	}
+
+	return g.streamRequest(ctx, reqBody)
 }
 
 func isValidGeminiEmbeddingModel(s string) bool {
@@ -1265,6 +1259,14 @@ func (g *GeminiLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 			})
 	}
 
+	if len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "no parts in response candidate"),
+			errors.Fields{
+				"model": g.ModelID(),
+			})
+	}
+
 	content_text := geminiResp.Candidates[0].Content.Parts[0].Text
 	usage := &core.TokenInfo{
 		PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
@@ -1301,146 +1303,7 @@ func (g *GeminiLLM) StreamGenerateWithContent(ctx context.Context, content []cor
 		},
 	}
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.New(errors.InvalidInput, fmt.Sprintf("failed to marshal request body: %v", err)),
-			errors.Fields{"content_blocks": len(content), "model": g.ModelID()})
-	}
-
-	// Add streaming parameter
-	streamURL := constructRequestURL(g.GetEndpointConfig(), g.apiKey) + "&alt=sse"
-
-	req, err := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.New(errors.InvalidInput, fmt.Sprintf("failed to create request: %v", err)),
-			errors.Fields{"model": g.ModelID()})
-	}
-
-	for key, value := range g.GetEndpointConfig().Headers {
-		req.Header.Set(key, value)
-	}
-	req.Header.Set("Accept", "text/event-stream")
-
-	// Create channels and response
-	chunkChan := make(chan core.StreamChunk)
-	streamCtx, cancelStream := context.WithCancel(ctx)
-
-	// Used to protect against multiple closes
-	var channelClosed sync.Once
-
-	// Create a safe way to close the channel
-	safeCloseChannel := func() {
-		channelClosed.Do(func() {
-			close(chunkChan)
-		})
-	}
-
-	response := &core.StreamResponse{
-		ChunkChannel: chunkChan,
-		Cancel: func() {
-			cancelStream()
-		},
-	}
-
-	// Start streaming goroutine (similar to existing StreamGenerate)
-	go func() {
-		defer safeCloseChannel()
-
-		client := g.GetHTTPClient()
-		resp, err := client.Do(req)
-		if err != nil {
-			if streamCtx.Err() != nil {
-				return
-			}
-			chunkChan <- core.StreamChunk{
-				Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("request failed: %v", err)),
-			}
-			return
-		}
-		defer resp.Body.Close()
-
-		reader := bufio.NewReader(resp.Body)
-
-		for {
-			select {
-			case <-streamCtx.Done():
-				return
-			default:
-			}
-
-			readCtx, cancel := context.WithTimeout(streamCtx, 500*time.Millisecond)
-
-			ch := make(chan struct {
-				line string
-				err  error
-			}, 1)
-
-			go func() {
-				line, err := reader.ReadString('\n')
-				ch <- struct {
-					line string
-					err  error
-				}{line, err}
-			}()
-
-			var line string
-			var readErr error
-
-			select {
-			case result := <-ch:
-				line = result.line
-				readErr = result.err
-				cancel()
-			case <-readCtx.Done():
-				cancel()
-				if streamCtx.Err() != nil {
-					return
-				}
-				continue
-			}
-
-			if readErr != nil {
-				if readErr == io.EOF || streamCtx.Err() != nil {
-					return
-				}
-				if streamCtx.Err() == nil {
-					chunkChan <- core.StreamChunk{
-						Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("stream read error: %v", readErr)),
-					}
-				}
-				return
-			}
-
-			if streamCtx.Err() != nil {
-				return
-			}
-
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "data: ") {
-				data := strings.TrimPrefix(line, "data: ")
-
-				if data == "[DONE]" {
-					return
-				}
-
-				var chunk geminiResponse
-				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-					continue
-				}
-
-				if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
-					content := chunk.Candidates[0].Content.Parts[0].Text
-					if streamCtx.Err() == nil {
-						chunkChan <- core.StreamChunk{Content: content}
-					}
-				}
-			}
-		}
-	}()
-
-	return response, nil
+	return g.streamRequest(ctx, reqBody)
 }
 
 // convertToGeminiParts converts ContentBlocks to Gemini's format.
@@ -1457,14 +1320,14 @@ func (g *GeminiLLM) convertToGeminiParts(blocks []core.ContentBlock) []geminiPar
 			parts = append(parts, geminiPart{
 				InlineData: &geminiInlineData{
 					MimeType: block.MimeType,
-					Data:     string(block.Data), // Assume already base64 encoded
+					Data:     base64.StdEncoding.EncodeToString(block.Data),
 				},
 			})
 		case core.FieldTypeAudio:
 			parts = append(parts, geminiPart{
 				InlineData: &geminiInlineData{
 					MimeType: block.MimeType,
-					Data:     string(block.Data), // Assume already base64 encoded
+					Data:     base64.StdEncoding.EncodeToString(block.Data),
 				},
 			})
 		default:

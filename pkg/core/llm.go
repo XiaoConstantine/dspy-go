@@ -56,7 +56,7 @@ const (
 type ContentBlock struct {
 	Type     FieldType `json:"type"`
 	Text     string    `json:"text,omitempty"`
-	Data     []byte    `json:"-"` // Binary data for images/audio (base64 encoded)
+	Data     []byte    `json:"-"` // Raw binary data for images/audio
 	MimeType string    `json:"mime_type,omitempty"`
 	// Optional metadata for extensibility
 	Metadata map[string]interface{} `json:"metadata,omitempty"`

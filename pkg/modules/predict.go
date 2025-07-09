@@ -340,32 +340,14 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 	sb.WriteString("---\n\n")
 	for _, field := range signature.Inputs {
 		value := inputs[field.Name]
-		
-		// Handle multimodal content appropriately
-		switch field.Type {
-		case core.FieldTypeText:
-			// Standard text handling
-			sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
-		case core.FieldTypeImage:
-			// Check if it's a ContentBlock
-			if block, ok := value.(core.ContentBlock); ok && block.Type == core.FieldTypeImage {
-				sb.WriteString(fmt.Sprintf("%s: %s\n", field.Name, block.String()))
-			} else {
-				// Fallback to string representation
-				sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
-			}
-		case core.FieldTypeAudio:
-			// Check if it's a ContentBlock
-			if block, ok := value.(core.ContentBlock); ok && block.Type == core.FieldTypeAudio {
-				sb.WriteString(fmt.Sprintf("%s: %s\n", field.Name, block.String()))
-			} else {
-				// Fallback to string representation
-				sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
-			}
-		default:
-			// Default to existing behavior
-			sb.WriteString(fmt.Sprintf("%s: %v\n", field.Name, value))
+
+		valueStr := fmt.Sprintf("%v", value)
+		// If the value is a ContentBlock of the correct type, use its custom string representation.
+		if block, ok := value.(core.ContentBlock); ok && block.Type == field.Type {
+			valueStr = block.String()
 		}
+
+		sb.WriteString(fmt.Sprintf("%s: %s\n", field.Name, valueStr))
 	}
 
 	return sb.String()
