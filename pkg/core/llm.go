@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
@@ -348,14 +349,56 @@ func (b *BaseLLM) StreamGenerateWithContent(ctx context.Context, content []Conte
 // These maintain backward compatibility with existing code
 
 // This enables backward compatibility while supporting multimodal content.
+// It creates a structured prompt that includes field instructions and prefix information.
 func ConvertInputsToContentBlocks(signature Signature, inputs map[string]any) []ContentBlock {
 	var blocks []ContentBlock
 
+	// Add instruction block that explains the expected format
+	instructionText := fmt.Sprintf("Given the fields '%s', produce the fields '%s'.\n\n",
+		joinFieldNames(inputFieldsToFields(signature.Inputs)),
+		joinFieldNames(outputFieldsToFields(signature.Outputs)),
+	)
+
+	// Add prefix instructions for output fields
+	for _, field := range signature.Outputs {
+		if field.Prefix != "" {
+			instructionText += fmt.Sprintf("The %s field should start with '%s' followed by the content on new lines.\n",
+				field.Name, field.Prefix)
+		}
+		if field.Description != "" {
+			instructionText += fmt.Sprintf(" %s", field.Description)
+			instructionText += "\n"
+		}
+	}
+	instructionText += "\n"
+
+	// Add the main signature instruction if present
+	if signature.Instruction != "" {
+		instructionText += signature.Instruction + "\n\n"
+	}
+
+	// Add conversation context if present
+	if context, ok := inputs["conversation_context"].(string); ok && context != "" {
+		instructionText += "===== CONVERSATION HISTORY =====\n"
+		instructionText += context
+		instructionText += "\n===== END HISTORY =====\n\n"
+	}
+
+	// Add the instruction block
+	blocks = append(blocks, NewTextBlock(instructionText))
+
+	// Add input field separator
+	blocks = append(blocks, NewTextBlock("---\n"))
+
+	// Process input fields in signature order
 	for _, field := range signature.Inputs {
 		value, exists := inputs[field.Name]
 		if !exists {
 			continue
 		}
+
+		// Add field label
+		blocks = append(blocks, NewTextBlock(fmt.Sprintf("%s: ", field.Name)))
 
 		// Type detection based on field type and value type
 		switch field.Type {
@@ -387,9 +430,41 @@ func ConvertInputsToContentBlocks(signature Signature, inputs map[string]any) []
 			// Default to text for unknown types
 			blocks = append(blocks, NewTextBlock(fmt.Sprintf("%v", value)))
 		}
+
+		// Add newline after each field
+		blocks = append(blocks, NewTextBlock("\n"))
 	}
 
 	return blocks
+}
+
+// Helper functions for field processing in core package
+
+// joinFieldNames joins field names with commas.
+func joinFieldNames(fields []Field) string {
+	names := make([]string, len(fields))
+	for i, field := range fields {
+		names[i] = field.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// inputFieldsToFields converts InputField slice to Field slice.
+func inputFieldsToFields(inputs []InputField) []Field {
+	fields := make([]Field, len(inputs))
+	for i, input := range inputs {
+		fields[i] = input.Field
+	}
+	return fields
+}
+
+// outputFieldsToFields converts OutputField slice to Field slice.
+func outputFieldsToFields(outputs []OutputField) []Field {
+	fields := make([]Field, len(outputs))
+	for i, output := range outputs {
+		fields[i] = output.Field
+	}
+	return fields
 }
 
 // IsMultimodalContent checks if the inputs contain any non-text content.
