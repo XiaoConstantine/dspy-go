@@ -435,6 +435,8 @@
         .feature-card:nth-child(4) { animation-delay: 0.4s; }
         .feature-card:nth-child(5) { animation-delay: 0.5s; }
         .feature-card:nth-child(6) { animation-delay: 0.6s; }
+        .feature-card:nth-child(7) { animation-delay: 0.7s; }
+        .feature-card:nth-child(8) { animation-delay: 0.8s; }
     </style>
 </head>
 <body>
@@ -454,7 +456,7 @@
         <section class="hero">
             <div class="container">
                 <h1>Systematic Prompt Engineering for Go</h1>
-                <p>DSPy-Go brings systematic prompt engineering and automated reasoning capabilities to Go applications through composable modules and intelligent workflows.</p>
+                <p>DSPy-Go brings systematic prompt engineering, multimodal AI capabilities, and automated reasoning to Go applications through composable modules and intelligent workflows.</p>
                 
                 <div class="cta-buttons">
                     <a href="#quickstart" class="btn btn-primary">Get Started</a>
@@ -507,9 +509,19 @@
                         <p>Implement chain-of-thought, ReAct, refinement, and multi-chain comparison techniques for sophisticated AI workflows.</p>
                     </div>
                     <div class="feature-card">
+                        <div class="feature-icon">🖼️</div>
+                        <h3>Multimodal AI</h3>
+                        <p>Native support for image analysis, vision Q&A, multimodal chat, and streaming with flexible content blocks for text, images, and future audio.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚙️</div>
+                        <h3>Configurable Architecture</h3>
+                        <p>Flexible configuration system with environment variables, YAML files, and programmatic setup for easy deployment and management.</p>
+                    </div>
+                    <div class="feature-card">
                         <div class="feature-icon">🌐</div>
                         <h3>Multi-Provider Support</h3>
-                        <p>Native support for Anthropic Claude, Google Gemini, Ollama, and LlamaCPP with seamless provider switching.</p>
+                        <p>Native support for Anthropic Claude, Google Gemini (with multimodal), Ollama, and LlamaCPP with seamless provider switching.</p>
                     </div>
                 </div>
             </div>
@@ -527,12 +539,12 @@
                         <p>LLM Providers</p>
                     </div>
                     <div class="stat-item">
-                        <h3>10+</h3>
-                        <p>Examples</p>
+                        <h3>Multimodal</h3>
+                        <p>AI Support</p>
                     </div>
                     <div class="stat-item">
-                        <h3>100%</h3>
-                        <p>Go Native</p>
+                        <h3>12+</h3>
+                        <p>Examples</p>
                     </div>
                 </div>
             </div>
@@ -599,6 +611,67 @@ func main() {
     fmt.Printf("Answer: %s\n", result["answer"])
 }</code></pre>
                 </div>
+
+                <h3 style="text-align: center; margin-top: 3rem; margin-bottom: 1rem; color: var(--text);">Multimodal Example</h3>
+                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+                    Analyze images with Google Gemini's multimodal capabilities
+                </p>
+
+                <div class="code-example">
+                    <pre><code class="language-go">package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+
+    "github.com/XiaoConstantine/dspy-go/pkg/core"
+    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+    "github.com/XiaoConstantine/dspy-go/pkg/modules"
+)
+
+func main() {
+    // Create Gemini LLM with multimodal support
+    llm, err := llms.NewGeminiLLM(os.Getenv("GEMINI_API_KEY"), core.ModelGoogleGeminiFlash)
+    if err != nil {
+        log.Fatalf("Failed to create Gemini LLM: %v", err)
+    }
+
+    // Define multimodal signature
+    signature := core.NewSignature(
+        []core.InputField{
+            {Field: core.NewImageField("image", core.WithDescription("The image to analyze"))},
+            {Field: core.NewTextField("question", core.WithDescription("Question about the image"))},
+        },
+        []core.OutputField{
+            {Field: core.NewTextField("answer", core.WithDescription("Analysis result"))},
+        },
+    ).WithInstruction("Analyze the provided image and answer the given question about it.")
+
+    // Create prediction module
+    predictor := modules.NewPredict(signature)
+    predictor.SetLLM(llm)
+
+    // Load and process image
+    imageData, err := os.ReadFile("path/to/image.jpg")
+    if err != nil {
+        log.Fatalf("Failed to load image: %v", err)
+    }
+
+    // Execute multimodal prediction
+    ctx := core.WithExecutionState(context.Background())
+    result, err := predictor.Process(ctx, map[string]interface{}{
+        "image":    core.NewImageBlock(imageData, "image/jpeg"),
+        "question": "What objects can you see in this image?",
+    })
+    if err != nil {
+        log.Fatalf("Error processing image: %v", err)
+    }
+
+    fmt.Printf("Answer: %s\n", result["answer"])
+}</code></pre>
+                </div>
             </div>
         </section>
 
@@ -630,6 +703,11 @@ func main() {
                         <h3>Tool System</h3>
                         <p>Smart tool registry, chaining, composition, and MCP integration.</p>
                         <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/tools">Explore Tools →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Multimodal AI</h3>
+                        <p>Image analysis, vision Q&A, multimodal chat, and streaming examples with Google Gemini.</p>
+                        <a href="https://github.com/XiaoConstantine/dspy-go/tree/main/examples/multimodal">Explore Multimodal →</a>
                     </div>
                     <div class="doc-card">
                         <h3>Workflows</h3>
