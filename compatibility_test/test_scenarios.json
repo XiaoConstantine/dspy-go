@@ -1,0 +1,336 @@
+{
+  "test_scenarios": [
+    {
+      "name": "basic_qa_bootstrap",
+      "description": "Basic Q&A with BootstrapFewShot optimizer",
+      "optimizer": "BootstrapFewShot",
+      "parameters": {
+        "max_bootstrapped_demos": 4,
+        "max_labeled_demos": 4
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "generates_demonstrations": true,
+        "improves_performance": true,
+        "validates_examples": true
+      }
+    },
+    {
+      "name": "basic_qa_mipro",
+      "description": "Basic Q&A with MIPRO optimizer",
+      "optimizer": "MIPRO",
+      "parameters": {
+        "num_trials": 5,
+        "max_bootstrapped_demos": 3,
+        "max_labeled_demos": 3,
+        "mode": "light"
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "generates_instructions": true,
+        "optimizes_prompts": true,
+        "uses_bayesian_optimization": true
+      }
+    },
+    {
+      "name": "edge_case_empty_dataset",
+      "description": "Test behavior with empty dataset",
+      "optimizer": "BootstrapFewShot",
+      "parameters": {
+        "max_bootstrapped_demos": 4,
+        "max_labeled_demos": 4
+      },
+      "dataset": "empty",
+      "expected_behavior": {
+        "handles_gracefully": true,
+        "returns_error": true
+      }
+    },
+    {
+      "name": "edge_case_single_example",
+      "description": "Test behavior with single example",
+      "optimizer": "BootstrapFewShot",
+      "parameters": {
+        "max_bootstrapped_demos": 4,
+        "max_labeled_demos": 4
+      },
+      "dataset": "single_example",
+      "expected_behavior": {
+        "handles_gracefully": true,
+        "uses_available_examples": true
+      }
+    },
+    {
+      "name": "parameter_compatibility_bootstrap",
+      "description": "Test parameter compatibility for BootstrapFewShot",
+      "optimizer": "BootstrapFewShot",
+      "parameters": {
+        "max_bootstrapped_demos": 2,
+        "max_labeled_demos": 2
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "accepts_parameters": true,
+        "limits_demonstrations": true
+      }
+    },
+    {
+      "name": "parameter_compatibility_mipro",
+      "description": "Test parameter compatibility for MIPRO",
+      "optimizer": "MIPRO",
+      "parameters": {
+        "num_trials": 3,
+        "max_bootstrapped_demos": 2,
+        "max_labeled_demos": 2,
+        "mode": "light"
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "accepts_parameters": true,
+        "limits_trials": true,
+        "uses_light_mode": true
+      }
+    },
+    {
+      "name": "metric_compatibility",
+      "description": "Test custom metric compatibility",
+      "optimizer": "BootstrapFewShot",
+      "parameters": {
+        "max_bootstrapped_demos": 3,
+        "max_labeled_demos": 3
+      },
+      "dataset": "simple_qa",
+      "metric": "custom_accuracy",
+      "expected_behavior": {
+        "accepts_custom_metric": true,
+        "uses_metric_for_validation": true
+      }
+    },
+    {
+      "name": "performance_comparison",
+      "description": "Compare performance between Python and Go implementations",
+      "optimizer": "both",
+      "parameters": {
+        "max_bootstrapped_demos": 4,
+        "max_labeled_demos": 4,
+        "num_trials": 5
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "similar_scores": true,
+        "reasonable_performance": true
+      }
+    },
+    {
+      "name": "demonstration_generation",
+      "description": "Test demonstration generation consistency",
+      "optimizer": "BootstrapFewShot",
+      "parameters": {
+        "max_bootstrapped_demos": 5,
+        "max_labeled_demos": 3
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "generates_correct_count": true,
+        "validates_demonstrations": true,
+        "teacher_student_works": true
+      }
+    },
+    {
+      "name": "instruction_optimization",
+      "description": "Test instruction optimization in MIPRO",
+      "optimizer": "MIPRO",
+      "parameters": {
+        "num_trials": 7,
+        "max_bootstrapped_demos": 3,
+        "max_labeled_demos": 3,
+        "mode": "medium"
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "generates_instruction_candidates": true,
+        "optimizes_instructions": true,
+        "improves_over_baseline": true
+      }
+    },
+    {
+      "name": "basic_qa_simba",
+      "description": "Basic Q&A with SIMBA optimizer",
+      "optimizer": "SIMBA",
+      "parameters": {
+        "batch_size": 4,
+        "max_steps": 6,
+        "num_candidates": 4,
+        "sampling_temperature": 0.2
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "generates_instruction_variations": true,
+        "uses_mini_batch_optimization": true,
+        "performs_introspective_analysis": true,
+        "converges_automatically": true
+      }
+    },
+    {
+      "name": "parameter_compatibility_simba",
+      "description": "Test parameter compatibility for SIMBA",
+      "optimizer": "SIMBA",
+      "parameters": {
+        "batch_size": 2,
+        "max_steps": 4,
+        "num_candidates": 3,
+        "sampling_temperature": 0.3
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "accepts_parameters": true,
+        "limits_batch_size": true,
+        "uses_temperature_sampling": true
+      }
+    },
+    {
+      "name": "simba_introspection",
+      "description": "Test SIMBA introspective capabilities",
+      "optimizer": "SIMBA",
+      "parameters": {
+        "batch_size": 4,
+        "max_steps": 8,
+        "num_candidates": 4,
+        "sampling_temperature": 0.25,
+        "introspection_frequency": 2
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "performs_introspection": true,
+        "generates_analysis": true,
+        "provides_recommendations": true,
+        "identifies_patterns": true
+      }
+    },
+    {
+      "name": "simba_convergence",
+      "description": "Test SIMBA convergence detection",
+      "optimizer": "SIMBA",
+      "parameters": {
+        "batch_size": 3,
+        "max_steps": 10,
+        "num_candidates": 3,
+        "sampling_temperature": 0.15,
+        "convergence_threshold": 0.001
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "detects_convergence": true,
+        "stops_early_if_converged": true,
+        "tracks_improvement": true
+      }
+    },
+    {
+      "name": "multi_optimizer_comparison",
+      "description": "Compare all three optimizers on same dataset",
+      "optimizer": "all",
+      "parameters": {
+        "bootstrap_fewshot": {
+          "max_bootstrapped_demos": 4,
+          "max_labeled_demos": 4
+        },
+        "mipro": {
+          "num_trials": 5,
+          "max_bootstrapped_demos": 3,
+          "max_labeled_demos": 3,
+          "mode": "light"
+        },
+        "simba": {
+          "batch_size": 4,
+          "max_steps": 6,
+          "num_candidates": 4,
+          "sampling_temperature": 0.2
+        }
+      },
+      "dataset": "simple_qa",
+      "expected_behavior": {
+        "all_optimizers_work": true,
+        "comparable_performance": true,
+        "reasonable_execution_time": true
+      }
+    }
+  ],
+  "datasets": {
+    "simple_qa": {
+      "description": "Simple Q&A dataset for basic testing",
+      "size": 20,
+      "examples": [
+        {
+          "question": "What is the capital of France?",
+          "answer": "Paris"
+        },
+        {
+          "question": "What is 2 + 2?",
+          "answer": "4"
+        },
+        {
+          "question": "What color is the sky?",
+          "answer": "Blue"
+        }
+      ]
+    },
+    "empty": {
+      "description": "Empty dataset for edge case testing",
+      "size": 0,
+      "examples": []
+    },
+    "single_example": {
+      "description": "Single example dataset",
+      "size": 1,
+      "examples": [
+        {
+          "question": "What is the capital of France?",
+          "answer": "Paris"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "simple_accuracy": {
+      "description": "Simple substring matching accuracy",
+      "type": "boolean",
+      "implementation": "substring_match"
+    },
+    "custom_accuracy": {
+      "description": "Custom accuracy metric for testing",
+      "type": "float",
+      "implementation": "custom_scoring"
+    }
+  },
+  "compatibility_requirements": {
+    "api_signatures": {
+      "bootstrap_fewshot": {
+        "init_parameters": ["metric", "max_bootstrapped_demos", "max_labeled_demos"],
+        "compile_parameters": ["program", "trainset"]
+      },
+      "mipro": {
+        "init_parameters": ["metric", "num_trials", "max_bootstrapped_demos", "max_labeled_demos"],
+        "compile_parameters": ["program", "dataset", "metric"]
+      },
+      "simba": {
+        "init_parameters": ["batch_size", "max_steps", "num_candidates", "sampling_temperature"],
+        "compile_parameters": ["program", "dataset", "metric"]
+      }
+    },
+    "behavioral_requirements": {
+      "demonstration_generation": "Must generate demonstrations using teacher-student approach",
+      "instruction_optimization": "Must optimize instructions using candidate generation",
+      "introspective_analysis": "Must perform self-analysis and provide recommendations",
+      "mini_batch_optimization": "Must use mini-batch stochastic optimization",
+      "temperature_sampling": "Must use temperature-controlled sampling for exploration",
+      "convergence_detection": "Must detect and stop at convergence automatically",
+      "metric_validation": "Must validate examples using provided metric",
+      "parameter_handling": "Must handle all specified parameters correctly"
+    },
+    "performance_requirements": {
+      "score_similarity": "Scores should be within 10% of Python implementation",
+      "time_performance": "Should complete within reasonable time bounds",
+      "memory_usage": "Should not exceed reasonable memory limits"
+    }
+  }
+}

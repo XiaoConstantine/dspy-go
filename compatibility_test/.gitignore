@@ -1,0 +1,44 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.env
+.venv/
+
+# Go
+go_comparison
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Results files
+dspy_comparison_results.json
+go_comparison_results.json
+compatibility_report.json
+api_validation_report.json
+benchmark_results.json
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
