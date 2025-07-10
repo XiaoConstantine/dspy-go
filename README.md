@@ -25,6 +25,7 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Advanced Parallel Execution**: High-performance parallel tool execution with intelligent scheduling algorithms
 - **Dependency Resolution**: Automatic execution planning based on tool dependencies with parallel optimization
 - **Quality Optimization**: Advanced optimizers including MIPRO, SIMBA, and BootstrapFewShot for systematic improvement
+- **Compatibility Testing**: Comprehensive compatibility testing framework for validating optimizer behavior against Python DSPy implementations
 
 ## Installation
 
@@ -820,6 +821,33 @@ if err != nil {
 optimizer := optimizers.NewBootstrapFewShot(gsm8kDataset, metricFunc)
 optimizedModule, err := optimizer.Optimize(ctx, module)
 ```
+
+## Compatibility Testing
+
+DSPy-Go includes a comprehensive compatibility testing framework to ensure that optimizer implementations match the behavior of Python DSPy:
+
+```bash
+cd compatibility_test
+
+# Test all optimizers (BootstrapFewShot, MIPRO, SIMBA)
+./run_experiment.sh
+
+# Test specific optimizer
+./run_experiment.sh --optimizer simba --dataset-size 10
+
+# Manual execution
+python dspy_comparison.py --optimizer bootstrap
+go run go_comparison.go --optimizer bootstrap
+python compare_results.py
+```
+
+The framework tests:
+- **API Compatibility**: Parameter names, types, and behavior
+- **Performance Parity**: Score differences within acceptable thresholds  
+- **Behavioral Consistency**: Similar optimization patterns and convergence
+- **All Three Optimizers**: BootstrapFewShot, MIPRO, and SIMBA
+
+Results are saved as JSON files with detailed compatibility analysis and recommendations.
 
 ## Examples
 
