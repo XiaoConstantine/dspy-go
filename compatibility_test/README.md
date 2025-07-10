@@ -16,6 +16,7 @@ The compatibility testing framework consists of:
 ### Optimizer Testing
 - **BootstrapFewShot**: Tests few-shot learning with bootstrapped demonstrations
 - **MIPRO/MIPROv2**: Tests multi-stage instruction prompt optimization with Bayesian optimization
+- **SIMBA**: Tests stochastic introspective mini-batch ascent with temperature-controlled sampling
 
 ### Compatibility Verification
 - API signature compatibility
@@ -84,7 +85,7 @@ Available optimizer options:
 - `bootstrap`: BootstrapFewShot only
 - `mipro`: MIPRO/MIPROv2 only  
 - `simba`: SIMBA only
-- `all`: All optimizers (default)
+- `all`: All three optimizers (default)
 
 ### Manual Execution
 
@@ -170,6 +171,12 @@ Results from Python DSPy implementation:
     "average_score": 0.92,
     "compilation_time": 25.67,
     "demonstrations": [...]
+  },
+  "simba": {
+    "optimizer": "SIMBA",
+    "average_score": 0.88,
+    "compilation_time": 18.45,
+    "demonstrations": [...]
   }
 }
 ```
@@ -191,6 +198,12 @@ Results from Go dspy-go implementation:
     "average_score": 0.90,
     "compilation_time": 24.12,
     "demonstrations": [...]
+  },
+  "simba": {
+    "optimizer": "SIMBA",
+    "average_score": 0.87,
+    "compilation_time": 17.89,
+    "demonstrations": [...]
   }
 }
 ```
@@ -202,6 +215,7 @@ Detailed compatibility analysis:
   "compatibility_summary": {
     "bootstrap_fewshot_compatible": true,
     "mipro_compatible": true,
+    "simba_compatible": true,
     "score_differences_acceptable": true,
     "api_signatures_match": true,
     "behavior_consistent": true
@@ -240,7 +254,8 @@ Detailed compatibility analysis:
 1. **Compatibility Summary**: Overall compatibility status
 2. **BootstrapFewShot Comparison**: Detailed comparison of few-shot optimizer
 3. **MIPRO Comparison**: Detailed comparison of MIPRO optimizer
-4. **Recommendations**: Action items for improvement
+4. **SIMBA Comparison**: Detailed comparison of SIMBA optimizer
+5. **Recommendations**: Action items for improvement
 
 ### Common Issues and Solutions
 
