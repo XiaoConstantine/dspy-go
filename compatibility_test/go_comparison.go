@@ -183,7 +183,7 @@ func (oc *OptimizerComparison) AccuracyMetric(example, prediction map[string]int
 	if len(expected) > 0 && len(predicted) > 0 {
 		expectedLower := strings.ToLower(strings.TrimSpace(expected))
 		predictedLower := strings.ToLower(strings.TrimSpace(predicted))
-		
+
 		// Bidirectional substring matching: expected in predicted OR predicted in expected
 		if strings.Contains(expectedLower, predictedLower) || strings.Contains(predictedLower, expectedLower) {
 			return 1.0
@@ -394,12 +394,13 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 	trainExamples := dataset[:trainSize]
 	valset := dataset[trainSize:]
 
-	// Create optimizer
+	// Create optimizer with fast mode for better compatibility test performance
 	optimizer := optimizers.NewSIMBA(
 		optimizers.WithSIMBABatchSize(batchSize),
 		optimizers.WithSIMBAMaxSteps(maxSteps),
 		optimizers.WithSIMBANumCandidates(4),
 		optimizers.WithSamplingTemperature(0.2),
+		optimizers.WithFastMode(true), // Enable fast mode for compatibility tests
 	)
 
 	// Create dataset interface for SIMBA
