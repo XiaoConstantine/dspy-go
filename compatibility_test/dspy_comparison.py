@@ -73,7 +73,7 @@ class BasicProgram(dspy.Module):
 class OptimizerComparison:
     """Main comparison class for testing optimizer compatibility"""
     
-    def __init__(self, model_name: str = "gemini/gemini-1.5-flash"):
+    def __init__(self, model_name: str = "gemini/gemini-2.0-flash"):
         self.model_name = model_name
         # Disable retries to reduce API calls when service is overloaded
         self.lm = dspy.LM(model=model_name, max_tokens=8192, max_retries=0)
@@ -138,8 +138,13 @@ class OptimizerComparison:
         logger.info("Testing BootstrapFewShot optimizer")
         
         program = BasicProgram()
-        trainset = dataset[:15]  # Use first 15 for training
-        valset = dataset[15:]    # Use remaining for validation
+        # Split dataset to match Go's approach: 3/4 for training, 1/4 for validation
+        dataset_size = len(dataset)
+        train_size = min(dataset_size * 3 // 4, dataset_size - 1)
+        if train_size < 1:
+            train_size = 1
+        trainset = dataset[:train_size]
+        valset = dataset[train_size:]
         
         # Create optimizer
         teleprompter = BootstrapFewShot(
@@ -181,15 +186,20 @@ class OptimizerComparison:
         return optimized_program, results
         
     def test_mipro_v2(self, dataset: List[dspy.Example],
-                     num_trials: int = 3,
-                     max_bootstrapped_demos: int = 2,
-                     max_labeled_demos: int = 2) -> Tuple[dspy.Module, Dict[str, Any]]:
+                     num_trials: int = 5,
+                     max_bootstrapped_demos: int = 3,
+                     max_labeled_demos: int = 3) -> Tuple[dspy.Module, Dict[str, Any]]:
         """Test MIPROv2 optimizer"""
         logger.info("Testing MIPROv2 optimizer")
         
         program = BasicProgram()
-        trainset = dataset[:15]  # Use first 15 for training
-        valset = dataset[15:]    # Use remaining for validation
+        # Split dataset to match Go's approach: 3/4 for training, 1/4 for validation
+        dataset_size = len(dataset)
+        train_size = min(dataset_size * 3 // 4, dataset_size - 1)
+        if train_size < 1:
+            train_size = 1
+        trainset = dataset[:train_size]
+        valset = dataset[train_size:]
         
         # Create optimizer
         teleprompter = MIPROv2(
@@ -240,16 +250,21 @@ class OptimizerComparison:
         return optimized_program, results
 
     def test_simba(self, dataset: List[dspy.Example],
-                   batch_size: int = 2,
-                   max_steps: int = 2,
-                   num_candidates: int = 2,
+                   batch_size: int = 4,
+                   max_steps: int = 6,
+                   num_candidates: int = 4,
                    sampling_temperature: float = 0.2) -> Tuple[dspy.Module, Dict[str, Any]]:
         """Test SIMBA optimizer"""
         logger.info("Testing SIMBA optimizer")
         
         program = BasicProgram()
-        trainset = dataset[:3]   # Use only 3 for training to reduce API calls
-        valset = dataset[3:5]    # Use only 2 for validation
+        # Split dataset to match Go's approach: 3/4 for training, 1/4 for validation
+        dataset_size = len(dataset)
+        train_size = min(dataset_size * 3 // 4, dataset_size - 1)
+        if train_size < 1:
+            train_size = 1
+        trainset = dataset[:train_size]
+        valset = dataset[train_size:]
         
         # Create optimizer with correct DSPy SIMBA parameter names
         teleprompter = SIMBA(
@@ -384,8 +399,8 @@ def main():
     
     args = parser.parse_args()
     
-    # Initialize comparison with Gemini 1.5 Flash
-    comparison = OptimizerComparison("gemini/gemini-1.5-flash")
+    # Initialize comparison with Gemini 2.0 Flash
+    comparison = OptimizerComparison("gemini/gemini-2.0-flash")
     
     # Create dataset
     dataset = comparison.create_sample_dataset(args.dataset_size)

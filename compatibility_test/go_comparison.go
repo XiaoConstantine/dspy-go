@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -178,15 +179,13 @@ func (oc *OptimizerComparison) AccuracyMetric(example, prediction map[string]int
 		return 0.0
 	}
 
-	// Simple substring matching for demo purposes
+	// Simple substring matching for demo purposes - match Python DSPy behavior
 	if len(expected) > 0 && len(predicted) > 0 {
-		if expected == predicted {
-			return 1.0
-		}
-		// Check if one contains the other (case-insensitive)
-		expectedLower := expected
-		predictedLower := predicted
-		if expectedLower == predictedLower {
+		expectedLower := strings.ToLower(strings.TrimSpace(expected))
+		predictedLower := strings.ToLower(strings.TrimSpace(predicted))
+		
+		// Bidirectional substring matching: expected in predicted OR predicted in expected
+		if strings.Contains(expectedLower, predictedLower) || strings.Contains(predictedLower, expectedLower) {
 			return 1.0
 		}
 	}
@@ -547,7 +546,7 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize comparison
-	comparison := NewOptimizerComparison("gemini-1.5-flash")
+	comparison := NewOptimizerComparison("gemini-2.0-flash")
 
 	// Create dataset
 	dataset := comparison.CreateSampleDataset(*datasetSize)
