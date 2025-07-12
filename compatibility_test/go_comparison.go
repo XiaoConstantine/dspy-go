@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
@@ -62,31 +63,6 @@ func (cm *ComparisonMetrics) GetTotalTime() float64 {
 	return sum
 }
 
-// SimpleDataset implements core.Dataset interface for testing.
-type SimpleDataset struct {
-	examples []core.Example
-	current  int
-}
-
-func NewSimpleDataset(examples []core.Example) *SimpleDataset {
-	return &SimpleDataset{
-		examples: examples,
-		current:  0,
-	}
-}
-
-func (sd *SimpleDataset) Next() (core.Example, bool) {
-	if sd.current >= len(sd.examples) {
-		return core.Example{}, false
-	}
-	example := sd.examples[sd.current]
-	sd.current++
-	return example, true
-}
-
-func (sd *SimpleDataset) Reset() {
-	sd.current = 0
-}
 
 // OptimizerComparison handles the comparison between Go and Python implementations.
 type OptimizerComparison struct {
@@ -96,6 +72,7 @@ type OptimizerComparison struct {
 	BootstrapMetrics *ComparisonMetrics
 	MIPROMetrics     *ComparisonMetrics
 	SIMBAMetrics     *ComparisonMetrics
+	CoProMetrics     *ComparisonMetrics
 }
 
 func NewOptimizerComparison(modelName string) *OptimizerComparison {
@@ -131,6 +108,7 @@ func NewOptimizerComparison(modelName string) *OptimizerComparison {
 		BootstrapMetrics: &ComparisonMetrics{},
 		MIPROMetrics:     &ComparisonMetrics{},
 		SIMBAMetrics:     &ComparisonMetrics{},
+		CoProMetrics:     &ComparisonMetrics{},
 	}
 }
 
@@ -240,9 +218,17 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 		maxBootstrappedDemos,
 	)
 
+	// Create dataset interface for BootstrapFewShot
+	trainDataset := datasets.NewSimpleDataset(trainExamples)
+	
+	// Define metric function for BootstrapFewShot
+	metricFunc := func(expected, actual map[string]interface{}) float64 {
+		return oc.AccuracyMetric(expected, actual, ctx)
+	}
+
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.Compile(ctx, program, program, trainset)
+	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -321,7 +307,7 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 	)
 
 	// Create dataset interface for MIPRO
-	trainDataset := NewSimpleDataset(trainExamples)
+	trainDataset := datasets.NewSimpleDataset(trainExamples)
 
 	// Compile program
 	startTime := time.Now()
@@ -365,6 +351,94 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 	return optimizedProgram, results
 }
 
+func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Example, breadth int, depth int) (core.Program, map[string]interface{}) {
+	log.Println("Testing COPRO optimizer")
+
+	// Create a simple program for testing
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+	)
+	predictor := modules.NewPredict(signature)
+
+	program := core.NewProgram(
+		map[string]core.Module{
+			"predictor": predictor,
+		},
+		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			return predictor.Process(ctx, inputs)
+		},
+	)
+
+	// Split dataset - handle small datasets properly
+	datasetSize := len(dataset)
+	trainSize := min(datasetSize*3/4, datasetSize-1) // Use 3/4 for training, leave at least 1 for validation
+	if trainSize < 1 {
+		trainSize = 1
+	}
+
+	trainExamples := dataset[:trainSize]
+	valset := dataset[trainSize:]
+
+	// Create dataset interface for COPRO
+	trainDataset := datasets.NewSimpleDataset(trainExamples)
+
+	// Define metric function for COPRO
+	metricFunc := func(expected, actual map[string]interface{}) float64 {
+		return oc.AccuracyMetric(expected, actual, ctx)
+	}
+
+	// Create COPRO optimizer (prompt optimization algorithm)
+	coproOptimizer := optimizers.NewCOPRO(
+		metricFunc,
+		optimizers.WithBreadth(breadth),        // Number of prompt candidates
+		optimizers.WithDepth(depth),            // Refinement iterations  
+		optimizers.WithInitTemperature(1.2),    // Exploration randomness
+		optimizers.WithTrackStats(false),
+	)
+
+	// Compile program
+	startTime := time.Now()
+	optimizedProgram, err := coproOptimizer.Compile(ctx, program, trainDataset, metricFunc)
+	compilationTime := time.Since(startTime).Seconds()
+
+	if err != nil {
+		log.Printf("Error during compilation: %v", err)
+		return program, map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	// Evaluate on validation set
+	totalScore := 0.0
+	for _, example := range valset {
+		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		if err != nil {
+			log.Printf("Error during evaluation: %v", err)
+			continue
+		}
+
+		score := oc.AccuracyMetric(example.Outputs, prediction, ctx)
+		totalScore += score
+		oc.CoProMetrics.AddScore(score)
+	}
+
+	avgScore := totalScore / float64(len(valset))
+
+	results := map[string]interface{}{
+		"optimizer":        "COPRO",
+		"compilation_time": compilationTime,
+		"average_score":    avgScore,
+		"total_examples":   len(valset),
+		"breadth":          breadth,
+		"depth":            depth,
+		"demonstrations":   oc.extractDemonstrations(optimizedProgram),
+	}
+
+	log.Printf("COPRO results: %+v", results)
+	return optimizedProgram, results
+}
+
 func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Example, batchSize int, maxSteps int) (core.Program, map[string]interface{}) {
 	log.Println("Testing SIMBA optimizer")
 
@@ -404,7 +478,7 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 	)
 
 	// Create dataset interface for SIMBA
-	trainDataset := NewSimpleDataset(trainExamples)
+	trainDataset := datasets.NewSimpleDataset(trainExamples)
 
 	// Define metric function for SIMBA
 	metricFunc := func(example, prediction map[string]interface{}) float64 {
@@ -540,7 +614,7 @@ func (oc *OptimizerComparison) SaveResults(results map[string]interface{}, filen
 }
 
 func main() {
-	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, or all")
+	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, copro, or all")
 	var datasetSize = flag.Int("dataset-size", 20, "Dataset size for testing")
 	flag.Parse()
 
@@ -577,18 +651,27 @@ func main() {
 		results["simba"] = simbaResults
 	}
 
+	if *optimizer == "copro" || *optimizer == "all" {
+		fmt.Println("Testing COPRO...")
+		_, coproResults := comparison.TestCOPRO(ctx, dataset, 5, 2) // breadth=5, depth=2
+		results["copro"] = coproResults
+	}
+
 	// Add comparison section if testing multiple optimizers
 	if *optimizer == "all" {
 		bootstrapResults := results["bootstrap_fewshot"].(map[string]interface{})
 		miproResults := results["mipro"].(map[string]interface{})
 		simbaResults := results["simba"].(map[string]interface{})
+		coproResults := results["copro"].(map[string]interface{})
 
 		bootstrapScore := bootstrapResults["average_score"].(float64)
 		miproScore := miproResults["average_score"].(float64)
 		simbaScore := simbaResults["average_score"].(float64)
+		coproScore := coproResults["average_score"].(float64)
 		bootstrapTime := bootstrapResults["compilation_time"].(float64)
 		miproTime := miproResults["compilation_time"].(float64)
 		simbaTime := simbaResults["compilation_time"].(float64)
+		coproTime := coproResults["compilation_time"].(float64)
 
 		// Find best optimizer
 		bestOptimizer := "BootstrapFewShot"
@@ -601,14 +684,24 @@ func main() {
 			bestOptimizer = "SIMBA"
 			bestScore = simbaScore
 		}
+		if coproScore > bestScore {
+			bestOptimizer = "COPRO"
+			bestScore = coproScore
+		}
 
 		results["comparison"] = map[string]interface{}{
 			"bootstrap_vs_mipro_score_diff": miproScore - bootstrapScore,
 			"bootstrap_vs_simba_score_diff": simbaScore - bootstrapScore,
+			"bootstrap_vs_copro_score_diff": coproScore - bootstrapScore,
 			"mipro_vs_simba_score_diff":     simbaScore - miproScore,
+			"mipro_vs_copro_score_diff":     coproScore - miproScore,
+			"simba_vs_copro_score_diff":     coproScore - simbaScore,
 			"bootstrap_vs_mipro_time_diff":  miproTime - bootstrapTime,
 			"bootstrap_vs_simba_time_diff":  simbaTime - bootstrapTime,
+			"bootstrap_vs_copro_time_diff":  coproTime - bootstrapTime,
 			"mipro_vs_simba_time_diff":      simbaTime - miproTime,
+			"mipro_vs_copro_time_diff":      coproTime - miproTime,
+			"simba_vs_copro_time_diff":      coproTime - simbaTime,
 			"best_optimizer":                bestOptimizer,
 			"best_score":                    bestScore,
 		}
@@ -645,6 +738,38 @@ func main() {
 		fmt.Printf("  - Average score: %.3f\n", simbaResults["average_score"])
 		fmt.Printf("  - Compilation time: %.2fs\n", simbaResults["compilation_time"])
 		fmt.Printf("  - Demonstrations: %d\n", len(simbaResults["demonstrations"].([]map[string]interface{})))
+	}
+
+	if coproResults, ok := results["copro"].(map[string]interface{}); ok {
+		fmt.Printf("\nCOPRO:\n")
+		if avgScore, exists := coproResults["average_score"]; exists && avgScore != nil {
+			fmt.Printf("  - Average score: %.3f\n", avgScore)
+		} else {
+			fmt.Printf("  - Average score: N/A (compilation failed)\n")
+		}
+		if compTime, exists := coproResults["compilation_time"]; exists && compTime != nil {
+			fmt.Printf("  - Compilation time: %.2fs\n", compTime)
+		} else {
+			fmt.Printf("  - Compilation time: N/A\n")
+		}
+		if breadth, exists := coproResults["breadth"]; exists && breadth != nil {
+			fmt.Printf("  - Breadth: %v\n", breadth)
+		}
+		if depth, exists := coproResults["depth"]; exists && depth != nil {
+			fmt.Printf("  - Depth: %v\n", depth)
+		}
+		if demos, exists := coproResults["demonstrations"]; exists && demos != nil {
+			if demoSlice, ok := demos.([]map[string]interface{}); ok {
+				fmt.Printf("  - Demonstrations: %d\n", len(demoSlice))
+			} else {
+				fmt.Printf("  - Demonstrations: 0 (error extracting)\n")
+			}
+		} else {
+			fmt.Printf("  - Demonstrations: 0\n")
+		}
+		if err, exists := coproResults["error"]; exists {
+			fmt.Printf("  - Error: %s\n", err)
+		}
 	}
 
 	if comparisonResults, ok := results["comparison"].(map[string]interface{}); ok {

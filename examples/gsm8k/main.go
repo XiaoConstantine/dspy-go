@@ -107,17 +107,32 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		return example["answer"] == prediction["answer"]
 	}, 5)
 
-	// Prepare training set
-	trainset := make([]map[string]interface{}, len(examples[:10]))
+	// Prepare training set as core.Examples
+	trainExamples := make([]core.Example, len(examples[:10]))
 	for i, ex := range examples[:10] {
-		trainset[i] = map[string]interface{}{
-			"question": ex.Question,
-			"answer":   ex.Answer,
+		trainExamples[i] = core.Example{
+			Inputs: map[string]interface{}{
+				"question": ex.Question,
+			},
+			Outputs: map[string]interface{}{
+				"answer": ex.Answer,
+			},
 		}
 	}
 
+	// Create dataset
+	trainDataset := datasets.NewSimpleDataset(trainExamples)
+
+	// Define metric function
+	metricFunc := func(expected, actual map[string]interface{}) float64 {
+		if expected["answer"] == actual["answer"] {
+			return 1.0
+		}
+		return 0.0
+	}
+
 	// Compile the program
-	compiledProgram, err := optimizer.Compile(ctx, program, program, trainset)
+	compiledProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
 	if err != nil {
 		logger.Fatalf(ctx, "Failed to compile program: %v", err)
 	}

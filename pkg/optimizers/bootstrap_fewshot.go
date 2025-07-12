@@ -25,7 +25,38 @@ func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction 
 	}
 }
 
-func (b *BootstrapFewShot) Compile(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
+// Compile implements the core.Optimizer interface.
+func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
+	// Convert core.Dataset to trainset format
+	var trainset []map[string]interface{}
+	dataset.Reset()
+	for {
+		example, hasNext := dataset.Next()
+		if !hasNext {
+			break
+		}
+		// Combine inputs and outputs into a single map for compatibility
+		trainExample := make(map[string]interface{})
+		for k, v := range example.Inputs {
+			trainExample[k] = v
+		}
+		for k, v := range example.Outputs {
+			trainExample[k] = v
+		}
+		trainset = append(trainset, trainExample)
+	}
+
+	// Use program as both student and teacher (self-improvement)
+	return b.compileInternal(ctx, program, program, trainset)
+}
+
+// CompileLegacy provides backward compatibility for the old interface.
+func (b *BootstrapFewShot) CompileLegacy(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
+	return b.compileInternal(ctx, student, teacher, trainset)
+}
+
+// compileInternal contains the original implementation logic.
+func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
 	compiledStudent := student.Clone()
 	teacherLLM := core.GetTeacherLLM()
 	if teacherLLM == nil {

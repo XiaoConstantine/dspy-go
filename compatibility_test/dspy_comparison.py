@@ -19,7 +19,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import dspy
-from dspy.teleprompt import BootstrapFewShot, MIPROv2, SIMBA
+from dspy.teleprompt import BootstrapFewShot, MIPROv2, SIMBA, COPRO
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -83,6 +83,7 @@ class OptimizerComparison:
         self.bootstrap_metrics = ComparisonMetrics()
         self.mipro_metrics = ComparisonMetrics()
         self.simba_metrics = ComparisonMetrics()
+        self.copro_metrics = ComparisonMetrics()
         
     def create_sample_dataset(self, size: int = 20) -> List[dspy.Example]:
         """Create a sample dataset for testing"""
@@ -311,6 +312,66 @@ class OptimizerComparison:
         
         logger.info(f"SIMBA results: {results}")
         return optimized_program, results
+
+    def test_copro(self, dataset: List[dspy.Example],
+                   breadth: int = 5,
+                   depth: int = 2,
+                   init_temperature: float = 1.2) -> Tuple[dspy.Module, Dict[str, Any]]:
+        """Test COPRO optimizer"""
+        logger.info("Testing COPRO optimizer")
+        
+        program = BasicProgram()
+        # Split dataset to match Go's approach: 3/4 for training, 1/4 for validation
+        dataset_size = len(dataset)
+        train_size = min(dataset_size * 3 // 4, dataset_size - 1)
+        if train_size < 1:
+            train_size = 1
+        trainset = dataset[:train_size]
+        valset = dataset[train_size:]
+        
+        # Create COPRO optimizer
+        teleprompter = COPRO(
+            metric=self.accuracy_metric,
+            breadth=breadth,
+            depth=depth,
+            init_temperature=init_temperature
+        )
+        
+        # Compile program
+        import time
+        start_time = time.time()
+        optimized_program = teleprompter.compile(student=program, trainset=trainset, eval_kwargs={})
+        compilation_time = time.time() - start_time
+        
+        # Evaluate on validation set
+        total_score = 0.0
+        for example in valset:
+            try:
+                prediction = optimized_program(question=example.question)
+                score = self.accuracy_metric(example, prediction)
+                total_score += score
+                self.copro_metrics.add_score(score)
+            except Exception as e:
+                logger.error(f"Error during evaluation: {e}")
+                # Continue with next example instead of failing
+                total_score += 0.0
+                self.copro_metrics.add_score(0.0)
+                
+        avg_score = total_score / len(valset) if valset else 0.0
+        
+        results = {
+            "optimizer": "COPRO",
+            "compilation_time": compilation_time,
+            "average_score": avg_score,
+            "total_examples": len(valset),
+            "breadth": breadth,
+            "depth": depth,
+            "init_temperature": init_temperature,
+            "demonstrations": self._extract_demonstrations(optimized_program)
+        }
+        
+        logger.info(f"COPRO results: {results}")
+        return optimized_program, results
         
     def _extract_demonstrations(self, program: dspy.Module) -> List[Dict[str, Any]]:
         """Extract demonstrations from optimized program"""
@@ -392,7 +453,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='DSPy Optimizer Comparison')
-    parser.add_argument('--optimizer', choices=['bootstrap', 'mipro', 'simba', 'all'], 
+    parser.add_argument('--optimizer', choices=['bootstrap', 'mipro', 'simba', 'copro', 'all'], 
                        default='all', help='Optimizer to test (default: all)')
     parser.add_argument('--dataset-size', type=int, default=20, 
                        help='Dataset size for testing (default: 20)')
@@ -426,14 +487,21 @@ def main():
         _, simba_results = comparison.test_simba(dataset)
         results["simba"] = simba_results
     
+    if args.optimizer == 'copro' or args.optimizer == 'all':
+        print("Testing COPRO...")
+        _, copro_results = comparison.test_copro(dataset)
+        results["copro"] = copro_results
+    
     # Add comparison section if testing multiple optimizers
     if args.optimizer == 'all':
         bootstrap_score = results["bootstrap_fewshot"]["average_score"]
         mipro_score = results["mipro_v2"]["average_score"] 
         simba_score = results["simba"]["average_score"]
+        copro_score = results["copro"]["average_score"]
         bootstrap_time = results["bootstrap_fewshot"]["compilation_time"]
         mipro_time = results["mipro_v2"]["compilation_time"]
         simba_time = results["simba"]["compilation_time"]
+        copro_time = results["copro"]["compilation_time"]
         
         # Find best optimizer
         best_optimizer = "BootstrapFewShot"
@@ -444,14 +512,23 @@ def main():
         if simba_score > best_score:
             best_optimizer = "SIMBA"
             best_score = simba_score
+        if copro_score > best_score:
+            best_optimizer = "COPRO"
+            best_score = copro_score
             
         results["comparison"] = {
             "bootstrap_vs_mipro_score_diff": mipro_score - bootstrap_score,
             "bootstrap_vs_simba_score_diff": simba_score - bootstrap_score,
+            "bootstrap_vs_copro_score_diff": copro_score - bootstrap_score,
             "mipro_vs_simba_score_diff": simba_score - mipro_score,
+            "mipro_vs_copro_score_diff": copro_score - mipro_score,
+            "simba_vs_copro_score_diff": copro_score - simba_score,
             "bootstrap_vs_mipro_time_diff": mipro_time - bootstrap_time,
             "bootstrap_vs_simba_time_diff": simba_time - bootstrap_time,
+            "bootstrap_vs_copro_time_diff": copro_time - bootstrap_time,
             "mipro_vs_simba_time_diff": simba_time - mipro_time,
+            "mipro_vs_copro_time_diff": copro_time - mipro_time,
+            "simba_vs_copro_time_diff": copro_time - simba_time,
             "best_optimizer": best_optimizer,
             "best_score": best_score
         }
@@ -485,6 +562,17 @@ def main():
             print(f"  - Average score: {results['simba']['average_score']:.3f}")
             print(f"  - Compilation time: {results['simba']['compilation_time']:.2f}s")
             print(f"  - Demonstrations: {len(results['simba']['demonstrations'])}")
+    
+    if "copro" in results:
+        print(f"\nCOPRO:")
+        if "error" in results["copro"]:
+            print(f"  - Error: {results['copro']['error']}")
+        else:
+            print(f"  - Average score: {results['copro']['average_score']:.3f}")
+            print(f"  - Compilation time: {results['copro']['compilation_time']:.2f}s")
+            print(f"  - Breadth: {results['copro']['breadth']}")
+            print(f"  - Depth: {results['copro']['depth']}")
+            print(f"  - Demonstrations: {len(results['copro']['demonstrations'])}")
     
     if "comparison" in results:
         print(f"\nBest optimizer: {results['comparison']['best_optimizer']} ({results['comparison']['best_score']:.3f})")

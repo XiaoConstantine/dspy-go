@@ -6,37 +6,13 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 )
 
-// SimpleDataset implements the core.Dataset interface for MIPRO.
-type SimpleDataset struct {
-	Examples []core.Example
-	Index    int
-}
-
-func NewSimpleDataset(examples []core.Example) *SimpleDataset {
-	return &SimpleDataset{
-		Examples: examples,
-		Index:    0,
-	}
-}
-
-func (d *SimpleDataset) Next() (core.Example, bool) {
-	if d.Index < len(d.Examples) {
-		example := d.Examples[d.Index]
-		d.Index++
-		return example, true
-	}
-	return core.Example{}, false
-}
-
-func (d *SimpleDataset) Reset() {
-	d.Index = 0
-}
 
 // Function to create the HTML parsing program structure.
 func createHTMLParsingProgram() core.Program {
@@ -269,14 +245,20 @@ Use proper HTML structure with html, head, and body tags.`)
 
 	// Compile the program
 	logger.Info(ctx, "Compiling HTML extraction program...")
-	// Convert trainingExamples ([]core.Example) to the []map[string]interface{} trainset expected by BootstrapFewShot.Compile
-	trainset := make([]map[string]interface{}, len(trainingExamples))
-	for i, ex := range trainingExamples {
-		trainset[i] = ex.Inputs // Use only inputs for the trainset argument
+	
+	// Create dataset from training examples
+	trainDataset := datasets.NewSimpleDataset(trainingExamples)
+
+	// Define metric function for optimizer compile
+	compileMetric := func(expected, actual map[string]interface{}) float64 {
+		// Simple exact match for demonstration
+		if expected["title"] == actual["title"] {
+			return 1.0
+		}
+		return 0.0
 	}
-	// Note: BootstrapFewShot Compile signature requires student, teacher, trainset.
-	// We'll use the same program for student and teacher in this simple example.
-	compiled_program, err := optimizer.Compile(ctx, html_program, html_program, trainset)
+
+	compiled_program, err := optimizer.Compile(ctx, html_program, trainDataset, compileMetric)
 	if err != nil {
 		logger.Fatalf(ctx, "Compilation failed: %v", err)
 	}
