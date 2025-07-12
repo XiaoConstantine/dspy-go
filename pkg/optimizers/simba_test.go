@@ -2139,17 +2139,31 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 			WithPipelineBufferSize(2),
 		)
 
-		// Create cancellable context
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		// Create cancellable context with a more reasonable timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		// Run optimization (should be cancelled)
-		_, err := simba.Compile(ctx, program, dataset, metric)
+		// Start optimization in a goroutine to test cancellation
+		done := make(chan bool, 1)
+		var err error
+		go func() {
+			defer func() { done <- true }()
+			_, err = simba.Compile(ctx, program, dataset, metric)
+		}()
 
-		// Should handle context cancellation gracefully
-		// May complete quickly in test environment, so check for either success or context error
-		if err != nil {
-			assert.Contains(t, err.Error(), "context")
+		// Cancel after a very short time to ensure cancellation
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+
+		// Wait for completion with timeout
+		select {
+		case <-done:
+			// Should handle context cancellation gracefully
+			if err != nil {
+				assert.Contains(t, err.Error(), "context")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Pipeline context cancellation test timed out - workers not shutting down properly")
 		}
 	})
 }

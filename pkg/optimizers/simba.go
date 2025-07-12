@@ -2033,15 +2033,15 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 			case <-s.pipelineChannels.Done:
 				return
 			default:
-				// Channel might be closed, check context and done channel
+				// Channel might be closed, check context and done channel quickly
 				select {
 				case <-ctx.Done():
 					return
 				case <-s.pipelineChannels.Done:
 					return
 				default:
-					// Continue processing if neither context nor done channel signaled
-					time.Sleep(10 * time.Millisecond)
+					// Exit immediately if channels are closed to avoid busy waiting
+					return
 				}
 			}
 
@@ -2127,15 +2127,15 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset, w
 			case <-s.pipelineChannels.Done:
 				return
 			default:
-				// Channel might be closed, check context and done channel
+				// Channel might be closed, check context and done channel quickly
 				select {
 				case <-ctx.Done():
 					return
 				case <-s.pipelineChannels.Done:
 					return
 				default:
-					// Continue processing if neither context nor done channel signaled
-					time.Sleep(10 * time.Millisecond)
+					// Exit immediately if channels are closed to avoid busy waiting
+					return
 				}
 			}
 		}
@@ -2185,15 +2185,15 @@ func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, wg *sync.WaitGrou
 			case <-s.pipelineChannels.Done:
 				return
 			default:
-				// Channel might be closed, check context and done channel
+				// Channel might be closed, check context and done channel quickly
 				select {
 				case <-ctx.Done():
 					return
 				case <-s.pipelineChannels.Done:
 					return
 				default:
-					// Continue processing if neither context nor done channel signaled
-					time.Sleep(10 * time.Millisecond)
+					// Exit immediately if channels are closed to avoid busy waiting
+					return
 				}
 			}
 		}
@@ -2224,6 +2224,8 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			doneOnce.Do(func() {
 				close(s.pipelineChannels.Done)
 			})
+			// Wait for workers to finish before closing channels
+			wg.Wait()
 			s.closePipelineChannels()
 			return bestProgram, ctx.Err()
 		case err := <-s.pipelineChannels.Errors:
@@ -2232,6 +2234,8 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			doneOnce.Do(func() {
 				close(s.pipelineChannels.Done)
 			})
+			// Wait for workers to finish before closing channels
+			wg.Wait()
 			s.closePipelineChannels()
 			return bestProgram, err
 		case stage := <-s.pipelineChannels.CandidateEvaluation:
@@ -2288,11 +2292,15 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 				doneOnce.Do(func() {
 					close(s.pipelineChannels.Done)
 				})
+				// Wait for workers to finish before closing channels
+				wg.Wait()
 				s.closePipelineChannels()
 				return bestProgram, nil
 			}
 		case <-s.pipelineChannels.Done:
 			pipelineCancel() // Cancel workers first
+			// Wait for workers to finish before closing channels
+			wg.Wait()
 			s.closePipelineChannels()
 			return bestProgram, nil
 		}
@@ -2303,6 +2311,8 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 	doneOnce.Do(func() {
 		close(s.pipelineChannels.Done)
 	})
+	// Wait for workers to finish before closing channels
+	wg.Wait()
 	s.closePipelineChannels()
 	return bestProgram, nil
 }
