@@ -1320,7 +1320,7 @@ func testSIMBAIntegration(t *testing.T) {
 		assert.True(t, state.BestScore >= 0)
 		assert.True(t, len(state.CandidateHistory) > 0)
 		assert.True(t, len(state.PerformanceLog) > 0)
-		
+
 		// Check that candidate metadata was recorded
 		hasMetadata := false
 		for _, candidate := range state.CandidateHistory {
@@ -1336,7 +1336,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Bucket sorting vs temperature sampling performance comparison", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { 
+		metric := func(expected, actual map[string]interface{}) float64 {
 			return 0.75 + 0.1*float64(len(actual)) // Varies by response complexity
 		}
 
@@ -1377,15 +1377,15 @@ func testSIMBAIntegration(t *testing.T) {
 		// Both should complete successfully and in reasonable time
 		assert.True(t, duration1 < 30*time.Second)
 		assert.True(t, duration2 < 30*time.Second)
-		
+
 		// Get final states
 		state1 := simba1.GetState()
 		state2 := simba2.GetState()
-		
+
 		// Both should have achieved reasonable performance
 		assert.True(t, state1.BestScore >= 0.0)
 		assert.True(t, state2.BestScore >= 0.0)
-		
+
 		// Bucket sorting should have additional metadata
 		assert.True(t, len(state2.CandidateHistory) >= len(state1.CandidateHistory))
 	})
@@ -1474,7 +1474,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 }
 
-// Helper function to add mock trajectories for testing
+// Helper function to add mock trajectories for testing.
 func addMockTrajectories(simba *SIMBA) {
 	mockTrajectories := []Trajectory{
 		{
@@ -1570,7 +1570,7 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 	t.Run("Default configuration has bucket sorting disabled", func(t *testing.T) {
 		simba := NewSIMBA()
 		config := simba.GetConfig()
-		
+
 		assert.False(t, config.UseBucketSorting)
 		assert.Equal(t, []string{"max_to_min_gap", "max_score", "max_to_avg_gap"}, config.BucketSortingCriteria)
 		assert.Equal(t, []float64{0.4, 0.4, 0.2}, config.BucketSortingWeights)
@@ -1579,7 +1579,7 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 	t.Run("WithBucketSorting enables bucket sorting", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
 		config := simba.GetConfig()
-		
+
 		assert.True(t, config.UseBucketSorting)
 	})
 
@@ -1587,7 +1587,7 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 		criteria := []string{"max_score", "diversity", "improvement_potential"}
 		simba := NewSIMBA(WithBucketSortingCriteria(criteria))
 		config := simba.GetConfig()
-		
+
 		assert.Equal(t, criteria, config.BucketSortingCriteria)
 	})
 
@@ -1595,7 +1595,7 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 		weights := []float64{0.6, 0.3, 0.1}
 		simba := NewSIMBA(WithBucketSortingWeights(weights))
 		config := simba.GetConfig()
-		
+
 		// Weights should sum to 1.0
 		total := 0.0
 		for _, w := range config.BucketSortingWeights {
@@ -1608,7 +1608,7 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 		weights := []float64{0.0, 0.0, 0.0}
 		simba := NewSIMBA(WithBucketSortingWeights(weights))
 		config := simba.GetConfig()
-		
+
 		// Should keep original weights when sum is zero
 		assert.Equal(t, []float64{0.4, 0.4, 0.2}, config.BucketSortingWeights)
 	})
@@ -1617,7 +1617,7 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 		weights := []float64{}
 		simba := NewSIMBA(WithBucketSortingWeights(weights))
 		config := simba.GetConfig()
-		
+
 		// Should keep original weights when empty
 		assert.Equal(t, []float64{0.4, 0.4, 0.2}, config.BucketSortingWeights)
 	})
@@ -1627,18 +1627,18 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 func testSIMBAMultiCriteriaScoring(t *testing.T) {
 	t.Run("Calculates multi-criteria scores correctly", func(t *testing.T) {
 		simba := NewSIMBA()
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.3, 0.7, 0.5}
-		
+
 		metadata := simba.calculateMultiCriteriaScore(candidates, scores)
-		
+
 		assert.Equal(t, 3, len(metadata))
-		
+
 		// Check that all metadata entries have valid values
 		for i, meta := range metadata {
 			assert.Equal(t, scores[i], meta.IndividualScores[0])
@@ -1652,12 +1652,12 @@ func testSIMBAMultiCriteriaScoring(t *testing.T) {
 
 	t.Run("Handles single candidate correctly", func(t *testing.T) {
 		simba := NewSIMBA()
-		
+
 		candidates := []core.Program{createSIMBATestProgram()}
 		scores := []float64{0.8}
-		
+
 		metadata := simba.calculateMultiCriteriaScore(candidates, scores)
-		
+
 		assert.Equal(t, 1, len(metadata))
 		assert.Equal(t, 0.8, metadata[0].IndividualScores[0])
 		assert.Equal(t, 0.8, metadata[0].MaxScore)
@@ -1667,18 +1667,18 @@ func testSIMBAMultiCriteriaScoring(t *testing.T) {
 
 	t.Run("Handles identical scores correctly", func(t *testing.T) {
 		simba := NewSIMBA()
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.5, 0.5, 0.5}
-		
+
 		metadata := simba.calculateMultiCriteriaScore(candidates, scores)
-		
+
 		assert.Equal(t, 3, len(metadata))
-		
+
 		// All candidates should have identical gaps
 		for _, meta := range metadata {
 			assert.Equal(t, 0.0, meta.MaxToMinGap)
@@ -1692,32 +1692,32 @@ func testSIMBAMultiCriteriaScoring(t *testing.T) {
 			WithBucketSortingCriteria([]string{"max_score", "diversity"}),
 			WithBucketSortingWeights([]float64{0.7, 0.3}),
 		)
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.2, 0.8}
-		
+
 		metadata := simba.calculateMultiCriteriaScore(candidates, scores)
-		
+
 		assert.Equal(t, 2, len(metadata))
-		
+
 		// Higher score should have higher composite score
 		assert.True(t, metadata[1].CompositeScore > metadata[0].CompositeScore)
 	})
 
 	t.Run("Handles edge cases gracefully", func(t *testing.T) {
 		simba := NewSIMBA()
-		
+
 		// Empty candidates
 		emptyMetadata := simba.calculateMultiCriteriaScore([]core.Program{}, []float64{})
 		assert.Equal(t, 0, len(emptyMetadata))
-		
+
 		// Zero scores
 		candidates := []core.Program{createSIMBATestProgram()}
 		zeroScores := []float64{0.0}
-		
+
 		metadata := simba.calculateMultiCriteriaScore(candidates, zeroScores)
 		assert.Equal(t, 1, len(metadata))
 		assert.Equal(t, 0.0, metadata[0].IndividualScores[0])
@@ -1728,34 +1728,34 @@ func testSIMBAMultiCriteriaScoring(t *testing.T) {
 func testSIMBABucketSortingAlgorithm(t *testing.T) {
 	t.Run("Selects best candidate with bucket sorting", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.3, 0.9, 0.6}
-		
+
 		selectedProgram, selectedScore := simba.selectBestCandidate(candidates, scores)
-		
+
 		assert.NotNil(t, selectedProgram)
 		assert.True(t, selectedScore >= 0.6) // Should select from top-performing candidates
 	})
 
 	t.Run("Bucket assignment works correctly", func(t *testing.T) {
 		simba := NewSIMBA()
-		
+
 		// Test bucket assignment for different ranks
 		totalCandidates := 10
-		
+
 		// Top 30% should be bucket 1
 		topBucket := simba.assignBucket(0.9, 0, totalCandidates)
 		assert.Equal(t, 1, topBucket)
-		
+
 		// Next 40% should be bucket 2
 		middleBucket := simba.assignBucket(0.5, 5, totalCandidates)
 		assert.Equal(t, 2, middleBucket)
-		
+
 		// Bottom 30% should be bucket 3
 		bottomBucket := simba.assignBucket(0.1, 9, totalCandidates)
 		assert.Equal(t, 3, bottomBucket)
@@ -1766,7 +1766,7 @@ func testSIMBABucketSortingAlgorithm(t *testing.T) {
 			WithBucketSorting(true),
 			WithSamplingTemperature(0.5),
 		)
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
@@ -1774,14 +1774,14 @@ func testSIMBABucketSortingAlgorithm(t *testing.T) {
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.2, 0.8, 0.9, 0.85}
-		
+
 		// Run multiple selections to check probabilistic behavior
 		selections := make(map[float64]int)
 		for i := 0; i < 100; i++ {
 			_, selectedScore := simba.selectBestCandidate(candidates, scores)
 			selections[selectedScore]++
 		}
-		
+
 		// Should favor high-scoring candidates but allow some diversity
 		assert.True(t, len(selections) >= 1)
 		assert.True(t, selections[0.9] > 0 || selections[0.85] > 0 || selections[0.8] > 0)
@@ -1789,27 +1789,27 @@ func testSIMBABucketSortingAlgorithm(t *testing.T) {
 
 	t.Run("Handles single candidate correctly", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		candidates := []core.Program{createSIMBATestProgram()}
 		scores := []float64{0.7}
-		
+
 		selectedProgram, selectedScore := simba.selectBestCandidate(candidates, scores)
-		
+
 		assert.NotNil(t, selectedProgram)
 		assert.Equal(t, 0.7, selectedScore)
 	})
 
 	t.Run("Fallback to temperature sampling when bucket sorting disabled", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(false))
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.3, 0.7}
-		
+
 		selectedProgram, selectedScore := simba.selectBestCandidate(candidates, scores)
-		
+
 		assert.NotNil(t, selectedProgram)
 		assert.True(t, selectedScore >= 0.3)
 	})
@@ -1820,16 +1820,16 @@ func testSIMBABucketSortingAlgorithm(t *testing.T) {
 			WithBucketSortingCriteria([]string{"max_score", "diversity", "improvement_potential"}),
 			WithBucketSortingWeights([]float64{0.5, 0.3, 0.2}),
 		)
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.2, 0.8, 0.5}
-		
+
 		selectedProgram, selectedScore := simba.selectBestCandidate(candidates, scores)
-		
+
 		assert.NotNil(t, selectedProgram)
 		assert.True(t, selectedScore >= 0.2)
 	})
@@ -1839,7 +1839,7 @@ func testSIMBABucketSortingAlgorithm(t *testing.T) {
 func testSIMBACandidateMetadata(t *testing.T) {
 	t.Run("Records candidate metadata correctly", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		program := createSIMBATestProgram()
 		score := 0.8
 		metadata := &CandidateMetadata{
@@ -1850,12 +1850,12 @@ func testSIMBACandidateMetadata(t *testing.T) {
 			SelectionRank:    1,
 			BucketAssignment: 1,
 		}
-		
+
 		simba.recordCandidateMetadata(program, score, metadata)
-		
+
 		state := simba.GetState()
 		assert.Equal(t, 1, len(state.CandidateHistory))
-		
+
 		result := state.CandidateHistory[0]
 		assert.Equal(t, score, result.Score)
 		assert.NotNil(t, result.Metadata)
@@ -1866,50 +1866,50 @@ func testSIMBACandidateMetadata(t *testing.T) {
 
 	t.Run("Maintains sliding window of candidate history", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		program := createSIMBATestProgram()
 		metadata := &CandidateMetadata{
 			IndividualScores: []float64{0.5},
 			CompositeScore:   0.5,
 		}
-		
+
 		// Add more than 50 candidates
 		for i := 0; i < 55; i++ {
 			simba.recordCandidateMetadata(program, 0.5, metadata)
 		}
-		
+
 		state := simba.GetState()
 		assert.Equal(t, 50, len(state.CandidateHistory)) // Should maintain max 50
 	})
 
 	t.Run("Handles nil metadata gracefully", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		program := createSIMBATestProgram()
 		score := 0.7
-		
+
 		// Should not panic with nil metadata
 		simba.recordCandidateMetadata(program, score, nil)
-		
+
 		state := simba.GetState()
 		assert.Equal(t, 0, len(state.CandidateHistory)) // Should not record anything
 	})
 
 	t.Run("Metadata includes timestamp and temperature", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		program := createSIMBATestProgram()
 		score := 0.6
 		metadata := &CandidateMetadata{
 			IndividualScores: []float64{0.6},
 			CompositeScore:   0.6,
 		}
-		
+
 		simba.recordCandidateMetadata(program, score, metadata)
-		
+
 		state := simba.GetState()
 		assert.Equal(t, 1, len(state.CandidateHistory))
-		
+
 		result := state.CandidateHistory[0]
 		assert.True(t, result.CreatedAt.After(time.Time{}))
 		assert.True(t, result.Temperature >= 0)
@@ -1917,24 +1917,24 @@ func testSIMBACandidateMetadata(t *testing.T) {
 
 	t.Run("Integration with bucket sorting selection", func(t *testing.T) {
 		simba := NewSIMBA(WithBucketSorting(true))
-		
+
 		candidates := []core.Program{
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 			createSIMBATestProgram(),
 		}
 		scores := []float64{0.3, 0.7, 0.5}
-		
+
 		// Select candidate using bucket sorting
 		selectedProgram, selectedScore := simba.selectBestCandidate(candidates, scores)
-		
+
 		assert.NotNil(t, selectedProgram)
 		assert.True(t, selectedScore >= 0.3)
-		
+
 		// Check that metadata was recorded
 		state := simba.GetState()
 		assert.Equal(t, 1, len(state.CandidateHistory))
-		
+
 		result := state.CandidateHistory[0]
 		assert.Equal(t, selectedScore, result.Score)
 		assert.NotNil(t, result.Metadata)
@@ -1947,33 +1947,33 @@ func testSIMBALLMConcurrency(t *testing.T) {
 	t.Run("Default LLM concurrency is unlimited", func(t *testing.T) {
 		simba := NewSIMBA()
 		assert.Equal(t, 0, simba.config.LLMConcurrency)
-		
+
 		// Test that createLLMPool returns unlimited pool
 		pool := simba.createLLMPool()
 		assert.NotNil(t, pool)
 	})
-	
+
 	t.Run("LLM concurrency can be configured", func(t *testing.T) {
 		simba := NewSIMBA(WithLLMConcurrency(50))
 		assert.Equal(t, 50, simba.config.LLMConcurrency)
-		
+
 		// Test that createLLMPool returns limited pool
 		pool := simba.createLLMPool()
 		assert.NotNil(t, pool)
 	})
-	
+
 	t.Run("LLM concurrency option validation", func(t *testing.T) {
 		// Test various concurrency values
 		testCases := []struct {
 			concurrency int
 			expected    int
 		}{
-			{0, 0},    // unlimited
-			{1, 1},    // single threaded
+			{0, 0},     // unlimited
+			{1, 1},     // single threaded
 			{100, 100}, // high concurrency
-			{-1, -1},  // negative (should work as unlimited)
+			{-1, -1},   // negative (should work as unlimited)
 		}
-		
+
 		for _, tc := range testCases {
 			simba := NewSIMBA(WithLLMConcurrency(tc.concurrency))
 			assert.Equal(t, tc.expected, simba.config.LLMConcurrency)
@@ -1988,23 +1988,23 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		simba := NewSIMBA()
 		assert.False(t, simba.config.UsePipelineProcessing)
 		assert.Equal(t, 2, simba.config.PipelineBufferSize)
-		
+
 		// Test enabling pipeline processing
 		simba = NewSIMBA(WithPipelineProcessing(true))
 		assert.True(t, simba.config.UsePipelineProcessing)
-		
+
 		// Test configuring buffer size
 		simba = NewSIMBA(WithPipelineBufferSize(5))
 		assert.Equal(t, 5, simba.config.PipelineBufferSize)
-		
+
 		// Test zero buffer size (should be ignored)
 		simba = NewSIMBA(WithPipelineBufferSize(0))
 		assert.Equal(t, 2, simba.config.PipelineBufferSize) // Should remain default
 	})
-	
+
 	t.Run("Pipeline channels initialization", func(t *testing.T) {
 		simba := NewSIMBA(WithPipelineProcessing(true), WithPipelineBufferSize(3))
-		
+
 		// Test channel initialization
 		simba.initializePipelineChannels()
 		assert.NotNil(t, simba.pipelineChannels)
@@ -2014,56 +2014,56 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		assert.NotNil(t, simba.pipelineChannels.Results)
 		assert.NotNil(t, simba.pipelineChannels.Errors)
 		assert.NotNil(t, simba.pipelineChannels.Done)
-		
+
 		// Test safe cleanup
 		simba.closePipelineChannels()
 	})
-	
+
 	t.Run("Pipeline processing execution", func(t *testing.T) {
 		// Create test components
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.8 }
-		
+
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(3),
 			WithSIMBANumCandidates(4),
 			WithPipelineProcessing(true),
 			WithPipelineBufferSize(2),
 		)
-		
+
 		ctx := context.Background()
-		
+
 		// Run optimization with pipeline processing
 		optimizedProgram, err := simba.Compile(ctx, program, dataset, metric)
-		
+
 		assert.NoError(t, err)
 		assert.NotNil(t, optimizedProgram)
-		
+
 		// Check that optimization completed
 		state := simba.GetState()
 		assert.True(t, state.CurrentStep >= 0)
 		assert.True(t, len(state.PerformanceLog) > 0)
 	})
-	
+
 	t.Run("Sequential vs pipeline processing comparison", func(t *testing.T) {
 		// Create test components
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.75 }
-		
+
 		// Test sequential processing
 		simbaSequential := NewSIMBA(
 			WithSIMBAMaxSteps(2),
 			WithSIMBANumCandidates(3),
 			WithPipelineProcessing(false),
 		)
-		
+
 		ctx := context.Background()
 		startTime := time.Now()
 		_, err1 := simbaSequential.Compile(ctx, program, dataset, metric)
 		sequentialDuration := time.Since(startTime)
-		
+
 		// Test pipeline processing
 		simbaPipeline := NewSIMBA(
 			WithSIMBAMaxSteps(2),
@@ -2071,43 +2071,43 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 			WithPipelineProcessing(true),
 			WithPipelineBufferSize(2),
 		)
-		
+
 		startTime = time.Now()
 		_, err2 := simbaPipeline.Compile(ctx, program, dataset, metric)
 		pipelineDuration := time.Since(startTime)
-		
+
 		assert.NoError(t, err1)
 		assert.NoError(t, err2)
-		
+
 		// Both should complete successfully
 		// Note: In this test environment, pipeline might not always be faster
 		// due to overhead, but both should work correctly
 		t.Logf("Sequential duration: %v, Pipeline duration: %v", sequentialDuration, pipelineDuration)
 	})
-	
+
 	t.Run("Pipeline error handling", func(t *testing.T) {
 		// Create test components with potential for errors
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.6 }
-		
+
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(2),
 			WithSIMBANumCandidates(2),
 			WithPipelineProcessing(true),
 			WithPipelineBufferSize(1), // Small buffer to test channel handling
 		)
-		
+
 		ctx := context.Background()
-		
+
 		// Should handle gracefully even with small buffers and datasets
 		optimizedProgram, err := simba.Compile(ctx, program, dataset, metric)
-		
+
 		// Should complete without errors despite edge conditions
 		assert.NoError(t, err)
 		assert.NotNil(t, optimizedProgram)
 	})
-	
+
 	t.Run("Pipeline stage data flow", func(t *testing.T) {
 		// Test PipelineStage creation and data flow
 		stage := &PipelineStage{
@@ -2118,7 +2118,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 			Timestamp:  time.Now(),
 			Error:      nil,
 		}
-		
+
 		assert.Equal(t, 1, stage.StepIndex)
 		assert.Len(t, stage.Candidates, 1)
 		assert.Len(t, stage.Batch, 1)
@@ -2126,26 +2126,26 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		assert.Nil(t, stage.Error)
 		assert.False(t, stage.Timestamp.IsZero())
 	})
-	
+
 	t.Run("Pipeline context cancellation", func(t *testing.T) {
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
 		metric := func(expected, actual map[string]interface{}) float64 { return 0.5 }
-		
+
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(5), // Longer optimization
 			WithSIMBANumCandidates(4),
 			WithPipelineProcessing(true),
 			WithPipelineBufferSize(2),
 		)
-		
+
 		// Create cancellable context
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
-		
+
 		// Run optimization (should be cancelled)
 		_, err := simba.Compile(ctx, program, dataset, metric)
-		
+
 		// Should handle context cancellation gracefully
 		// May complete quickly in test environment, so check for either success or context error
 		if err != nil {

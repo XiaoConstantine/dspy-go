@@ -44,7 +44,7 @@ type SIMBAConfig struct {
 	MinImprovementRatio  float64 `json:"min_improvement_ratio"` // Default: 0.05
 
 	// Concurrency and resources
-	MaxGoroutines int `json:"max_goroutines"` // Default: 10 (for non-LLM operations)
+	MaxGoroutines  int `json:"max_goroutines"`  // Default: 10 (for non-LLM operations)
 	LLMConcurrency int `json:"llm_concurrency"` // Default: 0 (unlimited for LLM calls)
 
 	// Strategy configuration
@@ -52,22 +52,22 @@ type SIMBAConfig struct {
 	StrategyRatio float64 `json:"strategy_ratio"` // Default: 0.5 (percentage of instruction perturbation when using both)
 
 	// Bucket sorting configuration
-	UseBucketSorting      bool      `json:"use_bucket_sorting"`       // Default: false
-	BucketSortingCriteria []string  `json:"bucket_sorting_criteria"`  // Default: ["max_to_min_gap", "max_score", "max_to_avg_gap"]
-	BucketSortingWeights  []float64 `json:"bucket_sorting_weights"`   // Default: [0.4, 0.4, 0.2]
+	UseBucketSorting      bool      `json:"use_bucket_sorting"`      // Default: false
+	BucketSortingCriteria []string  `json:"bucket_sorting_criteria"` // Default: ["max_to_min_gap", "max_score", "max_to_avg_gap"]
+	BucketSortingWeights  []float64 `json:"bucket_sorting_weights"`  // Default: [0.4, 0.4, 0.2]
 
 	// Pipeline processing configuration
 	UsePipelineProcessing bool `json:"use_pipeline_processing"` // Default: false
 	PipelineBufferSize    int  `json:"pipeline_buffer_size"`    // Default: 2
 
 	// Early stopping configuration
-	EarlyStoppingPatience int     `json:"early_stopping_patience"` // Default: 0 (disabled)
+	EarlyStoppingPatience  int     `json:"early_stopping_patience"`  // Default: 0 (disabled)
 	EarlyStoppingThreshold float64 `json:"early_stopping_threshold"` // Default: 0.01
 
 	// Fast mode configuration for Python compatibility
-	FastMode                     bool `json:"fast_mode"`                      // Default: false
-	DisableTrajectoryTracking    bool `json:"disable_trajectory_tracking"`   // Default: false  
-	DisableRuleGeneration        bool `json:"disable_rule_generation"`       // Default: false
+	FastMode                       bool `json:"fast_mode"`                        // Default: false
+	DisableTrajectoryTracking      bool `json:"disable_trajectory_tracking"`      // Default: false
+	DisableRuleGeneration          bool `json:"disable_rule_generation"`          // Default: false
 	DisableInstructionPerturbation bool `json:"disable_instruction_perturbation"` // Default: false
 }
 
@@ -95,12 +95,12 @@ type SIMBAState struct {
 
 // CandidateResult represents a candidate program and its performance.
 type CandidateResult struct {
-	Program     core.Program        `json:"-"`
-	Score       float64             `json:"score"`
-	Step        int                 `json:"step"`
-	Temperature float64             `json:"temperature"`
-	CreatedAt   time.Time           `json:"created_at"`
-	Metadata    *CandidateMetadata  `json:"metadata,omitempty"`
+	Program     core.Program       `json:"-"`
+	Score       float64            `json:"score"`
+	Step        int                `json:"step"`
+	Temperature float64            `json:"temperature"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Metadata    *CandidateMetadata `json:"metadata,omitempty"`
 }
 
 // CandidateMetadata contains detailed performance metrics for a candidate.
@@ -109,16 +109,16 @@ type CandidateMetadata struct {
 	IndividualScores []float64 `json:"individual_scores"`
 	DiversityScore   float64   `json:"diversity_score"`
 	ImprovementDelta float64   `json:"improvement_delta"`
-	
+
 	// Multi-criteria scores
-	MaxToMinGap   float64 `json:"max_to_min_gap"`
-	MaxScore      float64 `json:"max_score"`
-	MaxToAvgGap   float64 `json:"max_to_avg_gap"`
-	
+	MaxToMinGap float64 `json:"max_to_min_gap"`
+	MaxScore    float64 `json:"max_score"`
+	MaxToAvgGap float64 `json:"max_to_avg_gap"`
+
 	// Selection tracking
-	SelectionRank     int     `json:"selection_rank"`
-	BucketAssignment  int     `json:"bucket_assignment"`
-	CompositeScore    float64 `json:"composite_score"`
+	SelectionRank    int     `json:"selection_rank"`
+	BucketAssignment int     `json:"bucket_assignment"`
+	CompositeScore   float64 `json:"composite_score"`
 }
 
 // candidatePair holds a candidate program with its metadata for bucket sorting.
@@ -174,12 +174,12 @@ type PipelineChannels struct {
 
 // PipelineResult represents the result of a pipeline stage.
 type PipelineResult struct {
-	StepIndex       int
-	BestProgram     core.Program
-	BestScore       float64
-	AllScores       []float64
-	ProcessingTime  time.Duration
-	StageTimings    map[string]time.Duration
+	StepIndex      int
+	BestProgram    core.Program
+	BestScore      float64
+	AllScores      []float64
+	ProcessingTime time.Duration
+	StageTimings   map[string]time.Duration
 }
 
 // SIMBA implements Stochastic Introspective Mini-Batch Ascent optimizer.
@@ -200,12 +200,12 @@ type SIMBA struct {
 	rng    *rand.Rand
 
 	// Performance optimizations
-	ruleCache map[string][]string // Cache extracted rules to reduce LLM calls
-	ruleCacheMu sync.RWMutex     // Separate mutex for rule cache
+	ruleCache   map[string][]string // Cache extracted rules to reduce LLM calls
+	ruleCacheMu sync.RWMutex        // Separate mutex for rule cache
 
 	// Pipeline processing
 	pipelineChannels *PipelineChannels
-	
+
 	// Thread safety
 	mu sync.RWMutex
 }
@@ -448,7 +448,7 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 	}
 
 	s.logger.Info(ctx, "Using sequential processing mode")
-	
+
 	// Main optimization loop (sequential processing)
 	for step := 0; step < s.config.MaxSteps; step++ {
 		stepCtx, stepSpan := core.StartSpan(ctx, fmt.Sprintf("SIMBA.Step.%d", step))
@@ -572,7 +572,7 @@ func (s *SIMBA) resetState() {
 	s.state.IntrospectionLog = make([]string, 0)
 	s.state.StartTime = time.Now()
 	s.state.Trajectories = make([]Trajectory, 0)
-	
+
 	// Clear rule cache for new optimization
 	s.ruleCacheMu.Lock()
 	s.ruleCache = make(map[string][]string)
@@ -649,7 +649,7 @@ func (s *SIMBA) generateCandidates(ctx context.Context, baseProgram core.Program
 		}
 	}
 
-	s.logger.Debug(ctx, "Generating candidates: %d instruction perturbation, %d rule-based", 
+	s.logger.Debug(ctx, "Generating candidates: %d instruction perturbation, %d rule-based",
 		numInstructionCandidates, numRuleCandidates)
 
 	// Generate candidates using both strategies in parallel with unlimited concurrency
@@ -896,7 +896,7 @@ Analysis:`
 func (s *SIMBA) parseRulesFromAnalysis(analysis string) []string {
 	rules := []string{}
 	lines := strings.Split(analysis, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "RULE: ") {
@@ -919,7 +919,7 @@ func (s *SIMBA) parseRulesFromAnalysis(analysis string) []string {
 func (s *SIMBA) extractComparativeRules(ctx context.Context, successful, failed []Trajectory) ([]string, error) {
 	// Create cache key based on trajectory patterns
 	cacheKey := s.createTrajectoryCacheKey(successful, failed)
-	
+
 	// Check cache first
 	s.ruleCacheMu.RLock()
 	if cachedRules, exists := s.ruleCache[cacheKey]; exists {
@@ -927,10 +927,10 @@ func (s *SIMBA) extractComparativeRules(ctx context.Context, successful, failed 
 		return cachedRules, nil
 	}
 	s.ruleCacheMu.RUnlock()
-	
+
 	// Use LLM to analyze patterns
 	analysisPrompt := s.buildTrajectoryAnalysisPrompt(successful, failed)
-	
+
 	if s.analyzerModel == nil {
 		return []string{}, nil
 	}
@@ -942,12 +942,12 @@ func (s *SIMBA) extractComparativeRules(ctx context.Context, successful, failed 
 
 	// Extract rules from the analysis
 	rules := s.parseRulesFromAnalysis(response.Content)
-	
+
 	// Cache the results
 	s.ruleCacheMu.Lock()
 	s.ruleCache[cacheKey] = rules
 	s.ruleCacheMu.Unlock()
-	
+
 	return rules, nil
 }
 
@@ -959,7 +959,7 @@ func (s *SIMBA) extractSuccessPatternRules(ctx context.Context, successful []Tra
 
 	// Create cache key based on successful trajectory patterns
 	cacheKey := s.createSuccessTrajectoryCacheKey(successful)
-	
+
 	// Check cache first
 	s.ruleCacheMu.RLock()
 	if cachedRules, exists := s.ruleCache[cacheKey]; exists {
@@ -970,7 +970,7 @@ func (s *SIMBA) extractSuccessPatternRules(ctx context.Context, successful []Tra
 
 	// Build success pattern analysis prompt
 	prompt := s.buildSuccessPatternAnalysisPrompt(successful)
-	
+
 	if s.analyzerModel == nil {
 		return []string{}, nil
 	}
@@ -982,12 +982,12 @@ func (s *SIMBA) extractSuccessPatternRules(ctx context.Context, successful []Tra
 
 	// Extract rules from the analysis
 	rules := s.parseRulesFromAnalysis(response.Content)
-	
+
 	// Cache the results
 	s.ruleCacheMu.Lock()
 	s.ruleCache[cacheKey] = rules
 	s.ruleCacheMu.Unlock()
-	
+
 	return rules, nil
 }
 
@@ -1043,14 +1043,14 @@ func (s *SIMBA) hashTrajectories(trajectories []Trajectory) string {
 	if len(trajectories) == 0 {
 		return "empty"
 	}
-	
+
 	// Use first few trajectories for hashing to avoid expensive computation
 	hashInputs := make([]string, 0, 3)
 	for i := 0; i < len(trajectories) && i < 3; i++ {
 		t := trajectories[i]
 		hashInputs = append(hashInputs, fmt.Sprintf("%.2f", t.Score))
 	}
-	
+
 	return strings.Join(hashInputs, "_")
 }
 
@@ -1214,9 +1214,7 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 	if !s.config.DisableTrajectoryTracking {
 		s.mu.Lock()
 		// Keep a sliding window of recent trajectories (max 100)
-		for _, t := range trajectories {
-			s.state.Trajectories = append(s.state.Trajectories, t)
-		}
+		s.state.Trajectories = append(s.state.Trajectories, trajectories...)
 		if len(s.state.Trajectories) > 100 {
 			// Keep only the most recent 100 trajectories
 			s.state.Trajectories = s.state.Trajectories[len(s.state.Trajectories)-100:]
@@ -1245,12 +1243,12 @@ func (s *SIMBA) selectBestCandidate(candidates []core.Program, scores []float64)
 	// Use bucket sorting if enabled
 	if s.config.UseBucketSorting {
 		selectedProgram, selectedScore, metadata := s.selectCandidateWithBucketSorting(candidates, scores)
-		
+
 		// Record candidate metadata if available
 		if metadata != nil {
 			s.recordCandidateMetadata(selectedProgram, selectedScore, metadata)
 		}
-		
+
 		return selectedProgram, selectedScore
 	}
 
@@ -1279,7 +1277,7 @@ func (s *SIMBA) selectBestCandidateWithTemperature(candidates []core.Program, sc
 	s.mu.Lock()
 	shouldExplore := temperature > 0 && s.rng.Float64() < 0.3 // 30% chance for exploration
 	s.mu.Unlock()
-	
+
 	if shouldExplore {
 		selectedIdx := s.temperatureSample(scores, temperature)
 		return candidates[selectedIdx], scores[selectedIdx]
@@ -1325,7 +1323,7 @@ func (s *SIMBA) temperatureSample(scores []float64, temperature float64) int {
 	s.mu.Lock()
 	r := s.rng.Float64()
 	s.mu.Unlock()
-	
+
 	var cumulative float64
 	for i, prob := range probs {
 		cumulative += prob
@@ -1351,12 +1349,12 @@ func (s *SIMBA) calculateMultiCriteriaScore(candidates []core.Program, scores []
 	}
 
 	metadata := make([]CandidateMetadata, len(candidates))
-	
+
 	// Calculate basic statistics
 	minScore := scores[0]
 	maxScore := scores[0]
 	totalScore := 0.0
-	
+
 	for _, score := range scores {
 		if score < minScore {
 			minScore = score
@@ -1366,24 +1364,24 @@ func (s *SIMBA) calculateMultiCriteriaScore(candidates []core.Program, scores []
 		}
 		totalScore += score
 	}
-	
+
 	avgScore := totalScore / float64(len(scores))
-	
+
 	// Calculate multi-criteria scores for each candidate
 	for i, score := range scores {
 		// Core metrics
 		maxToMinGap := maxScore - minScore
 		maxToAvgGap := maxScore - avgScore
-		
+
 		// Diversity score based on score distance from average
 		diversityScore := math.Abs(score - avgScore)
-		
+
 		// Improvement delta (relative to best score)
 		improvementDelta := score - maxScore
-		
+
 		// Composite score calculation using configured criteria and weights
 		compositeScore := s.calculateCompositeScore(score, maxScore, minScore, avgScore)
-		
+
 		metadata[i] = CandidateMetadata{
 			IndividualScores: []float64{score},
 			DiversityScore:   diversityScore,
@@ -1394,7 +1392,7 @@ func (s *SIMBA) calculateMultiCriteriaScore(candidates []core.Program, scores []
 			CompositeScore:   compositeScore,
 		}
 	}
-	
+
 	return metadata
 }
 
@@ -1403,15 +1401,15 @@ func (s *SIMBA) calculateCompositeScore(score, maxScore, minScore, avgScore floa
 	if len(s.config.BucketSortingCriteria) == 0 {
 		return score
 	}
-	
+
 	compositeScore := 0.0
-	
+
 	for i, criterion := range s.config.BucketSortingCriteria {
 		weight := 1.0 / float64(len(s.config.BucketSortingCriteria))
 		if i < len(s.config.BucketSortingWeights) {
 			weight = s.config.BucketSortingWeights[i]
 		}
-		
+
 		var criterionScore float64
 		switch criterion {
 		case "max_to_min_gap":
@@ -1433,7 +1431,7 @@ func (s *SIMBA) calculateCompositeScore(score, maxScore, minScore, avgScore floa
 			// Favor candidates above average
 			gap := maxScore - avgScore
 			if gap > 0 {
-				criterionScore = math.Max(0, (score - avgScore) / gap)
+				criterionScore = math.Max(0, (score-avgScore)/gap)
 			} else {
 				if score >= avgScore {
 					criterionScore = 1.0
@@ -1444,7 +1442,7 @@ func (s *SIMBA) calculateCompositeScore(score, maxScore, minScore, avgScore floa
 		case "diversity":
 			// Favor candidates with unique scores
 			diversity := math.Abs(score - avgScore)
-			maxDiversity := math.Max(math.Abs(maxScore - avgScore), math.Abs(minScore - avgScore))
+			maxDiversity := math.Max(math.Abs(maxScore-avgScore), math.Abs(minScore-avgScore))
 			if maxDiversity > 0 {
 				criterionScore = diversity / maxDiversity
 			} else {
@@ -1460,10 +1458,10 @@ func (s *SIMBA) calculateCompositeScore(score, maxScore, minScore, avgScore floa
 		default:
 			criterionScore = score
 		}
-		
+
 		compositeScore += weight * criterionScore
 	}
-	
+
 	return compositeScore
 }
 
@@ -1475,7 +1473,7 @@ func (s *SIMBA) selectCandidateWithBucketSorting(candidates []core.Program, scor
 
 	// Calculate multi-criteria scores and metadata
 	metadata := s.calculateMultiCriteriaScore(candidates, scores)
-	
+
 	// Create candidate-metadata pairs for sorting
 	pairs := make([]candidatePair, len(candidates))
 	for i := 0; i < len(candidates); i++ {
@@ -1486,7 +1484,7 @@ func (s *SIMBA) selectCandidateWithBucketSorting(candidates []core.Program, scor
 			index:     i,
 		}
 	}
-	
+
 	// Sort by composite score (descending)
 	for i := 0; i < len(pairs); i++ {
 		for j := i + 1; j < len(pairs); j++ {
@@ -1495,14 +1493,14 @@ func (s *SIMBA) selectCandidateWithBucketSorting(candidates []core.Program, scor
 			}
 		}
 	}
-	
+
 	// Assign bucket rankings
 	for i, pair := range pairs {
 		pair.metadata.SelectionRank = i + 1
 		pair.metadata.BucketAssignment = s.assignBucket(pair.metadata.CompositeScore, i, len(pairs))
 		pairs[i] = pair
 	}
-	
+
 	// Select from top bucket with optional temperature sampling
 	topBucket := s.getTopBucket(pairs)
 	if len(topBucket) == 0 {
@@ -1510,7 +1508,7 @@ func (s *SIMBA) selectCandidateWithBucketSorting(candidates []core.Program, scor
 		selected := pairs[0]
 		return selected.candidate, selected.score, &selected.metadata
 	}
-	
+
 	// Apply temperature sampling within top bucket
 	temperature := s.getCurrentTemperature(s.state.CurrentStep)
 	if temperature > 0 && len(topBucket) > 1 {
@@ -1519,7 +1517,7 @@ func (s *SIMBA) selectCandidateWithBucketSorting(candidates []core.Program, scor
 		for i, pair := range topBucket {
 			bucketScores[i] = pair.metadata.CompositeScore
 		}
-		
+
 		// Sample from top bucket using temperature
 		selectedIdx := s.temperatureSample(bucketScores, temperature)
 		if selectedIdx < len(topBucket) {
@@ -1527,7 +1525,7 @@ func (s *SIMBA) selectCandidateWithBucketSorting(candidates []core.Program, scor
 			return selected.candidate, selected.score, &selected.metadata
 		}
 	}
-	
+
 	// Default to best candidate from top bucket
 	selected := topBucket[0]
 	return selected.candidate, selected.score, &selected.metadata
@@ -1550,7 +1548,7 @@ func (s *SIMBA) getTopBucket(pairs []candidatePair) []candidatePair {
 	if len(pairs) == 0 {
 		return []candidatePair{}
 	}
-	
+
 	// Get all candidates from bucket 1 (top bucket)
 	topBucket := []candidatePair{}
 	for _, pair := range pairs {
@@ -1558,12 +1556,12 @@ func (s *SIMBA) getTopBucket(pairs []candidatePair) []candidatePair {
 			topBucket = append(topBucket, pair)
 		}
 	}
-	
+
 	// If no candidates in top bucket, return best candidate
 	if len(topBucket) == 0 {
 		return []candidatePair{pairs[0]}
 	}
-	
+
 	return topBucket
 }
 
@@ -1572,10 +1570,10 @@ func (s *SIMBA) recordCandidateMetadata(program core.Program, score float64, met
 	if metadata == nil {
 		return
 	}
-	
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Create candidate result with metadata
 	result := CandidateResult{
 		Program:     program,
@@ -1585,10 +1583,10 @@ func (s *SIMBA) recordCandidateMetadata(program core.Program, score float64, met
 		CreatedAt:   time.Now(),
 		Metadata:    metadata,
 	}
-	
+
 	// Add to candidate history
 	s.state.CandidateHistory = append(s.state.CandidateHistory, result)
-	
+
 	// Keep sliding window of recent candidates (max 50)
 	if len(s.state.CandidateHistory) > 50 {
 		s.state.CandidateHistory = s.state.CandidateHistory[len(s.state.CandidateHistory)-50:]
@@ -1923,7 +1921,7 @@ func (s *SIMBA) shouldStopEarly() bool {
 
 	pastBestScore := log[patienceStepsAgo].BestScore
 	currentBestScore := s.state.BestScore
-	
+
 	// Check if improvement is below threshold
 	improvement := currentBestScore - pastBestScore
 	return improvement < s.config.EarlyStoppingThreshold
@@ -1956,12 +1954,12 @@ func (s *SIMBA) closePipelineChannels() {
 				close(ch)
 			}
 		}
-		
+
 		safeClose(s.pipelineChannels.CandidateGeneration)
 		safeClose(s.pipelineChannels.BatchSampling)
 		safeClose(s.pipelineChannels.CandidateEvaluation)
 		safeClose(s.pipelineChannels.Results)
-		
+
 		// Close error channel safely
 		select {
 		case <-s.pipelineChannels.Errors:
@@ -1982,19 +1980,19 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 
 	// Start pipeline workers
 	var wg sync.WaitGroup
-	
+
 	// Start candidate generation worker
 	wg.Add(1)
 	go s.candidateGenerationWorker(pipelineCtx, program, &wg)
-	
+
 	// Start batch sampling worker
 	wg.Add(1)
 	go s.batchSamplingWorker(pipelineCtx, dataset, &wg)
-	
+
 	// Start candidate evaluation worker
 	wg.Add(1)
 	go s.candidateEvaluationWorker(pipelineCtx, &wg)
-	
+
 	// Start pipeline coordinator
 	return s.pipelineCoordinator(ctx, program, &wg, pipelineCancel)
 }
@@ -2002,10 +2000,10 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 // candidateGenerationWorker generates candidates in parallel for multiple steps.
 func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.Program, wg *sync.WaitGroup) {
 	defer wg.Done()
-	
+
 	currentProgram := baseProgram
 	stepIndex := 0
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -2016,17 +2014,17 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 			if stepIndex >= s.config.MaxSteps {
 				return
 			}
-			
+
 			startTime := time.Now()
 			candidates, err := s.generateCandidates(ctx, currentProgram)
-			
+
 			stage := &PipelineStage{
 				StepIndex:  stepIndex,
 				Candidates: candidates,
 				Timestamp:  startTime,
 				Error:      err,
 			}
-			
+
 			select {
 			case s.pipelineChannels.CandidateGeneration <- stage:
 				stepIndex++
@@ -2034,8 +2032,19 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 				return
 			case <-s.pipelineChannels.Done:
 				return
+			default:
+				// Channel might be closed, check context and done channel
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.pipelineChannels.Done:
+					return
+				default:
+					// Continue processing if neither context nor done channel signaled
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
-			
+
 			// Update current program from previous results
 			if stepIndex > 1 {
 				select {
@@ -2063,7 +2072,7 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 // batchSamplingWorker samples mini-batches in parallel.
 func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset, wg *sync.WaitGroup) {
 	defer wg.Done()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -2074,39 +2083,60 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset, w
 			if stage == nil {
 				return
 			}
-			
+
 			if stage.Error != nil {
 				select {
 				case s.pipelineChannels.Errors <- stage.Error:
 				case <-ctx.Done():
 					return
+				case <-s.pipelineChannels.Done:
+					return
+				default:
+					// Error channel might be closed, log and continue
+					s.logger.Error(ctx, "Pipeline error (channel closed): %v", stage.Error)
 				}
 				continue
 			}
-			
+
 			startTime := time.Now()
 			batch, err := s.sampleMiniBatch(ctx, dataset)
 			stage.Batch = batch
 			stage.Error = err
-			
+
 			if err != nil {
 				select {
 				case s.pipelineChannels.Errors <- err:
 				case <-ctx.Done():
 					return
+				case <-s.pipelineChannels.Done:
+					return
+				default:
+					// Error channel might be closed, log and continue
+					s.logger.Error(ctx, "Pipeline error (channel closed): %v", err)
 				}
 				continue
 			}
-			
-			s.logger.Debug(ctx, "Pipeline: Batch sampled for step %d in %v", 
+
+			s.logger.Debug(ctx, "Pipeline: Batch sampled for step %d in %v",
 				stage.StepIndex, time.Since(startTime))
-			
+
 			select {
 			case s.pipelineChannels.BatchSampling <- stage:
 			case <-ctx.Done():
 				return
 			case <-s.pipelineChannels.Done:
 				return
+			default:
+				// Channel might be closed, check context and done channel
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.pipelineChannels.Done:
+					return
+				default:
+					// Continue processing if neither context nor done channel signaled
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
 		}
 	}
@@ -2115,7 +2145,7 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset, w
 // candidateEvaluationWorker evaluates candidates in parallel.
 func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -2126,29 +2156,45 @@ func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, wg *sync.WaitGrou
 			if stage == nil {
 				return
 			}
-			
+
 			if stage.Error != nil {
 				select {
 				case s.pipelineChannels.Errors <- stage.Error:
 				case <-ctx.Done():
 					return
+				case <-s.pipelineChannels.Done:
+					return
+				default:
+					// Error channel might be closed, log and continue
+					s.logger.Error(ctx, "Pipeline error (channel closed): %v", stage.Error)
 				}
 				continue
 			}
-			
+
 			startTime := time.Now()
 			scores := s.evaluateCandidates(ctx, stage.Candidates, stage.Batch)
 			stage.Scores = scores
-			
-			s.logger.Debug(ctx, "Pipeline: Candidates evaluated for step %d in %v", 
+
+			s.logger.Debug(ctx, "Pipeline: Candidates evaluated for step %d in %v",
 				stage.StepIndex, time.Since(startTime))
-			
+
 			select {
 			case s.pipelineChannels.CandidateEvaluation <- stage:
 			case <-ctx.Done():
 				return
 			case <-s.pipelineChannels.Done:
 				return
+			default:
+				// Channel might be closed, check context and done channel
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.pipelineChannels.Done:
+					return
+				default:
+					// Continue processing if neither context nor done channel signaled
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
 		}
 	}
@@ -2159,7 +2205,7 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 	bestProgram := initialProgram.Clone()
 	bestScore := s.state.BestScore
 	processedSteps := 0
-	
+
 	// Wait for pipeline workers and collect results
 	var doneOnce sync.Once
 	go func() {
@@ -2168,9 +2214,9 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			close(s.pipelineChannels.Done)
 		})
 	}()
-	
+
 	stageTimings := make(map[string]time.Duration)
-	
+
 	for processedSteps < s.config.MaxSteps {
 		select {
 		case <-ctx.Done():
@@ -2192,13 +2238,13 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			if stage == nil {
 				continue
 			}
-			
+
 			processingTime := time.Since(stage.Timestamp)
 			stageTimings[fmt.Sprintf("step_%d", stage.StepIndex)] = processingTime
-			
+
 			// Select best candidate from this step
 			selectedProgram, selectedScore := s.selectBestCandidate(stage.Candidates, stage.Scores)
-			
+
 			// Update global best if improvement found
 			improvement := selectedScore - bestScore
 			if selectedScore > bestScore {
@@ -2208,11 +2254,11 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 				bestProgram = s.state.BestProgram
 				bestScore = selectedScore
 				s.mu.Unlock()
-				
-				s.logger.Info(ctx, "Pipeline: New best score: %.4f (improvement: +%.4f) at step %d", 
+
+				s.logger.Info(ctx, "Pipeline: New best score: %.4f (improvement: +%.4f) at step %d",
 					selectedScore, improvement, stage.StepIndex)
 			}
-			
+
 			// Record step metrics
 			stepResult := StepResult{
 				Step:            stage.StepIndex,
@@ -2224,7 +2270,7 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 				Improvement:     improvement,
 			}
 			s.state.PerformanceLog = append(s.state.PerformanceLog, stepResult)
-			
+
 			// Send result back for next iteration
 			stage.Error = nil // Clear any previous errors
 			select {
@@ -2232,9 +2278,9 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			default:
 				// Results channel might be full, continue
 			}
-			
+
 			processedSteps++
-			
+
 			// Check for convergence
 			if s.hasConverged() {
 				s.logger.Info(ctx, "Pipeline: Optimization converged at step %d", stage.StepIndex)
@@ -2251,7 +2297,7 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			return bestProgram, nil
 		}
 	}
-	
+
 	// Close channels safely when optimization completes normally
 	pipelineCancel() // Cancel workers first
 	doneOnce.Do(func() {
