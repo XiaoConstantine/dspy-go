@@ -22,6 +22,10 @@ type COPRO struct {
 	Depth           int     // Iterations of prompt refinement
 	InitTemperature float64 // Randomness in prompt generation
 	TrackStats      bool    // Optional performance tracking
+
+	// LLM-assisted prompt generation components
+	PromptGenerator  *LLMPromptGenerator
+	CandidateHistory []PromptCandidate // Track previous attempts for learning
 }
 
 // PromptCandidate represents a candidate prompt configuration.
@@ -29,7 +33,10 @@ type PromptCandidate struct {
 	Instruction string
 	Prefix      string
 	Score       float64
-	Generation  int // Which depth iteration this was generated in
+	Generation  int     // Which depth iteration this was generated in
+	Diversity   float64 // Semantic diversity score
+	Rank        int     // Performance ranking
+	AttemptID   string  // Unique identifier for tracking
 }
 
 // COPROOptions provides configuration options for COPRO.
@@ -79,12 +86,12 @@ func WithTrackStats(track bool) COPROOption {
 	}
 }
 
-// NewCOPRO creates a new COPRO optimizer.
+// NewCOPRO creates a new COPRO optimizer with enhanced LLM-assisted prompt generation.
 func NewCOPRO(metric core.Metric, options ...COPROOption) *COPRO {
 	opts := &COPROOptions{
-		Breadth:         10,
-		Depth:           3,
-		InitTemperature: 1.4,
+		Breadth:         5,   // Reduced for higher quality candidates
+		Depth:           2,   // Match Python DSPy default
+		InitTemperature: 1.2, // Match Python DSPy default
 		TrackStats:      false,
 	}
 
@@ -93,12 +100,13 @@ func NewCOPRO(metric core.Metric, options ...COPROOption) *COPRO {
 	}
 
 	return &COPRO{
-		PromptModel:     opts.PromptModel,
-		Metric:          metric,
-		Breadth:         opts.Breadth,
-		Depth:           opts.Depth,
-		InitTemperature: opts.InitTemperature,
-		TrackStats:      opts.TrackStats,
+		PromptModel:      opts.PromptModel,
+		Metric:           metric,
+		Breadth:          opts.Breadth,
+		Depth:            opts.Depth,
+		InitTemperature:  opts.InitTemperature,
+		TrackStats:       opts.TrackStats,
+		CandidateHistory: make([]PromptCandidate, 0),
 	}
 }
 
@@ -259,65 +267,108 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	return nil
 }
 
-// generateInitialCandidates generates the initial set of prompt candidates.
+// generateInitialCandidates generates sophisticated initial prompt candidates using LLM assistance.
 func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *modules.Predict, baseInstruction string) []PromptCandidate {
-	var candidates []PromptCandidate
-
 	// Get the signature to understand the task
 	signature := predictor.GetSignature()
 
-	// Generate diverse instruction variations
-	instructionTemplates := c.getInstructionTemplates(signature)
+	// Initialize LLM prompt generator if not already done
+	if c.PromptGenerator == nil {
+		// Use the predictor's LLM for prompt generation, or default model
+		promptLLM := c.PromptModel
+		if promptLLM == nil {
+			promptLLM = predictor.LLM
+		}
+		c.PromptGenerator = NewLLMPromptGenerator(promptLLM, signature)
+	}
 
-	for i := 0; i < c.Breadth; i++ {
-		// Apply temperature-based variation
-		temp := c.InitTemperature * (1.0 - float64(i)/float64(c.Breadth))
+	// Generate sophisticated instructions using LLM assistance
+	taskDescription := c.getTaskDescription(signature, baseInstruction)
+	instructions, err := c.PromptGenerator.generateBasicInstructions(ctx, taskDescription, c.Breadth, c.InitTemperature)
+	if err != nil {
+		log.Printf("COPRO: Failed to generate LLM-assisted instructions, falling back to enhanced templates: %v", err)
+		// Fallback to enhanced template-based generation
+		instructions = c.getEnhancedInstructionTemplates(signature, baseInstruction)
+	}
 
-		var instruction string
-		if i < len(instructionTemplates) {
-			instruction = instructionTemplates[i]
-		} else {
-			// Generate variations of base instruction or templates
-			instruction = c.varyInstruction(baseInstruction, temp)
+	// Create candidates with diversity scoring
+	var candidates []PromptCandidate
+	for i, instruction := range instructions {
+		if i >= c.Breadth {
+			break
 		}
 
 		candidate := PromptCandidate{
 			Instruction: instruction,
-			Prefix:      "", // Could add prefix variations here
+			Prefix:      "",
 			Generation:  1,
+			AttemptID:   fmt.Sprintf("init_%d", i),
+			Rank:        i,
 		}
-
 		candidates = append(candidates, candidate)
 	}
+
+	// Calculate diversity scores
+	c.calculatePromptDiversity(candidates)
 
 	return candidates
 }
 
-// refineCandidates generates refined candidates based on top performers.
+// refineCandidates generates sophisticated refined candidates using performance feedback.
 func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict, topCandidates []PromptCandidate, depth int) []PromptCandidate {
-	var refined []PromptCandidate
+	// Add current candidates to history for learning
+	c.CandidateHistory = append(c.CandidateHistory, topCandidates...)
 
-	// Generate refinements for each top candidate
-	for _, candidate := range topCandidates {
-		// Generate multiple refinements per candidate
-		numRefinements := maxInt(1, c.Breadth/len(topCandidates))
+	// Try LLM-assisted refinement first
+	if c.PromptGenerator != nil && len(c.CandidateHistory) >= 3 {
+		// Use LLM to generate refined instructions based on performance history
+		refinedInstructions, err := c.PromptGenerator.generateRefinedInstructions(ctx, c.CandidateHistory, c.Breadth, c.InitTemperature*math.Pow(0.8, float64(depth)))
+		if err == nil && len(refinedInstructions) > 0 {
+			var refined []PromptCandidate
+			for i, instruction := range refinedInstructions {
+				if i >= c.Breadth {
+					break
+				}
 
-		for i := 0; i < numRefinements; i++ {
-			// Apply temperature decay with depth
-			temp := c.InitTemperature * math.Pow(0.8, float64(depth))
-
-			refinedInstruction := c.refineInstruction(candidate.Instruction, temp)
-
-			refinedCandidate := PromptCandidate{
-				Instruction: refinedInstruction,
-				Prefix:      candidate.Prefix,
-				Generation:  depth + 1,
+				refinedCandidate := PromptCandidate{
+					Instruction: instruction,
+					Prefix:      "",
+					Generation:  depth + 1,
+					AttemptID:   fmt.Sprintf("refined_%d_%d", depth, i),
+				}
+				refined = append(refined, refinedCandidate)
 			}
 
-			refined = append(refined, refinedCandidate)
+			// Calculate diversity for refined candidates
+			c.calculatePromptDiversity(refined)
+			return refined
 		}
 	}
 
+	// Fallback to enhanced refinement strategy
+	var refined []PromptCandidate
+	for _, candidate := range topCandidates {
+		numRefinements := maxInt(1, c.Breadth/len(topCandidates))
+
+		for i := 0; i < numRefinements; i++ {
+			temp := c.InitTemperature * math.Pow(0.8, float64(depth))
+			refinedInstruction := c.refineInstruction(candidate.Instruction, temp)
+
+			// Ensure we're creating meaningful variations
+			if refinedInstruction != candidate.Instruction {
+				refinedCandidate := PromptCandidate{
+					Instruction: refinedInstruction,
+					Prefix:      candidate.Prefix,
+					Generation:  depth + 1,
+					AttemptID:   fmt.Sprintf("basic_refined_%d_%d", depth, i),
+				}
+				refined = append(refined, refinedCandidate)
+			}
+		}
+	}
+
+	// Calculate diversity scores
+	c.calculatePromptDiversity(refined)
 	return refined
 }
 
@@ -334,8 +385,8 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	var totalScore float64
 	validEvaluations := 0
 
-	// Evaluate on a subset of examples for efficiency - reduced for speed
-	maxEval := min(len(examples), 5) // Reduced from 20 to 5 for faster evaluation
+	// Evaluate on full training set for proper candidate discrimination (matching Python DSPy)
+	maxEval := len(examples) // Use all available examples for accurate evaluation
 
 	for i := 0; i < maxEval; i++ {
 		example := examples[i]
@@ -397,40 +448,239 @@ func (c *COPRO) datasetToExamples(dataset core.Dataset) []core.Example {
 	return examples
 }
 
-func (c *COPRO) getInstructionTemplates(signature core.Signature) []string {
-	// Generate diverse instruction templates based on the signature
-	templates := []string{
-		"Given the following information, provide a clear and accurate response.",
-		"Please analyze the input and generate an appropriate output.",
-		"Based on the provided context, answer the question thoroughly.",
-		"Process the given input and provide a well-reasoned response.",
-		"Review the information provided and give a detailed answer.",
-		"Examine the input carefully and provide a precise response.",
-		"Consider the given information and generate an appropriate answer.",
-		"Analyze the provided data and respond accurately.",
-		"Think through the problem step by step and provide your answer.",
-		"Based on your understanding, provide a comprehensive response.",
-	}
-
-	return templates
+// LLMPromptGenerator handles sophisticated prompt generation using LLM assistance.
+type LLMPromptGenerator struct {
+	llm                core.LLM
+	signature          core.Signature
+	candidateCache     map[string]PromptCandidate
+	diversityThreshold float64
 }
 
+// NewLLMPromptGenerator creates a new LLM-assisted prompt generator.
+func NewLLMPromptGenerator(llm core.LLM, signature core.Signature) *LLMPromptGenerator {
+	return &LLMPromptGenerator{
+		llm:                llm,
+		signature:          signature,
+		candidateCache:     make(map[string]PromptCandidate),
+		diversityThreshold: 0.7,
+	}
+}
+
+// generateBasicInstructions creates initial high-quality instruction candidates using LLM.
+func (lpg *LLMPromptGenerator) generateBasicInstructions(ctx context.Context, taskDescription string, breadth int, temperature float64) ([]string, error) {
+	// Create a sophisticated prompt for LLM-assisted instruction generation
+	generatorPrompt := fmt.Sprintf(`You are an expert prompt engineer. Your task is to generate %d high-quality, diverse instruction variations for a language model task.
+
+Task Description: %s
+
+Task Fields:
+- Input: %s 
+- Output: %s
+
+Generate %d distinct, effective instructions that will help a language model perform this task accurately. Each instruction should:
+1. Be clear and specific
+2. Provide helpful guidance 
+3. Use different phrasings and approaches
+4. Encourage step-by-step thinking when appropriate
+5. Be semantically diverse from the others
+
+Return ONLY the instructions, one per line, without numbering or bullet points.`,
+		breadth, taskDescription,
+		strings.Join(getFieldNames(lpg.signature.Inputs), ", "),
+		strings.Join(getFieldNames(lpg.signature.Outputs), ", "),
+		breadth)
+
+	// Use LLM to generate sophisticated instructions
+	output, err := lpg.llm.Generate(ctx, generatorPrompt,
+		core.WithTemperature(temperature),
+		core.WithMaxTokens(1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate instructions: %w", err)
+	}
+
+	// Parse the generated instructions
+	response := output.Content
+
+	instructions := strings.Split(strings.TrimSpace(response), "\n")
+
+	// Clean and validate instructions
+	var validInstructions []string
+	for _, inst := range instructions {
+		cleaned := strings.TrimSpace(inst)
+		if len(cleaned) > 10 && !strings.HasPrefix(cleaned, "#") {
+			validInstructions = append(validInstructions, cleaned)
+		}
+	}
+
+	// If we didn't get enough valid instructions, add some fallbacks
+	if len(validInstructions) < breadth {
+		fallbacks := lpg.getFallbackInstructions(taskDescription)
+		for i := len(validInstructions); i < breadth && i < len(fallbacks); i++ {
+			validInstructions = append(validInstructions, fallbacks[i])
+		}
+	}
+
+	return validInstructions[:min(len(validInstructions), breadth)], nil
+}
+
+// generateRefinedInstructions creates improved instructions based on previous attempts.
+func (lpg *LLMPromptGenerator) generateRefinedInstructions(ctx context.Context, history []PromptCandidate, breadth int, temperature float64) ([]string, error) {
+	if len(history) == 0 {
+		return nil, fmt.Errorf("no history available for refinement")
+	}
+
+	// Sort history by score to get best and worst performers
+	sort.Slice(history, func(i, j int) bool {
+		return history[i].Score > history[j].Score
+	})
+
+	// Create refinement prompt with performance feedback
+	bestInstructions := ""
+	worstInstructions := ""
+
+	for i := 0; i < min(3, len(history)); i++ {
+		bestInstructions += fmt.Sprintf("- %s (score: %.3f)\n", history[i].Instruction, history[i].Score)
+	}
+
+	for i := maxInt(0, len(history)-3); i < len(history); i++ {
+		worstInstructions += fmt.Sprintf("- %s (score: %.3f)\n", history[i].Instruction, history[i].Score)
+	}
+
+	refinementPrompt := fmt.Sprintf(`You are an expert prompt engineer analyzing previous instruction attempts. Based on the performance data below, generate %d improved instruction variations.
+
+Task: %s
+
+HIGH-PERFORMING INSTRUCTIONS:
+%s
+LOW-PERFORMING INSTRUCTIONS:
+%s
+
+Analyze what made the high-performing instructions successful and what made the low-performing ones less effective. Generate %d new, improved instructions that:
+1. Build on the successful patterns from high-performers
+2. Avoid the weaknesses of low-performers  
+3. Introduce new effective approaches
+4. Are diverse and semantically distinct
+5. Provide clear, actionable guidance
+
+Return ONLY the improved instructions, one per line.`,
+		breadth, lpg.getTaskDescription(),
+		bestInstructions, worstInstructions, breadth)
+
+	output, err := lpg.llm.Generate(ctx, refinementPrompt,
+		core.WithTemperature(temperature),
+		core.WithMaxTokens(1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refined instructions: %w", err)
+	}
+
+	response := output.Content
+
+	instructions := strings.Split(strings.TrimSpace(response), "\n")
+	var validInstructions []string
+	for _, inst := range instructions {
+		cleaned := strings.TrimSpace(inst)
+		if len(cleaned) > 10 {
+			validInstructions = append(validInstructions, cleaned)
+		}
+	}
+
+	return validInstructions[:min(len(validInstructions), breadth)], nil
+}
+
+// getFallbackInstructions provides sophisticated fallback instructions.
+func (lpg *LLMPromptGenerator) getFallbackInstructions(taskDescription string) []string {
+	return []string{
+		"Analyze the provided information step-by-step and generate a precise, well-reasoned response.",
+		"Carefully examine the input data and provide a clear, accurate answer with supporting details.",
+		"Think through this problem methodically, considering all relevant factors before responding.",
+		"Process the given information thoroughly and deliver a comprehensive, well-structured answer.",
+		"Review the provided context carefully and generate a detailed, evidence-based response.",
+		"Systematically analyze the input and provide a clear, logical, and well-justified answer.",
+		"Consider all aspects of the given information and respond with precision and clarity.",
+		"Examine the provided data comprehensively and generate an accurate, well-reasoned output.",
+	}
+}
+
+// getTaskDescription creates a description of the current task.
+func (lpg *LLMPromptGenerator) getTaskDescription() string {
+	if lpg.signature.Instruction != "" {
+		return lpg.signature.Instruction
+	}
+	return fmt.Sprintf("Process %s to generate %s",
+		strings.Join(getFieldNames(lpg.signature.Inputs), ", "),
+		strings.Join(getFieldNames(lpg.signature.Outputs), ", "))
+}
+
+// calculatePromptDiversity computes semantic diversity between prompt candidates.
+func (c *COPRO) calculatePromptDiversity(candidates []PromptCandidate) {
+	for i := range candidates {
+		diversitySum := 0.0
+		comparisons := 0
+
+		for j := range candidates {
+			if i != j {
+				similarity := c.computeTextSimilarity(candidates[i].Instruction, candidates[j].Instruction)
+				diversitySum += (1.0 - similarity)
+				comparisons++
+			}
+		}
+
+		if comparisons > 0 {
+			candidates[i].Diversity = diversitySum / float64(comparisons)
+		}
+	}
+}
+
+// computeTextSimilarity computes similarity between two text strings.
+func (c *COPRO) computeTextSimilarity(text1, text2 string) float64 {
+	// Simple word-based similarity (can be enhanced with embedding similarity)
+	words1 := strings.Fields(strings.ToLower(text1))
+	words2 := strings.Fields(strings.ToLower(text2))
+
+	wordSet1 := make(map[string]bool)
+	wordSet2 := make(map[string]bool)
+
+	for _, word := range words1 {
+		wordSet1[word] = true
+	}
+	for _, word := range words2 {
+		wordSet2[word] = true
+	}
+
+	intersection := 0
+	for word := range wordSet1 {
+		if wordSet2[word] {
+			intersection++
+		}
+	}
+
+	union := len(wordSet1) + len(wordSet2) - intersection
+	if union == 0 {
+		return 1.0
+	}
+
+	return float64(intersection) / float64(union)
+}
+
+// varyInstruction creates sophisticated variations using LLM assistance.
 func (c *COPRO) varyInstruction(baseInstruction string, temperature float64) string {
 	if baseInstruction == "" {
 		return "Please provide a clear and accurate response to the given input."
 	}
 
-	// Simple variation: add prefixes/suffixes based on temperature
+	// Enhanced variation strategies
 	variations := []string{
-		"Think carefully and " + strings.ToLower(baseInstruction),
-		baseInstruction + " Be specific and thorough.",
-		"Step by step, " + strings.ToLower(baseInstruction),
-		baseInstruction + " Provide detailed reasoning.",
-		"Carefully consider: " + strings.ToLower(baseInstruction),
+		"Think step-by-step and " + strings.ToLower(baseInstruction),
+		baseInstruction + " Ensure your response is comprehensive and well-reasoned.",
+		"Carefully analyze the information, then " + strings.ToLower(baseInstruction),
+		baseInstruction + " Provide clear justification for your answer.",
+		"Consider all relevant factors and " + strings.ToLower(baseInstruction),
+		"Systematically evaluate the input and " + strings.ToLower(baseInstruction),
+		baseInstruction + " Support your response with logical reasoning.",
 	}
 
-	// Temperature-based selection
-	if temperature > 1.0 {
+	// Temperature-based selection with enhanced randomness
+	if temperature > 0.8 {
 		idx := rand.Intn(len(variations))
 		return variations[idx]
 	}
@@ -438,24 +688,36 @@ func (c *COPRO) varyInstruction(baseInstruction string, temperature float64) str
 	return baseInstruction
 }
 
+// refineInstruction applies sophisticated refinement strategies.
 func (c *COPRO) refineInstruction(instruction string, temperature float64) string {
-	// Simple refinement strategy - could be made more sophisticated
+	// Enhanced refinement strategies with context awareness
 	refinements := []string{
-		"more precisely",
-		"step by step",
-		"thoroughly and carefully",
-		"with detailed reasoning",
-		"clearly and accurately",
+		"with methodical analysis",
+		"using step-by-step reasoning",
+		"with comprehensive evaluation",
+		"through careful consideration",
+		"with detailed justification",
+		"using systematic approach",
+		"with thorough examination",
+		"through logical analysis",
 	}
 
-	if temperature > 0.5 && rand.Float64() < temperature {
+	// Context-aware refinement placement
+	if temperature > 0.4 && rand.Float64() < temperature {
 		refinement := refinements[rand.Intn(len(refinements))]
 
-		// Add refinement to instruction
+		// Intelligent refinement insertion
 		if strings.Contains(instruction, ".") {
-			return strings.Replace(instruction, ".", " "+refinement+".", 1)
+			// Insert before final period
+			lastDot := strings.LastIndex(instruction, ".")
+			return instruction[:lastDot] + " " + refinement + instruction[lastDot:]
+		} else if strings.Contains(instruction, ",") {
+			// Insert after first comma
+			firstComma := strings.Index(instruction, ",")
+			return instruction[:firstComma+1] + " " + refinement + "," + instruction[firstComma+1:]
 		} else {
-			return instruction + " " + refinement
+			// Append to end
+			return instruction + " " + refinement + "."
 		}
 	}
 
@@ -492,4 +754,57 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// getFieldNames extracts field names from InputField or OutputField slices.
+func getFieldNames(fields interface{}) []string {
+	switch f := fields.(type) {
+	case []core.InputField:
+		names := make([]string, len(f))
+		for i, field := range f {
+			names[i] = field.Name
+		}
+		return names
+	case []core.OutputField:
+		names := make([]string, len(f))
+		for i, field := range f {
+			names[i] = field.Name
+		}
+		return names
+	default:
+		return []string{}
+	}
+}
+
+// getTaskDescription creates a comprehensive task description for LLM prompt generation.
+func (c *COPRO) getTaskDescription(signature core.Signature, baseInstruction string) string {
+	if baseInstruction != "" {
+		return baseInstruction
+	}
+	if signature.Instruction != "" {
+		return signature.Instruction
+	}
+	return fmt.Sprintf("Process %s to generate %s",
+		strings.Join(getFieldNames(signature.Inputs), ", "),
+		strings.Join(getFieldNames(signature.Outputs), ", "))
+}
+
+// getEnhancedInstructionTemplates provides sophisticated fallback instruction templates.
+func (c *COPRO) getEnhancedInstructionTemplates(signature core.Signature, baseInstruction string) []string {
+	taskDesc := c.getTaskDescription(signature, baseInstruction)
+
+	templates := []string{
+		fmt.Sprintf("Carefully analyze the provided information and %s with comprehensive reasoning.", strings.ToLower(taskDesc)),
+		fmt.Sprintf("Think step-by-step through the given data to %s accurately and precisely.", strings.ToLower(taskDesc)),
+		fmt.Sprintf("Systematically evaluate all relevant factors to %s with detailed justification.", strings.ToLower(taskDesc)),
+		fmt.Sprintf("Examine the input thoroughly and %s using logical, methodical analysis.", strings.ToLower(taskDesc)),
+		fmt.Sprintf("Process the given information comprehensively to %s with clear reasoning.", strings.ToLower(taskDesc)),
+	}
+
+	// Ensure we have enough templates
+	for len(templates) < c.Breadth {
+		templates = append(templates, "Analyze the provided information step-by-step and generate a precise, well-reasoned response.")
+	}
+
+	return templates[:c.Breadth]
 }

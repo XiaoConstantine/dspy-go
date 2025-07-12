@@ -760,3 +760,220 @@ func TestEnvironmentSourceAgentMemory(t *testing.T) {
 	err = source.setAgentMemoryValue(memory, "unknown", "value")
 	assert.NoError(t, err) // Should not error for unknown keys
 }
+
+func TestEnvironmentSourceChainOfThought(t *testing.T) {
+	source := NewEnvironmentSource()
+	cot := &ChainOfThoughtConfig{}
+	
+	// Test max.steps
+	err := source.setChainOfThoughtValue(cot, "max.steps", "5")
+	assert.NoError(t, err)
+	assert.Equal(t, 5, cot.MaxSteps)
+	
+	// Test maxSteps alternative
+	err = source.setChainOfThoughtValue(cot, "maxSteps", "10")
+	assert.NoError(t, err)
+	assert.Equal(t, 10, cot.MaxSteps)
+	
+	// Test include.reasoning
+	err = source.setChainOfThoughtValue(cot, "include.reasoning", "true")
+	assert.NoError(t, err)
+	assert.True(t, cot.IncludeReasoning)
+	
+	// Test includeReasoning alternative
+	err = source.setChainOfThoughtValue(cot, "includeReasoning", "false")
+	assert.NoError(t, err)
+	assert.False(t, cot.IncludeReasoning)
+	
+	// Test step.delimiter
+	err = source.setChainOfThoughtValue(cot, "step.delimiter", " -> ")
+	assert.NoError(t, err)
+	assert.Equal(t, " -> ", cot.StepDelimiter)
+	
+	// Test stepDelimiter alternative
+	err = source.setChainOfThoughtValue(cot, "stepDelimiter", " | ")
+	assert.NoError(t, err)
+	assert.Equal(t, " | ", cot.StepDelimiter)
+	
+	// Test invalid values
+	err = source.setChainOfThoughtValue(cot, "max.steps", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setChainOfThoughtValue(cot, "include.reasoning", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setChainOfThoughtValue(cot, "unknown", "value")
+	assert.NoError(t, err)
+}
+
+func TestEnvironmentSourceMultiChainComparison(t *testing.T) {
+	source := NewEnvironmentSource()
+	mcc := &MultiChainComparisonConfig{}
+	
+	// Test num.chains
+	err := source.setMultiChainComparisonValue(mcc, "num.chains", "3")
+	assert.NoError(t, err)
+	assert.Equal(t, 3, mcc.NumChains)
+	
+	// Test numChains alternative
+	err = source.setMultiChainComparisonValue(mcc, "numChains", "5")
+	assert.NoError(t, err)
+	assert.Equal(t, 5, mcc.NumChains)
+	
+	// Test comparison.strategy
+	err = source.setMultiChainComparisonValue(mcc, "comparison.strategy", "majority_vote")
+	assert.NoError(t, err)
+	assert.Equal(t, "majority_vote", mcc.ComparisonStrategy)
+	
+	// Test parallel.execution
+	err = source.setMultiChainComparisonValue(mcc, "parallel.execution", "true")
+	assert.NoError(t, err)
+	assert.True(t, mcc.ParallelExecution)
+	
+	// Test invalid values
+	err = source.setMultiChainComparisonValue(mcc, "num.chains", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setMultiChainComparisonValue(mcc, "parallel.execution", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setMultiChainComparisonValue(mcc, "unknown", "value")
+	assert.NoError(t, err)
+}
+
+func TestEnvironmentSourceReAct(t *testing.T) {
+	source := NewEnvironmentSource()
+	react := &ReActConfig{}
+	
+	// Test max.cycles
+	err := source.setReActValue(react, "max.cycles", "3")
+	assert.NoError(t, err)
+	assert.Equal(t, 3, react.MaxCycles)
+	
+	// Test action.timeout
+	err = source.setReActValue(react, "action.timeout", "30s")
+	assert.NoError(t, err)
+	assert.Equal(t, 30*time.Second, react.ActionTimeout)
+	
+	// Test include.intermediate.steps
+	err = source.setReActValue(react, "include.intermediate.steps", "true")
+	assert.NoError(t, err)
+	assert.True(t, react.IncludeIntermediateSteps)
+	
+	// Test invalid values
+	err = source.setReActValue(react, "max.cycles", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setReActValue(react, "action.timeout", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setReActValue(react, "include.intermediate.steps", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setReActValue(react, "unknown", "value")
+	assert.NoError(t, err)
+}
+
+func TestEnvironmentSourceRefine(t *testing.T) {
+	source := NewEnvironmentSource()
+	refine := &RefineConfig{}
+	
+	// Test max.iterations
+	err := source.setRefineValue(refine, "max.iterations", "5")
+	assert.NoError(t, err)
+	assert.Equal(t, 5, refine.MaxIterations)
+	
+	// Test convergence.threshold
+	err = source.setRefineValue(refine, "convergence.threshold", "0.95")
+	assert.NoError(t, err)
+	assert.Equal(t, 0.95, refine.ConvergenceThreshold)
+	
+	// Test refinement.strategy
+	err = source.setRefineValue(refine, "refinement.strategy", "iterative_improvement")
+	assert.NoError(t, err)
+	assert.Equal(t, "iterative_improvement", refine.RefinementStrategy)
+	
+	// Test invalid values
+	err = source.setRefineValue(refine, "max.iterations", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setRefineValue(refine, "convergence.threshold", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setRefineValue(refine, "unknown", "value")
+	assert.NoError(t, err)
+}
+
+func TestEnvironmentSourceWorkflows(t *testing.T) {
+	source := NewEnvironmentSource()
+	workflows := &WorkflowsConfig{}
+	
+	// Test default.timeout
+	err := source.setWorkflowsValue(workflows, "default.timeout", "5m")
+	assert.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, workflows.DefaultTimeout)
+	
+	// Test invalid timeout
+	err = source.setWorkflowsValue(workflows, "default.timeout", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setWorkflowsValue(workflows, "unknown", "value")
+	assert.NoError(t, err)
+}
+
+func TestEnvironmentSourceTools(t *testing.T) {
+	source := NewEnvironmentSource()
+	tools := &ToolsConfig{}
+	
+	// Test registry.max.tools
+	err := source.setToolsValue(tools, "registry.max.tools", "100")
+	assert.NoError(t, err)
+	assert.Equal(t, 100, tools.Registry.MaxTools)
+	
+	// Test registry.auto.discovery
+	err = source.setToolsValue(tools, "registry.auto.discovery", "true")
+	assert.NoError(t, err)
+	assert.True(t, tools.Registry.AutoDiscovery)
+	
+	// Test invalid values
+	err = source.setToolsValue(tools, "registry.max.tools", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setToolsValue(tools, "registry.auto.discovery", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setToolsValue(tools, "unknown", "value")
+	assert.NoError(t, err)
+}
+
+func TestEnvironmentSourceMCP(t *testing.T) {
+	source := NewEnvironmentSource()
+	mcp := &MCPConfig{}
+	
+	// Test default.timeout
+	err := source.setMCPValue(mcp, "default.timeout", "10s")
+	assert.NoError(t, err)
+	assert.Equal(t, 10*time.Second, mcp.DefaultTimeout)
+	
+	// Test max.connections
+	err = source.setMCPValue(mcp, "max.connections", "5")
+	assert.NoError(t, err)
+	assert.Equal(t, 5, mcp.ConnectionPool.MaxConnections)
+	
+	// Test invalid values
+	err = source.setMCPValue(mcp, "default.timeout", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setMCPValue(mcp, "max.connections", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setMCPValue(mcp, "unknown", "value")
+	assert.NoError(t, err)
+}

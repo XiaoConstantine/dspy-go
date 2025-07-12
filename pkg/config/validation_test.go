@@ -428,3 +428,112 @@ func TestValidateConfigurationWithComplexErrors(t *testing.T) {
 	assert.Contains(t, errStr, "MaxTokens")
 	assert.Contains(t, errStr, "BackoffMultiplier")
 }
+
+func TestValidationCustomValidators(t *testing.T) {
+	// Create a test config with fields that will trigger custom validators
+	config := GetDefaultConfig()
+	
+	// Test log level validation
+	config.Logging.Level = "invalid_level"
+	err := ValidateConfiguration(config)
+	assert.Error(t, err)
+	
+	// Test valid log level
+	config.Logging.Level = "INFO"
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+	
+	// Note: Outputs validation is handled by struct tags, not custom validators
+	// Test that we can add valid outputs
+	config.Logging.Outputs = []LogOutputConfig{
+		{Type: "console", Format: "json"},
+	}
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+}
+
+func TestValidationProviderAndModelValidation(t *testing.T) {
+	config := GetDefaultConfig()
+	
+	// Test invalid provider
+	config.LLM.Default.Provider = "invalid_provider"
+	err := ValidateConfiguration(config)
+	assert.Error(t, err)
+	
+	// Test valid provider
+	config.LLM.Default.Provider = "anthropic"
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+	
+	// Test empty model ID
+	config.LLM.Default.ModelID = ""
+	err = ValidateConfiguration(config)
+	assert.Error(t, err)
+	
+	// Test valid model ID
+	config.LLM.Default.ModelID = "claude-3-sonnet-20240229"
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+}
+
+func TestValidationBackendAndStrategyValidation(t *testing.T) {
+	config := GetDefaultConfig()
+	
+	// Test caching backend validation
+	config.Modules.Predict.Caching.Type = "invalid_backend"
+	err := ValidateConfiguration(config)
+	assert.Error(t, err)
+	
+	// Test valid caching backend
+	config.Modules.Predict.Caching.Type = "memory"
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+	
+	// Test comparison strategy validation
+	config.Modules.MultiChainComparison.ComparisonStrategy = "invalid_strategy"
+	err = ValidateConfiguration(config)
+	assert.Error(t, err)
+	
+	// Test valid comparison strategy
+	config.Modules.MultiChainComparison.ComparisonStrategy = "majority_vote"
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+}
+
+func TestValidationEdgeCases(t *testing.T) {
+	// Test registerAllValidators error path
+	validator, err := NewValidator()
+	require.NoError(t, err)
+	assert.NotNil(t, validator)
+	
+	// Test validateLogOutput with different paths
+	config := GetDefaultConfig()
+	
+	// Test with empty outputs array
+	config.Logging.Outputs = []LogOutputConfig{}
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+	
+	// Test with multiple outputs
+	config.Logging.Outputs = []LogOutputConfig{
+		{Type: "console", Format: "json"},
+		{Type: "file", Format: "text", FilePath: "/tmp/test.log"},
+	}
+	err = ValidateConfiguration(config)
+	assert.NoError(t, err)
+}
+
+func TestDefaults(t *testing.T) {
+	// Test mergeLLMConfig edge cases
+	config := GetDefaultConfig()
+	
+	// Test with empty teacher config (this hits the 80% coverage line)
+	config.LLM.Teacher = LLMProviderConfig{}
+	merged := MergeWithDefaults(config)
+	assert.NotNil(t, merged)
+	
+	// Test mergeWorkflowPersistenceConfig
+	config.Agents.Workflows.Persistence = WorkflowPersistenceConfig{}
+	merged = MergeWithDefaults(config)
+	assert.NotNil(t, merged)
+}
