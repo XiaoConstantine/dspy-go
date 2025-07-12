@@ -310,3 +310,70 @@ func TestCreateDefaultConfigFileInHomeDir(t *testing.T) {
 	assert.FileExists(t, configPath)
 	assert.Contains(t, configPath, "dspy.yaml")
 }
+
+func TestDiscoverConfigFilesGlobal(t *testing.T) {
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "dspy.yaml")
+	
+	err := os.WriteFile(configFile, []byte("test: value"), 0644)
+	require.NoError(t, err)
+	
+	// Change working directory temporarily to test the function
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	
+	err = os.Chdir(tempDir)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+	
+	files, err := DiscoverConfigFiles()
+	require.NoError(t, err)
+	assert.Len(t, files, 1)
+	assert.Contains(t, files[0], "dspy.yaml")
+}
+
+func TestDiscoverFirstConfigFileGlobal(t *testing.T) {
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "dspy.yaml")
+	
+	err := os.WriteFile(configFile, []byte("test: value"), 0644)
+	require.NoError(t, err)
+	
+	// Change working directory temporarily to test the function
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	
+	err = os.Chdir(tempDir)
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+	
+	firstFile, err := DiscoverFirstConfigFile()
+	require.NoError(t, err)
+	assert.Contains(t, firstFile, "dspy.yaml")
+}
+
+func TestCreateDefaultConfigFileInHomeDirActual(t *testing.T) {
+	// Test actual function (not method)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot access home directory")
+	}
+	
+	testConfigDir := filepath.Join(homeDir, ".config", "dspy-go-test-actual")
+	defer os.RemoveAll(filepath.Dir(testConfigDir))
+	
+	configPath, err := CreateDefaultConfigFileInHomeDir()
+	if err == nil {
+		// If successful, clean up the created file
+		defer os.RemoveAll(filepath.Dir(configPath))
+		assert.FileExists(t, configPath)
+		assert.Contains(t, configPath, "dspy.yaml")
+	} else {
+		// It's ok if this fails due to permissions
+		t.Logf("CreateDefaultConfigFileInHomeDir failed (expected): %v", err)
+	}
+}

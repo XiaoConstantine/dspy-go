@@ -628,3 +628,135 @@ func TestSetConfigValueEdgeCases(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 45*time.Second, config.LLM.Default.Endpoint.Timeout)
 }
+
+func TestEnvironmentSourcePredictSettings(t *testing.T) {
+	source := NewEnvironmentSource()
+	
+	// Initialize PredictSettings
+	settings := &PredictSettings{}
+	
+	// Test include.confidence
+	err := source.setPredictSettingsValue(settings, "include.confidence", "true")
+	assert.NoError(t, err)
+	assert.True(t, settings.IncludeConfidence)
+	
+	// Test includeConfidence alternative
+	err = source.setPredictSettingsValue(settings, "includeConfidence", "false")
+	assert.NoError(t, err)
+	assert.False(t, settings.IncludeConfidence)
+	
+	// Test temperature
+	err = source.setPredictSettingsValue(settings, "temperature", "0.7")
+	assert.NoError(t, err)
+	assert.Equal(t, 0.7, settings.Temperature)
+	
+	// Test top.k
+	err = source.setPredictSettingsValue(settings, "top.k", "10")
+	assert.NoError(t, err)
+	assert.Equal(t, 10, settings.TopK)
+	
+	// Test topK alternative
+	err = source.setPredictSettingsValue(settings, "topK", "20")
+	assert.NoError(t, err)
+	assert.Equal(t, 20, settings.TopK)
+	
+	// Test invalid values
+	err = source.setPredictSettingsValue(settings, "include.confidence", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setPredictSettingsValue(settings, "temperature", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setPredictSettingsValue(settings, "top.k", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setPredictSettingsValue(settings, "unknown", "value")
+	assert.NoError(t, err) // Should not error for unknown keys
+}
+
+func TestEnvironmentSourceCaching(t *testing.T) {
+	source := NewEnvironmentSource()
+	
+	// Initialize CachingConfig
+	caching := &CachingConfig{}
+	
+	// Test enabled
+	err := source.setCachingValue(caching, "enabled", "true")
+	assert.NoError(t, err)
+	assert.True(t, caching.Enabled)
+	
+	// Test type field
+	err = source.setCachingValue(caching, "type", "redis")
+	assert.NoError(t, err)
+	assert.Equal(t, "redis", caching.Type)
+	
+	// Test ttl (needs duration format)
+	err = source.setCachingValue(caching, "ttl", "1h")
+	assert.NoError(t, err)
+	assert.Equal(t, 1*time.Hour, caching.TTL)
+	
+	// Test invalid values
+	err = source.setCachingValue(caching, "enabled", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setCachingValue(caching, "ttl", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setCachingValue(caching, "unknown", "value")
+	assert.NoError(t, err) // Should not error for unknown keys
+}
+
+func TestEnvironmentSourceAgentSettings(t *testing.T) {
+	source := NewEnvironmentSource()
+	
+	// Initialize AgentConfig
+	agent := &AgentConfig{}
+	
+	// Test timeout (needs duration format)
+	err := source.setAgentValue(agent, "timeout", "30s")
+	assert.NoError(t, err)
+	assert.Equal(t, 30*time.Second, agent.Timeout)
+	
+	// Test max.history
+	err = source.setAgentValue(agent, "max.history", "100")
+	assert.NoError(t, err)
+	assert.Equal(t, 100, agent.MaxHistory)
+	
+	// Test invalid values
+	err = source.setAgentValue(agent, "timeout", "invalid")
+	assert.Error(t, err)
+	
+	err = source.setAgentValue(agent, "max.history", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setAgentValue(agent, "unknown", "value")
+	assert.NoError(t, err) // Should not error for unknown keys
+}
+
+func TestEnvironmentSourceAgentMemory(t *testing.T) {
+	source := NewEnvironmentSource()
+	
+	// Initialize AgentMemoryConfig
+	memory := &AgentMemoryConfig{}
+	
+	// Test capacity
+	err := source.setAgentMemoryValue(memory, "capacity", "1000")
+	assert.NoError(t, err)
+	assert.Equal(t, 1000, memory.Capacity)
+	
+	// Test type
+	err = source.setAgentMemoryValue(memory, "type", "buffered")
+	assert.NoError(t, err)
+	assert.Equal(t, "buffered", memory.Type)
+	
+	// Test invalid values
+	err = source.setAgentMemoryValue(memory, "capacity", "invalid")
+	assert.Error(t, err)
+	
+	// Test unhandled key
+	err = source.setAgentMemoryValue(memory, "unknown", "value")
+	assert.NoError(t, err) // Should not error for unknown keys
+}
