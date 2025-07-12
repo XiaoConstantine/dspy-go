@@ -1938,7 +1938,21 @@ func (s *SIMBA) initializePipelineChannels() {
 		CandidateEvaluation: make(chan *PipelineStage, bufferSize),
 		Results:             make(chan *PipelineStage, bufferSize),
 		Errors:              make(chan error, bufferSize*3), // Extra capacity for error handling
-		Done:                make(chan struct{}),
+		Done:                make(chan struct{}, 1),         // ✅ Buffered to prevent blocking
+	}
+}
+
+// safeSendStage safely sends a stage to a channel with timeout protection.
+func (s *SIMBA) safeSendStage(ctx context.Context, ch chan<- *PipelineStage, stage *PipelineStage) bool {
+	select {
+	case ch <- stage:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-s.pipelineChannels.Done:
+		return false
+	case <-time.After(100 * time.Millisecond): // Prevent indefinite blocking
+		return false
 	}
 }
 
@@ -2025,24 +2039,12 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 				Error:      err,
 			}
 
-			select {
-			case s.pipelineChannels.CandidateGeneration <- stage:
+			// Use safe send with timeout protection
+			if s.safeSendStage(ctx, s.pipelineChannels.CandidateGeneration, stage) {
 				stepIndex++
-			case <-ctx.Done():
+			} else {
+				// Failed to send, likely due to shutdown or timeout
 				return
-			case <-s.pipelineChannels.Done:
-				return
-			default:
-				// Channel might be closed, check context and done channel quickly
-				select {
-				case <-ctx.Done():
-					return
-				case <-s.pipelineChannels.Done:
-					return
-				default:
-					// Exit immediately if channels are closed to avoid busy waiting
-					return
-				}
 			}
 
 			// Update current program from previous results
