@@ -17,9 +17,10 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: $0 [--optimizer bootstrap|mipro|simba|all] [--dataset-size N]"
+            echo "Usage: $0 [--optimizer bootstrap|mipro|simba|copro|all] [--dataset-size N]"
             echo "  --optimizer: Which optimizer to test (default: all)"
             echo "  --dataset-size: Dataset size for testing (default: 20)"
+            echo "  Note: CoPro is Go-specific and will only run Go tests"
             exit 0
             ;;
         *)

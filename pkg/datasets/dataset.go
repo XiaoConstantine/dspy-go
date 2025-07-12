@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 var (
@@ -82,4 +84,33 @@ func downloadDataset(datasetName, datasetPath string) error {
 	}
 
 	return nil
+}
+
+// SimpleDataset implements core.Dataset interface for testing and examples.
+type SimpleDataset struct {
+	examples []core.Example
+	current  int
+}
+
+// NewSimpleDataset creates a new SimpleDataset with the given examples.
+func NewSimpleDataset(examples []core.Example) *SimpleDataset {
+	return &SimpleDataset{
+		examples: examples,
+		current:  0,
+	}
+}
+
+// Next returns the next example in the dataset.
+func (sd *SimpleDataset) Next() (core.Example, bool) {
+	if sd.current >= len(sd.examples) {
+		return core.Example{}, false
+	}
+	example := sd.examples[sd.current]
+	sd.current++
+	return example, true
+}
+
+// Reset resets the dataset iterator to the beginning.
+func (sd *SimpleDataset) Reset() {
+	sd.current = 0
 }

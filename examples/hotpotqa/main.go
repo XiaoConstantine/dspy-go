@@ -182,15 +182,28 @@ func RunHotPotQAExample(apiKey string) {
 
 	optimizer := optimizers.NewBootstrapFewShot(metric, 5)
 
-	trainset := make([]map[string]interface{}, len(trainExamples))
+	// Convert to core.Examples
+	trainCoreExamples := make([]core.Example, len(trainExamples))
 	for i, ex := range trainExamples {
-		trainset[i] = map[string]interface{}{
-			"question": ex.Question,
-			"answer":   ex.Answer,
+		trainCoreExamples[i] = core.Example{
+			Inputs: map[string]interface{}{
+				"question": ex.Question,
+			},
+			Outputs: map[string]interface{}{
+				"answer": ex.Answer,
+			},
 		}
 	}
 
-	compiledProgram, err := optimizer.Compile(ctx, program, program, trainset)
+	// Create dataset
+	trainDataset := datasets.NewSimpleDataset(trainCoreExamples)
+
+	// Define metric function
+	metricFunc := func(expected, actual map[string]interface{}) float64 {
+		return computeF1(actual["answer"].(string), expected["answer"].(string))
+	}
+
+	compiledProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
 	if err != nil {
 		logger.Fatalf(ctx, "Failed to compile program: %v", err)
 	}
