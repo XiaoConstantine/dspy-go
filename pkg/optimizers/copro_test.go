@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
@@ -660,7 +661,219 @@ func TestCOPROWithExecutionState(t *testing.T) {
 	assert.NotNil(t, optimizedProgram)
 }
 
-// Benchmark tests.
+// Benchmark tests using shared benchmark utilities.
+
+// BenchmarkCOPRO runs comprehensive benchmarks for COPRO optimizer.
+func BenchmarkCOPRO(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	configs := testutil.StandardBenchmarkConfigs()
+
+	testCases := []struct {
+		name       string
+		datasetKey string
+		configKey  string
+	}{
+		{"Fast_Tiny", "tiny", "fast"},
+		{"Fast_Small", "small", "fast"},
+		{"Standard_Small", "small", "standard"},
+		{"Standard_Medium", "medium", "standard"},
+		{"Comprehensive_Medium", "medium", "comprehensive"},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			dataset := datasets[tc.datasetKey]
+			config := configs[tc.configKey]
+
+			// Create program
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			// Create COPRO optimizer with config
+			copro := NewCOPRO(
+				testutil.BenchmarkAccuracyMetric,
+				WithBreadth(config.Breadth),
+				WithDepth(config.Depth),
+				WithInitTemperature(config.Temperature),
+			)
+
+			// Setup mock LLM
+			mockLLM := &MockLLM{}
+			mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "4"}, nil)
+			mockLLM.On("GetModelName").Return("test-model")
+			mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := core.WithExecutionState(context.Background())
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := copro.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
+
+// BenchmarkCOPRODatasetScaling tests performance across different dataset sizes.
+func BenchmarkCOPRODatasetScaling(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	config := testutil.StandardBenchmarkConfigs()["fast"] // Use fast config for scaling tests
+
+	for name, dataset := range datasets {
+		b.Run(fmt.Sprintf("Dataset_%s_%d", name, dataset.Size), func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			copro := NewCOPRO(
+				testutil.BenchmarkAccuracyMetric,
+				WithBreadth(config.Breadth),
+				WithDepth(config.Depth),
+			)
+
+			mockLLM := &MockLLM{}
+			mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "4"}, nil)
+			mockLLM.On("GetModelName").Return("test-model")
+			mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := core.WithExecutionState(context.Background())
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := copro.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
+
+// BenchmarkCOPROParameterTuning tests performance with different parameter configurations.
+func BenchmarkCOPROParameterTuning(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"] // Use small dataset for parameter testing
+
+	parameterTests := []struct {
+		name        string
+		breadth     int
+		depth       int
+		temperature float64
+	}{
+		{"Breadth3_Depth1", 3, 1, 1.0},
+		{"Breadth5_Depth2", 5, 2, 1.2},
+		{"Breadth8_Depth3", 8, 3, 1.5},
+		{"HighTemp_Breadth5", 5, 2, 2.0},
+		{"LowTemp_Breadth5", 5, 2, 0.5},
+	}
+
+	for _, pt := range parameterTests {
+		b.Run(pt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			copro := NewCOPRO(
+				testutil.BenchmarkAccuracyMetric,
+				WithBreadth(pt.breadth),
+				WithDepth(pt.depth),
+				WithInitTemperature(pt.temperature),
+			)
+
+			mockLLM := &MockLLM{}
+			mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "4"}, nil)
+			mockLLM.On("GetModelName").Return("test-model")
+			mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := core.WithExecutionState(context.Background())
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := copro.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
+
+// BenchmarkCOPROConcurrency tests parallel evaluation performance.
+func BenchmarkCOPROConcurrency(b *testing.B) {
+	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	copro := NewCOPRO(metric)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	predictor := modules.NewPredict(signature)
+
+	mockLLM := &MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "4"}, nil)
+	mockLLM.On("GetModelName").Return("test-model")
+	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+	predictor.SetLLM(mockLLM)
+
+	concurrencyTests := []struct {
+		name          string
+		numCandidates int
+		numExamples   int
+	}{
+		{"Candidates5_Examples10", 5, 10},
+		{"Candidates10_Examples20", 10, 20},
+		{"Candidates20_Examples50", 20, 50},
+	}
+
+	for _, ct := range concurrencyTests {
+		b.Run(ct.name, func(b *testing.B) {
+			candidates := make([]PromptCandidate, ct.numCandidates)
+			for i := range candidates {
+				candidates[i] = PromptCandidate{
+					Instruction: fmt.Sprintf("Candidate %d", i),
+					Score:       0.0,
+					Generation:  1,
+				}
+			}
+
+			examples := make([]core.Example, ct.numExamples)
+			for i := range examples {
+				examples[i] = core.Example{
+					Inputs:  map[string]interface{}{"question": fmt.Sprintf("What is %d+%d?", i, i)},
+					Outputs: map[string]interface{}{"answer": fmt.Sprintf("%d", i*2)},
+				}
+			}
+
+			ctx := context.Background()
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// Reset scores
+				for j := range candidates {
+					candidates[j].Score = 0.0
+				}
+				copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples)
+			}
+		})
+	}
+}
+
+// BenchmarkCOPROCompile is the original benchmark for backward compatibility.
 func BenchmarkCOPROCompile(b *testing.B) {
 	program := createCOPROTestProgram()
 	dataset := createCOPROTestDataset()

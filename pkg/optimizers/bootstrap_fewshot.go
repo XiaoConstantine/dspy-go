@@ -3,12 +3,12 @@ package optimizers
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -92,7 +92,8 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 
 	for i := 0; i < examplesNeeded; i++ {
 		if b.enoughBootstrappedDemos(compiledStudent) {
-			log.Println("Enough bootstrapped demos, breaking loop")
+			logger := logging.GetLogger()
+			logger.Info(ctx, "Enough bootstrapped demos, breaking loop")
 			break
 		}
 
