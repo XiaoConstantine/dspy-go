@@ -10,6 +10,14 @@
 DSPy Python Reference Implementation for Compatibility Testing
 This script provides a reference implementation using the official DSPy Python package
 for side-by-side comparison with dspy-go optimizers.
+
+Cache Control:
+- Use --disable-cache flag to disable DSPy caching
+- Or set environment variables before running:
+    export DSPY_CACHEDIR=""
+    export DSP_CACHEDIR=""
+    export DSP_NOTEBOOK_CACHEDIR=""
+    export DSPY_NOTEBOOK_CACHEDIR=""
 """
 
 import json
@@ -17,6 +25,30 @@ import logging
 import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
+
+# Check and optionally clear cache environment variables before importing dspy
+def configure_cache_environment(disable_cache: bool = False):
+    """Configure cache environment variables before importing dspy"""
+    cache_vars = ['DSPY_CACHEDIR', 'DSP_CACHEDIR', 'DSP_NOTEBOOK_CACHEDIR', 'DSPY_NOTEBOOK_CACHEDIR']
+    
+    if disable_cache:
+        for var in cache_vars:
+            os.environ[var] = ""
+        logger = logging.getLogger(__name__)
+        logger.info(f"Cleared cache environment variables: {', '.join(cache_vars)}")
+    else:
+        # Log current cache settings
+        logger = logging.getLogger(__name__)
+        current_settings = {}
+        for var in cache_vars:
+            if var in os.environ:
+                current_settings[var] = os.environ[var]
+        if current_settings:
+            logger.info(f"Current cache environment variables: {current_settings}")
+
+# Check if we should disable cache from command line arguments
+if '--disable-cache' in sys.argv:
+    configure_cache_environment(disable_cache=True)
 
 import dspy
 from dspy.teleprompt import BootstrapFewShot, MIPROv2, SIMBA, COPRO
@@ -73,10 +105,36 @@ class BasicProgram(dspy.Module):
 class OptimizerComparison:
     """Main comparison class for testing optimizer compatibility"""
     
-    def __init__(self, model_name: str = "gemini/gemini-2.0-flash"):
+    def __init__(self, model_name: str = "gemini/gemini-2.0-flash", disable_cache: bool = False):
         self.model_name = model_name
-        # Disable retries to reduce API calls when service is overloaded
-        self.lm = dspy.LM(model=model_name, max_tokens=8192, max_retries=0)
+        self.disable_cache = disable_cache
+        
+        # Configure cache settings if requested
+        if disable_cache:
+            logger.info("Disabling DSPy caching")
+            # Method 1: Using configure_cache (for DSPy v2.5+)
+            try:
+                dspy.configure_cache(
+                    enable_disk_cache=False,
+                    enable_memory_cache=False,
+                )
+                logger.info("Successfully disabled caching using dspy.configure_cache()")
+            except AttributeError:
+                logger.warning("dspy.configure_cache() not available, trying alternative method")
+                pass
+            
+            # Method 2: Set cache=False in LM configuration (for DSPy v2.5+)
+            try:
+                self.lm = dspy.LM(model=model_name, max_tokens=8192, max_retries=0, cache=False)
+                logger.info("Successfully disabled caching using cache=False parameter")
+            except TypeError:
+                # Fallback for older versions that don't support cache parameter
+                logger.warning("cache parameter not supported, using standard configuration")
+                self.lm = dspy.LM(model=model_name, max_tokens=8192, max_retries=0)
+        else:
+            # Standard configuration with caching enabled
+            self.lm = dspy.LM(model=model_name, max_tokens=8192, max_retries=0)
+        
         dspy.settings.configure(lm=self.lm)
         
         # Initialize metrics
@@ -457,11 +515,13 @@ def main():
                        default='all', help='Optimizer to test (default: all)')
     parser.add_argument('--dataset-size', type=int, default=20, 
                        help='Dataset size for testing (default: 20)')
+    parser.add_argument('--disable-cache', action='store_true',
+                       help='Disable DSPy caching (useful for testing and debugging)')
     
     args = parser.parse_args()
     
     # Initialize comparison with Gemini 2.0 Flash
-    comparison = OptimizerComparison("gemini/gemini-2.0-flash")
+    comparison = OptimizerComparison("gemini/gemini-2.0-flash", disable_cache=args.disable_cache)
     
     # Create dataset
     dataset = comparison.create_sample_dataset(args.dataset_size)

@@ -57,7 +57,7 @@ echo "✅ uv is available"
 
 # Run Python DSPy comparison using uv
 echo "🐍 Running Python DSPy comparison with uv..."
-uv run dspy_comparison.py --optimizer "$OPTIMIZER" --dataset-size "$DATASET_SIZE"
+uv run dspy_comparison.py --disable-cache --optimizer "$OPTIMIZER" --dataset-size "$DATASET_SIZE"
 
 # Check if Python comparison was successful
 if [ $? -eq 0 ]; then
