@@ -4,10 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 )
+
+// ConcurrencyTestMu protects concurrent access to global concurrency settings
+// during benchmark tests to prevent race conditions.
+var ConcurrencyTestMu sync.Mutex
 
 // BenchmarkDataset represents different dataset sizes for benchmarking.
 type BenchmarkDataset struct {
