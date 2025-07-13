@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
@@ -30,13 +31,14 @@ type COPRO struct {
 
 // PromptCandidate represents a candidate prompt configuration.
 type PromptCandidate struct {
-	Instruction string
-	Prefix      string
-	Score       float64
-	Generation  int     // Which depth iteration this was generated in
-	Diversity   float64 // Semantic diversity score
-	Rank        int     // Performance ranking
-	AttemptID   string  // Unique identifier for tracking
+	Instruction     string
+	Prefix          string
+	Score           float64 // Training score
+	ValidationScore float64 // Validation score to prevent overfitting
+	Generation      int     // Which depth iteration this was generated in
+	Diversity       float64 // Semantic diversity score
+	Rank            int     // Performance ranking
+	AttemptID       string  // Unique identifier for tracking
 }
 
 // COPROOptions provides configuration options for COPRO.
@@ -124,6 +126,7 @@ func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	if core.GetExecutionState(ctx) == nil {
 		ctx = core.WithExecutionState(ctx)
 	}
+	logger := logging.GetLogger()
 
 	ctx, span := core.StartSpan(ctx, "COPROCompilation")
 	defer core.EndSpan(ctx)
@@ -134,11 +137,11 @@ func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	// Extract all Predict modules that need optimization
 	predictors := c.extractPredictors(optimizedProgram)
 	if len(predictors) == 0 {
-		log.Println("COPRO: No Predict modules found to optimize")
+		logger.Info(ctx, "COPRO: No Predict modules found to optimize")
 		return optimizedProgram, nil
 	}
 
-	log.Printf("COPRO: Found %d Predict modules to optimize", len(predictors))
+	logger.Info(ctx, "COPRO: Found %d Predict modules to optimize", len(predictors))
 
 	// Optimize each predictor's prompts
 	for moduleName, predictor := range predictors {
@@ -175,12 +178,22 @@ func (c *COPRO) extractPredictors(program core.Program) map[string]*modules.Pred
 func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predict, dataset core.Dataset) error {
 	ctx, span := core.StartSpan(ctx, "OptimizePredictorPrompts")
 	defer core.EndSpan(ctx)
+	logger := logging.GetLogger()
 
 	// Convert dataset to examples for evaluation
 	examples := c.datasetToExamples(dataset)
 	if len(examples) == 0 {
 		return fmt.Errorf("no examples in dataset for optimization")
 	}
+
+	// Split examples into train/validation to prevent overfitting
+	trainSize := len(examples) * 2 / 3  // Use 2/3 for training
+	if trainSize < 1 {
+		trainSize = 1
+	}
+	trainExamples := examples[:trainSize]
+	validationExamples := examples[trainSize:]
+	logger.Info(ctx, "COPRO: Using %d examples for training, %d for validation", len(trainExamples), len(validationExamples))
 
 	// Get current instruction and prefix as baseline
 	signature := predictor.GetSignature()
@@ -197,16 +210,16 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 			Prefix:      currentPrefix,
 			Generation:  0,
 		}
-		baseline.Score = c.evaluateCandidate(ctx, predictor, baseline, examples)
+		baseline.Score = c.evaluateCandidate(ctx, predictor, baseline, trainExamples)
 		candidates = append(candidates, baseline)
-		log.Printf("COPRO: Baseline score: %.3f", baseline.Score)
+		logger.Info(ctx, "COPRO: Baseline score: %.3f", baseline.Score)
 	}
 
 	// Generate initial candidates
 	initialCandidates := c.generateInitialCandidates(ctx, predictor, currentInstruction)
 
-	// Evaluate initial candidates in parallel
-	c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, examples)
+	// Evaluate initial candidates in parallel on training data
+	c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, trainExamples)
 
 	candidates = append(candidates, initialCandidates...)
 
@@ -226,8 +239,8 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 		// Generate refined candidates
 		refinedCandidates := c.refineCandidates(depthCtx, predictor, topCandidates, depth)
 
-		// Evaluate refined candidates in parallel
-		c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, examples)
+		// Evaluate refined candidates in parallel on training data
+		c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, trainExamples)
 
 		// Add refined candidates to pool
 		candidates = append(candidates, refinedCandidates...)
@@ -238,7 +251,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 			sort.Slice(refinedCandidates, func(i, j int) bool {
 				return refinedCandidates[i].Score > refinedCandidates[j].Score
 			})
-			log.Printf("COPRO: Depth %d - Best refined score: %.3f (overall best: %.3f)",
+			logger.Info(depthCtx, "COPRO: Depth %d - Best refined score: %.3f (overall best: %.3f)",
 				depth, refinedCandidates[0].Score, bestScore)
 		}
 
@@ -247,20 +260,34 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 		core.EndSpan(depthCtx)
 	}
 
-	// Select the best candidate overall
+	// Validate all candidates on validation set to prevent overfitting
+	logger.Info(ctx, "COPRO: Validating %d candidates on %d validation examples", len(candidates), len(validationExamples))
+	for i := range candidates {
+		candidates[i].ValidationScore = c.evaluateCandidate(ctx, predictor, candidates[i], validationExamples)
+	}
+
+	// Select candidate with best validation score (not training score)
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].Score > candidates[j].Score
+		return candidates[i].ValidationScore > candidates[j].ValidationScore
 	})
 
 	if len(candidates) > 0 {
 		bestCandidate := candidates[0]
-		log.Printf("COPRO: Selected best candidate - Score: %.3f, Instruction: %s",
-			bestCandidate.Score, c.truncateString(bestCandidate.Instruction, 100))
+		logger.Info(ctx, "COPRO: Selected best candidate - Training: %.3f, Validation: %.3f, Instruction: %s",
+			bestCandidate.Score, bestCandidate.ValidationScore, c.truncateString(bestCandidate.Instruction, 100))
+
+		// Log overfitting warning if training score much higher than validation
+		overfitGap := bestCandidate.Score - bestCandidate.ValidationScore
+		if overfitGap > 0.2 {
+			logger.Warn(ctx, "COPRO: Potential overfitting detected - gap: %.3f (training: %.3f vs validation: %.3f)",
+				overfitGap, bestCandidate.Score, bestCandidate.ValidationScore)
+		}
 
 		// Apply the best prompt to the predictor
 		c.applyPromptToPredictor(predictor, bestCandidate)
 
-		span.WithAnnotation("best_score", bestCandidate.Score)
+		span.WithAnnotation("best_training_score", bestCandidate.Score)
+		span.WithAnnotation("best_validation_score", bestCandidate.ValidationScore)
 		span.WithAnnotation("total_candidates", len(candidates))
 	}
 
@@ -271,7 +298,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *modules.Predict, baseInstruction string) []PromptCandidate {
 	// Get the signature to understand the task
 	signature := predictor.GetSignature()
-
+	logger := logging.GetLogger()
 	// Initialize LLM prompt generator if not already done
 	if c.PromptGenerator == nil {
 		// Use the predictor's LLM for prompt generation, or default model
@@ -282,11 +309,12 @@ func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *module
 		c.PromptGenerator = NewLLMPromptGenerator(promptLLM, signature)
 	}
 
-	// Generate sophisticated instructions using LLM assistance
+	// Generate sophisticated instructions using LLM assistance with retry logic
 	taskDescription := c.getTaskDescription(signature, baseInstruction)
-	instructions, err := c.PromptGenerator.generateBasicInstructions(ctx, taskDescription, c.Breadth, c.InitTemperature)
+	instructions, err := c.PromptGenerator.generateBasicInstructionsWithRetry(ctx, taskDescription, c.Breadth, c.InitTemperature)
+	logger.Info(ctx, "COPRO: Generated %d initial candidates", len(instructions))
 	if err != nil {
-		log.Printf("COPRO: Failed to generate LLM-assisted instructions, falling back to enhanced templates: %v", err)
+		logger.Error(ctx, "COPRO: Failed to generate LLM-assisted instructions after retries, falling back to enhanced templates: %v", err)
 		// Fallback to enhanced template-based generation
 		instructions = c.getEnhancedInstructionTemplates(signature, baseInstruction)
 	}
@@ -382,26 +410,52 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	tempPredictor := modules.NewPredict(tempSignature)
 	tempPredictor.SetLLM(predictor.LLM)
 
+	// Evaluate all examples in parallel for better performance
+	scores := make([]float64, len(examples))
+	valid := make([]bool, len(examples))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	// Use a semaphore to limit concurrent LLM calls per candidate
+	semaphore := make(chan struct{}, 10) // Allow 10 concurrent evaluations per candidate
+
+	for i, example := range examples {
+		wg.Add(1)
+		go func(idx int, ex core.Example) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+
+			// Get prediction with candidate prompt
+			prediction, err := tempPredictor.Process(ctx, ex.Inputs)
+			if err != nil {
+				log.Printf("COPRO: Error evaluating candidate: %v", err)
+				mu.Lock()
+				scores[idx] = 0.0
+				valid[idx] = false
+				mu.Unlock()
+				return
+			}
+
+			// Evaluate using metric
+			score := c.Metric(ex.Outputs, prediction)
+			mu.Lock()
+			scores[idx] = score
+			valid[idx] = true
+			mu.Unlock()
+		}(i, example)
+	}
+
+	wg.Wait()
+
+	// Calculate average score
 	var totalScore float64
 	validEvaluations := 0
-
-	// Evaluate on full training set for proper candidate discrimination (matching Python DSPy)
-	maxEval := len(examples) // Use all available examples for accurate evaluation
-
-	for i := 0; i < maxEval; i++ {
-		example := examples[i]
-
-		// Get prediction with candidate prompt
-		prediction, err := tempPredictor.Process(ctx, example.Inputs)
-		if err != nil {
-			log.Printf("COPRO: Error evaluating candidate: %v", err)
-			continue
+	for i, score := range scores {
+		if valid[i] {
+			totalScore += score
+			validEvaluations++
 		}
-
-		// Evaluate using metric
-		score := c.Metric(example.Outputs, prediction)
-		totalScore += score
-		validEvaluations++
 	}
 
 	if validEvaluations == 0 {
@@ -413,7 +467,7 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 
 // evaluateCandidatesParallel evaluates multiple candidates in parallel for better performance.
 func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modules.Predict, candidates []PromptCandidate, examples []core.Example) {
-	const maxGoroutines = 3 // Limit concurrent evaluations to avoid API rate limits
+	const maxGoroutines = 20 // Increased concurrency for better performance
 	semaphore := make(chan struct{}, maxGoroutines)
 	var wg sync.WaitGroup
 
@@ -466,29 +520,49 @@ func NewLLMPromptGenerator(llm core.LLM, signature core.Signature) *LLMPromptGen
 	}
 }
 
+// generateBasicInstructionsWithRetry creates initial high-quality instruction candidates using LLM with retry logic.
+func (lpg *LLMPromptGenerator) generateBasicInstructionsWithRetry(ctx context.Context, taskDescription string, breadth int, temperature float64) ([]string, error) {
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		instructions, err := lpg.generateBasicInstructions(ctx, taskDescription, breadth, temperature)
+		if err == nil && len(instructions) >= breadth/2 { // Accept if we get at least half the requested instructions
+			return instructions, nil
+		}
+		// Increase temperature for retry to get more diverse results
+		temperature = temperature * 1.2
+	}
+	return nil, fmt.Errorf("failed to generate instructions after %d retries", maxRetries)
+}
+
 // generateBasicInstructions creates initial high-quality instruction candidates using LLM.
 func (lpg *LLMPromptGenerator) generateBasicInstructions(ctx context.Context, taskDescription string, breadth int, temperature float64) ([]string, error) {
 	// Create a sophisticated prompt for LLM-assisted instruction generation
-	generatorPrompt := fmt.Sprintf(`You are an expert prompt engineer. Your task is to generate %d high-quality, diverse instruction variations for a language model task.
+	inputFields := strings.Join(getFieldNames(lpg.signature.Inputs), ", ")
+	outputFields := strings.Join(getFieldNames(lpg.signature.Outputs), ", ")
+	
+	generatorPrompt := fmt.Sprintf(`You are an expert prompt engineer specializing in question-answering tasks. Generate %d high-quality, diverse instruction variations that will help a language model answer questions accurately.
 
-Task Description: %s
+Current Task: Convert "%s" into "%s"
+Task Context: %s
 
-Task Fields:
-- Input: %s 
-- Output: %s
+Create %d DIFFERENT instruction approaches, each using a unique strategy:
 
-Generate %d distinct, effective instructions that will help a language model perform this task accurately. Each instruction should:
-1. Be clear and specific
-2. Provide helpful guidance 
-3. Use different phrasings and approaches
-4. Encourage step-by-step thinking when appropriate
-5. Be semantically diverse from the others
+Strategy Examples:
+- Direct factual approach: "Answer the question with accurate, factual information"
+- Analytical approach: "Analyze the question carefully and provide a well-reasoned answer" 
+- Step-by-step approach: "Break down the question step-by-step before answering"
+- Comprehensive approach: "Provide a thorough and complete answer to the question"
+- Precise approach: "Give a precise, specific answer to the question asked"
 
-Return ONLY the instructions, one per line, without numbering or bullet points.`,
-		breadth, taskDescription,
-		strings.Join(getFieldNames(lpg.signature.Inputs), ", "),
-		strings.Join(getFieldNames(lpg.signature.Outputs), ", "),
-		breadth)
+Requirements for each instruction:
+1. Must be 10-25 words long
+2. Should use different verbs and approaches  
+3. Must guide the model to produce accurate answers
+4. Should NOT be generic or vague
+5. Each must be clearly distinct from the others
+
+Return EXACTLY %d instructions, one per line, no numbering:`,
+		breadth, inputFields, outputFields, taskDescription, breadth, breadth)
 
 	// Use LLM to generate sophisticated instructions
 	output, err := lpg.llm.Generate(ctx, generatorPrompt,
@@ -590,14 +664,16 @@ Return ONLY the improved instructions, one per line.`,
 // getFallbackInstructions provides sophisticated fallback instructions.
 func (lpg *LLMPromptGenerator) getFallbackInstructions(taskDescription string) []string {
 	return []string{
-		"Analyze the provided information step-by-step and generate a precise, well-reasoned response.",
-		"Carefully examine the input data and provide a clear, accurate answer with supporting details.",
-		"Think through this problem methodically, considering all relevant factors before responding.",
-		"Process the given information thoroughly and deliver a comprehensive, well-structured answer.",
-		"Review the provided context carefully and generate a detailed, evidence-based response.",
-		"Systematically analyze the input and provide a clear, logical, and well-justified answer.",
-		"Consider all aspects of the given information and respond with precision and clarity.",
-		"Examine the provided data comprehensively and generate an accurate, well-reasoned output.",
+		"Answer the question directly with accurate, factual information.",
+		"Provide a clear, concise response based on the given question.",
+		"Think carefully about the question and give a precise answer.",
+		"Analyze the question and respond with relevant, correct information.",
+		"Give a straightforward answer to the specific question asked.",
+		"Consider the question carefully and provide an accurate response.", 
+		"Respond to the question with clear, factual information.",
+		"Answer the question using your knowledge to provide correct information.",
+		"Read the question carefully and give an appropriate, accurate answer.",
+		"Provide a helpful, correct answer to the question presented.",
 	}
 }
 
@@ -791,19 +867,22 @@ func (c *COPRO) getTaskDescription(signature core.Signature, baseInstruction str
 
 // getEnhancedInstructionTemplates provides sophisticated fallback instruction templates.
 func (c *COPRO) getEnhancedInstructionTemplates(signature core.Signature, baseInstruction string) []string {
-	taskDesc := c.getTaskDescription(signature, baseInstruction)
-
 	templates := []string{
-		fmt.Sprintf("Carefully analyze the provided information and %s with comprehensive reasoning.", strings.ToLower(taskDesc)),
-		fmt.Sprintf("Think step-by-step through the given data to %s accurately and precisely.", strings.ToLower(taskDesc)),
-		fmt.Sprintf("Systematically evaluate all relevant factors to %s with detailed justification.", strings.ToLower(taskDesc)),
-		fmt.Sprintf("Examine the input thoroughly and %s using logical, methodical analysis.", strings.ToLower(taskDesc)),
-		fmt.Sprintf("Process the given information comprehensively to %s with clear reasoning.", strings.ToLower(taskDesc)),
+		"Answer the question with accurate, factual information based on your knowledge.",
+		"Provide a clear, direct answer to the specific question being asked.",
+		"Think through the question carefully and give a precise, correct response.",
+		"Read the question and respond with relevant, accurate information.",
+		"Give a straightforward answer using factual knowledge about the topic.",
+		"Consider the question and provide a helpful, correct answer.",
+		"Respond to the question with clear, accurate information.",
+		"Answer the question directly with appropriate factual details.",
+		"Provide a correct answer based on the specific question asked.",
+		"Give an accurate response that directly addresses the question.",
 	}
 
 	// Ensure we have enough templates
 	for len(templates) < c.Breadth {
-		templates = append(templates, "Analyze the provided information step-by-step and generate a precise, well-reasoned response.")
+		templates = append(templates, "Answer the question with accurate, factual information.")
 	}
 
 	return templates[:c.Breadth]
