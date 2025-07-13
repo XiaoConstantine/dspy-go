@@ -5,13 +5,25 @@ This framework provides side-by-side comparison between the Python DSPy package 
 ## 📊 Latest Results Dashboard
 
 ### Test Status: ✅ COMPATIBLE
-*Last Updated: 2025-07-11 | Dataset Size: 20 | Model: gemini-2.0-flash*
+*Last Updated: 2025-07-13 | Dataset Size: 20 | Model: gemini-2.0-flash*
 
+#### Results With Cache (Python DSPy Default)
 | Optimizer | Python Score | Go Score | Score Diff | Time (Python) | Time (Go) | Demos (Python) | Demos (Go) | Status |
 |-----------|--------------|----------|------------|---------------|-----------|-----------------|------------|---------|
-| BootstrapFewShot | 0.60 | 0.60 | 0.00 | 2.29s | 2.15s | 4 | 4 | ✅ Compatible |
-| MIPRO | 0.60 | 0.60 | 0.00 | 23.46s | 16.19s | 0 | 0 | ✅ Compatible |
-| SIMBA | 0.60 | 0.60 | 0.00 | 19.69s | 38.56s | 0 | 0 | ✅ Compatible |
+| BootstrapFewShot | 0.60 | 0.60 | 0.00 | 0.04s* | 2.15s | 4 | 4 | ✅ Compatible |
+| MIPRO | 0.60 | 0.60 | 0.00 | 0.18s* | 16.19s | 0 | 0 | ✅ Compatible |
+| SIMBA | 0.60 | 0.60 | 0.00 | 0.13s* | 38.56s | 0 | 0 | ✅ Compatible |
+| COPRO | 0.80 | 0.60 | 0.20 | 0.15s* | 75.04s | 0 | 0 | ⚠️ At Threshold |
+
+*Python times with caching enabled
+
+#### Results Without Cache (Fair Comparison)
+| Optimizer | Python Score | Go Score | Score Diff | Time (Python) | Time (Go) | Time Ratio | Status |
+|-----------|--------------|----------|------------|---------------|-----------|-------------|--------|
+| BootstrapFewShot | 0.60 | 0.60 | 0.00 | 2.87s | 2.15s | Go 1.3x faster | ✅ Compatible |
+| MIPRO | 0.60 | 0.60 | 0.00 | 33.74s | 16.25s | Go 2.0x faster | ✅ Compatible |
+| SIMBA | 0.60 | 0.60 | 0.00 | 23.30s | 7.61s | Go 3.0x faster | ✅ Compatible |
+| COPRO | 0.60 | 0.60 | 0.00 | 22.72s | 8.07s | Go 2.8x faster | ✅ Compatible |
 
 ### Configuration Summary
 All optimizers now use **matched configurations** between Python and Go implementations:
