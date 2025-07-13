@@ -3,11 +3,13 @@ package optimizers
 import (
 	"context"
 	"fmt"
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"math"
 	"math/rand"
 	"sort"
 	"time"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // TPEConfig contains configuration for Tree-structured Parzen Estimators.
@@ -91,6 +93,8 @@ func NewTPEOptimizer(config TPEConfig) SearchStrategy {
 
 // Initialize sets up the search space and constraints.
 func (t *TPEOptimizer) Initialize(config SearchConfig) error {
+	logger := logging.GetLogger()
+	
 	if len(config.ParamSpace) == 0 {
 		return fmt.Errorf("parameter space cannot be empty")
 	}
@@ -99,19 +103,25 @@ func (t *TPEOptimizer) Initialize(config SearchConfig) error {
 	t.maxTrials = config.MaxTrials
 	t.currentTrials = 0
 
+	logger.Info(context.Background(), "TPE optimizer initialized - max_trials: %d, param_space_size: %d, gamma: %.3f, seed: %d", 
+		t.maxTrials, len(t.paramSpace), t.gamma, t.seed)
+
 	return nil
 }
 
 // SuggestParams suggests the next set of parameters to try.
 func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
+	logger := logging.GetLogger()
 	t.currentTrials++
 
 	var params map[string]interface{}
 
 	// Generate parameters
 	if len(t.observations) < max(5, int(float64(t.maxTrials)*0.1)) {
+		logger.Debug(ctx, "TPE using random sampling - trial: %d, observations: %d", t.currentTrials, len(t.observations))
 		params = t.randomSample()
 	} else {
+		logger.Debug(ctx, "TPE using Parzen estimator - trial: %d, observations: %d", t.currentTrials, len(t.observations))
 		params = t.suggestTPE()
 	}
 
@@ -123,11 +133,14 @@ func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{
 		}
 	}
 
+	logger.Debug(ctx, "TPE suggested parameters - trial: %d, params: %v", t.currentTrials, params)
 	return params, nil
 }
 
 // UpdateResults updates the internal state with the results of the last trial.
 func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float64) error {
+	logger := logging.GetLogger()
+	
 	t.observations = append(t.observations, observation{
 		params: params,
 		score:  score,
@@ -135,8 +148,13 @@ func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float6
 
 	// Update best parameters if score is better
 	if score > t.bestScore {
+		logger.Info(context.Background(), "TPE found new best parameters - score: %.6f, previous_best: %.6f, params: %v", 
+			score, t.bestScore, params)
 		t.bestScore = score
 		t.bestParams = cloneParams(params)
+	} else {
+		logger.Debug(context.Background(), "TPE updated with result - score: %.6f, best_score: %.6f, total_observations: %d", 
+			score, t.bestScore, len(t.observations))
 	}
 
 	return nil

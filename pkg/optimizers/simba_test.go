@@ -2167,3 +2167,264 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		}
 	})
 }
+
+// Benchmark tests for SIMBA optimizer using shared benchmark utilities
+
+// BenchmarkSIMBA runs comprehensive benchmarks for SIMBA optimizer.
+func BenchmarkSIMBA(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	configs := testutil.StandardBenchmarkConfigs()
+
+	testCases := []struct {
+		name       string
+		datasetKey string
+		configKey  string
+	}{
+		{"Fast_Tiny", "tiny", "fast"},
+		{"Fast_Small", "small", "fast"},
+		{"Standard_Small", "small", "standard"},
+		{"Standard_Medium", "medium", "standard"},
+		{"Comprehensive_Medium", "medium", "comprehensive"},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			dataset := datasets[tc.datasetKey]
+			config := configs[tc.configKey]
+
+			// Create program
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			// Create SIMBA optimizer with config
+			simba := NewSIMBA(
+				WithSIMBABatchSize(config.BatchSize),
+				WithSIMBAMaxSteps(config.MaxSteps),
+				WithSIMBANumCandidates(6),
+				WithSamplingTemperature(config.Temperature),
+				WithFastMode(true), // Enable fast mode for benchmarks
+			)
+
+			// Setup mock LLM
+			mockLLM := &testutil.MockLLM{}
+			setupLLMMockForBenchmark(mockLLM)
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := simba.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				if err != nil {
+					b.Fatalf("SIMBA compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkSIMBADatasetScaling tests performance across different dataset sizes.
+func BenchmarkSIMBADatasetScaling(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	config := testutil.StandardBenchmarkConfigs()["fast"] // Use fast config for scaling tests
+
+	for name, dataset := range datasets {
+		b.Run(fmt.Sprintf("Dataset_%s_%d", name, dataset.Size), func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			simba := NewSIMBA(
+				WithSIMBABatchSize(config.BatchSize),
+				WithSIMBAMaxSteps(config.MaxSteps),
+				WithSIMBANumCandidates(4),
+				WithFastMode(true),
+			)
+
+			mockLLM := &testutil.MockLLM{}
+			setupLLMMockForBenchmark(mockLLM)
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := simba.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				if err != nil {
+					b.Fatalf("SIMBA compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkSIMBAParameterTuning tests performance with different parameter configurations.
+func BenchmarkSIMBAParameterTuning(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"] // Use small dataset for parameter testing
+
+	parameterTests := []struct {
+		name          string
+		batchSize     int
+		maxSteps      int
+		numCandidates int
+		temperature   float64
+	}{
+		{"Batch2_Steps3_Candidates4", 2, 3, 4, 0.2},
+		{"Batch4_Steps6_Candidates6", 4, 6, 6, 0.2},
+		{"Batch8_Steps10_Candidates8", 8, 10, 8, 0.2},
+		{"HighTemp_Batch4", 4, 6, 6, 1.0},
+		{"LowTemp_Batch4", 4, 6, 6, 0.1},
+	}
+
+	for _, pt := range parameterTests {
+		b.Run(pt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			simba := NewSIMBA(
+				WithSIMBABatchSize(pt.batchSize),
+				WithSIMBAMaxSteps(pt.maxSteps),
+				WithSIMBANumCandidates(pt.numCandidates),
+				WithSamplingTemperature(pt.temperature),
+				WithFastMode(true),
+			)
+
+			mockLLM := &testutil.MockLLM{}
+			setupLLMMockForBenchmark(mockLLM)
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := simba.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				if err != nil {
+					b.Fatalf("SIMBA compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkSIMBAMiniBatch tests mini-batch processing performance.
+func BenchmarkSIMBAMiniBatch(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["medium"]
+
+	batchTests := []struct {
+		name      string
+		batchSize int
+	}{
+		{"Batch2", 2},
+		{"Batch4", 4},
+		{"Batch8", 8},
+		{"Batch16", 16},
+	}
+
+	for _, bt := range batchTests {
+		b.Run(bt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			simba := NewSIMBA(
+				WithSIMBABatchSize(bt.batchSize),
+				WithSIMBAMaxSteps(3), // Keep steps low for batch testing
+				WithSIMBANumCandidates(4),
+				WithFastMode(true),
+			)
+
+			mockLLM := &testutil.MockLLM{}
+			setupLLMMockForBenchmark(mockLLM)
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := simba.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				if err != nil {
+					b.Fatalf("SIMBA compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkSIMBAFastMode compares fast mode vs normal mode performance.
+func BenchmarkSIMBAFastMode(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"]
+
+	modeTests := []struct {
+		name     string
+		fastMode bool
+	}{
+		{"FastMode_Enabled", true},
+		{"FastMode_Disabled", false},
+	}
+
+	for _, mt := range modeTests {
+		b.Run(mt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			simba := NewSIMBA(
+				WithSIMBABatchSize(4),
+				WithSIMBAMaxSteps(3),
+				WithSIMBANumCandidates(4),
+				WithFastMode(mt.fastMode),
+			)
+
+			mockLLM := &testutil.MockLLM{}
+			setupLLMMockForBenchmark(mockLLM)
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := simba.Compile(ctx, program, benchDataset, testutil.BenchmarkAccuracyMetric)
+				if err != nil {
+					b.Fatalf("SIMBA compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// setupLLMMockForBenchmark configures mock LLM for benchmark tests.
+func setupLLMMockForBenchmark(mockLLM *testutil.MockLLM) {
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "test response"}, nil)
+	mockLLM.On("GetModelName").Return("benchmark-model")
+	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+	mockLLM.On("ProviderName").Return("benchmark")
+	mockLLM.On("ModelID").Return("benchmark-model-id")
+}

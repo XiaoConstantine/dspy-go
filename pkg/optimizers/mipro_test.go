@@ -9,6 +9,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -465,4 +466,284 @@ func (m *MockSearchStrategy) GetBestParams() (map[string]interface{}, float64) {
 func (m *MockSearchStrategy) Initialize(config SearchConfig) error {
 	args := m.Called(config)
 	return args.Error(0)
+}
+
+// Benchmark tests for MIPRO optimizer using shared benchmark utilities
+
+// BenchmarkMIPRO runs comprehensive benchmarks for MIPRO optimizer.
+func BenchmarkMIPRO(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	configs := testutil.StandardBenchmarkConfigs()
+
+	testCases := []struct {
+		name       string
+		datasetKey string
+		configKey  string
+	}{
+		{"Fast_Tiny", "tiny", "fast"},
+		{"Fast_Small", "small", "fast"},
+		{"Standard_Small", "small", "standard"},
+		{"Standard_Medium", "medium", "standard"},
+		{"Comprehensive_Medium", "medium", "comprehensive"},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			dataset := datasets[tc.datasetKey]
+			config := configs[tc.configKey]
+
+			// Create program
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			// Create MIPRO optimizer with config
+			// Convert testutil.BenchmarkAccuracyMetric to MIPRO metric signature
+			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+				return testutil.BenchmarkAccuracyMetric(example, prediction)
+			}
+
+			mipro := NewMIPRO(
+				miproMetric,
+				WithMode(LightMode), // Use light mode for benchmarks
+				WithNumTrials(config.NumTrials),
+				WithMaxLabeledDemos(3),
+			)
+
+			// Setup mock LLM
+			mockLLM := setupMIPROBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := mipro.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("MIPRO compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkMIPRODatasetScaling tests performance across different dataset sizes.
+func BenchmarkMIPRODatasetScaling(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	config := testutil.StandardBenchmarkConfigs()["fast"] // Use fast config for scaling tests
+
+	for name, dataset := range datasets {
+		b.Run(fmt.Sprintf("Dataset_%s_%d", name, dataset.Size), func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+				return testutil.BenchmarkAccuracyMetric(example, prediction)
+			}
+
+			mipro := NewMIPRO(
+				miproMetric,
+				WithMode(LightMode),
+				WithNumTrials(config.NumTrials),
+				WithMaxLabeledDemos(3),
+			)
+
+			mockLLM := setupMIPROBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := mipro.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("MIPRO compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkMIPROParameterTuning tests performance with different parameter configurations.
+func BenchmarkMIPROParameterTuning(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"] // Use small dataset for parameter testing
+
+	parameterTests := []struct {
+		name      string
+		mode      RunMode
+		numTrials int
+		maxDemos  int
+	}{
+		{"LightMode_Trials3", LightMode, 3, 3},
+		{"LightMode_Trials5", LightMode, 5, 3},
+		{"LightMode_Trials8", LightMode, 8, 3},
+		{"LightMode_Demos5", LightMode, 5, 5},
+		{"LightMode_Demos8", LightMode, 5, 8},
+	}
+
+	for _, pt := range parameterTests {
+		b.Run(pt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+				return testutil.BenchmarkAccuracyMetric(example, prediction)
+			}
+
+			mipro := NewMIPRO(
+				miproMetric,
+				WithMode(pt.mode),
+				WithNumTrials(pt.numTrials),
+				WithMaxLabeledDemos(pt.maxDemos),
+			)
+
+			mockLLM := setupMIPROBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := mipro.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("MIPRO compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkMIPROMode compares different optimization modes.
+func BenchmarkMIPROMode(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"]
+
+	modeTests := []struct {
+		name string
+		mode RunMode
+	}{
+		{"LightMode", LightMode},
+		{"MediumMode", MediumMode},
+	}
+
+	for _, mt := range modeTests {
+		b.Run(mt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+				return testutil.BenchmarkAccuracyMetric(example, prediction)
+			}
+
+			mipro := NewMIPRO(
+				miproMetric,
+				WithMode(mt.mode),
+				WithNumTrials(3), // Keep trials low for mode comparison
+				WithMaxLabeledDemos(3),
+			)
+
+			mockLLM := setupMIPROBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := mipro.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("MIPRO compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkMIPROTrials tests performance scaling with number of trials.
+func BenchmarkMIPROTrials(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"]
+
+	trialTests := []struct {
+		name      string
+		numTrials int
+	}{
+		{"Trials3", 3},
+		{"Trials5", 5},
+		{"Trials8", 8},
+		{"Trials10", 10},
+	}
+
+	for _, tt := range trialTests {
+		b.Run(tt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+				return testutil.BenchmarkAccuracyMetric(example, prediction)
+			}
+
+			mipro := NewMIPRO(
+				miproMetric,
+				WithMode(LightMode),
+				WithNumTrials(tt.numTrials),
+				WithMaxLabeledDemos(3),
+			)
+
+			mockLLM := setupMIPROBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := mipro.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("MIPRO compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// setupMIPROBenchmarkLLM creates a mock LLM configured for MIPRO benchmarks.
+func setupMIPROBenchmarkLLM() *MockLLM {
+	mockLLM := &MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "test response"}, nil)
+	mockLLM.On("GetModelName").Return("benchmark-model")
+	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+	mockLLM.On("ProviderName").Return("benchmark")
+	mockLLM.On("ModelID").Return("benchmark-model-id")
+	return mockLLM
 }

@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -176,4 +177,289 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 		optimized, _ := optimizer.Compile(ctx, createProgram(), trainDataset, dummyMetric)
 		assert.Equal(t, 0, len(optimized.Modules["predict"].(*modules.Predict).Demos))
 	})
+}
+
+// Benchmark tests for BootstrapFewShot optimizer using shared benchmark utilities
+
+// BenchmarkBootstrapFewShot runs comprehensive benchmarks for BootstrapFewShot optimizer.
+func BenchmarkBootstrapFewShot(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	configs := testutil.StandardBenchmarkConfigs()
+
+	testCases := []struct {
+		name       string
+		datasetKey string
+		configKey  string
+	}{
+		{"Fast_Tiny", "tiny", "fast"},
+		{"Fast_Small", "small", "fast"},
+		{"Standard_Small", "small", "standard"},
+		{"Standard_Medium", "medium", "standard"},
+		{"Comprehensive_Medium", "medium", "comprehensive"},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			dataset := datasets[tc.datasetKey]
+			config := configs[tc.configKey]
+
+			// Create program
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			// Create BootstrapFewShot optimizer with config
+			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+				// Convert to float64 metric for compatibility
+				score := testutil.BenchmarkAccuracyMetric(example, prediction)
+				return score > 0.5 // Accept if accuracy > 50%
+			}
+
+			bootstrap := NewBootstrapFewShot(boolMetric, config.MaxSteps) // Use MaxSteps as MaxBootstrapped
+
+			// Setup mock LLM
+			mockLLM := setupBootstrapBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := bootstrap.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("BootstrapFewShot compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkBootstrapFewShotDatasetScaling tests performance across different dataset sizes.
+func BenchmarkBootstrapFewShotDatasetScaling(b *testing.B) {
+	datasets := testutil.CreateBenchmarkDatasets()
+	config := testutil.StandardBenchmarkConfigs()["fast"] // Use fast config for scaling tests
+
+	for name, dataset := range datasets {
+		b.Run(fmt.Sprintf("Dataset_%s_%d", name, dataset.Size), func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+				score := testutil.BenchmarkAccuracyMetric(example, prediction)
+				return score > 0.5
+			}
+
+			bootstrap := NewBootstrapFewShot(boolMetric, config.MaxSteps)
+
+			mockLLM := setupBootstrapBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := bootstrap.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("BootstrapFewShot compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkBootstrapFewShotParameterTuning tests performance with different parameter configurations.
+func BenchmarkBootstrapFewShotParameterTuning(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"] // Use small dataset for parameter testing
+
+	parameterTests := []struct {
+		name            string
+		maxBootstrapped int
+		metricThreshold float64
+	}{
+		{"MaxBootstrap3_Threshold50", 3, 0.5},
+		{"MaxBootstrap5_Threshold50", 5, 0.5},
+		{"MaxBootstrap8_Threshold50", 8, 0.5},
+		{"MaxBootstrap5_Threshold30", 5, 0.3},
+		{"MaxBootstrap5_Threshold70", 5, 0.7},
+	}
+
+	for _, pt := range parameterTests {
+		b.Run(pt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+				score := testutil.BenchmarkAccuracyMetric(example, prediction)
+				return score > pt.metricThreshold
+			}
+
+			bootstrap := NewBootstrapFewShot(boolMetric, pt.maxBootstrapped)
+
+			mockLLM := setupBootstrapBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := bootstrap.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("BootstrapFewShot compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkBootstrapFewShotMetricVariations tests performance with different metric behaviors.
+func BenchmarkBootstrapFewShotMetricVariations(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"]
+
+	metricTests := []struct {
+		name        string
+		metricFunc  func(example, prediction map[string]interface{}, ctx context.Context) bool
+		description string
+	}{
+		{
+			"AlwaysAccept",
+			func(example, prediction map[string]interface{}, ctx context.Context) bool { return true },
+			"Metric that always accepts predictions",
+		},
+		{
+			"AlwaysReject",
+			func(example, prediction map[string]interface{}, ctx context.Context) bool { return false },
+			"Metric that always rejects predictions",
+		},
+		{
+			"Selective50",
+			func(example, prediction map[string]interface{}, ctx context.Context) bool {
+				score := testutil.BenchmarkAccuracyMetric(example, prediction)
+				return score > 0.5
+			},
+			"Metric that accepts when accuracy > 50%",
+		},
+		{
+			"Selective80",
+			func(example, prediction map[string]interface{}, ctx context.Context) bool {
+				score := testutil.BenchmarkAccuracyMetric(example, prediction)
+				return score > 0.8
+			},
+			"Metric that accepts when accuracy > 80%",
+		},
+	}
+
+	for _, mt := range metricTests {
+		b.Run(mt.name, func(b *testing.B) {
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+			bootstrap := NewBootstrapFewShot(mt.metricFunc, 5)
+
+			mockLLM := setupBootstrapBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := bootstrap.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("BootstrapFewShot compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkBootstrapFewShotConcurrency tests performance with different concurrency levels.
+func BenchmarkBootstrapFewShotConcurrency(b *testing.B) {
+	dataset := testutil.CreateBenchmarkDatasets()["small"]
+
+	concurrencyTests := []struct {
+		name             string
+		concurrencyLevel int
+	}{
+		{"Concurrency1", 1},
+		{"Concurrency2", 2},
+		{"Concurrency4", 4},
+		{"Concurrency8", 8},
+	}
+
+	for _, ct := range concurrencyTests {
+		b.Run(ct.name, func(b *testing.B) {
+			// Set concurrency level for this test
+			originalConcurrency := core.GlobalConfig.ConcurrencyLevel
+			core.GlobalConfig.ConcurrencyLevel = ct.concurrencyLevel
+			defer func() {
+				core.GlobalConfig.ConcurrencyLevel = originalConcurrency
+			}()
+
+			signature := core.NewSignature(
+				[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+				[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+			)
+			predictor := modules.NewPredict(signature)
+			program := testutil.CreateBenchmarkProgram(predictor)
+
+			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+				score := testutil.BenchmarkAccuracyMetric(example, prediction)
+				return score > 0.5
+			}
+
+			bootstrap := NewBootstrapFewShot(boolMetric, 5)
+
+			mockLLM := setupBootstrapBenchmarkLLM()
+
+			predictor = program.Modules["predictor"].(*modules.Predict)
+			predictor.SetLLM(mockLLM)
+
+			ctx := context.Background()
+			benchDataset := testutil.BenchmarkDatasetFromExamples(dataset.Examples)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := bootstrap.Compile(ctx, program, benchDataset, nil)
+				if err != nil {
+					b.Fatalf("BootstrapFewShot compilation failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// setupBootstrapBenchmarkLLM creates a mock LLM configured for BootstrapFewShot benchmarks.
+func setupBootstrapBenchmarkLLM() *MockLLM {
+	mockLLM := &MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "test response"}, nil)
+	mockLLM.On("GetModelName").Return("benchmark-model")
+	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+	mockLLM.On("ProviderName").Return("benchmark")
+	mockLLM.On("ModelID").Return("benchmark-model-id")
+	return mockLLM
 }

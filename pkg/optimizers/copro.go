@@ -3,7 +3,6 @@ package optimizers
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"sort"
@@ -429,7 +428,8 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 			// Get prediction with candidate prompt
 			prediction, err := tempPredictor.Process(ctx, ex.Inputs)
 			if err != nil {
-				log.Printf("COPRO: Error evaluating candidate: %v", err)
+				logger := logging.GetLogger()
+				logger.Error(ctx, "COPRO: Error evaluating candidate: %v", err)
 				mu.Lock()
 				scores[idx] = 0.0
 				valid[idx] = false
