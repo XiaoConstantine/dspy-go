@@ -517,7 +517,7 @@ func (es *EnvironmentSource) setCachingValue(caching *CachingConfig, key, value 
 			return fmt.Errorf("invalid TTL: %s", value)
 		}
 	case "max.size", "maxSize":
-		if maxSize, err := strconv.Atoi(value); err == nil {
+		if maxSize, err := strconv.ParseInt(value, 10, 64); err == nil {
 			caching.MaxSize = maxSize
 		} else {
 			return fmt.Errorf("invalid max size: %s", value)

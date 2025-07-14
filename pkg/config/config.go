@@ -340,14 +340,41 @@ type CachingConfig struct {
 	// Cache TTL
 	TTL time.Duration `yaml:"ttl" validate:"min=1s"`
 
-	// Maximum cache size
-	MaxSize int `yaml:"max_size" validate:"min=1"`
+	// Maximum cache size (in bytes)
+	MaxSize int64 `yaml:"max_size" validate:"min=1"`
 
-	// Cache type (memory, redis, file)
-	Type string `yaml:"type" validate:"oneof=memory redis file"`
+	// Cache type (memory, sqlite)
+	Type string `yaml:"type" validate:"oneof=memory sqlite"`
 
-	// Cache configuration
-	Config map[string]interface{} `yaml:"config"`
+	// SQLite specific configuration
+	SQLiteConfig SQLiteCacheConfig `yaml:"sqlite_config,omitempty"`
+
+	// Memory cache specific configuration  
+	MemoryConfig MemoryCacheConfig `yaml:"memory_config,omitempty"`
+}
+
+// SQLiteCacheConfig holds SQLite-specific cache configuration.
+type SQLiteCacheConfig struct {
+	// Path to SQLite database file
+	Path string `yaml:"path"`
+
+	// Enable WAL mode for better concurrent performance
+	EnableWAL bool `yaml:"enable_wal"`
+
+	// Vacuum interval for database maintenance
+	VacuumInterval time.Duration `yaml:"vacuum_interval"`
+
+	// Maximum number of connections
+	MaxConnections int `yaml:"max_connections"`
+}
+
+// MemoryCacheConfig holds memory cache specific configuration.
+type MemoryCacheConfig struct {
+	// Cleanup interval for expired entries
+	CleanupInterval time.Duration `yaml:"cleanup_interval"`
+
+	// Number of shards for concurrent access
+	ShardCount int `yaml:"shard_count"`
 }
 
 // AgentsConfig holds agent-specific configuration.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/anthropic-go/anthropic"
+	"github.com/XiaoConstantine/dspy-go/pkg/cache"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
@@ -152,7 +153,10 @@ func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
 		}
 	}
 
-	// Apply decorators
+	// Apply caching if enabled (this happens before other decorators)
+	llm = cache.WrapWithCache(llm, nil) // nil means use environment/default config
+
+	// Apply other decorators
 	return core.Chain(llm,
 		func(l core.LLM) core.LLM { return core.NewModelContextDecorator(l) },
 	), nil

@@ -270,7 +270,7 @@ func TestDefaultConfigModules(t *testing.T) {
 	
 	assert.True(t, config.Modules.Predict.Caching.Enabled)
 	assert.Equal(t, 1*time.Hour, config.Modules.Predict.Caching.TTL)
-	assert.Equal(t, 1000, config.Modules.Predict.Caching.MaxSize)
+	assert.Equal(t, int64(100*1024*1024), config.Modules.Predict.Caching.MaxSize)
 	assert.Equal(t, "memory", config.Modules.Predict.Caching.Type)
 }
 

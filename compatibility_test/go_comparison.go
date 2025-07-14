@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/cache"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
@@ -616,12 +618,47 @@ func (oc *OptimizerComparison) SaveResults(results map[string]interface{}, filen
 func main() {
 	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, copro, or all")
 	var datasetSize = flag.Int("dataset-size", 20, "Dataset size for testing")
+	var enableCache = flag.Bool("enable-cache", false, "Enable caching for performance comparison")
+	var cacheType = flag.String("cache-type", "memory", "Cache type: memory or sqlite")
+	var withoutCache = flag.Bool("without-cache", false, "Run without cache for baseline comparison")
 	flag.Parse()
 
 	ctx := context.Background()
 
+	// Configure caching based on flags
+	if *enableCache && !*withoutCache {
+		fmt.Printf("Enabling %s cache for performance testing...\n", *cacheType)
+		// Set environment variables to enable caching
+		os.Setenv("DSPY_CACHE_ENABLED", "true")
+		os.Setenv("DSPY_CACHE_TYPE", *cacheType)
+		os.Setenv("DSPY_CACHE_TTL", "1h")
+		
+		if *cacheType == "sqlite" {
+			homeDir, _ := os.UserHomeDir()
+			cacheDir := filepath.Join(homeDir, ".dspy-go")
+			if err := os.MkdirAll(cacheDir, 0755); err != nil {
+				log.Printf("Warning: could not create cache directory: %v", err)
+			}
+			os.Setenv("DSPY_CACHE_PATH", filepath.Join(cacheDir, "cache.db"))
+		} else {
+			os.Setenv("DSPY_CACHE_MAX_SIZE", "100MB")
+		}
+	} else if *withoutCache {
+		fmt.Println("Running without cache for baseline comparison...")
+		os.Setenv("DSPY_CACHE_ENABLED", "false")
+	}
+
 	// Initialize comparison
 	comparison := NewOptimizerComparison("gemini-2.0-flash")
+
+	// Log cache status
+	if *enableCache && !*withoutCache {
+		fmt.Printf("Cache enabled: %s\n", *cacheType)
+		// Clear cache at start to ensure clean test
+		if err := cache.ClearGlobalCache(ctx); err != nil {
+			log.Printf("Warning: Could not clear cache: %v", err)
+		}
+	}
 
 	// Create dataset
 	dataset := comparison.CreateSampleDataset(*datasetSize)
@@ -707,8 +744,32 @@ func main() {
 		}
 	}
 
+	// Add cache statistics if caching was enabled
+	if *enableCache && !*withoutCache {
+		cacheStats := cache.GetGlobalCacheStats()
+		results["cache_stats"] = map[string]interface{}{
+			"hits":     cacheStats.Hits,
+			"misses":   cacheStats.Misses,
+			"sets":     cacheStats.Sets,
+			"size":     cacheStats.Size,
+			"hit_rate": float64(cacheStats.Hits) / float64(cacheStats.Hits+cacheStats.Misses),
+		}
+		fmt.Printf("\nCache Statistics:\n")
+		fmt.Printf("  - Hits: %d\n", cacheStats.Hits)
+		fmt.Printf("  - Misses: %d\n", cacheStats.Misses)
+		fmt.Printf("  - Hit Rate: %.2f%%\n", float64(cacheStats.Hits)/float64(cacheStats.Hits+cacheStats.Misses)*100)
+		fmt.Printf("  - Cache Size: %d bytes\n", cacheStats.Size)
+	}
+
 	// Save results
-	err := comparison.SaveResults(results, "go_comparison_results.json")
+	filename := "go_comparison_results.json"
+	if *enableCache && !*withoutCache {
+		filename = "go_comparison_results_cached.json"
+	} else if *withoutCache {
+		filename = "go_comparison_results_nocache.json"
+	}
+	
+	err := comparison.SaveResults(results, filename)
 	if err != nil {
 		log.Printf("Error saving results: %v", err)
 	}

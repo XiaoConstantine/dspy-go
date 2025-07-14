@@ -13,10 +13,15 @@ import (
 
 // Helper function to get the underlying LLM implementation from a potentially wrapped LLM.
 func getUnderlyingLLM(llm core.LLM) core.LLM {
-	if unwrappable, ok := llm.(interface{ Unwrap() core.LLM }); ok {
-		return unwrappable.Unwrap()
+	current := llm
+	for {
+		if unwrappable, ok := current.(interface{ Unwrap() core.LLM }); ok {
+			current = unwrappable.Unwrap()
+		} else {
+			break
+		}
 	}
-	return llm
+	return current
 }
 
 func TestNewLLM(t *testing.T) {
