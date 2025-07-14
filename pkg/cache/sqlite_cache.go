@@ -143,7 +143,9 @@ func (c *SQLiteCache) Get(ctx context.Context, key string) ([]byte, bool, error)
 	// Correct the stats
 	atomic.AddInt64(&c.stats.Misses, -1)
 	atomic.AddInt64(&c.stats.Hits, 1)
+	c.mu.Lock()
 	c.stats.LastAccess = time.Now()
+	c.mu.Unlock()
 
 	return value, true, nil
 }
@@ -197,7 +199,9 @@ func (c *SQLiteCache) Set(ctx context.Context, key string, value []byte, ttl tim
 	} else {
 		atomic.AddInt64(&c.stats.Size, size)
 	}
+	c.mu.Lock()
 	c.stats.LastAccess = now
+	c.mu.Unlock()
 
 	return nil
 }

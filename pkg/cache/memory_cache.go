@@ -136,7 +136,7 @@ func (c *MemoryCache) Get(ctx context.Context, key string) ([]byte, bool, error)
 	c.lruList.moveToFront(entry.element)
 
 	atomic.AddInt64(&c.stats.Hits, 1)
-	c.stats.LastAccess = time.Now()
+	c.stats.LastAccess = time.Now() // Safe: protected by c.mu.Lock
 
 	return entry.value, true, nil
 }
@@ -188,7 +188,7 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value []byte, ttl tim
 	}
 
 	atomic.AddInt64(&c.stats.Sets, 1)
-	c.stats.LastAccess = time.Now()
+	c.stats.LastAccess = time.Now() // Safe: protected by c.mu.Lock
 
 	return nil
 }
@@ -225,6 +225,10 @@ func (c *MemoryCache) Clear(ctx context.Context) error {
 }
 
 func (c *MemoryCache) Stats() CacheStats {
+	c.mu.RLock()
+	lastAccess := c.stats.LastAccess
+	c.mu.RUnlock()
+	
 	return CacheStats{
 		Hits:       atomic.LoadInt64(&c.stats.Hits),
 		Misses:     atomic.LoadInt64(&c.stats.Misses),
@@ -232,7 +236,7 @@ func (c *MemoryCache) Stats() CacheStats {
 		Deletes:    atomic.LoadInt64(&c.stats.Deletes),
 		Size:       atomic.LoadInt64(&c.stats.Size),
 		MaxSize:    c.config.MaxSize,
-		LastAccess: c.stats.LastAccess,
+		LastAccess: lastAccess,
 	}
 }
 
