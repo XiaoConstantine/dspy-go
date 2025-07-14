@@ -64,8 +64,13 @@ func applyFileConfig(cacheConfig *CacheConfig, fileConfig *config.CachingConfig)
 
 		// Set default path if not specified
 		if cacheConfig.SQLiteConfig.Path == "" {
-			homeDir, _ := os.UserHomeDir()
-			cacheConfig.SQLiteConfig.Path = filepath.Join(homeDir, ".dspy", "cache.db")
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				// Fallback to current directory if home directory is not available
+				cacheConfig.SQLiteConfig.Path = "dspy_cache.db"
+			} else {
+				cacheConfig.SQLiteConfig.Path = filepath.Join(homeDir, ".dspy", "cache.db")
+			}
 		}
 
 		// Set default values

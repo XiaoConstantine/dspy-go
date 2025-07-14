@@ -53,7 +53,11 @@ func (g *KeyGenerator) GenerateJSONKey(modelID string, prompt string, schema int
 	opts := g.mergeOptions(options)
 
 	// Serialize schema
-	schemaJSON, _ := json.Marshal(schema)
+	schemaJSON, err := json.Marshal(schema)
+	if err != nil {
+		// If schema serialization fails, use empty schema
+		schemaJSON = []byte("{}")
+	}
 
 	// Create key data including schema
 	keyData := g.createKeyData(modelID, prompt, opts) + string(schemaJSON)
@@ -110,7 +114,7 @@ func (g *KeyGenerator) mergeOptions(options []core.GenerateOption) *core.Generat
 // createKeyData creates a normalized string representation of request parameters.
 func (g *KeyGenerator) createKeyData(modelID string, prompt string, config *core.GenerateOptions) string {
 	// Normalize prompt (trim whitespace, lowercase for consistency)
-	normalizedPrompt := strings.TrimSpace(prompt)
+	normalizedPrompt := strings.ToLower(strings.TrimSpace(prompt))
 
 	// Create parameter string
 	params := g.optionsToString(config)

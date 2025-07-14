@@ -281,29 +281,35 @@ func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64) error
 			break
 		}
 
-		// Find and delete the oldest accessed entry
-		query := `
-		DELETE FROM cache_entries 
-		WHERE key = (
-			SELECT key FROM cache_entries 
-			ORDER BY accessed_at ASC 
-			LIMIT 1
-		)
-		`
+		// Find the oldest accessed entry
+		var oldestKey string
+		var deletedSize int64
+		selectQuery := `SELECT key, size FROM cache_entries ORDER BY accessed_at ASC LIMIT 1`
 		
-		result, err := c.db.ExecContext(ctx, query)
+		err := c.db.QueryRowContext(ctx, selectQuery).Scan(&oldestKey, &deletedSize)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// No more entries to evict
+				break
+			}
+			return err
+		}
+
+		// Delete the oldest entry
+		deleteQuery := `DELETE FROM cache_entries WHERE key = ?`
+		result, err := c.db.ExecContext(ctx, deleteQuery, oldestKey)
 		if err != nil {
 			return err
 		}
 
 		rowsAffected, _ := result.RowsAffected()
-		if rowsAffected == 0 {
-			// No more entries to evict
+		if rowsAffected > 0 {
+			// Update size atomically instead of recalculating
+			atomic.AddInt64(&c.stats.Size, -deletedSize)
+		} else {
+			// Entry was not found, break to avoid infinite loop
 			break
 		}
-
-		// Recalculate size after eviction
-		c.loadStats()
 	}
 
 	return nil
@@ -326,6 +332,18 @@ func (c *SQLiteCache) cleanupRoutine() {
 }
 
 func (c *SQLiteCache) cleanupExpired() {
+	// Get the sum of sizes of expired entries before deleting
+	var deletedSize int64
+	sumQuery := `SELECT COALESCE(SUM(size), 0) FROM cache_entries WHERE expires_at > 0 AND expires_at < ?`
+	if err := c.db.QueryRow(sumQuery, time.Now().UnixNano()).Scan(&deletedSize); err != nil {
+		log.Printf("Warning: failed to get expired entries size: %v", err)
+		return
+	}
+
+	if deletedSize == 0 {
+		return // No expired entries
+	}
+
 	query := `DELETE FROM cache_entries WHERE expires_at > 0 AND expires_at < ?`
 	result, err := c.db.Exec(query, time.Now().UnixNano())
 	if err != nil {
@@ -335,8 +353,8 @@ func (c *SQLiteCache) cleanupExpired() {
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected > 0 {
-		// Recalculate size after cleanup
-		c.loadStats()
+		// Update size atomically instead of recalculating
+		atomic.AddInt64(&c.stats.Size, -deletedSize)
 	}
 }
 

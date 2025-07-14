@@ -212,7 +212,7 @@ func TestCreateKeyData(t *testing.T) {
 
 		keyData := generator.createKeyData("gpt-4", "Hello world", config)
 		assert.Contains(t, keyData, "gpt-4")
-		assert.Contains(t, keyData, "Hello world")
+		assert.Contains(t, keyData, "hello world")
 		assert.Contains(t, keyData, "temp:0.70")
 		assert.Contains(t, keyData, "max:100")
 	})
@@ -221,6 +221,13 @@ func TestCreateKeyData(t *testing.T) {
 		config := core.NewGenerateOptions()
 		keyData1 := generator.createKeyData("gpt-4", "  Hello world  ", config)
 		keyData2 := generator.createKeyData("gpt-4", "Hello world", config)
+		assert.Equal(t, keyData1, keyData2)
+	})
+
+	t.Run("Prompt lowercasing", func(t *testing.T) {
+		config := core.NewGenerateOptions()
+		keyData1 := generator.createKeyData("gpt-4", "Hello World", config)
+		keyData2 := generator.createKeyData("gpt-4", "hello world", config)
 		assert.Equal(t, keyData1, keyData2)
 	})
 }
