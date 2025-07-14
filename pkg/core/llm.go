@@ -18,8 +18,9 @@ type TokenInfo struct {
 }
 
 type LLMResponse struct {
-	Content string
-	Usage   *TokenInfo
+	Content  string
+	Usage    *TokenInfo
+	Metadata map[string]interface{}
 }
 
 type StreamChunk struct {

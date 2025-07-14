@@ -304,9 +304,12 @@ func getDefaultModulesConfig() ModulesConfig {
 			Caching: CachingConfig{
 				Enabled: true,
 				TTL:     1 * time.Hour,
-				MaxSize: 1000,
+				MaxSize: 100 * 1024 * 1024, // 100MB
 				Type:    "memory",
-				Config:  map[string]interface{}{},
+				MemoryConfig: MemoryCacheConfig{
+					CleanupInterval: time.Minute,
+					ShardCount:      16,
+				},
 			},
 		},
 	}
@@ -906,15 +909,14 @@ func mergeCachingConfig(partial CachingConfig, defaults CachingConfig) CachingCo
 		result.Type = defaults.Type
 	}
 
-	// Merge config map
-	if result.Config == nil {
-		result.Config = defaults.Config
-	} else {
-		for key, value := range defaults.Config {
-			if _, exists := result.Config[key]; !exists {
-				result.Config[key] = value
-			}
-		}
+	// Merge SQLite config
+	if result.SQLiteConfig.Path == "" {
+		result.SQLiteConfig = defaults.SQLiteConfig
+	}
+
+	// Merge memory config
+	if result.MemoryConfig.CleanupInterval == 0 {
+		result.MemoryConfig = defaults.MemoryConfig
 	}
 
 	return result

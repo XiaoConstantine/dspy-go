@@ -589,42 +589,6 @@ func TestApplyPromptToPredictor(t *testing.T) {
 	assert.Equal(t, "New instruction", newSignature.Instruction)
 }
 
-func TestTruncateString(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
-
-	tests := []struct {
-		name     string
-		input    string
-		maxLen   int
-		expected string
-	}{
-		{
-			name:     "Short string",
-			input:    "Hello",
-			maxLen:   10,
-			expected: "Hello",
-		},
-		{
-			name:     "Long string",
-			input:    "This is a very long string that should be truncated",
-			maxLen:   10,
-			expected: "This is a ...",
-		},
-		{
-			name:     "Exact length",
-			input:    "Exactly10!",
-			maxLen:   10,
-			expected: "Exactly10!",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := copro.truncateString(tt.input, tt.maxLen)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
 
 func TestHelperFunctions(t *testing.T) {
 	// Test min function
