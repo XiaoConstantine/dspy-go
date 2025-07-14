@@ -114,10 +114,10 @@ func NewMemoryCache(config CacheConfig) (*MemoryCache, error) {
 }
 
 func (c *MemoryCache) Get(ctx context.Context, key string) ([]byte, bool, error) {
-	c.mu.RLock()
-	entry, exists := c.entries[key]
-	c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
+	entry, exists := c.entries[key]
 	if !exists {
 		atomic.AddInt64(&c.stats.Misses, 1)
 		return nil, false, nil
@@ -125,19 +125,15 @@ func (c *MemoryCache) Get(ctx context.Context, key string) ([]byte, bool, error)
 
 	// Check if expired
 	if entry.expiresAt.After(time.Time{}) && time.Now().After(entry.expiresAt) {
-		c.mu.Lock()
 		delete(c.entries, key)
 		c.lruList.removeElement(entry.element)
 		atomic.AddInt64(&c.stats.Size, -entry.size)
-		c.mu.Unlock()
 		atomic.AddInt64(&c.stats.Misses, 1)
 		return nil, false, nil
 	}
 
 	// Move to front of LRU list
-	c.mu.Lock()
 	c.lruList.moveToFront(entry.element)
-	c.mu.Unlock()
 
 	atomic.AddInt64(&c.stats.Hits, 1)
 	c.stats.LastAccess = time.Now()
@@ -284,26 +280,27 @@ func (c *MemoryCache) cleanupRoutine() {
 
 func (c *MemoryCache) cleanupExpired() {
 	now := time.Now()
+	
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
 	var keysToDelete []string
-
-	c.mu.RLock()
 	for key, entry := range c.entries {
 		if entry.expiresAt.After(time.Time{}) && now.After(entry.expiresAt) {
 			keysToDelete = append(keysToDelete, key)
 		}
 	}
-	c.mu.RUnlock()
 
-	if len(keysToDelete) > 0 {
-		c.mu.Lock()
-		for _, key := range keysToDelete {
-			if entry, exists := c.entries[key]; exists {
+	// Delete expired entries - check expiration again in case time passed
+	for _, key := range keysToDelete {
+		if entry, exists := c.entries[key]; exists {
+			// Double-check expiration to avoid race conditions
+			if entry.expiresAt.After(time.Time{}) && now.After(entry.expiresAt) {
 				delete(c.entries, key)
 				c.lruList.removeElement(entry.element)
 				atomic.AddInt64(&c.stats.Size, -entry.size)
 			}
 		}
-		c.mu.Unlock()
 	}
 }
 

@@ -37,6 +37,26 @@ type CacheStats struct {
 	LastAccess time.Time `json:"last_access"`
 }
 
+// HitRate returns the cache hit rate (0.0 to 1.0).
+// Returns 0.0 if no hits or misses have occurred.
+func (s *CacheStats) HitRate() float64 {
+	total := s.Hits + s.Misses
+	if total == 0 {
+		return 0.0
+	}
+	return float64(s.Hits) / float64(total)
+}
+
+// MissRate returns the cache miss rate (0.0 to 1.0).
+// Returns 0.0 if no hits or misses have occurred.
+func (s *CacheStats) MissRate() float64 {
+	total := s.Hits + s.Misses
+	if total == 0 {
+		return 0.0
+	}
+	return float64(s.Misses) / float64(total)
+}
+
 // CacheEntry represents a cached item.
 type CacheEntry struct {
 	Key        string    `json:"key"`
