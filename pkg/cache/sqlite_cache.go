@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,7 +73,7 @@ func NewSQLiteCache(config CacheConfig) (*SQLiteCache, error) {
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
 			// Log warning but don't fail
-			fmt.Printf("Warning: failed to set pragma %s: %v\n", pragma, err)
+			log.Printf("Warning: failed to set pragma %s: %v", pragma, err)
 		}
 	}
 
@@ -136,7 +137,7 @@ func (c *SQLiteCache) Get(ctx context.Context, key string) ([]byte, bool, error)
 	updateQuery := `UPDATE cache_entries SET accessed_at = ? WHERE key = ?`
 	if _, err := c.db.ExecContext(ctx, updateQuery, now, key); err != nil {
 		// Log warning but don't fail the get operation
-		fmt.Printf("Warning: failed to update access time: %v\n", err)
+		log.Printf("Warning: failed to update access time: %v", err)
 	}
 
 	// Correct the stats
@@ -242,7 +243,7 @@ func (c *SQLiteCache) Clear(ctx context.Context) error {
 	// Vacuum to reclaim space
 	if _, err := c.db.Exec("VACUUM"); err != nil {
 		// Log warning but don't fail
-		fmt.Printf("Warning: failed to vacuum after clear: %v\n", err)
+		log.Printf("Warning: failed to vacuum after clear: %v", err)
 	}
 
 	return nil
@@ -328,7 +329,7 @@ func (c *SQLiteCache) cleanupExpired() {
 	query := `DELETE FROM cache_entries WHERE expires_at > 0 AND expires_at < ?`
 	result, err := c.db.Exec(query, time.Now().UnixNano())
 	if err != nil {
-		fmt.Printf("Warning: failed to cleanup expired entries: %v\n", err)
+		log.Printf("Warning: failed to cleanup expired entries: %v", err)
 		return
 	}
 
@@ -351,7 +352,7 @@ func (c *SQLiteCache) vacuumRoutine() {
 			return
 		case <-ticker.C:
 			if _, err := c.db.Exec("VACUUM"); err != nil {
-				fmt.Printf("Warning: failed to vacuum database: %v\n", err)
+				log.Printf("Warning: failed to vacuum database: %v", err)
 			}
 		}
 	}
@@ -361,7 +362,7 @@ func (c *SQLiteCache) loadStats() {
 	var totalSize int64
 	query := `SELECT COALESCE(SUM(size), 0) FROM cache_entries`
 	if err := c.db.QueryRow(query).Scan(&totalSize); err != nil {
-		fmt.Printf("Warning: failed to load cache size: %v\n", err)
+		log.Printf("Warning: failed to load cache size: %v", err)
 		return
 	}
 	atomic.StoreInt64(&c.stats.Size, totalSize)
@@ -405,9 +406,14 @@ func (c *SQLiteCache) Import(ctx context.Context, entries []CacheEntry) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	
+	// Track if transaction was committed successfully
+	var committed bool
 	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			fmt.Printf("Warning: failed to rollback transaction: %v\n", rollbackErr)
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("Warning: failed to rollback transaction: %v", rollbackErr)
+			}
 		}
 	}()
 
@@ -436,6 +442,7 @@ func (c *SQLiteCache) Import(ctx context.Context, entries []CacheEntry) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	committed = true
 
 	// Reload stats after import
 	c.loadStats()

@@ -76,10 +76,28 @@ func getOrCreateGlobalCache(cacheConfig CacheConfig) Cache {
 
 // configEqual checks if two cache configurations are equal.
 func configEqual(a, b CacheConfig) bool {
-	return a.Type == b.Type &&
-		a.DefaultTTL == b.DefaultTTL &&
-		a.MaxSize == b.MaxSize &&
-		a.SQLiteConfig.Path == b.SQLiteConfig.Path
+	if a.Type != b.Type ||
+		a.DefaultTTL != b.DefaultTTL ||
+		a.MaxSize != b.MaxSize {
+		return false
+	}
+
+	// Compare SQLite-specific configuration
+	if a.SQLiteConfig.Path != b.SQLiteConfig.Path ||
+		a.SQLiteConfig.EnableWAL != b.SQLiteConfig.EnableWAL ||
+		a.SQLiteConfig.VacuumInterval != b.SQLiteConfig.VacuumInterval ||
+		a.SQLiteConfig.MaxConnections != b.SQLiteConfig.MaxConnections {
+		return false
+	}
+
+	// Compare Memory-specific configuration
+	if a.MemoryConfig.EvictionPolicy != b.MemoryConfig.EvictionPolicy ||
+		a.MemoryConfig.CleanupInterval != b.MemoryConfig.CleanupInterval ||
+		a.MemoryConfig.ShardCount != b.MemoryConfig.ShardCount {
+		return false
+	}
+
+	return true
 }
 
 // Generate implements core.LLM with caching.
