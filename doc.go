@@ -50,6 +50,7 @@
 //   - Integration with multiple LLM providers:
 //     * Anthropic Claude
 //     * Google Gemini (with multimodal support)
+//     * OpenAI (with flexible configuration for compatible APIs)
 //     * Ollama
 //     * LlamaCPP
 //
@@ -107,6 +108,65 @@
 //	        log.Fatalf("Error executing program: %v", err)
 //	    }
 //
+//	    fmt.Printf("Answer: %s\n", result["answer"])
+//	}
+//
+// OpenAI-Compatible API Example:
+//
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "log"
+//	    "time"
+//
+//	    "github.com/XiaoConstantine/dspy-go/pkg/core"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/modules"
+//	)
+//
+//	func main() {
+//	    // Configure LiteLLM (OpenAI-compatible)
+//	    llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+//	        llms.WithAPIKey("your-api-key"),
+//	        llms.WithOpenAIBaseURL("http://localhost:4000"),
+//	        llms.WithOpenAITimeout(60*time.Second))
+//	    if err != nil {
+//	        log.Fatalf("Failed to create LiteLLM instance: %v", err)
+//	    }
+//
+//	    // Or configure LocalAI
+//	    localLLM, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+//	        llms.WithOpenAIBaseURL("http://localhost:8080"),
+//	        llms.WithOpenAIPath("/v1/chat/completions"))
+//	    if err != nil {
+//	        log.Fatalf("Failed to create LocalAI instance: %v", err)
+//	    }
+//
+//	    // Or configure custom OpenAI-compatible API
+//	    customLLM, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+//	        llms.WithAPIKey("custom-key"),
+//	        llms.WithOpenAIBaseURL("https://api.custom-provider.com"),
+//	        llms.WithHeader("X-Custom-Header", "value"))
+//	    if err != nil {
+//	        log.Fatalf("Failed to create custom LLM instance: %v", err)
+//	    }
+//
+//	    // Use any of these LLMs with DSPy-Go modules
+//	    signature := core.NewSignature(
+//	        []core.InputField{{Field: core.Field{Name: "question"}}},
+//	        []core.OutputField{{Field: core.Field{Name: "answer"}}},
+//	    )
+//	    
+//	    cot := modules.NewChainOfThought(signature)
+//	    cot.SetLLM(llm) // Use LiteLLM, LocalAI, or custom provider
+//	    
+//	    result, err := cot.Process(context.Background(), map[string]interface{}{
+//	        "question": "What are the benefits of using OpenAI-compatible APIs?",
+//	    })
+//	    if err != nil {
+//	        log.Fatalf("Error processing: %v", err)
+//	    }
+//	    
 //	    fmt.Printf("Answer: %s\n", result["answer"])
 //	}
 //

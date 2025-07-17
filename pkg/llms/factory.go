@@ -71,6 +71,20 @@ func ensureRegistryInitialized() {
 			panic(fmt.Sprintf("failed to register llamacpp provider: %v", err))
 		}
 
+		// Register OpenAI and compatible providers
+		if err := registry.RegisterProvider("openai", OpenAIProviderFactory); err != nil {
+			panic(fmt.Sprintf("failed to register openai provider: %v", err))
+		}
+		if err := registry.RegisterProvider("litellm", LiteLLMProviderFactory); err != nil {
+			panic(fmt.Sprintf("failed to register litellm provider: %v", err))
+		}
+		if err := registry.RegisterProvider("localai", LocalAIProviderFactory); err != nil {
+			panic(fmt.Sprintf("failed to register localai provider: %v", err))
+		}
+		if err := registry.RegisterProvider("fastchat", FastChatProviderFactory); err != nil {
+			panic(fmt.Sprintf("failed to register fastchat provider: %v", err))
+		}
+
 		// Load default model configurations
 		loadDefaultModelConfigurations(registry)
 	})
@@ -124,6 +138,111 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) {
 				},
 			},
 		},
+		"openai": {
+			Name: "openai",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelOpenAIGPT4): {
+					ID:           string(core.ModelOpenAIGPT4),
+					Name:         "GPT-4",
+					Capabilities: []string{"completion", "chat", "json", "streaming"},
+				},
+				string(core.ModelOpenAIGPT4Turbo): {
+					ID:           string(core.ModelOpenAIGPT4Turbo),
+					Name:         "GPT-4 Turbo",
+					Capabilities: []string{"completion", "chat", "json", "streaming"},
+				},
+				string(core.ModelOpenAIGPT35Turbo): {
+					ID:           string(core.ModelOpenAIGPT35Turbo),
+					Name:         "GPT-3.5 Turbo",
+					Capabilities: []string{"completion", "chat", "json", "streaming"},
+				},
+				string(core.ModelOpenAIGPT4o): {
+					ID:           string(core.ModelOpenAIGPT4o),
+					Name:         "GPT-4o",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding"},
+				},
+				string(core.ModelOpenAIGPT4oMini): {
+					ID:           string(core.ModelOpenAIGPT4oMini),
+					Name:         "GPT-4o Mini",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding"},
+				},
+			},
+		},
+		"litellm": {
+			Name: "litellm",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelLiteLLMGPT4): {
+					ID:           string(core.ModelLiteLLMGPT4),
+					Name:         "GPT-4 via LiteLLM",
+					Capabilities: []string{"completion", "chat", "json", "streaming"},
+				},
+				string(core.ModelLiteLLMClaude3): {
+					ID:           string(core.ModelLiteLLMClaude3),
+					Name:         "Claude 3 Sonnet via LiteLLM",
+					Capabilities: []string{"completion", "chat", "json", "streaming"},
+				},
+				string(core.ModelLiteLLMLlama2): {
+					ID:           string(core.ModelLiteLLMLlama2),
+					Name:         "Llama 2 70B via LiteLLM",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+				string(core.ModelLiteLLMGemini): {
+					ID:           string(core.ModelLiteLLMGemini),
+					Name:         "Gemini Pro via LiteLLM",
+					Capabilities: []string{"completion", "chat", "json", "streaming"},
+				},
+			},
+		},
+		"localai": {
+			Name: "localai",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelLocalAILlama2): {
+					ID:           string(core.ModelLocalAILlama2),
+					Name:         "Llama 2 7B Chat",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+				string(core.ModelLocalAICodeLlama): {
+					ID:           string(core.ModelLocalAICodeLlama),
+					Name:         "CodeLlama 13B Instruct",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+				string(core.ModelLocalAIAlpaca): {
+					ID:           string(core.ModelLocalAIAlpaca),
+					Name:         "Alpaca 7B",
+					Capabilities: []string{"completion", "chat"},
+				},
+				string(core.ModelLocalAIVicuna): {
+					ID:           string(core.ModelLocalAIVicuna),
+					Name:         "Vicuna 7B",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+			},
+		},
+		"fastchat": {
+			Name: "fastchat",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelFastChatVicuna): {
+					ID:           string(core.ModelFastChatVicuna),
+					Name:         "Vicuna 7B v1.5",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+				string(core.ModelFastChatAlpaca): {
+					ID:           string(core.ModelFastChatAlpaca),
+					Name:         "Alpaca 13B",
+					Capabilities: []string{"completion", "chat"},
+				},
+				string(core.ModelFastChatCodeLlama): {
+					ID:           string(core.ModelFastChatCodeLlama),
+					Name:         "CodeLlama 7B Instruct",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+				string(core.ModelFastChatLlama2): {
+					ID:           string(core.ModelFastChatLlama2),
+					Name:         "Llama 2 7B Chat",
+					Capabilities: []string{"completion", "chat", "streaming"},
+				},
+			},
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -172,12 +291,14 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 		llm, err = NewAnthropicLLM(apiKey, anthropic.ModelID(modelID))
 	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashThinking || modelID == core.ModelGoogleGeminiFlashLite:
 		llm, err = NewGeminiLLM(apiKey, modelID)
+	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo || modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini:
+		llm, err = NewOpenAI(modelID, apiKey)
 	case strings.HasPrefix(string(modelID), "ollama:"):
 		parts := strings.SplitN(string(modelID), ":", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
 			return nil, fmt.Errorf("invalid Ollama model ID format. Use 'ollama:<model_name>'")
 		}
-		llm, err = NewOllamaLLM("http://localhost:11434", parts[1])
+		llm, err = NewOllamaLLM(core.ModelID(parts[1]))
 	case strings.HasPrefix(string(modelID), "llamacpp:"):
 		return NewLlamacppLLM("http://localhost:8080")
 	default:

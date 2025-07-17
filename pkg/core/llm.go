@@ -496,18 +496,78 @@ type ModelID string
 
 const (
 	// Anthropic models.
-	ModelAnthropicHaiku            ModelID = ModelID(anthropic.ModelHaiku)
-	ModelAnthropicSonnet           ModelID = ModelID(anthropic.ModelSonnet)
-	ModelAnthropicOpus             ModelID = ModelID(anthropic.ModelOpus)
+	ModelAnthropicHaiku  ModelID = ModelID(anthropic.ModelHaiku)
+	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelSonnet)
+	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelOpus)
+	// Google models.
 	ModelGoogleGeminiFlash         ModelID = "gemini-2.0-flash"
 	ModelGoogleGeminiPro           ModelID = "gemini-2.5-pro-exp-03-25"
 	ModelGoogleGeminiFlashThinking ModelID = "gemini-2.0-flash-thinking-exp"
 	ModelGoogleGeminiFlashLite     ModelID = "gemini-2.0-flash-lite"
+	// OpenAI models.
+	ModelOpenAIGPT4       ModelID = "gpt-4"
+	ModelOpenAIGPT4Turbo  ModelID = "gpt-4-turbo"
+	ModelOpenAIGPT35Turbo ModelID = "gpt-3.5-turbo"
+	ModelOpenAIGPT4o      ModelID = "gpt-4o"
+	ModelOpenAIGPT4oMini  ModelID = "gpt-4o-mini"
+
+	// LiteLLM models (can proxy to any provider).
+	ModelLiteLLMGPT4    ModelID = "gpt-4"
+	ModelLiteLLMClaude3 ModelID = "claude-3-sonnet-20240229"
+	ModelLiteLLMLlama2  ModelID = "llama-2-70b-chat"
+	ModelLiteLLMGemini  ModelID = "gemini-pro"
+
+	// Ollama models (OpenAI-compatible mode).
+	ModelOllamaLlama3_8B    ModelID = "llama3:8b"
+	ModelOllamaLlama3_70B   ModelID = "llama3:70b"
+	ModelOllamaLlama3_1_8B  ModelID = "llama3.1:8b"
+	ModelOllamaLlama3_1_70B ModelID = "llama3.1:70b"
+	ModelOllamaLlama3_2_3B  ModelID = "llama3.2:3b"
+	ModelOllamaCodeLlama13B ModelID = "codellama:13b"
+	ModelOllamaCodeLlama34B ModelID = "codellama:34b"
+	ModelOllamaMistral7B    ModelID = "mistral:7b"
+	ModelOllamaGemma2B      ModelID = "gemma:2b"
+	ModelOllamaGemma7B      ModelID = "gemma:7b"
+	ModelOllamaQwen2_5_7B   ModelID = "qwen2.5:7b"
+	ModelOllamaQwen2_5_14B  ModelID = "qwen2.5:14b"
+
+	// Ollama embedding models.
+	ModelOllamaNomicEmbed ModelID = "nomic-embed-text"
+	ModelOllamaMxbaiEmbed ModelID = "mxbai-embed-large"
+	ModelOllamaAllMiniLM  ModelID = "all-minilm"
+
+	// LocalAI models.
+	ModelLocalAILlama2    ModelID = "llama-2-7b-chat"
+	ModelLocalAICodeLlama ModelID = "codellama-13b-instruct"
+	ModelLocalAIAlpaca    ModelID = "alpaca-7b"
+	ModelLocalAIVicuna    ModelID = "vicuna-7b"
+
+	// FastChat models.
+	ModelFastChatVicuna    ModelID = "vicuna-7b-v1.5"
+	ModelFastChatAlpaca    ModelID = "alpaca-13b"
+	ModelFastChatCodeLlama ModelID = "codellama-7b-instruct"
+	ModelFastChatLlama2    ModelID = "llama-2-7b-chat"
+
+	// Generic OpenAI-compatible models.
+	ModelCompatibleGPT4   ModelID = "gpt-4"
+	ModelCompatibleGPT35  ModelID = "gpt-3.5-turbo"
+	ModelCompatibleClaude ModelID = "claude-3-sonnet"
+	ModelCompatibleLlama2 ModelID = "llama-2-chat"
 )
 
 var ProviderModels = map[string][]ModelID{
 	"anthropic": {ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus},
 	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashThinking, ModelGoogleGeminiFlashLite},
-	"ollama":    {},
-	"llamacpp":  {},
+	"openai":    {ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini},
+	"ollama": {
+		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,
+		ModelOllamaLlama3_2_3B, ModelOllamaCodeLlama13B, ModelOllamaCodeLlama34B, ModelOllamaMistral7B,
+		ModelOllamaGemma2B, ModelOllamaGemma7B, ModelOllamaQwen2_5_7B, ModelOllamaQwen2_5_14B,
+		ModelOllamaNomicEmbed, ModelOllamaMxbaiEmbed, ModelOllamaAllMiniLM,
+	},
+	"llamacpp":          {},
+	"litellm":           {ModelLiteLLMGPT4, ModelLiteLLMClaude3, ModelLiteLLMLlama2, ModelLiteLLMGemini},
+	"localai":           {ModelLocalAILlama2, ModelLocalAICodeLlama, ModelLocalAIAlpaca, ModelLocalAIVicuna},
+	"fastchat":          {ModelFastChatVicuna, ModelFastChatAlpaca, ModelFastChatCodeLlama, ModelFastChatLlama2},
+	"openai_compatible": {ModelCompatibleGPT4, ModelCompatibleGPT35, ModelCompatibleClaude, ModelCompatibleLlama2},
 }
