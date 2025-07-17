@@ -13,7 +13,7 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Modular Architecture**: Build complex LLM applications by composing simple, reusable components
 - **Systematic Prompt Engineering**: Optimize prompts automatically based on examples and feedback
 - **Flexible Workflows**: Chain, branch, and orchestrate LLM operations with powerful workflow abstractions
-- **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini (with multimodal support), Ollama, and LlamaCPP
+- **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini (with multimodal support), OpenAI, Ollama, LlamaCPP, and OpenAI-compatible APIs (LiteLLM, LocalAI, etc.)
 - **Multimodal Processing**: Native support for image analysis, vision Q&A, and multimodal chat with streaming capabilities
 - **Advanced Reasoning Patterns**: Implement chain-of-thought, ReAct, refinement, and multi-chain comparison techniques
 - **Parallel Processing**: Built-in support for concurrent execution to improve performance
@@ -449,7 +449,7 @@ result, err := orchestrator.Execute(ctx, map[string]interface{}{
 
 ## Working with Different LLM Providers
 
-DSPy-Go supports multiple LLM providers out of the box:
+DSPy-Go supports multiple LLM providers with flexible configuration options:
 
 ```go
 // Using Anthropic Claude
@@ -457,6 +457,27 @@ llm, err := llms.NewAnthropicLLM("api-key", core.ModelAnthropicSonnet)
 
 // Using Google Gemini
 llm, err := llms.NewGeminiLLM("api-key", "gemini-pro")
+
+// Using OpenAI (standard)
+llm, err := llms.NewOpenAI(core.ModelOpenAIGPT4, "api-key")
+
+// Using LiteLLM (OpenAI-compatible)
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("api-key"),
+    llms.WithOpenAIBaseURL("http://localhost:4000"))
+
+// Using LocalAI (OpenAI-compatible)
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("api-key"),
+    llms.WithOpenAIBaseURL("http://localhost:8080"),
+    llms.WithOpenAIPath("/v1/chat/completions"))
+
+// Using custom OpenAI-compatible API
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("custom-key"),
+    llms.WithOpenAIBaseURL("https://api.custom-provider.com"),
+    llms.WithHeader("Custom-Header", "value"),
+    llms.WithOpenAITimeout(30*time.Second))
 
 // Using Ollama (local)
 llm, err := llms.NewOllamaLLM("http://localhost:11434", "ollama:llama2")
@@ -469,6 +490,69 @@ llms.SetDefaultLLM(llm)
 
 // Or use with a specific module
 myModule.SetLLM(llm)
+```
+
+### OpenAI-Compatible APIs
+
+DSPy-Go's OpenAI provider supports any OpenAI-compatible API through functional options, making it easy to work with various providers:
+
+#### LiteLLM
+[LiteLLM](https://docs.litellm.ai/) provides a unified interface to 100+ LLMs:
+
+```go
+// Basic LiteLLM setup
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("your-api-key"),
+    llms.WithOpenAIBaseURL("http://localhost:4000"))
+
+// LiteLLM with custom configuration
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("litellm-key"),
+    llms.WithOpenAIBaseURL("https://your-litellm-instance.com"),
+    llms.WithOpenAITimeout(60*time.Second),
+    llms.WithHeader("X-Custom-Header", "value"))
+```
+
+#### LocalAI
+[LocalAI](https://localai.io/) for running local models:
+
+```go
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithOpenAIBaseURL("http://localhost:8080"),
+    llms.WithOpenAIPath("/v1/chat/completions"))
+```
+
+#### FastChat
+[FastChat](https://github.com/lm-sys/FastChat) for serving local models:
+
+```go
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithOpenAIBaseURL("http://localhost:8000"),
+    llms.WithOpenAIPath("/v1/chat/completions"))
+```
+
+#### Azure OpenAI
+Configure for Azure OpenAI Service:
+
+```go
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("azure-api-key"),
+    llms.WithOpenAIBaseURL("https://your-resource.openai.azure.com"),
+    llms.WithOpenAIPath("/openai/deployments/your-deployment/chat/completions"),
+    llms.WithHeader("api-version", "2024-02-15-preview"))
+```
+
+#### Custom Providers
+Any API that follows the OpenAI chat completions format:
+
+```go
+llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+    llms.WithAPIKey("custom-key"),
+    llms.WithOpenAIBaseURL("https://api.custom-provider.com"),
+    llms.WithOpenAIPath("/v1/chat/completions"),
+    llms.WithOpenAITimeout(30*time.Second),
+    llms.WithHeader("Authorization", "Bearer custom-token"),
+    llms.WithHeader("X-API-Version", "v1"))
 ```
 
 ## Advanced Features
