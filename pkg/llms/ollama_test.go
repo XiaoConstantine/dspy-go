@@ -806,12 +806,24 @@ func TestOllamaLLM_BatchEmbeddings(t *testing.T) {
 
 		resp := &openai.EmbeddingResponse{
 			Object: "list",
-			Data: []openai.EmbeddingData{{
-				Object:    "embedding",
-				Embedding: []float64{0.1, 0.2, 0.3},
-				Index:     0,
-			}},
-			Usage: openai.CompletionUsage{TotalTokens: 5},
+			Data: []openai.EmbeddingData{
+				{
+					Object:    "embedding",
+					Embedding: []float64{0.1, 0.2, 0.3},
+					Index:     0,
+				},
+				{
+					Object:    "embedding", 
+					Embedding: []float64{0.4, 0.5, 0.6},
+					Index:     1,
+				},
+				{
+					Object:    "embedding",
+					Embedding: []float64{0.7, 0.8, 0.9},
+					Index:     2,
+				},
+			},
+			Usage: openai.CompletionUsage{TotalTokens: 15},
 		}
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			t.Fatalf("Failed to encode response: %v", err)

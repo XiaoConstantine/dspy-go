@@ -745,11 +745,90 @@ func (o *OllamaLLM) StreamGenerateWithContent(ctx context.Context, content []cor
 
 // CreateEmbeddings generates embeddings for multiple inputs.
 func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
-	opts := core.NewEmbeddingOptions()
-	for _, opt := range options {
-		opt(opts)
+	if o.config.UseOpenAIAPI {
+		// Use batching for OpenAI-compatible API
+		opts := core.NewEmbeddingOptions()
+		for _, opt := range options {
+			opt(opts)
+		}
+
+		req := &openai.EmbeddingRequest{
+			Input: inputs,
+			Model: string(o.ModelID()),
+		}
+
+		jsonData, err := json.Marshal(req)
+		if err != nil {
+			return nil, errors.Wrap(err, errors.InvalidInput, "failed to marshal embedding request")
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx,
+			"POST",
+			o.GetEndpointConfig().BaseURL+"/v1/embeddings",
+			bytes.NewBuffer(jsonData),
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, errors.Unknown, "failed to create embedding request")
+		}
+
+		for key, value := range o.GetEndpointConfig().Headers {
+			httpReq.Header.Set(key, value)
+		}
+
+		resp, err := o.GetHTTPClient().Do(httpReq)
+		if err != nil {
+			return nil, errors.Wrap(err, errors.LLMGenerationFailed, "embedding request failed")
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.Wrap(err, errors.LLMGenerationFailed, "failed to read embedding response")
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, errors.WithFields(
+				errors.New(errors.LLMGenerationFailed, "API request failed"),
+				errors.Fields{"status": resp.StatusCode, "body": string(body)})
+		}
+
+		var embeddingResp openai.EmbeddingResponse
+		if err := json.Unmarshal(body, &embeddingResp); err != nil {
+			return nil, errors.Wrap(err, errors.InvalidResponse, "failed to parse embedding response")
+		}
+
+		if len(embeddingResp.Data) == 0 {
+			return nil, errors.New(errors.InvalidResponse, "no embeddings in response")
+		}
+
+		results := make([]core.EmbeddingResult, len(embeddingResp.Data))
+		for i, data := range embeddingResp.Data {
+			embedding32 := make([]float32, len(data.Embedding))
+			for j, v := range data.Embedding {
+				embedding32[j] = float32(v)
+			}
+			tokenCount := 0
+			if len(inputs) > 0 {
+				tokenCount = embeddingResp.Usage.TotalTokens / len(inputs) // Approximate
+			}
+			results[i] = core.EmbeddingResult{
+				Vector:     embedding32,
+				TokenCount: tokenCount,
+				Metadata: map[string]interface{}{
+					"model":       embeddingResp.Model,
+					"mode":        "openai",
+					"batch_index": i,
+				},
+			}
+		}
+
+		return &core.BatchEmbeddingResult{
+			Embeddings: results,
+			ErrorIndex: -1, // No error occurred
+		}, nil
 	}
 
+	// Fallback to looping for native mode
 	var allResults []core.EmbeddingResult
 	var firstError error
 	var errorIndex = -1
@@ -761,7 +840,6 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = err
 				errorIndex = i
 			}
-			// Continue to process other inputs, but store the first error.
 			continue
 		}
 
