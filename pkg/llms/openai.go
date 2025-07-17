@@ -141,13 +141,6 @@ func NewOpenAI(modelID core.ModelID, apiKey string) (*OpenAILLM, error) {
 
 // NewOpenAILLMFromConfig creates a new OpenAILLM instance from configuration.
 func NewOpenAILLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*OpenAILLM, error) {
-	// Validate model ID
-	if !isValidOpenAIModel(modelID) {
-		return nil, errors.WithFields(
-			errors.New(errors.InvalidInput, "unsupported OpenAI model"),
-			errors.Fields{"model": modelID})
-	}
-
 	opts := []OpenAIOption{}
 
 	// Parse configuration into options
@@ -162,6 +155,14 @@ func NewOpenAILLMFromConfig(ctx context.Context, config core.ProviderConfig, mod
 	}
 	if baseURL != "" {
 		opts = append(opts, WithOpenAIBaseURL(baseURL))
+	}
+
+	// Validate model ID only for the official OpenAI API endpoint to allow custom models with compatible APIs.
+	// An empty baseURL defaults to the official OpenAI API.
+	if (baseURL == "" || baseURL == "https://api.openai.com") && !isValidOpenAIModel(modelID) {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidInput, "unsupported model for official OpenAI API"),
+			errors.Fields{"model": modelID})
 	}
 
 	if config.Endpoint != nil && config.Endpoint.Path != "" {
