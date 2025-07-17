@@ -750,43 +750,27 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		opt(opts)
 	}
 
-	if opts.BatchSize <= 0 {
-		opts.BatchSize = 32
-	}
-
 	var allResults []core.EmbeddingResult
 	var firstError error
 	var errorIndex = -1
 
-	for i := 0; i < len(inputs); i += opts.BatchSize {
-		end := i + opts.BatchSize
-		if end > len(inputs) {
-			end = len(inputs)
+	for i, input := range inputs {
+		result, err := o.CreateEmbedding(ctx, input, options...)
+		if err != nil {
+			if firstError == nil {
+				firstError = err
+				errorIndex = i
+			}
+			// Continue to process other inputs, but store the first error.
+			continue
 		}
 
-		batch := inputs[i:end]
-		for j, input := range batch {
-			result, err := o.CreateEmbedding(ctx, input, options...)
-			if err != nil {
-				if firstError == nil {
-					firstError = err
-					errorIndex = i + j
-				}
-				continue
-			}
-			
-			// Add batch index to metadata
-			if result.Metadata == nil {
-				result.Metadata = make(map[string]interface{})
-			}
-			result.Metadata["batch_index"] = i + j
-			
-			allResults = append(allResults, *result)
+		if result.Metadata == nil {
+			result.Metadata = make(map[string]interface{})
 		}
-		
-		if firstError != nil {
-			break
-		}
+		result.Metadata["batch_index"] = i
+
+		allResults = append(allResults, *result)
 	}
 
 	return &core.BatchEmbeddingResult{
