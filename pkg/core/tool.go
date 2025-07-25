@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/XiaoConstantine/mcp-go/pkg/model"
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
 // ToolMetadata contains information about a tool's capabilities and requirements.

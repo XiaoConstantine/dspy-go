@@ -15,6 +15,6 @@ tools:
   mcp:
     servers:
       - name: "git-mcp"
-        command: "./examples/others/mcp/git-mcp-server"
+        command: "./git-mcp-server"
         args: []
         timeout: 30s
