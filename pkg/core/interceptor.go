@@ -18,7 +18,7 @@ type ToolHandler func(ctx context.Context, args map[string]interface{}) (ToolRes
 // ModuleInterceptor wraps Module.Process() calls with additional functionality.
 // It follows the gRPC interceptor pattern: the interceptor can inspect/modify the request,
 // call the handler, and inspect/modify the response.
-type ModuleInterceptor func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error)
+type ModuleInterceptor func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error)
 
 // AgentInterceptor wraps Agent.Execute() calls with additional functionality.
 // Similar to ModuleInterceptor but for agent operations.
@@ -153,8 +153,8 @@ func ChainModuleInterceptors(interceptors ...ModuleInterceptor) ModuleIntercepto
 	n := len(interceptors)
 	if n == 0 {
 		// Return a pass-through interceptor that just calls the handler
-		return func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-			return handler(ctx, inputs)
+		return func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+			return handler(ctx, inputs, opts...)
 		}
 	}
 
@@ -163,7 +163,7 @@ func ChainModuleInterceptors(interceptors ...ModuleInterceptor) ModuleIntercepto
 	}
 
 	// Build the chain from the inside out
-	return func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
+	return func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
 		// Create a chain of handlers, starting with the final handler
 		var chainer func(int, ModuleHandler) ModuleHandler
 		chainer = func(currentIndex int, currentHandler ModuleHandler) ModuleHandler {
@@ -171,10 +171,10 @@ func ChainModuleInterceptors(interceptors ...ModuleInterceptor) ModuleIntercepto
 				return currentHandler
 			}
 			return func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
-				return interceptors[currentIndex](ctx, inputs, info, chainer(currentIndex+1, currentHandler))
+				return interceptors[currentIndex](ctx, inputs, info, chainer(currentIndex+1, currentHandler), opts...)
 			}
 		}
-		return chainer(0, handler)(ctx, inputs)
+		return chainer(0, handler)(ctx, inputs, opts...)
 	}
 }
 
