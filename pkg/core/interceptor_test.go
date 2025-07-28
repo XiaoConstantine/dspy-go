@@ -199,8 +199,8 @@ func TestInterceptorChainMethods(t *testing.T) {
 	chain := NewInterceptorChain()
 
 	// Test adding interceptors
-	moduleInt := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	moduleInt := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
 	agentInt := func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
 		return handler(ctx, input)
@@ -264,11 +264,11 @@ func TestInterceptorChainCompose(t *testing.T) {
 	chain1 := NewInterceptorChain()
 	chain2 := NewInterceptorChain()
 
-	moduleInt1 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	moduleInt1 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
-	moduleInt2 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	moduleInt2 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
 
 	chain1.AddModuleInterceptor(moduleInt1)
@@ -310,8 +310,8 @@ func TestChainModuleInterceptors(t *testing.T) {
 	})
 
 	t.Run("single interceptor", func(t *testing.T) {
-		interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-			result, err := handler(ctx, inputs)
+		interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+			result, err := handler(ctx, inputs, opts...)
 			if err != nil {
 				return nil, err
 			}
@@ -335,16 +335,16 @@ func TestChainModuleInterceptors(t *testing.T) {
 	t.Run("multiple interceptors", func(t *testing.T) {
 		var order []string
 
-		interceptor1 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
+		interceptor1 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
 			order = append(order, "interceptor1-before")
-			result, err := handler(ctx, inputs)
+			result, err := handler(ctx, inputs, opts...)
 			order = append(order, "interceptor1-after")
 			return result, err
 		}
 
-		interceptor2 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
+		interceptor2 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
 			order = append(order, "interceptor2-before")
-			result, err := handler(ctx, inputs)
+			result, err := handler(ctx, inputs, opts...)
 			order = append(order, "interceptor2-after")
 			return result, err
 		}
@@ -367,8 +367,8 @@ func TestChainModuleInterceptors(t *testing.T) {
 	})
 
 	t.Run("error handling", func(t *testing.T) {
-		interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-			return handler(ctx, inputs)
+		interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+			return handler(ctx, inputs, opts...)
 		}
 
 		chained := ChainModuleInterceptors(interceptor)
@@ -378,6 +378,33 @@ func TestChainModuleInterceptors(t *testing.T) {
 		}
 		if err.Error() != "module error" {
 			t.Errorf("Expected 'module error', got '%s'", err.Error())
+		}
+	})
+
+	t.Run("options propagation", func(t *testing.T) {
+		var receivedOpts []Option
+		
+		handlerWithOptionsCheck := func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
+			receivedOpts = opts
+			return mockModuleHandler(ctx, inputs, opts...)
+		}
+
+		interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+			return handler(ctx, inputs, opts...)
+		}
+
+		chained := ChainModuleInterceptors(interceptor)
+		
+		// Create a dummy option for testing
+		testOption := func(*ModuleOptions) {}
+		
+		_, err := chained(ctx, inputs, info, handlerWithOptionsCheck, testOption)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		
+		if len(receivedOpts) != 1 {
+			t.Errorf("Expected 1 option to be passed through, got %d", len(receivedOpts))
 		}
 	})
 }
@@ -439,8 +466,13 @@ func TestChainAgentInterceptors(t *testing.T) {
 			return result, err
 		}
 
+		handlerWithOrder := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+			callOrder = append(callOrder, "handler")
+			return mockAgentHandler(ctx, input)
+		}
+
 		chained := ChainAgentInterceptors(interceptor1, interceptor2)
-		result, err := chained(ctx, input, info, mockAgentHandler)
+		result, err := chained(ctx, input, info, handlerWithOrder)
 
 		if err != nil {
 			t.Errorf("Expected no error, got %v", err)
@@ -450,7 +482,7 @@ func TestChainAgentInterceptors(t *testing.T) {
 		}
 
 		// Check call order
-		expectedOrder := []string{"agent_interceptor1_before", "agent_interceptor2_before", "agent_interceptor2_after", "agent_interceptor1_after"}
+		expectedOrder := []string{"agent_interceptor1_before", "agent_interceptor2_before", "handler", "agent_interceptor2_after", "agent_interceptor1_after"}
 		if len(callOrder) != len(expectedOrder) {
 			t.Errorf("Expected %d calls, got %d", len(expectedOrder), len(callOrder))
 		}
@@ -538,8 +570,13 @@ func TestChainToolInterceptors(t *testing.T) {
 			return result, err
 		}
 
+		handlerWithOrder := func(ctx context.Context, args map[string]interface{}) (ToolResult, error) {
+			callOrder = append(callOrder, "handler")
+			return mockToolHandler(ctx, args)
+		}
+
 		chained := ChainToolInterceptors(interceptor1, interceptor2)
-		result, err := chained(ctx, args, info, mockToolHandler)
+		result, err := chained(ctx, args, info, handlerWithOrder)
 
 		if err != nil {
 			t.Errorf("Expected no error, got %v", err)
@@ -549,7 +586,7 @@ func TestChainToolInterceptors(t *testing.T) {
 		}
 
 		// Check call order
-		expectedOrder := []string{"tool_interceptor1_before", "tool_interceptor2_before", "tool_interceptor2_after", "tool_interceptor1_after"}
+		expectedOrder := []string{"tool_interceptor1_before", "tool_interceptor2_before", "handler", "tool_interceptor2_after", "tool_interceptor1_after"}
 		if len(callOrder) != len(expectedOrder) {
 			t.Errorf("Expected %d calls, got %d", len(expectedOrder), len(callOrder))
 		}
@@ -595,8 +632,8 @@ func BenchmarkChainModuleInterceptors_OneInterceptor(b *testing.B) {
 	inputs := map[string]any{"input": "test"}
 	info := createTestModuleInfo()
 
-	interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
 	chained := ChainModuleInterceptors(interceptor)
 
@@ -611,14 +648,14 @@ func BenchmarkChainModuleInterceptors_ThreeInterceptors(b *testing.B) {
 	inputs := map[string]any{"input": "test"}
 	info := createTestModuleInfo()
 
-	interceptor1 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	interceptor1 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
-	interceptor2 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	interceptor2 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
-	interceptor3 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler) (map[string]any, error) {
-		return handler(ctx, inputs)
+	interceptor3 := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
+		return handler(ctx, inputs, opts...)
 	}
 	chained := ChainModuleInterceptors(interceptor1, interceptor2, interceptor3)
 
