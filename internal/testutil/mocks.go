@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -16,10 +17,21 @@ type MockDataset struct {
 	mock.Mock
 	Examples []core.Example
 	Index    int
+	mu       sync.RWMutex
 }
 
 func (m *MockDataset) Next() (core.Example, bool) {
-	m.Called()
+	// Check if there's a mock expectation, if not use default behavior
+	if len(m.ExpectedCalls) > 0 {
+		for _, call := range m.ExpectedCalls {
+			if call.Method == "Next" {
+				m.Called()
+				break
+			}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.Index < len(m.Examples) {
 		example := m.Examples[m.Index]
 		m.Index++
@@ -30,7 +42,17 @@ func (m *MockDataset) Next() (core.Example, bool) {
 
 // Reset resets the dataset iterator.
 func (m *MockDataset) Reset() {
-	m.Called()
+	// Check if there's a mock expectation, if not just reset
+	if len(m.ExpectedCalls) > 0 {
+		for _, call := range m.ExpectedCalls {
+			if call.Method == "Reset" {
+				m.Called()
+				break
+			}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Index = 0
 }
 
@@ -572,6 +594,121 @@ func (m *MockCoreTool) Execute(ctx context.Context, args map[string]interface{})
 
 // Ensure MockCoreTool implements core.Tool.
 var _ core.Tool = (*MockCoreTool)(nil)
+
+// MockModule is a mock implementation of core.Module.
+type MockModule struct {
+	mock.Mock
+	signature   core.Signature
+	displayName string
+	moduleType  string
+	mu          sync.RWMutex
+}
+
+// NewMockModule creates a new MockModule with the given instruction.
+func NewMockModule(instruction string) *MockModule {
+	return &MockModule{
+		signature: core.Signature{
+			Inputs: []core.InputField{
+				{Field: core.Field{Name: "input", Description: "Test input"}},
+			},
+			Outputs: []core.OutputField{
+				{Field: core.Field{Name: "output", Description: "Test output"}},
+			},
+			Instruction: instruction,
+		},
+		displayName: "MockModule",
+		moduleType:  "mock",
+	}
+}
+
+func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	args := m.Called(ctx, inputs, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]any), args.Error(1)
+}
+
+func (m *MockModule) GetSignature() core.Signature {
+	// Check if there's a mock expectation, if not return default
+	if len(m.ExpectedCalls) > 0 {
+		for _, call := range m.ExpectedCalls {
+			if call.Method == "GetSignature" {
+				args := m.Called()
+				if args.Get(0) != nil {
+					return args.Get(0).(core.Signature)
+				}
+				break
+			}
+		}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.signature
+}
+
+func (m *MockModule) SetSignature(signature core.Signature) {
+	m.Called(signature)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.signature = signature
+}
+
+func (m *MockModule) SetLLM(llm core.LLM) {
+	m.Called(llm)
+}
+
+func (m *MockModule) Clone() core.Module {
+	// Check if there's a mock expectation, if not return default
+	if len(m.ExpectedCalls) > 0 {
+		for _, call := range m.ExpectedCalls {
+			if call.Method == "Clone" {
+				args := m.Called()
+				if args.Get(0) != nil {
+					return args.Get(0).(core.Module)
+				}
+				break
+			}
+		}
+	}
+	return &MockModule{
+		signature:   m.signature,
+		displayName: m.displayName,
+		moduleType:  m.moduleType,
+	}
+}
+
+func (m *MockModule) GetDisplayName() string {
+	args := m.Called()
+	if args.Get(0) != nil {
+		return args.String(0)
+	}
+	return m.displayName
+}
+
+func (m *MockModule) GetModuleType() string {
+	args := m.Called()
+	if args.Get(0) != nil {
+		return args.String(0)
+	}
+	return m.moduleType
+}
+
+func (m *MockModule) UpdateInstruction(instruction string) {
+	// Check if there's a mock expectation, if not update signature directly
+	if len(m.ExpectedCalls) > 0 {
+		for _, call := range m.ExpectedCalls {
+			if call.Method == "UpdateInstruction" {
+				m.Called(instruction)
+				break
+			}
+		}
+	}
+	m.signature.Instruction = instruction
+}
+
+// Ensure MockModule implements core.Module.
+var _ core.Module = (*MockModule)(nil)
 
 // --- Mock MCP Client ---
 
