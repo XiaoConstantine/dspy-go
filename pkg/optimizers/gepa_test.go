@@ -806,9 +806,6 @@ func TestMultiLevelReflectionSystem(t *testing.T) {
 	patterns := gepa.analyzePopulationPatterns()
 	assert.NotNil(t, patterns)
 
-	// Test evolutionary trend analysis
-	trends := gepa.analyzeEvolutionaryTrends()
-	assert.NotNil(t, trends)
 }
 
 func TestErrorHandlingAndEdgeCases(t *testing.T) {

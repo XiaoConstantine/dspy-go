@@ -4,17 +4,18 @@
 // features including multi-level reflection systems, LLM-based self-critique, and sophisticated
 // pattern analysis capabilities. Some advanced functions are currently unused but preserved for
 // future integration and research purposes.
-//
-//nolint:unused // Advanced reflection and analysis functions are research implementations
 package optimizers
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -189,7 +190,13 @@ type GEPAState struct {
 	ExecutionTraces          map[string][]ExecutionTrace       `json:"execution_traces"`
 	CandidateMetrics         map[string]*CandidateMetrics      `json:"candidate_metrics"`
 	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness `json:"multi_objective_fitness_map"`
-	mu                       sync.RWMutex
+
+	// Pareto archive for elite solution management
+	ParetoArchive     []*GEPACandidate                  `json:"pareto_archive"`
+	ArchiveFitnessMap map[string]*MultiObjectiveFitness `json:"archive_fitness_map"`
+	MaxArchiveSize    int                               `json:"max_archive_size"`
+
+	mu sync.RWMutex
 }
 
 // NewGEPAState creates a new GEPA optimization state.
@@ -204,6 +211,9 @@ func NewGEPAState() *GEPAState {
 		ExecutionTraces:          make(map[string][]ExecutionTrace),
 		CandidateMetrics:         make(map[string]*CandidateMetrics),
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
+		ParetoArchive:            make([]*GEPACandidate, 0),
+		ArchiveFitnessMap:        make(map[string]*MultiObjectiveFitness),
+		MaxArchiveSize:           50, // Configurable archive size
 		ConvergenceStatus: &ConvergenceStatus{
 			StagnationCount:                0,
 			PrematureConvergenceRisk:       "low",
@@ -263,6 +273,242 @@ func (s *GEPAState) GetTracesForCandidate(candidateID string) []ExecutionTrace {
 	return traces
 }
 
+// UpdateParetoArchive maintains elite Pareto-optimal solutions across generations.
+func (s *GEPAState) UpdateParetoArchive(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Combine current archive with new candidates
+	combined := make([]*GEPACandidate, 0, len(s.ParetoArchive)+len(candidates))
+	combinedFitness := make(map[string]*MultiObjectiveFitness)
+
+	// Add existing archive
+	for _, candidate := range s.ParetoArchive {
+		combined = append(combined, candidate)
+		if fitness, exists := s.ArchiveFitnessMap[candidate.ID]; exists {
+			combinedFitness[candidate.ID] = fitness
+		}
+	}
+
+	// Add new candidates
+	for _, candidate := range candidates {
+		combined = append(combined, candidate)
+		if fitness, exists := fitnessMap[candidate.ID]; exists {
+			combinedFitness[candidate.ID] = fitness
+		}
+	}
+
+	// Extract Pareto-optimal candidates
+	paretoOptimal := s.extractParetoOptimal(combined, combinedFitness)
+
+	// Maintain archive size limit with diversity preservation
+	if len(paretoOptimal) > s.MaxArchiveSize {
+		paretoOptimal = s.maintainArchiveDiversity(paretoOptimal, combinedFitness)
+	}
+
+	// Update archive and fitness map
+	s.ParetoArchive = paretoOptimal
+	s.ArchiveFitnessMap = make(map[string]*MultiObjectiveFitness)
+	for _, candidate := range paretoOptimal {
+		if fitness, exists := combinedFitness[candidate.ID]; exists {
+			s.ArchiveFitnessMap[candidate.ID] = fitness
+		}
+	}
+}
+
+// extractParetoOptimal identifies non-dominated solutions.
+func (s *GEPAState) extractParetoOptimal(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) []*GEPACandidate {
+	paretoOptimal := make([]*GEPACandidate, 0)
+
+	for _, candidate1 := range candidates {
+		fitness1, exists1 := fitnessMap[candidate1.ID]
+		if !exists1 {
+			continue
+		}
+
+		isDominated := false
+		for _, candidate2 := range candidates {
+			if candidate1.ID == candidate2.ID {
+				continue
+			}
+
+			fitness2, exists2 := fitnessMap[candidate2.ID]
+			if !exists2 {
+				continue
+			}
+
+			// Check if candidate2 dominates candidate1
+			if s.dominates(fitness2, fitness1) {
+				isDominated = true
+				break
+			}
+		}
+
+		if !isDominated {
+			paretoOptimal = append(paretoOptimal, candidate1)
+		}
+	}
+
+	return paretoOptimal
+}
+
+// dominates checks if fitness1 dominates fitness2 (all objectives >= and at least one >).
+func (s *GEPAState) dominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
+	objectives1 := []float64{
+		fitness1.SuccessRate, fitness1.OutputQuality, fitness1.Efficiency,
+		fitness1.Robustness, fitness1.Generalization, fitness1.Diversity, fitness1.Innovation,
+	}
+	objectives2 := []float64{
+		fitness2.SuccessRate, fitness2.OutputQuality, fitness2.Efficiency,
+		fitness2.Robustness, fitness2.Generalization, fitness2.Diversity, fitness2.Innovation,
+	}
+
+	allGreaterOrEqual := true
+	atLeastOneGreater := false
+
+	for i := range objectives1 {
+		if objectives1[i] < objectives2[i] {
+			allGreaterOrEqual = false
+			break
+		}
+		if objectives1[i] > objectives2[i] {
+			atLeastOneGreater = true
+		}
+	}
+
+	return allGreaterOrEqual && atLeastOneGreater
+}
+
+// maintainArchiveDiversity reduces archive size while preserving diversity.
+func (s *GEPAState) maintainArchiveDiversity(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) []*GEPACandidate {
+	if len(candidates) <= s.MaxArchiveSize {
+		return candidates
+	}
+
+	// Calculate crowding distances
+	crowdingDistances := s.calculateCrowdingDistances(candidates, fitnessMap)
+
+	// Sort by crowding distance (descending) to preserve most diverse solutions
+	type candidateDistance struct {
+		candidate *GEPACandidate
+		distance  float64
+	}
+
+	candidateDistances := make([]candidateDistance, len(candidates))
+	for i, candidate := range candidates {
+		candidateDistances[i] = candidateDistance{
+			candidate: candidate,
+			distance:  crowdingDistances[candidate.ID],
+		}
+	}
+
+	// Sort by distance (descending - keep most diverse)
+	for i := 0; i < len(candidateDistances)-1; i++ {
+		for j := i + 1; j < len(candidateDistances); j++ {
+			if candidateDistances[i].distance < candidateDistances[j].distance {
+				candidateDistances[i], candidateDistances[j] = candidateDistances[j], candidateDistances[i]
+			}
+		}
+	}
+
+	// Select top candidates
+	result := make([]*GEPACandidate, s.MaxArchiveSize)
+	for i := 0; i < s.MaxArchiveSize; i++ {
+		result[i] = candidateDistances[i].candidate
+	}
+
+	return result
+}
+
+// calculateCrowdingDistances computes crowding distances for diversity maintenance.
+func (s *GEPAState) calculateCrowdingDistances(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) map[string]float64 {
+	distances := make(map[string]float64)
+
+	// Initialize distances
+	for _, candidate := range candidates {
+		distances[candidate.ID] = 0.0
+	}
+
+	// Calculate for each objective
+	objectives := []string{"success", "quality", "efficiency", "robustness", "generalization", "diversity", "innovation"}
+
+	for _, objective := range objectives {
+		// Sort candidates by this objective
+		sortedCandidates := make([]*GEPACandidate, len(candidates))
+		copy(sortedCandidates, candidates)
+
+		// Simple bubble sort by objective value
+		for i := 0; i < len(sortedCandidates)-1; i++ {
+			for j := i + 1; j < len(sortedCandidates); j++ {
+				val1 := s.getObjectiveValue(sortedCandidates[i], objective, fitnessMap)
+				val2 := s.getObjectiveValue(sortedCandidates[j], objective, fitnessMap)
+				if val1 > val2 {
+					sortedCandidates[i], sortedCandidates[j] = sortedCandidates[j], sortedCandidates[i]
+				}
+			}
+		}
+
+		// Set boundary solutions to infinite distance
+		if len(sortedCandidates) > 0 {
+			distances[sortedCandidates[0].ID] = 1e9
+			distances[sortedCandidates[len(sortedCandidates)-1].ID] = 1e9
+		}
+
+		// Calculate crowding distance for intermediate solutions
+		if len(sortedCandidates) > 2 {
+			minVal := s.getObjectiveValue(sortedCandidates[0], objective, fitnessMap)
+			maxVal := s.getObjectiveValue(sortedCandidates[len(sortedCandidates)-1], objective, fitnessMap)
+
+			if maxVal > minVal {
+				for i := 1; i < len(sortedCandidates)-1; i++ {
+					prevVal := s.getObjectiveValue(sortedCandidates[i-1], objective, fitnessMap)
+					nextVal := s.getObjectiveValue(sortedCandidates[i+1], objective, fitnessMap)
+					distances[sortedCandidates[i].ID] += (nextVal - prevVal) / (maxVal - minVal)
+				}
+			}
+		}
+	}
+
+	return distances
+}
+
+// getObjectiveValue extracts objective value for crowding distance calculation.
+func (s *GEPAState) getObjectiveValue(candidate *GEPACandidate, objective string, fitnessMap map[string]*MultiObjectiveFitness) float64 {
+	fitness, exists := fitnessMap[candidate.ID]
+	if !exists {
+		return 0.0
+	}
+
+	switch objective {
+	case "success":
+		return fitness.SuccessRate
+	case "quality":
+		return fitness.OutputQuality
+	case "efficiency":
+		return fitness.Efficiency
+	case "robustness":
+		return fitness.Robustness
+	case "generalization":
+		return fitness.Generalization
+	case "diversity":
+		return fitness.Diversity
+	case "innovation":
+		return fitness.Innovation
+	default:
+		return 0.0
+	}
+}
+
+// GetParetoArchive returns the current Pareto archive of elite solutions.
+func (s *GEPAState) GetParetoArchive() []*GEPACandidate {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	archive := make([]*GEPACandidate, len(s.ParetoArchive))
+	copy(archive, s.ParetoArchive)
+	return archive
+}
+
 // PerformanceLogger tracks performance metrics for GEPA optimization.
 type PerformanceLogger struct {
 	metrics        map[string]*CandidateMetrics
@@ -310,6 +556,11 @@ type GEPA struct {
 
 	// Random number generator
 	rng *rand.Rand
+
+	// System monitoring
+	concurrentTaskCounter int64
+	lastMemStats          runtime.MemStats
+	memStatsLock          sync.RWMutex
 }
 
 // MultiObjectiveFitness represents fitness across multiple objectives for Pareto-based selection.
@@ -681,63 +932,170 @@ func (g *GEPA) createInputPattern(inputs map[string]any) string {
 	return pattern
 }
 
-// calculateInstructionSimilarity calculates similarity between two instructions.
+// calculateInstructionSimilarity calculates similarity between two instructions using LLM-based semantic analysis.
 func (g *GEPA) calculateInstructionSimilarity(inst1, inst2 string) float64 {
 	if inst1 == inst2 {
 		return 1.0
 	}
 
-	// Simple similarity based on common words
+	// First try LLM-based semantic similarity for better accuracy
+	if g.reflectionLLM != nil {
+		if semanticSim := g.calculateSemanticSimilarity(inst1, inst2); semanticSim >= 0 {
+			return semanticSim
+		}
+	}
+
+	// Fallback to improved lexical similarity
+	return g.calculateLexicalSimilarity(inst1, inst2)
+}
+
+// calculateSemanticSimilarity uses LLM to assess semantic similarity between instructions.
+func (g *GEPA) calculateSemanticSimilarity(inst1, inst2 string) float64 {
+	ctx := context.Background()
+
+	prompt := fmt.Sprintf(`Compare the semantic similarity between these two instructions and rate on a scale of 0.0-1.0:
+
+Instruction 1: "%s"
+Instruction 2: "%s"
+
+Consider:
+- Core intent and purpose
+- Task complexity and scope  
+- Semantic meaning beyond word overlap
+- Functional equivalence
+
+Respond with ONLY a decimal number between 0.0 and 1.0, where:
+- 0.0 = completely different purposes
+- 0.5 = related but distinct tasks
+- 1.0 = functionally equivalent
+
+Similarity score:`, inst1, inst2)
+
+	response, err := g.reflectionLLM.Generate(ctx, prompt)
+
+	if err != nil {
+		return -1 // Signal fallback needed
+	}
+
+	// Parse similarity score from response
+	responseText := strings.TrimSpace(response.Content)
+	if score, err := strconv.ParseFloat(responseText, 64); err == nil {
+		if score >= 0.0 && score <= 1.0 {
+			return score
+		}
+	}
+
+	// Try to extract number from longer response
+	words := strings.Fields(responseText)
+	for _, word := range words {
+		if score, err := strconv.ParseFloat(word, 64); err == nil {
+			if score >= 0.0 && score <= 1.0 {
+				return score
+			}
+		}
+	}
+
+	return -1 // Signal fallback needed
+}
+
+// calculateLexicalSimilarity provides enhanced word-based similarity as fallback.
+func (g *GEPA) calculateLexicalSimilarity(inst1, inst2 string) float64 {
+	if inst1 == inst2 {
+		return 1.0
+	}
+
 	words1 := strings.Fields(strings.ToLower(inst1))
 	words2 := strings.Fields(strings.ToLower(inst2))
 
 	if len(words1) == 0 && len(words2) == 0 {
 		return 1.0
 	}
+
 	if len(words1) == 0 || len(words2) == 0 {
 		return 0.0
 	}
 
-	// Create word frequency maps
-	freq1 := make(map[string]int)
-	freq2 := make(map[string]int)
+	// Enhanced similarity combining multiple metrics
+	jaccardSim := g.calculateJaccardSimilarity(words1, words2)
+	cosineSim := g.calculateCosineSimilarity(words1, words2)
+
+	// Weighted combination favoring cosine similarity for better semantic approximation
+	return 0.3*jaccardSim + 0.7*cosineSim
+}
+
+// calculateJaccardSimilarity computes Jaccard similarity coefficient.
+func (g *GEPA) calculateJaccardSimilarity(words1, words2 []string) float64 {
+	set1 := make(map[string]bool)
+	set2 := make(map[string]bool)
 
 	for _, word := range words1 {
-		freq1[word]++
+		set1[word] = true
 	}
 	for _, word := range words2 {
-		freq2[word]++
+		set2[word] = true
 	}
 
-	// Calculate Jaccard similarity
 	intersection := 0
-	union := 0
-
-	allWords := make(map[string]bool)
-	for word := range freq1 {
-		allWords[word] = true
-	}
-	for word := range freq2 {
-		allWords[word] = true
-	}
-
-	for word := range allWords {
-		count1 := freq1[word]
-		count2 := freq2[word]
-
-		if count1 > 0 && count2 > 0 {
+	for word := range set1 {
+		if set2[word] {
 			intersection++
 		}
-		if count1 > 0 || count2 > 0 {
-			union++
-		}
 	}
 
+	union := len(set1) + len(set2) - intersection
 	if union == 0 {
-		return 0.0
+		return 1.0
 	}
 
 	return float64(intersection) / float64(union)
+}
+
+// calculateCosineSimilarity computes cosine similarity using word frequency vectors.
+func (g *GEPA) calculateCosineSimilarity(words1, words2 []string) float64 {
+	// Build vocabulary
+	vocab := make(map[string]int)
+	for _, word := range words1 {
+		if _, exists := vocab[word]; !exists {
+			vocab[word] = len(vocab)
+		}
+	}
+	for _, word := range words2 {
+		if _, exists := vocab[word]; !exists {
+			vocab[word] = len(vocab)
+		}
+	}
+
+	if len(vocab) == 0 {
+		return 1.0
+	}
+
+	// Create frequency vectors
+	vec1 := make([]float64, len(vocab))
+	vec2 := make([]float64, len(vocab))
+
+	for _, word := range words1 {
+		vec1[vocab[word]]++
+	}
+	for _, word := range words2 {
+		vec2[vocab[word]]++
+	}
+
+	// Compute cosine similarity
+	dotProduct := 0.0
+	norm1 := 0.0
+	norm2 := 0.0
+
+	for i := range vec1 {
+		dotProduct += vec1[i] * vec2[i]
+		norm1 += vec1[i] * vec1[i]
+		norm2 += vec2[i] * vec2[i]
+	}
+
+	if norm1 == 0.0 || norm2 == 0.0 {
+		return 0.0
+	}
+
+	return dotProduct / (math.Sqrt(norm1) * math.Sqrt(norm2))
 }
 
 // assessOutputPatternNovelty evaluates the novelty of output patterns.
@@ -2387,6 +2745,12 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 		// Store multi-objective fitness map for this generation
 		g.setCurrentMultiObjectiveFitnessMap(multiObjFitnessMap)
 
+		// Update Pareto archive with elite solutions
+		currentPop := g.getCurrentPopulation()
+		if currentPop != nil {
+			g.state.UpdateParetoArchive(currentPop.Candidates, multiObjFitnessMap)
+		}
+
 		// Periodic reflection
 		if generation%g.config.ReflectionFreq == 0 && generation > 0 {
 			err = g.performReflection(ctx, generation)
@@ -2613,23 +2977,52 @@ func (g *GEPA) getCurrentCandidateID(ctx context.Context) string {
 
 // getCurrentSystemLoad gets current system load for context-aware tracking.
 func (g *GEPA) getCurrentSystemLoad() float64 {
-	// In a real implementation, this would get actual system metrics
-	// For now, return a simulated value
-	return 0.5 // TODO: Replace with actual system load monitoring
+	// Get number of goroutines as a proxy for system load
+	numGoroutines := runtime.NumGoroutine()
+	numCPU := runtime.NumCPU()
+
+	// Normalize by CPU count and apply sigmoid scaling
+	load := float64(numGoroutines) / float64(numCPU*10) // Scale relative to 10 goroutines per CPU
+	if load > 1.0 {
+		load = 1.0
+	}
+	return load
 }
 
 // getCurrentMemoryUsage gets current memory usage for context-aware tracking.
 func (g *GEPA) getCurrentMemoryUsage() float64 {
-	// In a real implementation, this would get actual memory metrics
-	// For now, return a simulated value
-	return 0.3 // TODO: Replace with actual memory usage monitoring
+	g.memStatsLock.Lock()
+	runtime.ReadMemStats(&g.lastMemStats)
+	g.memStatsLock.Unlock()
+
+	// Calculate memory usage ratio (heap in use / total allocated)
+	heapInUse := float64(g.lastMemStats.HeapInuse)
+	heapSys := float64(g.lastMemStats.HeapSys)
+
+	if heapSys == 0 {
+		return 0.0
+	}
+
+	usageRatio := heapInUse / heapSys
+	if usageRatio > 1.0 {
+		usageRatio = 1.0
+	}
+	return usageRatio
 }
 
 // getCurrentConcurrentTasks gets current number of concurrent tasks.
 func (g *GEPA) getCurrentConcurrentTasks() int {
-	// In a real implementation, this would count active goroutines or tasks
-	// For now, return a simulated value
-	return 1 // TODO: Replace with actual concurrency monitoring
+	return int(atomic.LoadInt64(&g.concurrentTaskCounter))
+}
+
+// incrementConcurrentTasks increments the concurrent task counter.
+func (g *GEPA) incrementConcurrentTasks() {
+	atomic.AddInt64(&g.concurrentTaskCounter, 1)
+}
+
+// decrementConcurrentTasks decrements the concurrent task counter.
+func (g *GEPA) decrementConcurrentTasks() {
+	atomic.AddInt64(&g.concurrentTaskCounter, -1)
 }
 
 // getCurrentExecutionPhase determines the current phase of execution.
@@ -3954,6 +4347,9 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 	for _, candidate := range population.Candidates {
 		candidate := candidate // Capture loop variable
 		p.Go(func() {
+			g.incrementConcurrentTasks()
+			defer g.decrementConcurrentTasks()
+
 			fitness := g.evaluateCandidate(ctx, candidate, program, dataset, metric)
 
 			mu.Lock()
@@ -4971,6 +5367,9 @@ func (g *GEPA) batchSelfCritique(ctx context.Context, candidates []*GEPACandidat
 	for _, candidate := range candidates {
 		candidate := candidate // Capture loop variable
 		p.Go(func() {
+			g.incrementConcurrentTasks()
+			defer g.decrementConcurrentTasks()
+
 			result, err := g.selfCritiqueCandidate(ctx, candidate)
 			if err != nil {
 				errorChan <- err
@@ -5002,38 +5401,6 @@ func (g *GEPA) batchSelfCritique(ctx context.Context, candidates []*GEPACandidat
 	return results, nil
 }
 
-// Multi-Level Reflection Implementation
-
-// performMultiLevelReflection performs reflection at both individual and population levels.
-func (g *GEPA) performMultiLevelReflection(ctx context.Context) error {
-	logger := logging.GetLogger()
-	logger.Info(ctx, "Performing multi-level reflection for generation %d", g.state.CurrentGeneration)
-
-	// Level 1: Individual Candidate Reflection
-	if err := g.performIndividualReflection(ctx); err != nil {
-		logger.Warn(ctx, "Individual reflection failed: %v", err)
-	}
-
-	// Level 2: Population-Level Reflection
-	if err := g.performPopulationReflection(ctx); err != nil {
-		logger.Warn(ctx, "Population reflection failed: %v", err)
-	}
-
-	// Level 3: Cross-Generation Reflection
-	if err := g.performCrossGenerationReflection(ctx); err != nil {
-		logger.Warn(ctx, "Cross-generation reflection failed: %v", err)
-	}
-
-	// Level 4: Meta-Reflection (reflection on reflection)
-	if g.state.CurrentGeneration > 0 && len(g.state.ReflectionHistory) > 5 {
-		if err := g.performMetaReflection(ctx); err != nil {
-			logger.Warn(ctx, "Meta-reflection failed: %v", err)
-		}
-	}
-
-	logger.Info(ctx, "Multi-level reflection completed")
-	return nil
-}
 
 // performIndividualReflection performs reflection on individual candidates.
 func (g *GEPA) performIndividualReflection(ctx context.Context) error {
@@ -5072,121 +5439,7 @@ func (g *GEPA) performIndividualReflection(ctx context.Context) error {
 	return nil
 }
 
-// performPopulationReflection performs reflection on the entire population.
-func (g *GEPA) performPopulationReflection(ctx context.Context) error {
-	if len(g.state.PopulationHistory) == 0 {
-		return fmt.Errorf("no population history available for reflection")
-	}
 
-	// Analyze population-level patterns
-	populationInsights := g.analyzePopulationPatterns()
-
-	// Generate population-level critique using LLM
-	populationCritique, err := g.generatePopulationCritique(ctx, populationInsights)
-	if err != nil {
-		return fmt.Errorf("failed to generate population critique: %w", err)
-	}
-
-	// Extract actionable insights from the critique
-	actionableInsights := g.extractActionableInsights(populationCritique)
-
-	// Store population reflection results
-	populationReflection := &ReflectionResult{
-		CandidateID:     "population",
-		Strengths:       actionableInsights.Strengths,
-		Weaknesses:      actionableInsights.Weaknesses,
-		Suggestions:     actionableInsights.Suggestions,
-		ConfidenceScore: actionableInsights.Confidence,
-		Timestamp:       time.Now(),
-		ReflectionDepth: 2, // Population level
-	}
-
-	g.state.ReflectionHistory = append(g.state.ReflectionHistory, populationReflection)
-
-	logger := logging.GetLogger()
-	logger.Debug(ctx, "Population reflection completed: identified %d strengths, %d weaknesses, %d suggestions",
-		len(actionableInsights.Strengths),
-		len(actionableInsights.Weaknesses),
-		len(actionableInsights.Suggestions))
-
-	return nil
-}
-
-// performCrossGenerationReflection performs reflection across multiple generations.
-func (g *GEPA) performCrossGenerationReflection(ctx context.Context) error {
-	if len(g.state.PopulationHistory) < 2 {
-		return fmt.Errorf("insufficient generation history for cross-generation reflection")
-	}
-
-	// Analyze evolutionary trends across generations
-	evolutionaryTrends := g.analyzeEvolutionaryTrends()
-
-	// Generate cross-generation insights
-	crossGenInsights, err := g.generateCrossGenerationInsights(ctx, evolutionaryTrends)
-	if err != nil {
-		return fmt.Errorf("failed to generate cross-generation insights: %w", err)
-	}
-
-	// Update convergence status based on cross-generation analysis
-	g.updateConvergenceStatusFromReflection(crossGenInsights)
-
-	// Store cross-generation reflection
-	crossGenReflection := &ReflectionResult{
-		CandidateID:     "cross_generation",
-		Strengths:       crossGenInsights.PositiveTrends,
-		Weaknesses:      crossGenInsights.NegativeTrends,
-		Suggestions:     crossGenInsights.Recommendations,
-		ConfidenceScore: crossGenInsights.TrendConfidence,
-		Timestamp:       time.Now(),
-		ReflectionDepth: 3, // Cross-generation level
-	}
-
-	g.state.ReflectionHistory = append(g.state.ReflectionHistory, crossGenReflection)
-
-	logger := logging.GetLogger()
-	logger.Debug(ctx, "Cross-generation reflection completed: analyzed %d generations, confidence: %.2f",
-		len(g.state.PopulationHistory), crossGenInsights.TrendConfidence)
-
-	return nil
-}
-
-// performMetaReflection performs reflection on the reflection process itself.
-func (g *GEPA) performMetaReflection(ctx context.Context) error {
-	if len(g.state.ReflectionHistory) < 3 {
-		return fmt.Errorf("insufficient reflection history for meta-reflection")
-	}
-
-	// Analyze the quality and accuracy of previous reflections
-	reflectionQuality := g.analyzeReflectionQuality()
-
-	// Generate meta-insights about the reflection process
-	metaInsights, err := g.generateMetaReflectionInsights(ctx, reflectionQuality)
-	if err != nil {
-		return fmt.Errorf("failed to generate meta-reflection insights: %w", err)
-	}
-
-	// Adjust reflection parameters based on meta-insights
-	g.adjustReflectionParameters(metaInsights)
-
-	// Store meta-reflection results
-	metaReflection := &ReflectionResult{
-		CandidateID:     "meta_reflection",
-		Strengths:       metaInsights.ReflectionStrengths,
-		Weaknesses:      metaInsights.ReflectionWeaknesses,
-		Suggestions:     metaInsights.ProcessImprovements,
-		ConfidenceScore: metaInsights.MetaConfidence,
-		Timestamp:       time.Now(),
-		ReflectionDepth: 4, // Meta-reflection level
-	}
-
-	g.state.ReflectionHistory = append(g.state.ReflectionHistory, metaReflection)
-
-	logger := logging.GetLogger()
-	logger.Debug(ctx, "Meta-reflection completed: reflection quality score: %.2f, adjustments made: %d",
-		reflectionQuality.OverallScore, len(metaInsights.ProcessImprovements))
-
-	return nil
-}
 
 // Supporting structures for multi-level reflection
 
@@ -5199,52 +5452,6 @@ type IndividualReflectionInsights struct {
 	ConfidenceDistribution map[string]int `json:"confidence_distribution"`
 }
 
-type PopulationCritique struct {
-	OverallHealth       string   `json:"overall_health"`
-	DiversityAssessment string   `json:"diversity_assessment"`
-	PerformanceTrends   []string `json:"performance_trends"`
-	RecommendedActions  []string `json:"recommended_actions"`
-	CritiqueText        string   `json:"critique_text"`
-}
-
-type ActionableInsights struct {
-	Strengths   []string `json:"strengths"`
-	Weaknesses  []string `json:"weaknesses"`
-	Suggestions []string `json:"suggestions"`
-	Confidence  float64  `json:"confidence"`
-}
-
-type EvolutionaryTrends struct {
-	FitnessProgression    []float64 `json:"fitness_progression"`
-	DiversityTrend        []float64 `json:"diversity_trend"`
-	ConvergenceIndicators []string  `json:"convergence_indicators"`
-	StagnationPeriods     []int     `json:"stagnation_periods"`
-	BreakthroughMoments   []int     `json:"breakthrough_moments"`
-}
-
-type CrossGenerationInsights struct {
-	PositiveTrends   []string `json:"positive_trends"`
-	NegativeTrends   []string `json:"negative_trends"`
-	Recommendations  []string `json:"recommendations"`
-	TrendConfidence  float64  `json:"trend_confidence"`
-	PredictedOutcome string   `json:"predicted_outcome"`
-}
-
-type ReflectionQuality struct {
-	OverallScore           float64            `json:"overall_score"`
-	AccuracyScores         map[string]float64 `json:"accuracy_scores"`
-	Usefulness             float64            `json:"usefulness"`
-	ConsistencyScore       float64            `json:"consistency_score"`
-	ImprovementSuggestions []string           `json:"improvement_suggestions"`
-}
-
-type MetaReflectionInsights struct {
-	ReflectionStrengths  []string           `json:"reflection_strengths"`
-	ReflectionWeaknesses []string           `json:"reflection_weaknesses"`
-	ProcessImprovements  []string           `json:"process_improvements"`
-	MetaConfidence       float64            `json:"meta_confidence"`
-	ParameterAdjustments map[string]float64 `json:"parameter_adjustments"`
-}
 
 // Implementation of helper methods for multi-level reflection
 
@@ -5546,293 +5753,17 @@ func (g *GEPA) analyzePopulationPatterns() *PopulationInsights {
 	return insights
 }
 
-// generatePopulationCritique generates LLM-based critique of the population.
-func (g *GEPA) generatePopulationCritique(ctx context.Context, insights *PopulationInsights) (*PopulationCritique, error) {
-	// Build population critique prompt
-	prompt := g.buildPopulationCritiquePrompt(insights)
 
-	// Generate critique using reflection LLM
-	response, err := g.reflectionLLM.Generate(ctx, prompt, core.WithTemperature(g.config.SelfCritiqueTemp))
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate population critique: %w", err)
-	}
 
-	// Parse critique response
-	critique := g.parsePopulationCritique(response.Content)
 
-	return critique, nil
-}
-
-// buildPopulationCritiquePrompt builds a prompt for population-level critique.
-func (g *GEPA) buildPopulationCritiquePrompt(insights *PopulationInsights) string {
-	var builder strings.Builder
-
-	builder.WriteString("# Population-Level Analysis and Critique\n\n")
-	builder.WriteString("## Population Statistics\n")
-	builder.WriteString(fmt.Sprintf("- **Generation**: %d\n", g.state.CurrentGeneration))
-	builder.WriteString(fmt.Sprintf("- **Population Size**: %d\n", len(g.state.PopulationHistory[len(g.state.PopulationHistory)-1].Candidates)))
-	builder.WriteString(fmt.Sprintf("- **Average Fitness**: %.3f\n", insights.AverageFitness))
-	builder.WriteString(fmt.Sprintf("- **Best Fitness**: %.3f\n", insights.BestFitness))
-	builder.WriteString(fmt.Sprintf("- **Worst Fitness**: %.3f\n", insights.WorstFitness))
-	builder.WriteString(fmt.Sprintf("- **Fitness Variance**: %.3f\n", insights.FitnessVariance))
-	builder.WriteString(fmt.Sprintf("- **Diversity Index**: %.3f\n\n", insights.DiversityIndex))
-
-	if len(insights.HighPerformingPatterns) > 0 {
-		builder.WriteString("## High-Performing Patterns\n")
-		for _, pattern := range insights.HighPerformingPatterns {
-			builder.WriteString(fmt.Sprintf("- %s\n", pattern))
-		}
-		builder.WriteString("\n")
-	}
-
-	builder.WriteString("## Critique Request\n")
-	builder.WriteString("Based on the population statistics and patterns above, provide a comprehensive critique of the current population. Address:\n\n")
-	builder.WriteString("1. **Population Health**: Overall assessment of population fitness and diversity\n")
-	builder.WriteString("2. **Evolutionary Progress**: Is the population making good progress toward optimization goals?\n")
-	builder.WriteString("3. **Diversity Assessment**: Is there sufficient diversity for continued evolution?\n")
-	builder.WriteString("4. **Potential Issues**: Any signs of premature convergence, stagnation, or other problems?\n")
-	builder.WriteString("5. **Recommended Actions**: Specific actions to improve population performance\n\n")
-
-	builder.WriteString("Please structure your response with clear sections and actionable insights.\n")
-
-	return builder.String()
-}
-
-// parsePopulationCritique parses the LLM response into structured critique.
-func (g *GEPA) parsePopulationCritique(response string) *PopulationCritique {
-	critique := &PopulationCritique{
-		PerformanceTrends:  make([]string, 0),
-		RecommendedActions: make([]string, 0),
-		CritiqueText:       response,
-	}
-
-	// Simple parsing - in practice, this would be more sophisticated
-	lines := strings.Split(response, "\n")
-	currentSection := ""
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Detect sections
-		lowerLine := strings.ToLower(line)
-		if strings.Contains(lowerLine, "population health") {
-			currentSection = "health"
-		} else if strings.Contains(lowerLine, "diversity") {
-			currentSection = "diversity"
-		} else if strings.Contains(lowerLine, "recommended") || strings.Contains(lowerLine, "actions") {
-			currentSection = "actions"
-		}
-
-		// Extract content
-		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") {
-			content := strings.TrimSpace(line[1:])
-			if content != "" {
-				switch currentSection {
-				case "actions":
-					critique.RecommendedActions = append(critique.RecommendedActions, content)
-				default:
-					critique.PerformanceTrends = append(critique.PerformanceTrends, content)
-				}
-			}
-		}
-
-		// Extract key assessments
-		if strings.Contains(lowerLine, "healthy") || strings.Contains(lowerLine, "good") {
-			critique.OverallHealth = "good"
-		} else if strings.Contains(lowerLine, "poor") || strings.Contains(lowerLine, "concerning") {
-			critique.OverallHealth = "poor"
-		} else if critique.OverallHealth == "" {
-			critique.OverallHealth = "moderate"
-		}
-
-		if strings.Contains(lowerLine, "diverse") || strings.Contains(lowerLine, "variety") {
-			critique.DiversityAssessment = "good"
-		} else if strings.Contains(lowerLine, "convergence") || strings.Contains(lowerLine, "similar") {
-			critique.DiversityAssessment = "low"
-		}
-	}
-
-	// Set defaults
-	if critique.OverallHealth == "" {
-		critique.OverallHealth = "moderate"
-	}
-	if critique.DiversityAssessment == "" {
-		critique.DiversityAssessment = "moderate"
-	}
-
-	return critique
-}
-
-// extractActionableInsights extracts actionable insights from population critique.
-func (g *GEPA) extractActionableInsights(critique *PopulationCritique) *ActionableInsights {
-	insights := &ActionableInsights{
-		Strengths:   make([]string, 0),
-		Weaknesses:  make([]string, 0),
-		Suggestions: critique.RecommendedActions,
-		Confidence:  0.7, // Default confidence
-	}
-
-	// Extract strengths and weaknesses from performance trends
-	for _, trend := range critique.PerformanceTrends {
-		lowerTrend := strings.ToLower(trend)
-		if strings.Contains(lowerTrend, "good") || strings.Contains(lowerTrend, "strong") ||
-			strings.Contains(lowerTrend, "effective") || strings.Contains(lowerTrend, "successful") {
-			insights.Strengths = append(insights.Strengths, trend)
-		} else if strings.Contains(lowerTrend, "poor") || strings.Contains(lowerTrend, "weak") ||
-			strings.Contains(lowerTrend, "problematic") || strings.Contains(lowerTrend, "concerning") {
-			insights.Weaknesses = append(insights.Weaknesses, trend)
-		}
-	}
-
-	// Adjust confidence based on assessment quality
-	if critique.OverallHealth == "good" && critique.DiversityAssessment == "good" {
-		insights.Confidence = 0.9
-	} else if critique.OverallHealth == "poor" || critique.DiversityAssessment == "low" {
-		insights.Confidence = 0.5
-	}
-
-	return insights
-}
 
 // Placeholder implementations for remaining methods (to be expanded as needed)
 
-func (g *GEPA) analyzeEvolutionaryTrends() *EvolutionaryTrends {
-	trends := &EvolutionaryTrends{
-		FitnessProgression:    make([]float64, 0),
-		DiversityTrend:        make([]float64, 0),
-		ConvergenceIndicators: make([]string, 0),
-		StagnationPeriods:     make([]int, 0),
-		BreakthroughMoments:   make([]int, 0),
-	}
 
-	// Analyze fitness progression across generations
-	for i, pop := range g.state.PopulationHistory {
-		if pop.BestCandidate != nil {
-			trends.FitnessProgression = append(trends.FitnessProgression, pop.BestCandidate.Fitness)
-		}
 
-		// Calculate diversity for this generation
-		diversity := g.calculatePopulationDiversity(pop)
-		trends.DiversityTrend = append(trends.DiversityTrend, diversity)
 
-		// Detect breakthrough moments (significant fitness improvements)
-		if i > 0 && len(trends.FitnessProgression) >= 2 {
-			currentFitness := trends.FitnessProgression[len(trends.FitnessProgression)-1]
-			prevFitness := trends.FitnessProgression[len(trends.FitnessProgression)-2]
-			if currentFitness-prevFitness > 0.1 { // Significant improvement threshold
-				trends.BreakthroughMoments = append(trends.BreakthroughMoments, i)
-			}
-		}
-	}
 
-	return trends
-}
 
-func (g *GEPA) generateCrossGenerationInsights(ctx context.Context, trends *EvolutionaryTrends) (*CrossGenerationInsights, error) {
-	insights := &CrossGenerationInsights{
-		PositiveTrends:   make([]string, 0),
-		NegativeTrends:   make([]string, 0),
-		Recommendations:  make([]string, 0),
-		TrendConfidence:  0.7,
-		PredictedOutcome: "continued_progress",
-	}
-
-	// Analyze fitness progression
-	if len(trends.FitnessProgression) >= 2 {
-		recentImprovement := trends.FitnessProgression[len(trends.FitnessProgression)-1] -
-			trends.FitnessProgression[len(trends.FitnessProgression)-2]
-		if recentImprovement > 0.05 {
-			insights.PositiveTrends = append(insights.PositiveTrends, "Recent fitness improvement detected")
-		} else if recentImprovement < -0.05 {
-			insights.NegativeTrends = append(insights.NegativeTrends, "Recent fitness decline detected")
-		}
-	}
-
-	// Analyze diversity trends
-	if len(trends.DiversityTrend) >= 3 {
-		recentDiversity := trends.DiversityTrend[len(trends.DiversityTrend)-1]
-		if recentDiversity < 0.2 {
-			insights.NegativeTrends = append(insights.NegativeTrends, "Low population diversity detected")
-			insights.Recommendations = append(insights.Recommendations, "Increase mutation rate to maintain diversity")
-		}
-	}
-
-	return insights, nil
-}
-
-func (g *GEPA) updateConvergenceStatusFromReflection(insights *CrossGenerationInsights) {
-	// Update convergence status based on cross-generation insights
-	// This is a simplified implementation
-	for _, trend := range insights.NegativeTrends {
-		if strings.Contains(strings.ToLower(trend), "diversity") {
-			g.state.ConvergenceStatus.PrematureConvergenceRisk = "high"
-		}
-	}
-}
-
-func (g *GEPA) analyzeReflectionQuality() *ReflectionQuality {
-	quality := &ReflectionQuality{
-		OverallScore:           0.7,
-		AccuracyScores:         make(map[string]float64),
-		Usefulness:             0.7,
-		ConsistencyScore:       0.8,
-		ImprovementSuggestions: make([]string, 0),
-	}
-
-	// Analyze reflection history for quality metrics
-	if len(g.state.ReflectionHistory) > 0 {
-		// Calculate average confidence as a proxy for quality
-		var totalConfidence float64
-		count := 0
-		for _, reflection := range g.state.ReflectionHistory {
-			totalConfidence += reflection.ConfidenceScore
-			count++
-		}
-		quality.OverallScore = totalConfidence / float64(count)
-	}
-
-	return quality
-}
-
-func (g *GEPA) generateMetaReflectionInsights(ctx context.Context, quality *ReflectionQuality) (*MetaReflectionInsights, error) {
-	insights := &MetaReflectionInsights{
-		ReflectionStrengths:  make([]string, 0),
-		ReflectionWeaknesses: make([]string, 0),
-		ProcessImprovements:  make([]string, 0),
-		MetaConfidence:       quality.OverallScore,
-		ParameterAdjustments: make(map[string]float64),
-	}
-
-	if quality.OverallScore > 0.8 {
-		insights.ReflectionStrengths = append(insights.ReflectionStrengths, "High-quality reflection analysis")
-	} else if quality.OverallScore < 0.5 {
-		insights.ReflectionWeaknesses = append(insights.ReflectionWeaknesses, "Low reflection quality detected")
-		insights.ProcessImprovements = append(insights.ProcessImprovements, "Improve reflection prompt quality")
-	}
-
-	return insights, nil
-}
-
-func (g *GEPA) adjustReflectionParameters(insights *MetaReflectionInsights) {
-	// Adjust reflection parameters based on meta-insights
-	for param, adjustment := range insights.ParameterAdjustments {
-		switch param {
-		case "self_critique_temp":
-			newTemp := g.config.SelfCritiqueTemp + adjustment
-			if newTemp >= 0.1 && newTemp <= 1.0 {
-				g.config.SelfCritiqueTemp = newTemp
-			}
-		case "reflection_freq":
-			newFreq := int(float64(g.config.ReflectionFreq) + adjustment)
-			if newFreq >= 1 && newFreq <= 10 {
-				g.config.ReflectionFreq = newFreq
-			}
-		}
-	}
-}
 
 func (g *GEPA) extractCommonPatterns(candidates []*GEPACandidate) []string {
 	patterns := make([]string, 0)
