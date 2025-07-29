@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/xml"
+	"fmt"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
@@ -22,6 +24,30 @@ type Tool interface {
 
 	// Call executes the tool with the provided arguments
 	Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error)
+}
+
+// InterceptableTool extends Tool with interceptor support.
+// This interface provides backward-compatible enhancement for tools that support interceptors.
+type InterceptableTool interface {
+	Tool
+
+	// CallWithInterceptors executes the tool with interceptor support
+	CallWithInterceptors(ctx context.Context, args map[string]interface{}, interceptors []core.ToolInterceptor) (*models.CallToolResult, error)
+
+	// SetInterceptors sets the default interceptors for this tool instance  
+	SetInterceptors(interceptors []core.ToolInterceptor)
+
+	// GetInterceptors returns the current interceptors for this tool
+	GetInterceptors() []core.ToolInterceptor
+
+	// ClearInterceptors removes all interceptors from this tool
+	ClearInterceptors()
+
+	// GetToolType returns the category/type of this tool
+	GetToolType() string
+
+	// GetVersion returns the tool version
+	GetVersion() string
 }
 
 // ToolType represents the source/type of a tool.
@@ -65,4 +91,131 @@ func (xa *XMLAction) GetArgumentsMap() map[string]interface{} {
 		argsMap[arg.Key] = arg.Value
 	}
 	return argsMap
+}
+
+// InterceptorToolWrapper wraps an existing Tool to provide interceptor support.
+// This allows any existing tool to be used with interceptors without modifying its implementation.
+type InterceptorToolWrapper struct {
+	tool         Tool
+	interceptors []core.ToolInterceptor
+	toolType     string
+	version      string
+}
+
+// NewInterceptorToolWrapper creates a new wrapper that adds interceptor support to an existing tool.
+func NewInterceptorToolWrapper(tool Tool, toolType, version string) *InterceptorToolWrapper {
+	return &InterceptorToolWrapper{
+		tool:         tool,
+		interceptors: make([]core.ToolInterceptor, 0),
+		toolType:     toolType,
+		version:      version,
+	}
+}
+
+// Name returns the tool's identifier from the wrapped tool.
+func (itw *InterceptorToolWrapper) Name() string {
+	return itw.tool.Name()
+}
+
+// Description returns human-readable explanation from the wrapped tool.
+func (itw *InterceptorToolWrapper) Description() string {
+	return itw.tool.Description()
+}
+
+// InputSchema returns the expected parameter structure from the wrapped tool.
+func (itw *InterceptorToolWrapper) InputSchema() models.InputSchema {
+	return itw.tool.InputSchema()
+}
+
+// Call executes the tool with the provided arguments using the wrapped tool.
+func (itw *InterceptorToolWrapper) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+	return itw.tool.Call(ctx, args)
+}
+
+// CallWithInterceptors executes the tool with interceptor support.
+func (itw *InterceptorToolWrapper) CallWithInterceptors(ctx context.Context, args map[string]interface{}, interceptors []core.ToolInterceptor) (*models.CallToolResult, error) {
+	// Use provided interceptors, or fall back to wrapper's default interceptors
+	if interceptors == nil {
+		interceptors = itw.interceptors
+	}
+
+	// Create tool info for interceptors
+	info := core.NewToolInfo(itw.tool.Name(), itw.tool.Description(), itw.toolType, itw.tool.InputSchema())
+	info.WithVersion(itw.version)
+
+	// Create the base handler that calls the wrapped tool and converts the result
+	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+		result, err := itw.tool.Call(ctx, args)
+		if err != nil {
+			return core.ToolResult{}, err
+		}
+		// Convert models.CallToolResult to core.ToolResult
+		return core.ToolResult{
+			Data:        result,
+			Metadata:    make(map[string]interface{}),
+			Annotations: make(map[string]interface{}),
+		}, nil
+	}
+
+	// Chain the interceptors
+	chainedInterceptor := core.ChainToolInterceptors(interceptors...)
+
+	// Execute with interceptors
+	coreResult, err := chainedInterceptor(ctx, args, info, handler)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert core.ToolResult back to models.CallToolResult
+	if mcpResult, ok := coreResult.Data.(*models.CallToolResult); ok {
+		return mcpResult, nil
+	}
+
+	// If the result is not already a CallToolResult, create one
+	return &models.CallToolResult{
+		Content: []models.Content{
+			models.TextContent{
+				Type: "text",
+				Text: fmt.Sprintf("%v", coreResult.Data),
+			},
+		},
+		IsError: false,
+	}, nil
+}
+
+// SetInterceptors sets the default interceptors for this wrapper.
+func (itw *InterceptorToolWrapper) SetInterceptors(interceptors []core.ToolInterceptor) {
+	itw.interceptors = make([]core.ToolInterceptor, len(interceptors))
+	copy(itw.interceptors, interceptors)
+}
+
+// GetInterceptors returns the current interceptors for this wrapper.
+func (itw *InterceptorToolWrapper) GetInterceptors() []core.ToolInterceptor {
+	result := make([]core.ToolInterceptor, len(itw.interceptors))
+	copy(result, itw.interceptors)
+	return result
+}
+
+// ClearInterceptors removes all interceptors from this wrapper.
+func (itw *InterceptorToolWrapper) ClearInterceptors() {
+	itw.interceptors = nil
+}
+
+// GetToolType returns the category/type of this tool.
+func (itw *InterceptorToolWrapper) GetToolType() string {
+	return itw.toolType
+}
+
+// GetVersion returns the tool version.
+func (itw *InterceptorToolWrapper) GetVersion() string {
+	return itw.version
+}
+
+// WrapToolWithInterceptors is a convenience function to wrap any tool with interceptor support.
+func WrapToolWithInterceptors(tool Tool, toolType, version string, interceptors ...core.ToolInterceptor) InterceptableTool {
+	wrapper := NewInterceptorToolWrapper(tool, toolType, version)
+	if len(interceptors) > 0 {
+		wrapper.SetInterceptors(interceptors)
+	}
+	return wrapper
 }

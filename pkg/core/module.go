@@ -28,6 +28,24 @@ type Module interface {
 	GetModuleType() string
 }
 
+// InterceptableModule extends Module with interceptor support.
+// This interface provides backward-compatible enhancement for modules that support interceptors.
+type InterceptableModule interface {
+	Module
+
+	// ProcessWithInterceptors executes the module's logic with interceptor support
+	ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, opts ...Option) (map[string]any, error)
+
+	// SetInterceptors sets the default interceptors for this module instance
+	SetInterceptors(interceptors []ModuleInterceptor)
+
+	// GetInterceptors returns the current interceptors for this module
+	GetInterceptors() []ModuleInterceptor
+
+	// ClearInterceptors removes all interceptors from this module
+	ClearInterceptors()
+}
+
 type Option func(*ModuleOptions)
 
 type StreamHandler func(chunk StreamChunk) error
@@ -92,10 +110,11 @@ func WithOptions(opts ...Option) Option {
 
 // BaseModule provides a basic implementation of the Module interface.
 type BaseModule struct {
-	Signature   Signature
-	LLM         LLM
-	DisplayName string
-	ModuleType  string
+	Signature    Signature
+	LLM          LLM
+	DisplayName  string
+	ModuleType   string
+	interceptors []ModuleInterceptor // Default interceptors for this module instance
 }
 
 // GetSignature returns the module's signature.
@@ -135,18 +154,74 @@ func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any, opts .
 
 // Clone creates a deep copy of the BaseModule.
 func (bm *BaseModule) Clone() Module {
+	// Deep copy interceptors
+	interceptors := make([]ModuleInterceptor, len(bm.interceptors))
+	copy(interceptors, bm.interceptors)
+
 	return &BaseModule{
-		Signature:   bm.Signature,
-		LLM:         bm.LLM, // Note: This is a shallow copy of the LLM
-		DisplayName: bm.DisplayName,
-		ModuleType:  bm.ModuleType,
+		Signature:    bm.Signature,
+		LLM:          bm.LLM, // Note: This is a shallow copy of the LLM
+		DisplayName:  bm.DisplayName,
+		ModuleType:   bm.ModuleType,
+		interceptors: interceptors,
 	}
+}
+
+// ProcessWithInterceptors executes the module's logic with interceptor support.
+// If no interceptors are provided, it falls back to using the module's default interceptors.
+// Note: This method should be called on the concrete module type, not BaseModule directly.
+func (bm *BaseModule) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, opts ...Option) (map[string]any, error) {
+	// This is a fallback implementation that uses the BaseModule's Process method.
+	// Concrete types should override this method to call their own Process implementation.
+	return bm.processWithInterceptorsImpl(ctx, inputs, interceptors, bm.Process, opts...)
+}
+
+// processWithInterceptorsImpl is a helper method that implements the interceptor logic.
+// It accepts a process function as a parameter to allow concrete types to pass their own Process method.
+func (bm *BaseModule) processWithInterceptorsImpl(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, processFunc func(context.Context, map[string]any, ...Option) (map[string]any, error), opts ...Option) (map[string]any, error) {
+	// Use provided interceptors, or fall back to module's default interceptors
+	if interceptors == nil {
+		interceptors = bm.interceptors
+	}
+
+	// Create module info for interceptors
+	info := NewModuleInfo(bm.GetDisplayName(), bm.GetModuleType(), bm.GetSignature())
+
+	// Create the base handler that calls the provided process function
+	handler := func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
+		return processFunc(ctx, inputs, opts...)
+	}
+
+	// Chain the interceptors
+	chainedInterceptor := ChainModuleInterceptors(interceptors...)
+
+	// Execute with interceptors
+	return chainedInterceptor(ctx, inputs, info, handler, opts...)
+}
+
+// SetInterceptors sets the default interceptors for this module instance.
+func (bm *BaseModule) SetInterceptors(interceptors []ModuleInterceptor) {
+	bm.interceptors = make([]ModuleInterceptor, len(interceptors))
+	copy(bm.interceptors, interceptors)
+}
+
+// GetInterceptors returns the current interceptors for this module.
+func (bm *BaseModule) GetInterceptors() []ModuleInterceptor {
+	result := make([]ModuleInterceptor, len(bm.interceptors))
+	copy(result, bm.interceptors)
+	return result
+}
+
+// ClearInterceptors removes all interceptors from this module.
+func (bm *BaseModule) ClearInterceptors() {
+	bm.interceptors = nil
 }
 
 // NewModule creates a new base module with the given signature.
 func NewModule(signature Signature) *BaseModule {
 	return &BaseModule{
-		Signature: signature,
+		Signature:    signature,
+		interceptors: make([]ModuleInterceptor, 0),
 	}
 }
 
