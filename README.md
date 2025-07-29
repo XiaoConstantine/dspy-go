@@ -24,7 +24,7 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 - **Tool Composition**: Create reusable composite tools by combining multiple tools into single units
 - **Advanced Parallel Execution**: High-performance parallel tool execution with intelligent scheduling algorithms
 - **Dependency Resolution**: Automatic execution planning based on tool dependencies with parallel optimization
-- **Quality Optimization**: Advanced optimizers including MIPRO, SIMBA, and BootstrapFewShot for systematic improvement
+- **Quality Optimization**: Advanced optimizers including GEPA (Generative Evolutionary Prompt Adaptation), MIPRO, SIMBA, and BootstrapFewShot for systematic improvement
 - **Compatibility Testing**: Comprehensive compatibility testing framework for validating optimizer behavior against Python DSPy implementations
 
 ## Installation
@@ -363,6 +363,55 @@ Collaborative optimizer for multi-module prompt optimization.
 copro := optimizers.NewCopro(dataset, metrics.NewRougeMetric("answer"))
 optimizedModule, err := copro.Optimize(ctx, originalModule)
 ```
+
+#### GEPA (Generative Evolutionary Prompt Adaptation)
+
+State-of-the-art evolutionary optimizer that combines multi-objective Pareto optimization with LLM-based self-reflection for comprehensive prompt evolution.
+
+```go
+// Create GEPA optimizer with advanced configuration
+config := &optimizers.GEPAConfig{
+    PopulationSize:    20,                // Size of evolutionary population
+    MaxGenerations:    10,                // Maximum number of generations
+    SelectionStrategy: "adaptive_pareto", // Multi-objective Pareto selection
+    MutationRate:      0.3,               // Probability of mutation
+    CrossoverRate:     0.7,               // Probability of crossover
+    ReflectionFreq:    2,                 // LLM-based reflection every 2 generations
+    ElitismRate:       0.1,               // Elite solution preservation rate
+}
+
+gepa, err := optimizers.NewGEPA(config)
+if err != nil {
+    log.Fatalf("Failed to create GEPA optimizer: %v", err)
+}
+
+// Optimize program with multi-objective evolutionary approach
+optimizedProgram, err := gepa.Compile(ctx, program, dataset, metricFunc)
+
+// Access comprehensive optimization results
+state := gepa.GetOptimizationState()
+fmt.Printf("Optimization completed in %d generations\n", state.CurrentGeneration)
+fmt.Printf("Best fitness: %.3f\n", state.BestFitness)
+
+// Access Pareto archive of elite solutions optimized for different trade-offs
+archive := state.GetParetoArchive()
+fmt.Printf("Elite solutions preserved: %d\n", len(archive))
+
+// Each solution in archive excels in different objectives:
+// - Success rate vs efficiency trade-offs
+// - Quality vs speed optimizations  
+// - Robustness vs generalization balance
+```
+
+**GEPA Key Features:**
+
+- **Multi-Objective Optimization**: Optimizes across 7 dimensions (success rate, quality, efficiency, robustness, generalization, diversity, innovation)
+- **Pareto-Based Selection**: Maintains diverse solutions optimized for different trade-offs
+- **LLM-Based Self-Reflection**: Uses language models to analyze and critique prompt performance
+- **Semantic Diversity Metrics**: Employs LLM-based similarity for true semantic diversity assessment
+- **Elite Archive Management**: Preserves high-quality solutions across generations with crowding distance
+- **Real-Time System Monitoring**: Context-aware performance tracking and adaptive parameter adjustment
+- **Advanced Genetic Operators**: Semantic crossover and mutation using LLMs for meaningful prompt evolution
 
 ## Agents and Workflows
 
@@ -913,15 +962,15 @@ DSPy-Go includes a comprehensive compatibility testing framework to ensure that 
 ```bash
 cd compatibility_test
 
-# Test all optimizers (BootstrapFewShot, MIPRO, SIMBA)
+# Test all optimizers (BootstrapFewShot, MIPRO, SIMBA, GEPA)
 ./run_experiment.sh
 
 # Test specific optimizer
-./run_experiment.sh --optimizer simba --dataset-size 10
+./run_experiment.sh --optimizer gepa --dataset-size 10
 
 # Manual execution
-python dspy_comparison.py --optimizer bootstrap
-go run go_comparison.go --optimizer bootstrap
+python dspy_comparison.py --optimizer gepa
+go run go_comparison.go --optimizer gepa
 python compare_results.py
 ```
 
@@ -929,7 +978,7 @@ The framework tests:
 - **API Compatibility**: Parameter names, types, and behavior
 - **Performance Parity**: Score differences within acceptable thresholds  
 - **Behavioral Consistency**: Similar optimization patterns and convergence
-- **All Three Optimizers**: BootstrapFewShot, MIPRO, and SIMBA
+- **All Four Optimizers**: BootstrapFewShot, MIPRO, SIMBA, and GEPA
 
 Results are saved as JSON files with detailed compatibility analysis and recommendations.
 
@@ -948,6 +997,7 @@ Check the examples directory for complete implementations:
 * [examples/multi_chain_comparison](examples/multi_chain_comparison): Multi-perspective reasoning and decision synthesis
 * [examples/others/mipro](examples/others/mipro): MIPRO optimizer demonstration with GSM8K
 * [examples/others/simba](examples/others/simba): SIMBA optimizer with introspective learning showcase
+* [examples/others/gepa](examples/others/gepa): GEPA evolutionary optimizer with multi-objective Pareto optimization
 
 ### Smart Tool Registry Examples
 

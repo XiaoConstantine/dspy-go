@@ -27,6 +27,8 @@
 //     * MIPRO: Multi-step interactive prompt optimization
 //     * Copro: Collaborative prompt optimization
 //     * SIMBA: Stochastic Introspective Mini-Batch Ascent with self-analysis
+//     * GEPA: Generative Evolutionary Prompt Adaptation with multi-objective Pareto optimization,
+//       LLM-based self-reflection, semantic diversity metrics, and elite archive management
 //     * TPE: Tree-structured Parzen Estimator for Bayesian optimization
 //
 //   - Agents: Advanced patterns for building sophisticated AI systems:
@@ -222,6 +224,104 @@
 //	    }
 //
 //	    fmt.Printf("Answer: %s\n", result["answer"])
+//	}
+//
+// GEPA Optimizer Example:
+//
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "log"
+//
+//	    "github.com/XiaoConstantine/dspy-go/pkg/core"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/modules"
+//	    "github.com/XiaoConstantine/dspy-go/pkg/optimizers"
+//	)
+//
+//	func main() {
+//	    // Configure LLM
+//	    llm, err := llms.NewAnthropicLLM("your-api-key", core.ModelAnthropicSonnet)
+//	    if err != nil {
+//	        log.Fatalf("Failed to create LLM: %v", err)
+//	    }
+//	    core.SetDefaultLLM(llm)
+//
+//	    // Create program to optimize
+//	    signature := core.NewSignature(
+//	        []core.InputField{{Field: core.Field{Name: "question"}}},
+//	        []core.OutputField{{Field: core.Field{Name: "answer"}}},
+//	    )
+//	    
+//	    module := modules.NewPredict(signature)
+//	    program := core.NewProgram(
+//	        map[string]core.Module{"predictor": module},
+//	        func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+//	            return module.Process(ctx, inputs)
+//	        },
+//	    )
+//
+//	    // Configure GEPA optimizer with multi-objective optimization
+//	    config := &optimizers.GEPAConfig{
+//	        PopulationSize:    20,              // Population size for evolutionary search
+//	        MaxGenerations:    10,              // Maximum number of generations
+//	        SelectionStrategy: "adaptive_pareto", // Use adaptive Pareto-based selection
+//	        MutationRate:      0.3,             // Probability of mutation
+//	        CrossoverRate:     0.7,             // Probability of crossover
+//	        ReflectionFreq:    2,               // Perform reflection every 2 generations
+//	    }
+//
+//	    gepa, err := optimizers.NewGEPA(config)
+//	    if err != nil {
+//	        log.Fatalf("Failed to create GEPA optimizer: %v", err)
+//	    }
+//
+//	    // Create training dataset
+//	    dataset := []core.Example{
+//	        {
+//	            Inputs:  map[string]interface{}{"question": "What is 2+2?"},
+//	            Outputs: map[string]interface{}{"answer": "4"},
+//	        },
+//	        {
+//	            Inputs:  map[string]interface{}{"question": "What is the capital of Japan?"},
+//	            Outputs: map[string]interface{}{"answer": "Tokyo"},
+//	        },
+//	        // Add more examples...
+//	    }
+//
+//	    // Define evaluation metric
+//	    metric := func(expected, actual map[string]interface{}) float64 {
+//	        if expected["answer"] == actual["answer"] {
+//	            return 1.0
+//	        }
+//	        return 0.0
+//	    }
+//
+//	    // Optimize the program using GEPA's multi-objective evolutionary approach
+//	    optimizedProgram, err := gepa.Compile(context.Background(), program, dataset, metric)
+//	    if err != nil {
+//	        log.Fatalf("GEPA optimization failed: %v", err)
+//	    }
+//
+//	    // Get optimization results
+//	    state := gepa.GetOptimizationState()
+//	    fmt.Printf("Optimization completed in %d generations\n", state.CurrentGeneration)
+//	    fmt.Printf("Best fitness achieved: %.3f\n", state.BestFitness)
+//	    fmt.Printf("Best prompt: %s\n", state.BestCandidate.Instruction)
+//	    
+//	    // Access Pareto archive of elite solutions
+//	    archive := state.GetParetoArchive()
+//	    fmt.Printf("Elite solutions in archive: %d\n", len(archive))
+//
+//	    // Use the optimized program
+//	    result, err := optimizedProgram.Execute(context.Background(), map[string]interface{}{
+//	        "question": "What is machine learning?",
+//	    })
+//	    if err != nil {
+//	        log.Fatalf("Error executing optimized program: %v", err)
+//	    }
+//
+//	    fmt.Printf("Optimized Answer: %s\n", result["answer"])
 //	}
 //
 // Advanced Features:
