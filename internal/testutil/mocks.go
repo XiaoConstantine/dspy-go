@@ -21,7 +21,10 @@ type MockDataset struct {
 }
 
 func (m *MockDataset) Next() (core.Example, bool) {
-	// Check if there's a mock expectation, if not use default behavior
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if there's a mock expectation
 	if len(m.ExpectedCalls) > 0 {
 		for _, call := range m.ExpectedCalls {
 			if call.Method == "Next" {
@@ -30,8 +33,7 @@ func (m *MockDataset) Next() (core.Example, bool) {
 			}
 		}
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+
 	if m.Index < len(m.Examples) {
 		example := m.Examples[m.Index]
 		m.Index++
@@ -42,7 +44,10 @@ func (m *MockDataset) Next() (core.Example, bool) {
 
 // Reset resets the dataset iterator.
 func (m *MockDataset) Reset() {
-	// Check if there's a mock expectation, if not just reset
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if there's a mock expectation
 	if len(m.ExpectedCalls) > 0 {
 		for _, call := range m.ExpectedCalls {
 			if call.Method == "Reset" {
@@ -51,8 +56,7 @@ func (m *MockDataset) Reset() {
 			}
 		}
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+
 	m.Index = 0
 }
 
@@ -314,7 +318,7 @@ func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []core.
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	
+
 	// Create cancellable context
 	streamCtx, cancelFunc := context.WithCancel(ctx)
 
@@ -342,7 +346,7 @@ func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []core.
 	go func() {
 		defer close(chunkChan)
 		defer cancelFunc()
-		
+
 		// Handle immediate error case
 		if mockConfig.Error != nil && mockConfig.ErrorAfter <= 0 {
 			chunkChan <- core.StreamChunk{Error: mockConfig.Error}
@@ -630,7 +634,10 @@ func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ..
 }
 
 func (m *MockModule) GetSignature() core.Signature {
-	// Check if there's a mock expectation, if not return default
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Check if there's a mock expectation with return value
 	if len(m.ExpectedCalls) > 0 {
 		for _, call := range m.ExpectedCalls {
 			if call.Method == "GetSignature" {
@@ -642,8 +649,7 @@ func (m *MockModule) GetSignature() core.Signature {
 			}
 		}
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+
 	return m.signature
 }
 
@@ -659,7 +665,7 @@ func (m *MockModule) SetLLM(llm core.LLM) {
 }
 
 func (m *MockModule) Clone() core.Module {
-	// Check if there's a mock expectation, if not return default
+	// Check if there's a mock expectation with return value
 	if len(m.ExpectedCalls) > 0 {
 		for _, call := range m.ExpectedCalls {
 			if call.Method == "Clone" {
@@ -671,8 +677,40 @@ func (m *MockModule) Clone() core.Module {
 			}
 		}
 	}
+
+	// Deep copy with proper synchronization
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Create deep copy of signature to avoid shared state
+	signatureCopy := core.Signature{
+		Instruction: m.signature.Instruction,
+		Inputs:      make([]core.InputField, len(m.signature.Inputs)),
+		Outputs:     make([]core.OutputField, len(m.signature.Outputs)),
+	}
+
+	// Deep copy inputs
+	for i, input := range m.signature.Inputs {
+		signatureCopy.Inputs[i] = core.InputField{
+			Field: core.Field{
+				Name:        input.Name,
+				Description: input.Description,
+			},
+		}
+	}
+
+	// Deep copy outputs
+	for i, output := range m.signature.Outputs {
+		signatureCopy.Outputs[i] = core.OutputField{
+			Field: core.Field{
+				Name:        output.Name,
+				Description: output.Description,
+			},
+		}
+	}
+
 	return &MockModule{
-		signature:   m.signature,
+		signature:   signatureCopy,
 		displayName: m.displayName,
 		moduleType:  m.moduleType,
 	}
@@ -695,7 +733,10 @@ func (m *MockModule) GetModuleType() string {
 }
 
 func (m *MockModule) UpdateInstruction(instruction string) {
-	// Check if there's a mock expectation, if not update signature directly
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if there's a mock expectation
 	if len(m.ExpectedCalls) > 0 {
 		for _, call := range m.ExpectedCalls {
 			if call.Method == "UpdateInstruction" {
@@ -704,6 +745,7 @@ func (m *MockModule) UpdateInstruction(instruction string) {
 			}
 		}
 	}
+
 	m.signature.Instruction = instruction
 }
 
