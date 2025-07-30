@@ -34,7 +34,7 @@ type InterceptableTool interface {
 	// CallWithInterceptors executes the tool with interceptor support
 	CallWithInterceptors(ctx context.Context, args map[string]interface{}, interceptors []core.ToolInterceptor) (*models.CallToolResult, error)
 
-	// SetInterceptors sets the default interceptors for this tool instance  
+	// SetInterceptors sets the default interceptors for this tool instance
 	SetInterceptors(interceptors []core.ToolInterceptor)
 
 	// GetInterceptors returns the current interceptors for this tool
@@ -96,19 +96,23 @@ func (xa *XMLAction) GetArgumentsMap() map[string]interface{} {
 // InterceptorToolWrapper wraps an existing Tool to provide interceptor support.
 // This allows any existing tool to be used with interceptors without modifying its implementation.
 type InterceptorToolWrapper struct {
-	tool         Tool
-	interceptors []core.ToolInterceptor
-	toolType     string
-	version      string
+	tool                     Tool
+	interceptors             []core.ToolInterceptor
+	toolType                 string
+	version                  string
+	lastExecutionMetadata    map[string]interface{} // Preserves metadata from last interceptor execution
+	lastExecutionAnnotations map[string]interface{} // Preserves annotations from last interceptor execution
 }
 
 // NewInterceptorToolWrapper creates a new wrapper that adds interceptor support to an existing tool.
 func NewInterceptorToolWrapper(tool Tool, toolType, version string) *InterceptorToolWrapper {
 	return &InterceptorToolWrapper{
-		tool:         tool,
-		interceptors: make([]core.ToolInterceptor, 0),
-		toolType:     toolType,
-		version:      version,
+		tool:                     tool,
+		interceptors:             make([]core.ToolInterceptor, 0),
+		toolType:                 toolType,
+		version:                  version,
+		lastExecutionMetadata:    make(map[string]interface{}),
+		lastExecutionAnnotations: make(map[string]interface{}),
 	}
 }
 
@@ -166,6 +170,9 @@ func (itw *InterceptorToolWrapper) CallWithInterceptors(ctx context.Context, arg
 		return nil, err
 	}
 
+	// Preserve interceptor metadata and annotations for later retrieval
+	itw.preserveExecutionData(coreResult)
+
 	// Convert core.ToolResult back to models.CallToolResult
 	if mcpResult, ok := coreResult.Data.(*models.CallToolResult); ok {
 		return mcpResult, nil
@@ -209,6 +216,51 @@ func (itw *InterceptorToolWrapper) GetToolType() string {
 // GetVersion returns the tool version.
 func (itw *InterceptorToolWrapper) GetVersion() string {
 	return itw.version
+}
+
+// preserveExecutionData stores the metadata and annotations from the interceptor execution.
+func (itw *InterceptorToolWrapper) preserveExecutionData(coreResult core.ToolResult) {
+	// Deep copy metadata to avoid reference issues
+	if coreResult.Metadata != nil {
+		itw.lastExecutionMetadata = make(map[string]interface{})
+		for k, v := range coreResult.Metadata {
+			itw.lastExecutionMetadata[k] = v
+		}
+	} else {
+		itw.lastExecutionMetadata = make(map[string]interface{})
+	}
+
+	// Deep copy annotations to avoid reference issues
+	if coreResult.Annotations != nil {
+		itw.lastExecutionAnnotations = make(map[string]interface{})
+		for k, v := range coreResult.Annotations {
+			itw.lastExecutionAnnotations[k] = v
+		}
+	} else {
+		itw.lastExecutionAnnotations = make(map[string]interface{})
+	}
+}
+
+// GetLastExecutionMetadata returns the metadata from the most recent interceptor execution.
+// This allows access to rich data added by interceptors (e.g., timing, logging, metrics).
+func (itw *InterceptorToolWrapper) GetLastExecutionMetadata() map[string]interface{} {
+	// Return a copy to prevent external modification
+	result := make(map[string]interface{})
+	for k, v := range itw.lastExecutionMetadata {
+		result[k] = v
+	}
+	return result
+}
+
+// GetLastExecutionAnnotations returns the annotations from the most recent interceptor execution.
+// This allows access to additional context added by interceptors (e.g., tracing, debugging info).
+func (itw *InterceptorToolWrapper) GetLastExecutionAnnotations() map[string]interface{} {
+	// Return a copy to prevent external modification
+	result := make(map[string]interface{})
+	for k, v := range itw.lastExecutionAnnotations {
+		result[k] = v
+	}
+	return result
 }
 
 // WrapToolWithInterceptors is a convenience function to wrap any tool with interceptor support.

@@ -218,6 +218,95 @@ func TestInterceptorToolWrapper(t *testing.T) {
 		assert.Equal(t, "custom data", textContent.Text)
 		assert.False(t, result.IsError)
 	})
+
+	t.Run("metadata preservation", func(t *testing.T) {
+		ctx := context.Background()
+		args := map[string]interface{}{"input": "test"}
+
+		// Interceptor that adds metadata and annotations
+		interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+			result, err := handler(ctx, args)
+			if err != nil {
+				return core.ToolResult{}, err
+			}
+			
+			// Add rich metadata
+			if result.Metadata == nil {
+				result.Metadata = make(map[string]interface{})
+			}
+			result.Metadata["execution_time_ms"] = 150
+			result.Metadata["interceptor_id"] = "test-interceptor"
+			result.Metadata["success"] = true
+			
+			// Add annotations
+			if result.Annotations == nil {
+				result.Annotations = make(map[string]interface{})
+			}
+			result.Annotations["trace_id"] = "trace-12345"
+			result.Annotations["debug_info"] = "interceptor executed successfully"
+			
+			return result, nil
+		}
+
+		// Execute with interceptor
+		result, err := wrapper.CallWithInterceptors(ctx, args, []core.ToolInterceptor{interceptor})
+		require.NoError(t, err)
+		
+		// Check that the MCP result is still correct
+		require.Len(t, result.Content, 1)
+		textContent := result.Content[0].(models.TextContent)
+		assert.Equal(t, "Tool result: test", textContent.Text)
+		
+		// Check that metadata was preserved
+		metadata := wrapper.GetLastExecutionMetadata()
+		assert.Equal(t, 150, metadata["execution_time_ms"])
+		assert.Equal(t, "test-interceptor", metadata["interceptor_id"])
+		assert.True(t, metadata["success"].(bool))
+		
+		// Check that annotations were preserved
+		annotations := wrapper.GetLastExecutionAnnotations()
+		assert.Equal(t, "trace-12345", annotations["trace_id"])
+		assert.Equal(t, "interceptor executed successfully", annotations["debug_info"])
+	})
+
+	t.Run("metadata isolation between calls", func(t *testing.T) {
+		ctx := context.Background()
+		args := map[string]interface{}{"input": "test"}
+
+		// First interceptor
+		interceptor1 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+			result, err := handler(ctx, args)
+			if err != nil {
+				return core.ToolResult{}, err
+			}
+			result.Metadata = map[string]interface{}{"call": "first"}
+			return result, nil
+		}
+
+		// Second interceptor  
+		interceptor2 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+			result, err := handler(ctx, args)
+			if err != nil {
+				return core.ToolResult{}, err
+			}
+			result.Metadata = map[string]interface{}{"call": "second"}
+			return result, nil
+		}
+
+		// First call
+		_, err := wrapper.CallWithInterceptors(ctx, args, []core.ToolInterceptor{interceptor1})
+		require.NoError(t, err)
+		assert.Equal(t, "first", wrapper.GetLastExecutionMetadata()["call"])
+
+		// Second call - should replace first call's metadata
+		_, err = wrapper.CallWithInterceptors(ctx, args, []core.ToolInterceptor{interceptor2})
+		require.NoError(t, err)
+		assert.Equal(t, "second", wrapper.GetLastExecutionMetadata()["call"])
+		
+		// Should not contain first call's metadata
+		_, exists := wrapper.GetLastExecutionMetadata()["first"]
+		assert.False(t, exists)
+	})
 }
 
 // TestWrapToolWithInterceptors tests the convenience function.
