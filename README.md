@@ -54,7 +54,7 @@ import (
 func main() {
     // Configure the default LLM
     llms.EnsureFactory()
-    err := config.ConfigureDefaultLLM("your-api-key", core.ModelAnthropicSonnet)
+    err := core.ConfigureDefaultLLM("your-api-key", core.ModelAnthropicSonnet)
     if err != nil {
         log.Fatalf("Failed to configure LLM: %v", err)
     }
