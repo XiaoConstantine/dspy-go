@@ -61,8 +61,8 @@ func main() {
 
     // Create a signature for question answering
     signature := core.NewSignature(
-        []core.InputField{{Field: core.Field{Name: "question"}}},
-        []core.OutputField{{Field: core.Field{Name: "answer"}}},
+        []core.InputField{{Field: core.NewField("question", core.WithDescription("Question to answer"))}},
+        []core.OutputField{{Field: core.NewField("answer", core.WithDescription("Answer to the question"))}},
     )
 
     // Create a ChainOfThought module that implements step-by-step reasoning
@@ -100,11 +100,11 @@ Signatures define the input and output fields for modules, creating a clear cont
 // Create a signature for a summarization task
 signature := core.NewSignature(
     []core.InputField{
-        {Field: core.Field{Name: "document", Description: "The document to summarize"}},
+        {Field: core.NewField("document", core.WithDescription("The document to summarize"))},
     },
     []core.OutputField{
-        {Field: core.Field{Name: "summary", Description: "A concise summary of the document"}},
-        {Field: core.Field{Name: "key_points", Description: "The main points from the document"}},
+        {Field: core.NewField("summary", core.WithDescription("A concise summary of the document"))},
+        {Field: core.NewField("key_points", core.WithDescription("The main points from the document"))},
     },
 )
 ```
