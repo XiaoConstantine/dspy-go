@@ -459,7 +459,7 @@ func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string
 	inputsJSON, err := json.Marshal(inputs)
 	if err != nil {
 		// Fallback to a deterministic representation if JSON marshaling fails
-		hasher.Write([]byte(fmt.Sprintf("%+v", inputs)))
+		fmt.Fprintf(hasher, "%+v", inputs)
 	} else {
 		hasher.Write(inputsJSON)
 	}
@@ -480,7 +480,7 @@ func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) stri
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		// Fallback to a deterministic representation if JSON marshaling fails
-		hasher.Write([]byte(fmt.Sprintf("%+v", args)))
+		fmt.Fprintf(hasher, "%+v", args)
 	} else {
 		hasher.Write(argsJSON)
 	}
