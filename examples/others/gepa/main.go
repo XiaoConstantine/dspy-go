@@ -190,8 +190,19 @@ func loadDataset(datasetName string) ([]core.Example, error) {
 		}
 		return examples, nil
 	case "hotpotqa":
-		// For now, use GSM8K as placeholder
-		return loadDataset("gsm8k")
+		hotpotExamples, err := datasets.LoadHotpotQA()
+		if err != nil {
+			return nil, err
+		}
+		// Convert to core.Example
+		examples := make([]core.Example, len(hotpotExamples))
+		for i, ex := range hotpotExamples {
+			examples[i] = core.Example{
+				Inputs:  map[string]interface{}{"question": ex.Question},
+				Outputs: map[string]interface{}{"answer": ex.Answer},
+			}
+		}
+		return examples, nil
 	default:
 		return loadDataset("gsm8k") // Default to GSM8K
 	}
