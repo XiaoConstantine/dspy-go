@@ -71,7 +71,7 @@ func (tm *TestModuleWithInterceptors) Process(ctx context.Context, inputs map[st
 
 // ProcessWithInterceptors overrides the BaseModule implementation to use the correct Process method.
 func (tm *TestModuleWithInterceptors) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, opts ...Option) (map[string]any, error) {
-	return tm.processWithInterceptorsImpl(ctx, inputs, interceptors, tm.Process, opts...)
+	return tm.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, tm.Process, opts...)
 }
 
 // Clone creates a copy of the test module.

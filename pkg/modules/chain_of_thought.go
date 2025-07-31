@@ -11,8 +11,9 @@ type ChainOfThought struct {
 }
 
 var (
-	_ core.Module     = (*ChainOfThought)(nil)
-	_ core.Composable = (*ChainOfThought)(nil)
+	_ core.Module             = (*ChainOfThought)(nil)
+	_ core.InterceptableModule = (*ChainOfThought)(nil)
+	_ core.Composable         = (*ChainOfThought)(nil)
 )
 
 func NewChainOfThought(signature core.Signature) *ChainOfThought {
@@ -112,6 +113,27 @@ func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opt
 
 	return outputs, nil
 }
+
+// ProcessWithInterceptors executes the module's logic with interceptor support.
+func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
+	return c.Predict.ProcessWithInterceptors(ctx, inputs, interceptors, opts...)
+}
+
+// SetInterceptors sets the default interceptors for this module instance.
+func (c *ChainOfThought) SetInterceptors(interceptors []core.ModuleInterceptor) {
+	c.Predict.SetInterceptors(interceptors)
+}
+
+// GetInterceptors returns the current interceptors for this module.
+func (c *ChainOfThought) GetInterceptors() []core.ModuleInterceptor {
+	return c.Predict.GetInterceptors()
+}
+
+// ClearInterceptors removes all interceptors from this module.
+func (c *ChainOfThought) ClearInterceptors() {
+	c.Predict.ClearInterceptors()
+}
+
 func appendRationaleField(signature core.Signature) core.Signature {
 	newSignature := signature
 	rationaleField := core.OutputField{
