@@ -23,6 +23,9 @@ type Predict struct {
 var _ core.Module = (*Predict)(nil)
 var _ core.InterceptableModule = (*Predict)(nil)
 
+// Ensure Predict implements InterceptableModule.
+var _ core.InterceptableModule = (*Predict)(nil)
+
 // Ensure Predict implements demo interfaces for saving/loading.
 var _ core.DemoProvider = (*Predict)(nil)
 var _ core.DemoConsumer = (*Predict)(nil)
@@ -173,6 +176,12 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	span.WithAnnotation("outputs", formattedOutputs)
 
 	return formattedOutputs, nil
+}
+
+// ProcessWithInterceptors executes the Predict module's logic with interceptor support.
+func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
+	// Use the helper method from BaseModule, but pass our own Process method
+	return p.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, p.Process, opts...)
 }
 
 func (p *Predict) Clone() core.Module {
@@ -706,10 +715,4 @@ func parseJSONResponse(content string, signature core.Signature) string {
 	}
 
 	return strings.TrimSpace(result.String())
-}
-
-// ProcessWithInterceptors executes the module's logic with interceptor support.
-func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
-	// Use the BaseModule's helper method with our own Process implementation
-	return p.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, p.Process, opts...)
 }
