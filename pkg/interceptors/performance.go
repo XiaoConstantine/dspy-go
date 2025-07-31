@@ -28,14 +28,18 @@ type Cache interface {
 
 // MemoryCache implements an in-memory cache with TTL support.
 type MemoryCache struct {
-	mu    sync.RWMutex
-	items map[string]*CacheEntry
+	mu       sync.RWMutex
+	items    map[string]*CacheEntry
+	stopChan chan struct{}
+	stopped  bool
 }
 
 // NewMemoryCache creates a new in-memory cache.
 func NewMemoryCache() *MemoryCache {
 	cache := &MemoryCache{
-		items: make(map[string]*CacheEntry),
+		items:    make(map[string]*CacheEntry),
+		stopChan: make(chan struct{}),
+		stopped:  false,
 	}
 	
 	// Start cleanup goroutine
@@ -47,19 +51,27 @@ func NewMemoryCache() *MemoryCache {
 // Get retrieves a value from the cache.
 func (mc *MemoryCache) Get(key string) (interface{}, bool) {
 	mc.mu.RLock()
-	defer mc.mu.RUnlock()
-
 	entry, exists := mc.items[key]
 	if !exists {
+		mc.mu.RUnlock()
 		return nil, false
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
-		delete(mc.items, key)
+		mc.mu.RUnlock()
+		// Upgrade to write lock for deletion
+		mc.mu.Lock()
+		// Check again in case another goroutine already deleted it
+		if entry, stillExists := mc.items[key]; stillExists && time.Now().After(entry.ExpiresAt) {
+			delete(mc.items, key)
+		}
+		mc.mu.Unlock()
 		return nil, false
 	}
 
-	return entry.Result, true
+	result := entry.Result
+	mc.mu.RUnlock()
+	return result, true
 }
 
 // Set stores a value in the cache with TTL.
@@ -87,20 +99,40 @@ func (mc *MemoryCache) Clear() {
 	mc.items = make(map[string]*CacheEntry)
 }
 
+// Stop terminates the cleanup goroutine and marks cache as stopped.
+func (mc *MemoryCache) Stop() {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	
+	if !mc.stopped {
+		mc.stopped = true
+		close(mc.stopChan)
+	}
+}
+
 // cleanup removes expired entries periodically.
 func (mc *MemoryCache) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		mc.mu.Lock()
-		now := time.Now()
-		for key, entry := range mc.items {
-			if now.After(entry.ExpiresAt) {
-				delete(mc.items, key)
+	for {
+		select {
+		case <-ticker.C:
+			mc.mu.Lock()
+			if mc.stopped {
+				mc.mu.Unlock()
+				return
 			}
+			now := time.Now()
+			for key, entry := range mc.items {
+				if now.After(entry.ExpiresAt) {
+					delete(mc.items, key)
+				}
+			}
+			mc.mu.Unlock()
+		case <-mc.stopChan:
+			return
 		}
-		mc.mu.Unlock()
 	}
 }
 
@@ -395,105 +427,22 @@ func CircuitBreakerToolInterceptor(cb *CircuitBreaker) core.ToolInterceptor {
 	}
 }
 
-// BatchingConfig holds configuration for batching operations.
-type BatchingConfig struct {
-	BatchSize    int           // Maximum number of items in a batch
-	BatchTimeout time.Duration // Maximum time to wait for a batch to fill
-}
-
-// BatchingModuleInterceptor creates an interceptor that batches module executions.
-// This is useful for modules that can process multiple inputs more efficiently in batches.
-func BatchingModuleInterceptor(config BatchingConfig) core.ModuleInterceptor {
-	type batchResult struct {
-		output map[string]any
-		err    error
-	}
-
-	type batchItem struct {
-		ctx     context.Context
-		inputs  map[string]any
-		info    *core.ModuleInfo
-		handler core.ModuleHandler
-		opts    []core.Option
-		result  chan batchResult
-	}
-
-	var (
-		mu           sync.Mutex
-		batch        []batchItem
-		batchTimer   *time.Timer
-		processing   bool
-	)
-
-	processBatch := func() {
-		mu.Lock()
-		currentBatch := batch
-		batch = nil
-		processing = false
-		if batchTimer != nil {
-			batchTimer.Stop()
-			batchTimer = nil
-		}
-		mu.Unlock()
-
-		if len(currentBatch) == 0 {
-			return
-		}
-
-		// Process each item in the batch
-		// Note: This is a simplified implementation. A real batching interceptor
-		// would need to understand how to combine inputs and split outputs.
-		for _, item := range currentBatch {
-			go func(item batchItem) {
-				result, err := item.handler(item.ctx, item.inputs, item.opts...)
-				item.result <- batchResult{output: result, err: err}
-				close(item.result)
-			}(item)
-		}
-	}
-
-	return func(ctx context.Context, inputs map[string]any, info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
-		resultChan := make(chan batchResult, 1)
-		
-		item := batchItem{
-			ctx:     ctx,
-			inputs:  inputs,
-			info:    info,
-			handler: handler,
-			opts:    opts,
-			result:  resultChan,
-		}
-
-		mu.Lock()
-		batch = append(batch, item)
-		
-		shouldProcess := len(batch) >= config.BatchSize
-		
-		if !processing && !shouldProcess {
-			processing = true
-			if batchTimer != nil {
-				batchTimer.Stop()
-			}
-			batchTimer = time.AfterFunc(config.BatchTimeout, processBatch)
-		} else if shouldProcess {
-			processing = true
-			if batchTimer != nil {
-				batchTimer.Stop()
-				batchTimer = nil
-			}
-			go processBatch()
-		}
-		mu.Unlock()
-
-		if shouldProcess {
-			processBatch()
-		}
-
-		// Wait for result
-		result := <-resultChan
-		return result.output, result.err
-	}
-}
+// NOTE: BatchingModuleInterceptor was removed due to fundamental design flaws.
+// 
+// True batching requires module-specific knowledge of how to:
+// 1. Combine multiple input sets into a single batch request
+// 2. Split batch responses back to individual results  
+// 3. Handle partial failures within a batch
+//
+// A generic batching interceptor cannot provide these capabilities without
+// understanding the specific module's batching semantics. Instead, modules
+// that support batching should implement it internally or provide
+// batch-specific interfaces.
+//
+// For future implementation, consider:
+// - Module-specific batch interfaces (e.g., BatchableModule)
+// - Batch request/response types in module signatures
+// - Explicit batch configuration per module type
 
 // Helper functions
 
@@ -507,8 +456,13 @@ func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string
 	hasher.Write([]byte(info.Version))
 	
 	// Add inputs (in a deterministic way)
-	inputsJSON, _ := json.Marshal(inputs)
-	hasher.Write(inputsJSON)
+	inputsJSON, err := json.Marshal(inputs)
+	if err != nil {
+		// Fallback to a deterministic representation if JSON marshaling fails
+		hasher.Write([]byte(fmt.Sprintf("%+v", inputs)))
+	} else {
+		hasher.Write(inputsJSON)
+	}
 	
 	return "module:" + hex.EncodeToString(hasher.Sum(nil))
 }
@@ -523,8 +477,13 @@ func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) stri
 	hasher.Write([]byte(info.Version))
 	
 	// Add arguments (in a deterministic way)
-	argsJSON, _ := json.Marshal(args)
-	hasher.Write(argsJSON)
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		// Fallback to a deterministic representation if JSON marshaling fails
+		hasher.Write([]byte(fmt.Sprintf("%+v", args)))
+	} else {
+		hasher.Write(argsJSON)
+	}
 	
 	return "tool:" + hex.EncodeToString(hasher.Sum(nil))
 }

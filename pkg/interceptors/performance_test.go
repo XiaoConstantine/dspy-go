@@ -49,12 +49,59 @@ func TestMemoryCache(t *testing.T) {
 		t.Error("Expected deleted key to not be found")
 	}
 
+	// Test Stop functionality
+	cache.Stop()
+	
+	// Test that cache still works after stop (just cleanup stops)
+	cache.Set("after_stop", "value", time.Second)
+	value, found = cache.Get("after_stop")
+	if !found || value != "value" {
+		t.Error("Cache should still work after Stop() call")
+	}
+}
+
+func TestMemoryCacheConcurrentAccess(t *testing.T) {
+	cache := NewMemoryCache()
+	defer cache.Stop()
+	
+	// Test concurrent access to verify race condition fix
+	done := make(chan bool)
+	
+	// Writer goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			cache.Set("key", "value", 10*time.Millisecond)
+			time.Sleep(time.Millisecond)
+		}
+		done <- true
+	}()
+	
+	// Reader goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			cache.Get("key") // This should not panic
+			time.Sleep(time.Millisecond)
+		}
+		done <- true
+	}()
+	
+	// Wait for both goroutines
+	<-done
+	<-done
+	
+	// If we get here without panic, the race condition is fixed
+}
+
+func TestMemoryCacheClear(t *testing.T) {
+	cache := NewMemoryCache()
+	defer cache.Stop()
+	
 	// Test Clear
 	cache.Set("key1", "value1", time.Second)
 	cache.Set("key2", "value2", time.Second)
 	cache.Clear()
 
-	_, found = cache.Get("key1")
+	_, found := cache.Get("key1")
 	if found {
 		t.Error("Expected cache to be cleared")
 	}
@@ -488,32 +535,8 @@ func TestRetryToolInterceptor(t *testing.T) {
 	}
 }
 
-func TestBatchingModuleInterceptor(t *testing.T) {
-	config := BatchingConfig{
-		BatchSize:    2,
-		BatchTimeout: 100 * time.Millisecond,
-	}
-	interceptor := BatchingModuleInterceptor(config)
-
-	ctx := context.Background()
-	info := core.NewModuleInfo("TestModule", "TestType", core.Signature{})
-
-	callCount := 0
-	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
-		callCount++
-		return map[string]any{"result": "success", "call": callCount}, nil
-	}
-
-	// Test batching - this is a simplified test since the actual batching
-	// logic would need more sophisticated module-specific implementation
-	result1, err := interceptor(ctx, map[string]any{"test": "1"}, info, handler)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-	if result1["result"] != "success" {
-		t.Errorf("Expected success result, got %v", result1["result"])
-	}
-}
+// TestBatchingModuleInterceptor was removed because the BatchingModuleInterceptor
+// was removed due to fundamental design flaws. See performance.go for details.
 
 func TestPerformanceHelperFunctions(t *testing.T) {
 	t.Run("generateModuleCacheKey", func(t *testing.T) {
