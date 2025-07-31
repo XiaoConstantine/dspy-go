@@ -76,14 +76,32 @@ func DefaultValidationConfig() ValidationConfig {
 		MaxInputSize:    10 * 1024 * 1024, // 10MB
 		MaxStringLength: 100000,           // 100KB per string
 		ForbiddenPatterns: []string{
-			`<script[^>]*>.*?</script>`,              // Script tags
-			`javascript:`,                            // JavaScript URLs
-			`on\w+\s*=`,                             // Event handlers
-			`eval\s*\(`,                             // eval() calls
-			`exec\s*\(`,                             // exec() calls
-			`system\s*\(`,                           // system() calls
+			`(?i)<script[^>]*>.*?</script>`,          // Script tags (case insensitive)
+			`(?i)javascript:`,                        // JavaScript URLs
+			`(?i)data:text/html`,                     // HTML data URLs
+			`(?i)on\w+\s*=`,                         // Event handlers
+			`(?i)eval\s*\(`,                         // eval() calls
+			`(?i)exec\s*\(`,                         // exec() calls
+			`(?i)system\s*\(`,                       // system() calls
+			`(?i)cmd\s*\(`,                          // cmd() calls
+			`(?i)shell_exec\s*\(`,                   // shell_exec() calls
 			`\$\{.*\}`,                              // Template injection
 			`<%.*%>`,                                // Template tags
+			`\{\{.*\}\}`,                            // Mustache/Handlebars templates
+			`(?i)<iframe[^>]*>`,                     // iframes
+			`(?i)<object[^>]*>`,                     // object tags
+			`(?i)<embed[^>]*>`,                      // embed tags
+			`(?i)<form[^>]*>`,                       // form tags
+			`(?i)vbscript:`,                         // VBScript URLs
+			`(?i)expression\s*\(`,                   // CSS expressions
+			`(?i)import\s+['\"]`,                    // Import statements
+			`\.\.\/`,                                // Path traversal
+			`\\\\`,                                  // Windows path traversal
+			`(?i)union\s+select`,                    // SQL injection
+			`(?i)drop\s+table`,                      // SQL injection
+			`(?i)delete\s+from`,                     // SQL injection
+			`--\s*$`,                                // SQL comments
+			`(?i)/\*.*\*/`,                          // SQL block comments
 		},
 		RequiredFields: []string{},
 		AllowHTML:      false,
@@ -387,17 +405,44 @@ func sanitizeInputsGeneric(inputs map[string]interface{}) map[string]interface{}
 func sanitizeValue(value interface{}) interface{} {
 	switch v := value.(type) {
 	case string:
-		// HTML escape the string to prevent XSS
-		return html.EscapeString(v)
+		// Multi-layered sanitization for strings
+		sanitized := v
+		
+		// HTML escape to prevent XSS
+		sanitized = html.EscapeString(sanitized)
+		
+		// Remove or replace dangerous characters
+		sanitized = strings.ReplaceAll(sanitized, "\x00", "") // Remove null bytes
+		sanitized = strings.ReplaceAll(sanitized, "\r\n", " ") // Normalize line endings
+		sanitized = strings.ReplaceAll(sanitized, "\n", " ")
+		sanitized = strings.ReplaceAll(sanitized, "\r", " ")
+		
+		// Limit string length to prevent DoS
+		if len(sanitized) > 10000 {
+			sanitized = sanitized[:10000]
+		}
+		
+		return sanitized
 
 	case map[string]interface{}:
 		result := make(map[string]interface{})
 		for k, subValue := range v {
-			result[k] = sanitizeValue(subValue)
+			// Sanitize both key and value
+			sanitizedKey := html.EscapeString(k)
+			if len(sanitizedKey) > 1000 { // Limit key length
+				sanitizedKey = sanitizedKey[:1000]
+			}
+			result[sanitizedKey] = sanitizeValue(subValue)
 		}
 		return result
 
 	case []interface{}:
+		// Limit array size to prevent DoS
+		maxSize := 1000
+		if len(v) > maxSize {
+			v = v[:maxSize]
+		}
+		
 		result := make([]interface{}, len(v))
 		for i, subValue := range v {
 			result[i] = sanitizeValue(subValue)
@@ -514,11 +559,31 @@ func hasAnyRole(userRoles, requiredRoles []string) bool {
 func hasAnyPermission(userPermissions, requiredPermissions []string) bool {
 	for _, userPerm := range userPermissions {
 		for _, requiredPerm := range requiredPermissions {
-			if userPerm == requiredPerm || strings.HasSuffix(userPerm, "*") {
+			if matchesPermission(userPerm, requiredPerm) {
 				return true
 			}
 		}
 	}
+	return false
+}
+
+// matchesPermission checks if a user permission matches a required permission.
+// Supports wildcard matching where user permissions ending with "*" match 
+// required permissions that start with the prefix (excluding the "*").
+func matchesPermission(userPerm, requiredPerm string) bool {
+	// Exact match
+	if userPerm == requiredPerm {
+		return true
+	}
+	
+	// Wildcard matching - user permission ends with "*"
+	if strings.HasSuffix(userPerm, "*") {
+		prefix := strings.TrimSuffix(userPerm, "*")
+		// Only match if required permission starts with the prefix
+		// and is longer than the prefix (prevents prefix matching itself and empty prefixes)
+		return len(prefix) > 0 && len(requiredPerm) > len(prefix) && strings.HasPrefix(requiredPerm, prefix)
+	}
+	
 	return false
 }
 

