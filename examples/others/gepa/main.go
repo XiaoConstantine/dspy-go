@@ -130,7 +130,7 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 		EvaluationBatchSize:  5,                 // Batch size for evaluation
 		ConcurrencyLevel:     3,                 // Concurrent evaluation level
 		Temperature:          0.8,               // LLM generation temperature
-		MaxTokens:            500,               // Maximum tokens for generation
+		MaxTokens:            8192,              // Maximum tokens for generation
 	}
 
 	logger.Info(ctx, "🔧 Creating GEPA optimizer with multi-objective evolutionary configuration")

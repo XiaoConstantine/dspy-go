@@ -183,7 +183,7 @@ func runGEPAExperiment(ctx context.Context, logger *logging.Logger, trainExample
 		EvaluationBatchSize:  5,
 		ConcurrencyLevel:     3,
 		Temperature:          0.8,
-		MaxTokens:            500,
+		MaxTokens:            8192,
 	}
 
 	gepa, err := optimizers.NewGEPA(config)
