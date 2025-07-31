@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -459,7 +461,8 @@ func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string
 	inputsJSON, err := json.Marshal(inputs)
 	if err != nil {
 		// Fallback to a deterministic representation if JSON marshaling fails
-		fmt.Fprintf(hasher, "%+v", inputs)
+		deterministicMapString := mapToDeterministicString(inputs)
+		hasher.Write([]byte(deterministicMapString))
 	} else {
 		hasher.Write(inputsJSON)
 	}
@@ -480,7 +483,8 @@ func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) stri
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		// Fallback to a deterministic representation if JSON marshaling fails
-		fmt.Fprintf(hasher, "%+v", args)
+		deterministicMapString := mapToDeterministicStringGeneric(args)
+		hasher.Write([]byte(deterministicMapString))
 	} else {
 		hasher.Write(argsJSON)
 	}
@@ -594,5 +598,70 @@ func RetryToolInterceptor(config RetryConfig) core.ToolInterceptor {
 		}
 
 		return core.ToolResult{}, fmt.Errorf("tool %s failed after %d attempts: %w", info.Name, config.MaxAttempts, lastErr)
+	}
+}
+
+// mapToDeterministicString converts a map[string]any to a deterministic string representation.
+// Keys are sorted to ensure consistent output regardless of map iteration order.
+func mapToDeterministicString(m map[string]any) string {
+	if m == nil {
+		return "nil"
+	}
+	
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	
+	var parts []string
+	for _, k := range keys {
+		v := m[k]
+		valueStr := valueToDeterministicString(v)
+		parts = append(parts, fmt.Sprintf("%s:%s", k, valueStr))
+	}
+	
+	return fmt.Sprintf("map{%s}", strings.Join(parts, ","))
+}
+
+// mapToDeterministicStringGeneric converts a map[string]interface{} to a deterministic string representation.
+func mapToDeterministicStringGeneric(m map[string]interface{}) string {
+	if m == nil {
+		return "nil"
+	}
+	
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	
+	var parts []string
+	for _, k := range keys {
+		v := m[k]
+		valueStr := valueToDeterministicString(v)
+		parts = append(parts, fmt.Sprintf("%s:%s", k, valueStr))
+	}
+	
+	return fmt.Sprintf("map{%s}", strings.Join(parts, ","))
+}
+
+// valueToDeterministicString converts any value to a deterministic string representation.
+func valueToDeterministicString(v interface{}) string {
+	switch val := v.(type) {
+	case nil:
+		return "nil"
+	case string:
+		return fmt.Sprintf("\"%s\"", val)
+	case map[string]interface{}:
+		return mapToDeterministicStringGeneric(val)
+	case []interface{}:
+		parts := make([]string, len(val))
+		for i, item := range val {
+			parts[i] = valueToDeterministicString(item)
+		}
+		return fmt.Sprintf("[%s]", strings.Join(parts, ","))
+	default:
+		return fmt.Sprintf("%v", val)
 	}
 }
