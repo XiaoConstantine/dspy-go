@@ -222,7 +222,7 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 
 	// Create dataset interface for BootstrapFewShot
 	trainDataset := datasets.NewSimpleDataset(trainExamples)
-	
+
 	// Define metric function for BootstrapFewShot
 	metricFunc := func(expected, actual map[string]interface{}) float64 {
 		return oc.AccuracyMetric(expected, actual, ctx)
@@ -394,7 +394,7 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 	coproOptimizer := optimizers.NewCOPRO(
 		metricFunc,
 		optimizers.WithBreadth(breadth),        // Number of prompt candidates
-		optimizers.WithDepth(depth),            // Refinement iterations  
+		optimizers.WithDepth(depth),            // Refinement iterations
 		optimizers.WithInitTemperature(1.2),    // Exploration randomness
 		optimizers.WithTrackStats(false),
 	)
@@ -632,7 +632,7 @@ func main() {
 		os.Setenv("DSPY_CACHE_ENABLED", "true")
 		os.Setenv("DSPY_CACHE_TYPE", *cacheType)
 		os.Setenv("DSPY_CACHE_TTL", "1h")
-		
+
 		if *cacheType == "sqlite" {
 			homeDir, _ := os.UserHomeDir()
 			cacheDir := filepath.Join(homeDir, ".dspy-go")
@@ -768,7 +768,7 @@ func main() {
 	} else if *withoutCache {
 		filename = "go_comparison_results_nocache.json"
 	}
-	
+
 	err := comparison.SaveResults(results, filename)
 	if err != nil {
 		log.Printf("Error saving results: %v", err)

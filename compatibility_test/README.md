@@ -52,7 +52,7 @@ All optimizers now use **matched configurations** between Python and Go implemen
 The compatibility testing framework consists of:
 
 1. **Python DSPy Reference Implementation** (`dspy_comparison.py`)
-2. **Go dspy-go Implementation** (`go_comparison.go`) 
+2. **Go dspy-go Implementation** (`go_comparison.go`)
 3. **Results Comparison Tool** (`compare_results.py`)
 4. **Automated Experiment Runner** (`run_experiment.sh`)
 
@@ -77,7 +77,7 @@ The compatibility testing framework consists of:
 - [uv](https://docs.astral.sh/uv/) package manager
 - Gemini API key
 
-### Go Environment  
+### Go Environment
 - Go 1.19+
 - dspy-go dependencies
 
@@ -128,7 +128,7 @@ Test with custom dataset size:
 
 Available optimizer options:
 - `bootstrap`: BootstrapFewShot only
-- `mipro`: MIPRO/MIPROv2 only  
+- `mipro`: MIPRO/MIPROv2 only
 - `simba`: SIMBA only
 - `all`: All three optimizers (default)
 
@@ -176,7 +176,7 @@ python compare_results.py
 #### BootstrapFewShot
 - **Python**: `dspy.teleprompt.BootstrapFewShot`
 - **Go**: `optimizers.BootstrapFewShot`
-- **Parameters**: 
+- **Parameters**:
   - `max_bootstrapped_demos`: 4
   - `max_labeled_demos`: 4
 
