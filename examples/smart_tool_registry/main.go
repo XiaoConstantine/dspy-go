@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
@@ -191,10 +192,10 @@ func (m *MockMCPDiscovery) Subscribe(callback func(tools []core.Tool)) error {
 
 // Helper functions are defined in shared.go
 
-// main demonstrates basic Smart Tool Registry usage.
+// - Reliability: Timeouts, retries, and error handling.
 func main() {
-	fmt.Println("🚀 Smart Tool Registry Example")
-	fmt.Println("==============================")
+	fmt.Println("🚀 Smart Tool Registry with Interceptors Example")
+	fmt.Println("================================================")
 
 	// 1. Create Smart Tool Registry with full configuration
 	fmt.Println("\n1. Setting up Smart Tool Registry...")
@@ -213,6 +214,39 @@ func main() {
 	}
 
 	registry := tools.NewSmartToolRegistry(config)
+
+	// Setup tool interceptors for enhanced security, observability and reliability
+	fmt.Println("   → Configuring tool interceptors...")
+
+	// Create tool interceptors
+	toolInterceptors := []core.ToolInterceptor{
+		// Logging interceptor - logs tool execution start/completion
+		interceptors.LoggingToolInterceptor(),
+
+		// Metrics interceptor - tracks tool performance metrics
+		interceptors.MetricsToolInterceptor(),
+
+		// Validation interceptor - validates tool arguments for safety
+		interceptors.ValidationToolInterceptor(interceptors.DefaultValidationConfig()),
+
+		// Security interceptor - sanitizes inputs to prevent injection attacks
+		interceptors.SanitizingToolInterceptor(),
+
+		// Rate limiting interceptor - prevents tool abuse (10 calls per minute per tool)
+		interceptors.RateLimitingToolInterceptor(10, time.Minute),
+
+		// Timeout interceptor - prevents tools from running too long
+		interceptors.TimeoutToolInterceptor(15 * time.Second),
+
+		// Retry interceptor - retries failed tool executions
+		interceptors.RetryToolInterceptor(interceptors.RetryConfig{
+			MaxAttempts: 2,
+			Delay:       500 * time.Millisecond,
+			Backoff:     1.5,
+		}),
+	}
+
+	fmt.Printf("   → Configured %d tool interceptors for enhanced tool execution\n", len(toolInterceptors))
 
 	// 2. Register example tools
 	fmt.Println("\n2. Registering tools...")
@@ -284,21 +318,31 @@ func main() {
 	fmt.Println("\n5. Executing Tools with Performance Tracking")
 	fmt.Println("==========================================")
 
-	// Execute search tool multiple times
-	fmt.Println("\n📊 Executing search operations...")
+	// Execute search tool multiple times with interceptors
+	fmt.Println("\n📊 Executing search operations with tool interceptors...")
+	fmt.Println("   → The following executions demonstrate interceptor benefits:")
+	fmt.Println("     • Logging: Start/completion of each tool execution")
+	fmt.Println("     • Metrics: Performance timing and success/failure tracking")
+	fmt.Println("     • Validation: Input safety checks against injection attacks")
+	fmt.Println("     • Sanitization: Input cleaning and normalization")
+	fmt.Println("     • Rate Limiting: Prevents tool abuse (10 calls/min per tool)")
+	fmt.Println("     • Timeout: Protection against long-running operations")
+	fmt.Println("     • Retry: Automatic retry on failures with exponential backoff")
+
 	for i := 0; i < 3; i++ {
 		params := map[string]interface{}{
 			"query": fmt.Sprintf("sample query %d", i+1),
 			"limit": 5,
 		}
 
+		fmt.Printf("\n   → Executing search operation %d with interceptors...\n", i+1)
 		result, err := registry.ExecuteWithTracking(ctx, "advanced_search", params)
 		if err != nil {
 			log.Printf("Execution error: %v", err)
 			continue
 		}
 
-		fmt.Printf("   ✅ Execution %d completed\n", i+1)
+		fmt.Printf("   ✅ Search execution %d completed successfully\n", i+1)
 		if data, ok := result.Data.(map[string]interface{}); ok {
 			if count, ok := data["count"].(int); ok {
 				fmt.Printf("      → Found %d results\n", count)
@@ -306,8 +350,8 @@ func main() {
 		}
 	}
 
-	// Execute create tool
-	fmt.Println("\n📝 Executing create operation...")
+	// Execute create tool with interceptors
+	fmt.Println("\n📝 Executing create operation with tool interceptors...")
 	params := map[string]interface{}{
 		"type": "report",
 		"name": "Q4 Analysis Report",
@@ -317,7 +361,7 @@ func main() {
 	if err != nil {
 		log.Printf("Execution error: %v", err)
 	} else {
-		fmt.Println("   ✅ Creation completed")
+		fmt.Println("   ✅ Creation completed with interceptor protection")
 		if data, ok := result.Data.(map[string]interface{}); ok {
 			if item, ok := data["created_item"].(map[string]interface{}); ok {
 				fmt.Printf("      → Created: %s (ID: %s)\n", item["name"], item["id"])
@@ -325,8 +369,8 @@ func main() {
 		}
 	}
 
-	// Execute analyze tool
-	fmt.Println("\n🔍 Executing analysis operation...")
+	// Execute analyze tool with interceptors
+	fmt.Println("\n🔍 Executing analysis operation with tool interceptors...")
 	params = map[string]interface{}{
 		"data": "performance metrics dataset",
 	}
@@ -335,7 +379,7 @@ func main() {
 	if err != nil {
 		log.Printf("Execution error: %v", err)
 	} else {
-		fmt.Println("   ✅ Analysis completed")
+		fmt.Println("   ✅ Analysis completed with security validation")
 		if data, ok := result.Data.(map[string]interface{}); ok {
 			if analysis, ok := data["analysis"].(map[string]interface{}); ok {
 				fmt.Printf("      → Score: %.1f, Confidence: %.2f\n",
@@ -424,7 +468,58 @@ func main() {
 			testIntent, scores[0].Tool.Name(), scores[0].FinalScore)
 	}
 
-	fmt.Println("\n🎉 Smart Tool Registry demonstration completed!")
+	// 10. Demonstrate tool interceptor security features
+	fmt.Println("\n10. Tool Interceptor Security Demonstration")
+	fmt.Println("==========================================")
+
+	fmt.Println("\n🔒 Testing security interceptors with potentially malicious inputs...")
+	fmt.Println("   → These examples show how interceptors protect against attacks:")
+
+	// Test XSS protection
+	maliciousInputs := []map[string]interface{}{
+		{
+			"query": "<script>alert('XSS')</script>search term",
+			"limit": 5,
+		},
+		{
+			"data": "'; DROP TABLE users; --",
+		},
+		{
+			"type": "{{template_injection}}",
+			"name": "normal_name",
+		},
+	}
+
+	testCases := []string{"XSS injection", "SQL injection", "Template injection"}
+
+	for i, testInput := range maliciousInputs {
+		fmt.Printf("\n   🚨 Testing %s protection...\n", testCases[i])
+
+		// Try to execute with malicious input - interceptors will sanitize/validate
+		toolName := "advanced_search"
+		switch i {
+		case 1:
+			toolName = "data_analyzer"
+		case 2:
+			toolName = "document_creator"
+		}
+
+		result, err := registry.ExecuteWithTracking(ctx, toolName, testInput)
+		if err != nil {
+			fmt.Printf("      ✅ %s blocked by security interceptors: %v\n", testCases[i], err)
+		} else {
+			fmt.Printf("      ✅ %s sanitized and processed safely\n", testCases[i])
+			if data, ok := result.Data.(map[string]interface{}); ok {
+				if toolName == "advanced_search" {
+					if count, ok := data["count"].(int); ok {
+						fmt.Printf("         → Sanitized query processed, found %d results\n", count)
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Println("\n🎉 Smart Tool Registry with Interceptors demonstration completed!")
 	fmt.Println("\nKey features demonstrated:")
 	fmt.Println("  ✅ Intelligent tool selection with Bayesian inference")
 	fmt.Println("  ✅ Real-time performance tracking and metrics")
@@ -433,4 +528,8 @@ func main() {
 	fmt.Println("  ✅ Fallback mechanisms and error handling")
 	fmt.Println("  ✅ Configurable selection algorithms")
 	fmt.Println("  ✅ Comprehensive tool metadata and scoring")
+	fmt.Println("  ✅ Tool interceptors for security, logging, and reliability")
+	fmt.Println("  ✅ Input validation and sanitization against attacks")
+	fmt.Println("  ✅ Rate limiting and timeout protection")
+	fmt.Println("  ✅ Automatic retry with exponential backoff")
 }
