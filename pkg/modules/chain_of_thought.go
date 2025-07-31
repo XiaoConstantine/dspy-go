@@ -116,7 +116,22 @@ func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opt
 
 // ProcessWithInterceptors executes the module's logic with interceptor support.
 func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
-	return c.Predict.ProcessWithInterceptors(ctx, inputs, interceptors, opts...)
+	// Use provided interceptors, or fall back to Predict's interceptors if none provided
+	if interceptors == nil {
+		interceptors = c.Predict.GetInterceptors()
+	}
+
+	// Create correct ModuleInfo for ChainOfThought (not Predict)
+	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature())
+	
+	// Create handler that calls our own Process method
+	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+		return c.Process(ctx, inputs, opts...)
+	}
+	
+	// Chain interceptors and execute
+	chainedInterceptor := core.ChainModuleInterceptors(interceptors...)
+	return chainedInterceptor(ctx, inputs, info, handler, opts...)
 }
 
 // SetInterceptors sets the default interceptors for this module instance.
