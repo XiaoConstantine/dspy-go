@@ -15,19 +15,26 @@ import (
 
 // RateLimiter tracks request rates per key (agent, tool, etc.).
 type RateLimiter struct {
-	mu       sync.RWMutex
-	requests map[string][]time.Time
-	limit    int
-	window   time.Duration
+	mu         sync.RWMutex
+	requests   map[string][]time.Time
+	lastAccess map[string]time.Time // Track last access time for cleanup
+	limit      int
+	window     time.Duration
 }
 
 // NewRateLimiter creates a new rate limiter with specified limit and time window.
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
-	return &RateLimiter{
-		requests: make(map[string][]time.Time),
-		limit:    limit,
-		window:   window,
+	rl := &RateLimiter{
+		requests:   make(map[string][]time.Time),
+		lastAccess: make(map[string]time.Time),
+		limit:      limit,
+		window:     window,
 	}
+	
+	// Start cleanup goroutine to prevent memory leaks
+	go rl.periodicCleanup()
+	
+	return rl
 }
 
 // Allow checks if a request should be allowed for the given key.
@@ -37,6 +44,9 @@ func (rl *RateLimiter) Allow(key string) bool {
 
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
+
+	// Update last access time for cleanup
+	rl.lastAccess[key] = now
 
 	// Get existing requests for this key
 	requests := rl.requests[key]
@@ -364,6 +374,11 @@ func validateValue(value interface{}, config ValidationConfig, patterns []*regex
 				return fmt.Errorf("input contains forbidden pattern: %s", pattern.String())
 			}
 		}
+		
+		// Check HTML content if not allowed
+		if !config.AllowHTML && containsHTML(v) {
+			return fmt.Errorf("HTML content not allowed in input")
+		}
 
 	case map[string]interface{}:
 		for _, subValue := range v {
@@ -595,4 +610,36 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// containsHTML checks if a string contains HTML-like content.
+// This is a simple heuristic check for common HTML patterns.
+func containsHTML(s string) bool {
+	// Check for HTML tags (opening, closing, or self-closing)
+	htmlTagPattern := regexp.MustCompile(`<\s*/?[a-zA-Z][^>]*>`)
+	// Check for HTML comments
+	htmlCommentPattern := regexp.MustCompile(`<!--.*?-->`)
+	
+	return htmlTagPattern.MatchString(s) || htmlCommentPattern.MatchString(s)
+}
+
+// periodicCleanup removes old unused keys from the rate limiter to prevent memory leaks.
+// Keys that haven't been accessed for more than 2x the rate limiting window are removed.
+func (rl *RateLimiter) periodicCleanup() {
+	ticker := time.NewTicker(rl.window * 2) // Cleanup every 2x window duration
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		rl.mu.Lock()
+		now := time.Now()
+		cleanupThreshold := now.Add(-rl.window * 2) // Remove keys not accessed for 2x window
+		
+		for key, lastAccess := range rl.lastAccess {
+			if lastAccess.Before(cleanupThreshold) {
+				delete(rl.requests, key)
+				delete(rl.lastAccess, key)
+			}
+		}
+		rl.mu.Unlock()
+	}
 }

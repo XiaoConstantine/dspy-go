@@ -216,6 +216,74 @@ func TestRateLimitingToolInterceptor(t *testing.T) {
 	}
 }
 
+func TestAllowHTMLValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		allowHTML   bool
+		input       string
+		shouldError bool
+	}{
+		{"HTML allowed - valid", true, "<div>content</div>", false},
+		{"HTML not allowed - invalid", false, "<div>content</div>", true},
+		{"HTML not allowed - plain text", false, "plain text", false},
+		{"HTML allowed - plain text", true, "plain text", false},
+		{"HTML not allowed - self-closing tag", false, "<img src='test'/>", true},
+		{"HTML not allowed - comment", false, "<!-- comment -->", true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := ValidationConfig{
+				MaxInputSize:      1000,
+				MaxStringLength:   100,
+				ForbiddenPatterns: []string{},
+				RequiredFields:    []string{},
+				AllowHTML:         test.allowHTML,
+			}
+
+			compiledPatterns := make([]*regexp.Regexp, 0)
+			inputs := map[string]interface{}{"test": test.input}
+			
+			err := validateInputsGeneric(inputs, config, compiledPatterns)
+			
+			if test.shouldError && err == nil {
+				t.Errorf("Expected error for input %q with AllowHTML=%v", test.input, test.allowHTML)
+			}
+			if !test.shouldError && err != nil {
+				t.Errorf("Unexpected error for input %q with AllowHTML=%v: %v", test.input, test.allowHTML, err)
+			}
+		})
+	}
+}
+
+func TestDeterministicCacheKeys(t *testing.T) {
+	// Test that cache keys are deterministic even when JSON marshaling fails
+	inputs1 := map[string]any{"b": "value2", "a": "value1"}
+	inputs2 := map[string]any{"a": "value1", "b": "value2"}
+	
+	info := core.NewModuleInfo("TestModule", "TestType", core.Signature{})
+	
+	key1 := generateModuleCacheKey(inputs1, info)
+	key2 := generateModuleCacheKey(inputs2, info)
+	
+	if key1 != key2 {
+		t.Errorf("Expected same cache keys for equivalent maps, got %s and %s", key1, key2)
+	}
+	
+	// Test with tool cache keys too
+	args1 := map[string]interface{}{"b": "value2", "a": "value1"}
+	args2 := map[string]interface{}{"a": "value1", "b": "value2"}
+	
+	toolInfo := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
+	
+	toolKey1 := generateToolCacheKey(args1, toolInfo)
+	toolKey2 := generateToolCacheKey(args2, toolInfo)
+	
+	if toolKey1 != toolKey2 {
+		t.Errorf("Expected same tool cache keys for equivalent maps, got %s and %s", toolKey1, toolKey2)
+	}
+}
+
 func TestDefaultValidationConfigBasic(t *testing.T) {
 	config := DefaultValidationConfig()
 
