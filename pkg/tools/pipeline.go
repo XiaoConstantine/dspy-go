@@ -235,7 +235,7 @@ func (tp *ToolPipeline) executeSequential(ctx context.Context, initialInput map[
 func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[string]interface{}, result *PipelineResult, start time.Time) (*PipelineResult, error) {
 	// For now, implement a simple parallel execution for independent steps
 	// In a more sophisticated implementation, we would analyze dependencies
-	
+
 	type stepResult struct {
 		index   int
 		result  core.ToolResult
@@ -252,12 +252,12 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 		wg.Add(1)
 		go func(idx int, s PipelineStep) {
 			defer wg.Done()
-			
+
 			stepStart := time.Now()
 			stepID := fmt.Sprintf("step_%d_%s", idx, s.ToolName)
-			
+
 			stepRes, err := tp.executeStep(ctx, s, initialInput)
-			
+
 			resultChan <- stepResult{
 				index:   idx,
 				result:  stepRes,
@@ -286,7 +286,7 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 	for stepRes := range resultChan {
 		results[stepRes.index] = stepRes.result
 		result.StepMetadata[stepRes.stepID] = stepRes.metadata
-		
+
 		if stepRes.error != nil {
 			hasError = true
 			if firstError == nil {
@@ -376,7 +376,7 @@ func (tp *ToolPipeline) evaluateConditions(conditions []Condition, previousResul
 // evaluateCondition evaluates a single condition.
 func (tp *ToolPipeline) evaluateCondition(condition Condition, data map[string]interface{}) bool {
 	value, exists := data[condition.Field]
-	
+
 	switch condition.Operator {
 	case "exists":
 		return exists
@@ -404,7 +404,7 @@ func (tp *ToolPipeline) evaluateCondition(condition Condition, data map[string]i
 func (tp *ToolPipeline) getCachedResult(toolName string, input map[string]interface{}) (core.ToolResult, bool) {
 	tp.mu.RLock()
 	defer tp.mu.RUnlock()
-	
+
 	key := tp.generateCacheKey(toolName, input)
 	result, found := tp.cache[key]
 	return result, found
@@ -414,7 +414,7 @@ func (tp *ToolPipeline) getCachedResult(toolName string, input map[string]interf
 func (tp *ToolPipeline) setCachedResult(toolName string, input map[string]interface{}, result core.ToolResult) {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
-	
+
 	key := tp.generateCacheKey(toolName, input)
 	tp.cache[key] = result
 }
@@ -446,10 +446,10 @@ func (tp *ToolPipeline) ClearCache() {
 
 // Helper function for string contains check.
 func contains(s, substr string) bool {
-	return len(substr) == 0 || len(s) >= len(substr) && 
-		(s == substr || s[0:len(substr)] == substr || 
+	return len(substr) == 0 || len(s) >= len(substr) &&
+		(s == substr || s[0:len(substr)] == substr ||
 		 s[len(s)-len(substr):] == substr ||
-		 (len(s) > len(substr) && 
+		 (len(s) > len(substr) &&
 		  func() bool {
 			  for i := 1; i <= len(s)-len(substr); i++ {
 				  if s[i:i+len(substr)] == substr {

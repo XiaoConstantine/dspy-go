@@ -33,22 +33,22 @@ examples:
       max_size_mb: 20
       supported_formats: ["jpeg", "jpg", "png", "webp", "gif"]
       resize_threshold: 2048
-    
+
     # Default prompts
     prompts:
       image_analysis: "Analyze the provided image and answer the given question about it."
       vision_qa: "Examine the image carefully and provide detailed observations, then answer the specific task."
       chat: "You are a helpful assistant that can see and analyze images. Respond naturally to the user's message while considering the provided image."
-    
+
     # Streaming settings
     streaming:
       enabled: true
       chunk_size: 1024
       timeout: "30s"
-    
+
     # Sample images directory
     sample_images_dir: "./examples/multimodal/images"
-    
+
     # Output settings
     output:
       format: "json"

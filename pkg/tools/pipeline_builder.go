@@ -194,7 +194,7 @@ func (pb *PipelineBuilder) Build() (*ToolPipeline, error) {
 	}
 
 	pipeline := NewToolPipeline(pb.name, pb.registry, pb.options)
-	
+
 	// Add all steps to the pipeline
 	for _, step := range pb.steps {
 		if err := pipeline.AddStep(step); err != nil {
@@ -234,7 +234,7 @@ func TransformRename(fieldMappings map[string]string) DataTransformer {
 		}
 
 		result := make(map[string]interface{})
-		
+
 		// Copy all fields, renaming as specified
 		for oldName, value := range inputMap {
 			if newName, shouldRename := fieldMappings[oldName]; shouldRename {
@@ -281,12 +281,12 @@ func TransformAddConstant(constantFields map[string]interface{}) DataTransformer
 		}
 
 		result := make(map[string]interface{})
-		
+
 		// Copy input fields
 		for key, value := range inputMap {
 			result[key] = value
 		}
-		
+
 		// Add constant fields
 		for key, value := range constantFields {
 			result[key] = value
@@ -301,18 +301,18 @@ func TransformChain(transformers ...DataTransformer) DataTransformer {
 	return func(input interface{}) (map[string]interface{}, error) {
 		current := input
 		var err error
-		
+
 		for _, transformer := range transformers {
 			current, err = transformer(current)
 			if err != nil {
 				return nil, err
 			}
 		}
-		
+
 		if result, ok := current.(map[string]interface{}); ok {
 			return result, nil
 		}
-		
+
 		return nil, errors.New(errors.Unknown, "transformer chain did not produce map result")
 	}
 }

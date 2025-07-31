@@ -12,7 +12,7 @@ import (
 func TestNewDiscoveryWithFilenames(t *testing.T) {
 	filenames := []string{"custom.yaml", "custom.yml"}
 	discovery := NewDiscoveryWithFilenames(filenames)
-	
+
 	assert.Equal(t, filenames, discovery.GetFilenames())
 	assert.NotEmpty(t, discovery.GetSearchPaths())
 }
@@ -21,7 +21,7 @@ func TestNewDiscoveryWithOptions(t *testing.T) {
 	searchPaths := []string{"/custom/path"}
 	filenames := []string{"custom.yaml"}
 	discovery := NewDiscoveryWithOptions(searchPaths, filenames)
-	
+
 	assert.Equal(t, searchPaths, discovery.GetSearchPaths())
 	assert.Equal(t, filenames, discovery.GetFilenames())
 }
@@ -29,11 +29,11 @@ func TestNewDiscoveryWithOptions(t *testing.T) {
 func TestDiscoverFirst(t *testing.T) {
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "dspy.yaml")
-	
+
 	// Create a test config file
 	err := os.WriteFile(configFile, []byte("test: value"), 0644)
 	require.NoError(t, err)
-	
+
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	firstFile, err := discovery.DiscoverFirst()
 	require.NoError(t, err)
@@ -43,7 +43,7 @@ func TestDiscoverFirst(t *testing.T) {
 func TestDiscoverFirstNoFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
-	
+
 	_, err := discovery.DiscoverFirst()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no configuration files found")
@@ -52,11 +52,11 @@ func TestDiscoverFirstNoFiles(t *testing.T) {
 func TestDiscoverInPath(t *testing.T) {
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "dspy.yaml")
-	
+
 	// Create a test config file
 	err := os.WriteFile(configFile, []byte("test: value"), 0644)
 	require.NoError(t, err)
-	
+
 	discovery := NewDiscovery()
 	files, err := discovery.DiscoverInPath(tempDir)
 	require.NoError(t, err)
@@ -67,11 +67,11 @@ func TestDiscoverInPath(t *testing.T) {
 func TestDiscoverWithPattern(t *testing.T) {
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "test.yaml")
-	
+
 	// Create a test config file
 	err := os.WriteFile(configFile, []byte("test: value"), 0644)
 	require.NoError(t, err)
-	
+
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	files, err := discovery.DiscoverWithPattern("*.yaml")
 	require.NoError(t, err)
@@ -84,11 +84,11 @@ func TestDiscoverRecursive(t *testing.T) {
 	subDir := filepath.Join(tempDir, "subdir")
 	err := os.MkdirAll(subDir, 0755)
 	require.NoError(t, err)
-	
+
 	configFile := filepath.Join(subDir, "dspy.yaml")
 	err = os.WriteFile(configFile, []byte("test: value"), 0644)
 	require.NoError(t, err)
-	
+
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	files, err := discovery.DiscoverRecursive()
 	require.NoError(t, err)
@@ -98,18 +98,18 @@ func TestDiscoverRecursive(t *testing.T) {
 
 func TestDiscoverySearchPathMethods(t *testing.T) {
 	discovery := NewDiscovery()
-	
+
 	// Test AddSearchPath
 	discovery.AddSearchPath("/test/path")
 	paths := discovery.GetSearchPaths()
 	assert.Contains(t, paths, "/test/path")
-	
+
 	// Test AddSearchPaths
 	discovery.AddSearchPaths([]string{"/test/path2", "/test/path3"})
 	paths = discovery.GetSearchPaths()
 	assert.Contains(t, paths, "/test/path2")
 	assert.Contains(t, paths, "/test/path3")
-	
+
 	// Test SetSearchPaths
 	discovery.SetSearchPaths([]string{"/new/path"})
 	paths = discovery.GetSearchPaths()
@@ -118,18 +118,18 @@ func TestDiscoverySearchPathMethods(t *testing.T) {
 
 func TestDiscoveryFilenameMethods(t *testing.T) {
 	discovery := NewDiscovery()
-	
+
 	// Test AddFilename
 	discovery.AddFilename("custom.yaml")
 	filenames := discovery.GetFilenames()
 	assert.Contains(t, filenames, "custom.yaml")
-	
+
 	// Test AddFilenames
 	discovery.AddFilenames([]string{"custom2.yaml", "custom3.yaml"})
 	filenames = discovery.GetFilenames()
 	assert.Contains(t, filenames, "custom2.yaml")
 	assert.Contains(t, filenames, "custom3.yaml")
-	
+
 	// Test SetFilenames
 	discovery.SetFilenames([]string{"new.yaml"})
 	filenames = discovery.GetFilenames()
@@ -139,7 +139,7 @@ func TestDiscoveryFilenameMethods(t *testing.T) {
 func TestCreateDefaultConfigFile(t *testing.T) {
 	tempDir := t.TempDir()
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
-	
+
 	configPath, err := discovery.CreateDefaultConfigFile()
 	require.NoError(t, err)
 	assert.FileExists(t, configPath)
@@ -149,11 +149,11 @@ func TestCreateDefaultConfigFile(t *testing.T) {
 func TestCreateDefaultConfigFileAlreadyExists(t *testing.T) {
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "dspy.yaml")
-	
+
 	// Create existing file
 	err := os.WriteFile(configFile, []byte("existing"), 0644)
 	require.NoError(t, err)
-	
+
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	_, err = discovery.CreateDefaultConfigFile()
 	assert.Error(t, err)
@@ -163,7 +163,7 @@ func TestCreateDefaultConfigFileAlreadyExists(t *testing.T) {
 func TestCreateDefaultConfigFileInPath(t *testing.T) {
 	tempDir := t.TempDir()
 	discovery := NewDiscovery()
-	
+
 	configPath, err := discovery.CreateDefaultConfigFileInPath(tempDir)
 	require.NoError(t, err)
 	assert.FileExists(t, configPath)
@@ -176,19 +176,19 @@ func TestDiscoveryValidate(t *testing.T) {
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	err := discovery.Validate()
 	assert.NoError(t, err)
-	
+
 	// Test no search paths
 	discovery = &Discovery{}
 	err = discovery.Validate()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no search paths configured")
-	
+
 	// Test no filenames
 	discovery = &Discovery{searchPaths: []string{tempDir}}
 	err = discovery.Validate()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no filenames configured")
-	
+
 	// Test no existing paths
 	discovery = NewDiscoveryWithPaths([]string{"/nonexistent"})
 	err = discovery.Validate()
@@ -201,16 +201,16 @@ func TestGetEnvironmentOverrides(t *testing.T) {
 	os.Setenv("DSPY_TEST_KEY", "test_value")
 	os.Setenv("DSPY_GO_ANOTHER_KEY", "another_value")
 	os.Setenv("OTHER_PREFIX_KEY", "ignored_value")
-	
+
 	defer func() {
 		os.Unsetenv("DSPY_TEST_KEY")
 		os.Unsetenv("DSPY_GO_ANOTHER_KEY")
 		os.Unsetenv("OTHER_PREFIX_KEY")
 	}()
-	
+
 	discovery := NewDiscovery()
 	overrides := discovery.GetEnvironmentOverrides()
-	
+
 	assert.Equal(t, "test_value", overrides["test.key"])
 	// Note: DSPY_GO_ prefix becomes "go.another.key" after processing
 	assert.Equal(t, "another_value", overrides["go.another.key"])
@@ -221,7 +221,7 @@ func TestDirExists(t *testing.T) {
 	tempDir := t.TempDir()
 	assert.True(t, dirExists(tempDir))
 	assert.False(t, dirExists("/nonexistent"))
-	
+
 	// Test with file instead of directory
 	tempFile := filepath.Join(tempDir, "test.txt")
 	err := os.WriteFile(tempFile, []byte("test"), 0644)
@@ -241,7 +241,7 @@ func TestDiscoverConfigFiles(t *testing.T) {
 	configFile := filepath.Join(tempDir, "dspy.yaml")
 	err := os.WriteFile(configFile, []byte("test"), 0644)
 	require.NoError(t, err)
-	
+
 	// Test with a custom discovery that includes our temp dir
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	files, err := discovery.Discover()
@@ -254,7 +254,7 @@ func TestDiscoverFirstConfigFile(t *testing.T) {
 	configFile := filepath.Join(tempDir, "dspy.yaml")
 	err := os.WriteFile(configFile, []byte("test"), 0644)
 	require.NoError(t, err)
-	
+
 	// Test DiscoverFirstConfigFile function
 	discovery := NewDiscoveryWithPaths([]string{tempDir})
 	firstFile, err := discovery.DiscoverFirst()
@@ -267,7 +267,7 @@ func TestDiscoverConfigFilesInPath(t *testing.T) {
 	configFile := filepath.Join(tempDir, "dspy.yaml")
 	err := os.WriteFile(configFile, []byte("test"), 0644)
 	require.NoError(t, err)
-	
+
 	files, err := DiscoverConfigFilesInPath(tempDir)
 	require.NoError(t, err)
 	assert.Len(t, files, 1)
@@ -279,13 +279,13 @@ func TestCreateDefaultConfigFileInCurrentDir(t *testing.T) {
 	tempDir := t.TempDir()
 	originalDir, err := os.Getwd()
 	require.NoError(t, err)
-	
+
 	err = os.Chdir(tempDir)
 	require.NoError(t, err)
 	defer func() {
 		_ = os.Chdir(originalDir)
 	}()
-	
+
 	configPath, err := CreateDefaultConfigFileInCurrentDir()
 	require.NoError(t, err)
 	assert.FileExists(t, configPath)
@@ -298,11 +298,11 @@ func TestCreateDefaultConfigFileInHomeDir(t *testing.T) {
 	if err != nil {
 		t.Skip("Cannot access home directory")
 	}
-	
+
 	// Use a temp subdirectory to avoid polluting home directory
 	testConfigDir := filepath.Join(homeDir, ".config", "dspy-go-test")
 	defer os.RemoveAll(testConfigDir)
-	
+
 	// Test the function directly by creating config in test directory
 	discovery := NewDiscovery()
 	configPath, err := discovery.CreateDefaultConfigFileInPath(testConfigDir)
@@ -314,20 +314,20 @@ func TestCreateDefaultConfigFileInHomeDir(t *testing.T) {
 func TestDiscoverConfigFilesGlobal(t *testing.T) {
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "dspy.yaml")
-	
+
 	err := os.WriteFile(configFile, []byte("test: value"), 0644)
 	require.NoError(t, err)
-	
+
 	// Change working directory temporarily to test the function
 	originalDir, err := os.Getwd()
 	require.NoError(t, err)
-	
+
 	err = os.Chdir(tempDir)
 	require.NoError(t, err)
 	defer func() {
 		_ = os.Chdir(originalDir)
 	}()
-	
+
 	files, err := DiscoverConfigFiles()
 	require.NoError(t, err)
 	assert.Len(t, files, 1)
@@ -337,20 +337,20 @@ func TestDiscoverConfigFilesGlobal(t *testing.T) {
 func TestDiscoverFirstConfigFileGlobal(t *testing.T) {
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "dspy.yaml")
-	
+
 	err := os.WriteFile(configFile, []byte("test: value"), 0644)
 	require.NoError(t, err)
-	
+
 	// Change working directory temporarily to test the function
 	originalDir, err := os.Getwd()
 	require.NoError(t, err)
-	
+
 	err = os.Chdir(tempDir)
 	require.NoError(t, err)
 	defer func() {
 		_ = os.Chdir(originalDir)
 	}()
-	
+
 	firstFile, err := DiscoverFirstConfigFile()
 	require.NoError(t, err)
 	assert.Contains(t, firstFile, "dspy.yaml")
@@ -362,10 +362,10 @@ func TestCreateDefaultConfigFileInHomeDirActual(t *testing.T) {
 	if err != nil {
 		t.Skip("Cannot access home directory")
 	}
-	
+
 	testConfigDir := filepath.Join(homeDir, ".config", "dspy-go-test-actual")
 	defer os.RemoveAll(filepath.Dir(testConfigDir))
-	
+
 	configPath, err := CreateDefaultConfigFileInHomeDir()
 	if err == nil {
 		// If successful, clean up the created file

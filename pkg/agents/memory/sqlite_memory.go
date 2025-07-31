@@ -65,9 +65,9 @@ func (s *SQLiteStore) ensureInitialized() error {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             expires_at DATETIME
         );
-        
+
         -- Create index on created_at for efficient querying
-        CREATE INDEX IF NOT EXISTS idx_memory_store_created_at 
+        CREATE INDEX IF NOT EXISTS idx_memory_store_created_at
         ON memory_store(created_at);
         `
 
@@ -118,9 +118,9 @@ func (s *SQLiteStore) Store(key string, value interface{}) error {
 
 	// Upsert the value
 	query := `
-    INSERT INTO memory_store (key, value, updated_at) 
+    INSERT INTO memory_store (key, value, updated_at)
     VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET 
+    ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
         updated_at = CURRENT_TIMESTAMP
     `
@@ -294,9 +294,9 @@ func (s *SQLiteStore) StoreWithTTL(ctx context.Context, key string, value interf
 	}
 
 	query := `
-    INSERT INTO memory_store (key, value, created_at, updated_at, expires_at) 
+    INSERT INTO memory_store (key, value, created_at, updated_at, expires_at)
     VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-    ON CONFLICT(key) DO UPDATE SET 
+    ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
         updated_at = excluded.updated_at
     `
@@ -319,8 +319,8 @@ func (s *SQLiteStore) CleanExpired(ctx context.Context) (int64, error) {
 	defer s.mu.Unlock()
 
 	query := `
-    DELETE FROM memory_store 
-    WHERE expires_at IS NOT NULL 
+    DELETE FROM memory_store
+    WHERE expires_at IS NOT NULL
     AND datetime(expires_at) <= datetime('now', 'utc')`
 
 	result, err := s.db.ExecContext(ctx, query)

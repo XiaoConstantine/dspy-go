@@ -31,7 +31,7 @@ func TestNewMultiChainComparison(t *testing.T) {
 
 	// Verify the signature was modified correctly
 	modifiedSignature := multiChain.GetSignature()
-	
+
 	// Should have original inputs plus M reasoning attempt fields
 	assert.Len(t, modifiedSignature.Inputs, 1+M)
 	assert.Equal(t, "question", modifiedSignature.Inputs[0].Name)

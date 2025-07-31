@@ -52,7 +52,7 @@ func (t *TestFuncTool) Execute(ctx context.Context, params map[string]interface{
 		if err != nil {
 			return core.ToolResult{}, err
 		}
-		
+
 		// Convert to core.ToolResult
 		toolResult := core.ToolResult{
 			Data:        extractContentText(result.Content),
@@ -115,7 +115,7 @@ func TestNewFuncTool(t *testing.T) {
 	if tool.metadata == nil {
 		t.Fatal("Expected non-nil metadata")
 	}
-	
+
 	// Check capabilities were extracted from the description
 	if len(tool.metadata.Capabilities) == 0 {
 		t.Error("Expected capabilities to be extracted from description")
@@ -158,7 +158,7 @@ func TestFuncToolInputSchema(t *testing.T) {
 		},
 	}
 	tool := &FuncTool{schema: schema}
-	
+
 	returnedSchema := tool.InputSchema()
 	if returnedSchema.Type != "object" {
 		t.Errorf("Expected schema type 'object', got '%s'", returnedSchema.Type)
@@ -177,7 +177,7 @@ func TestFuncToolMetadata(t *testing.T) {
 		Description: "Test description",
 	}
 	tool := &FuncTool{metadata: metadata}
-	
+
 	returnedMetadata := tool.Metadata()
 	if returnedMetadata != metadata {
 		t.Error("Expected metadata to be the same object")
@@ -195,7 +195,7 @@ func TestFuncToolCanHandle(t *testing.T) {
 		metadata:    metadata,
 		matchCutoff: 0.3,
 	}
-	
+
 	// Test various intents
 	tests := []struct {
 		intent   string
@@ -207,7 +207,7 @@ func TestFuncToolCanHandle(t *testing.T) {
 		{"I want to calculate something", false},
 		{"search-tool please help me", true}, // Contains tool name
 	}
-	
+
 	for _, test := range tests {
 		result := tool.CanHandle(context.Background(), test.intent)
 		if result != test.expected {
@@ -227,13 +227,13 @@ func TestFuncToolCall(t *testing.T) {
 		},
 	}
 	mockError := errors.New("test error")
-	
+
 	// Test successful call
 	successFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 		return mockResult, nil
 	}
 	successTool := &FuncTool{fn: successFn}
-	
+
 	result, err := successTool.Call(context.Background(), nil)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -241,13 +241,13 @@ func TestFuncToolCall(t *testing.T) {
 	if result != mockResult {
 		t.Error("Expected mock result, got different result")
 	}
-	
+
 	// Test failing call
 	errorFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 		return nil, mockError
 	}
 	errorTool := &FuncTool{fn: errorFn}
-	
+
 	result, err = errorTool.Call(context.Background(), nil)
 	if err != mockError {
 		t.Errorf("Expected mock error, got: %v", err)
@@ -269,13 +269,13 @@ func TestFuncToolExecute(t *testing.T) {
 		IsError: false,
 	}
 	mockError := errors.New("test error")
-	
+
 	// Test successful execution
 	successFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 		return mockResult, nil
 	}
 	successTool := &FuncTool{fn: successFn}
-	
+
 	coreResult, err := successTool.Execute(context.Background(), nil)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -286,13 +286,13 @@ func TestFuncToolExecute(t *testing.T) {
 	if isError, _ := coreResult.Metadata["isError"].(bool); isError {
 		t.Error("Expected isError to be false")
 	}
-	
+
 	// Test execution with error
 	errorFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 		return nil, mockError
 	}
 	errorTool := &FuncTool{fn: errorFn}
-	
+
 	coreResult, err = errorTool.Execute(context.Background(), nil)
 	if err != mockError {
 		t.Errorf("Expected mock error, got: %v", err)
@@ -317,7 +317,7 @@ func TestFuncToolValidate(t *testing.T) {
 		},
 	}
 	tool := &FuncTool{schema: schema}
-	
+
 	// Test valid parameters
 	validParams := map[string]interface{}{
 		"required_param": "value",
@@ -327,7 +327,7 @@ func TestFuncToolValidate(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	
+
 	// Test missing required parameter
 	invalidParams := map[string]interface{}{
 		"optional_param": 42,
@@ -336,7 +336,7 @@ func TestFuncToolValidate(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for missing required parameter, got nil")
 	}
-	
+
 	// Test with only required parameter
 	requiredOnlyParams := map[string]interface{}{
 		"required_param": "value",

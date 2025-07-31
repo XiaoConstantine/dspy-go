@@ -10,7 +10,7 @@ import (
 
 func TestCacheEntry_IsExpired(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name      string
 		entry     CacheEntry
@@ -132,7 +132,7 @@ func TestNewCache(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cache, err := NewCache(tt.config)
-			
+
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, cache)
@@ -141,7 +141,7 @@ func TestNewCache(t *testing.T) {
 				assert.NotNil(t, cache)
 				assert.Equal(t, tt.expectedType, fmt.Sprintf("%T", cache))
 			}
-			
+
 			if cache != nil {
 				cache.Close()
 			}

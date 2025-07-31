@@ -43,10 +43,10 @@ func NewMemoryCache() *MemoryCache {
 		stopChan: make(chan struct{}),
 		stopped:  false,
 	}
-	
+
 	// Start cleanup goroutine
 	go cache.cleanup()
-	
+
 	return cache
 }
 
@@ -105,7 +105,7 @@ func (mc *MemoryCache) Clear() {
 func (mc *MemoryCache) Stop() {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	
+
 	if !mc.stopped {
 		mc.stopped = true
 		close(mc.stopChan)
@@ -145,7 +145,7 @@ type CircuitBreaker struct {
 	failures     int
 	requests     int
 	lastFailTime time.Time
-	
+
 	// Configuration
 	failureThreshold int
 	resetTimeout     time.Duration
@@ -202,7 +202,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 	defer cb.mu.Unlock()
 
 	cb.requests++
-	
+
 	if cb.state == CircuitHalfOpen && cb.requests >= cb.requestThreshold {
 		cb.state = CircuitClosed
 		cb.failures = 0
@@ -380,7 +380,7 @@ func CircuitBreakerModuleInterceptor(cb *CircuitBreaker) core.ModuleInterceptor 
 		}
 
 		result, err := handler(ctx, inputs, opts...)
-		
+
 		if err != nil {
 			cb.RecordFailure()
 			return result, err
@@ -399,7 +399,7 @@ func CircuitBreakerAgentInterceptor(cb *CircuitBreaker) core.AgentInterceptor {
 		}
 
 		result, err := handler(ctx, input)
-		
+
 		if err != nil {
 			cb.RecordFailure()
 			return result, err
@@ -418,7 +418,7 @@ func CircuitBreakerToolInterceptor(cb *CircuitBreaker) core.ToolInterceptor {
 		}
 
 		result, err := handler(ctx, args)
-		
+
 		if err != nil {
 			cb.RecordFailure()
 			return result, err
@@ -430,10 +430,10 @@ func CircuitBreakerToolInterceptor(cb *CircuitBreaker) core.ToolInterceptor {
 }
 
 // NOTE: BatchingModuleInterceptor was removed due to fundamental design flaws.
-// 
+//
 // True batching requires module-specific knowledge of how to:
 // 1. Combine multiple input sets into a single batch request
-// 2. Split batch responses back to individual results  
+// 2. Split batch responses back to individual results
 // 3. Handle partial failures within a batch
 //
 // A generic batching interceptor cannot provide these capabilities without
@@ -451,12 +451,12 @@ func CircuitBreakerToolInterceptor(cb *CircuitBreaker) core.ToolInterceptor {
 // generateModuleCacheKey creates a cache key for module results.
 func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string {
 	hasher := sha256.New()
-	
+
 	// Add module info
 	hasher.Write([]byte(info.ModuleName))
 	hasher.Write([]byte(info.ModuleType))
 	hasher.Write([]byte(info.Version))
-	
+
 	// Add inputs (in a deterministic way)
 	inputsJSON, err := json.Marshal(inputs)
 	if err != nil {
@@ -466,19 +466,19 @@ func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string
 	} else {
 		hasher.Write(inputsJSON)
 	}
-	
+
 	return "module:" + hex.EncodeToString(hasher.Sum(nil))
 }
 
 // generateToolCacheKey creates a cache key for tool results.
 func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) string {
 	hasher := sha256.New()
-	
+
 	// Add tool info
 	hasher.Write([]byte(info.Name))
 	hasher.Write([]byte(info.ToolType))
 	hasher.Write([]byte(info.Version))
-	
+
 	// Add arguments (in a deterministic way)
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
@@ -488,7 +488,7 @@ func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) stri
 	} else {
 		hasher.Write(argsJSON)
 	}
-	
+
 	return "tool:" + hex.EncodeToString(hasher.Sum(nil))
 }
 
@@ -607,20 +607,20 @@ func mapToDeterministicString(m map[string]any) string {
 	if m == nil {
 		return "nil"
 	}
-	
+
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	
+
 	var parts []string
 	for _, k := range keys {
 		v := m[k]
 		valueStr := valueToDeterministicString(v)
 		parts = append(parts, fmt.Sprintf("%s:%s", k, valueStr))
 	}
-	
+
 	return fmt.Sprintf("map{%s}", strings.Join(parts, ","))
 }
 
@@ -629,20 +629,20 @@ func mapToDeterministicStringGeneric(m map[string]interface{}) string {
 	if m == nil {
 		return "nil"
 	}
-	
+
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	
+
 	var parts []string
 	for _, k := range keys {
 		v := m[k]
 		valueStr := valueToDeterministicString(v)
 		parts = append(parts, fmt.Sprintf("%s:%s", k, valueStr))
 	}
-	
+
 	return fmt.Sprintf("map{%s}", strings.Join(parts, ","))
 }
 

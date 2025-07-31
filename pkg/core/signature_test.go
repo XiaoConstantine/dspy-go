@@ -63,7 +63,7 @@ func TestSignature(t *testing.T) {
 		str := sig.String()
 		assert.Contains(t, str, "Inputs:")
 		assert.Contains(t, str, "input (input desc)")
-		assert.Contains(t, str, "Outputs:")  
+		assert.Contains(t, str, "Outputs:")
 		assert.Contains(t, str, "output (output desc)")
 		assert.Contains(t, str, "Instruction: test instruction")
 	})

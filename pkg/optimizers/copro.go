@@ -539,7 +539,7 @@ func (lpg *LLMPromptGenerator) generateBasicInstructions(ctx context.Context, ta
 	// Create a sophisticated prompt for LLM-assisted instruction generation
 	inputFields := strings.Join(getFieldNames(lpg.signature.Inputs), ", ")
 	outputFields := strings.Join(getFieldNames(lpg.signature.Outputs), ", ")
-	
+
 	generatorPrompt := fmt.Sprintf(`You are an expert prompt engineer specializing in question-answering tasks. Generate %d high-quality, diverse instruction variations that will help a language model answer questions accurately.
 
 Current Task: Convert "%s" into "%s"
@@ -549,14 +549,14 @@ Create %d DIFFERENT instruction approaches, each using a unique strategy:
 
 Strategy Examples:
 - Direct factual approach: "Answer the question with accurate, factual information"
-- Analytical approach: "Analyze the question carefully and provide a well-reasoned answer" 
+- Analytical approach: "Analyze the question carefully and provide a well-reasoned answer"
 - Step-by-step approach: "Break down the question step-by-step before answering"
 - Comprehensive approach: "Provide a thorough and complete answer to the question"
 - Precise approach: "Give a precise, specific answer to the question asked"
 
 Requirements for each instruction:
 1. Must be 10-25 words long
-2. Should use different verbs and approaches  
+2. Should use different verbs and approaches
 3. Must guide the model to produce accurate answers
 4. Should NOT be generic or vague
 5. Each must be clearly distinct from the others
@@ -631,7 +631,7 @@ LOW-PERFORMING INSTRUCTIONS:
 
 Analyze what made the high-performing instructions successful and what made the low-performing ones less effective. Generate %d new, improved instructions that:
 1. Build on the successful patterns from high-performers
-2. Avoid the weaknesses of low-performers  
+2. Avoid the weaknesses of low-performers
 3. Introduce new effective approaches
 4. Are diverse and semantically distinct
 5. Provide clear, actionable guidance
@@ -669,7 +669,7 @@ func (lpg *LLMPromptGenerator) getFallbackInstructions(taskDescription string) [
 		"Think carefully about the question and give a precise answer.",
 		"Analyze the question and respond with relevant, correct information.",
 		"Give a straightforward answer to the specific question asked.",
-		"Consider the question carefully and provide an accurate response.", 
+		"Consider the question carefully and provide an accurate response.",
 		"Respond to the question with clear, factual information.",
 		"Answer the question using your knowledge to provide correct information.",
 		"Read the question carefully and give an appropriate, accurate answer.",

@@ -109,7 +109,7 @@ func TestPatternCollectorAddInteraction(t *testing.T) {
 	config := &MCPOptimizerConfig{
 		MaxPatterns: 3, // Small limit for testing eviction
 	}
-	
+
 	pc := &PatternCollector{
 		Patterns:    make([]MCPInteraction, 0, config.MaxPatterns),
 		IndexByCtx:  make(map[string][]int),
@@ -192,7 +192,7 @@ func TestPatternCollectorGetSimilarPatterns(t *testing.T) {
 	config := &MCPOptimizerConfig{
 		MaxPatterns: 10,
 	}
-	
+
 	pc := &PatternCollector{
 		Patterns:    make([]MCPInteraction, 0, config.MaxPatterns),
 		IndexByCtx:  make(map[string][]int),
@@ -237,7 +237,7 @@ func TestPatternCollectorGetPatternsByTool(t *testing.T) {
 	config := &MCPOptimizerConfig{
 		MaxPatterns: 10,
 	}
-	
+
 	pc := &PatternCollector{
 		Patterns:    make([]MCPInteraction, 0, config.MaxPatterns),
 		IndexByCtx:  make(map[string][]int),
@@ -382,7 +382,7 @@ func TestExampleSelectorSelectOptimalExamples(t *testing.T) {
 			Timestamp: time.Now(),
 		},
 		{
-			ID:        "candidate2", 
+			ID:        "candidate2",
 			ToolName:  "test_tool",
 			Parameters: map[string]interface{}{"param": "value2"},
 			Success:   false,
@@ -688,7 +688,7 @@ func TestMCPOptimizerLearningDisabled(t *testing.T) {
 	// Learning should be skipped
 	err := optimizer.LearnFromInteraction(ctx, interaction)
 	require.NoError(t, err)
-	
+
 	// Pattern should not be added due to learning being disabled
 	assert.Equal(t, 0, optimizer.PatternCollector.GetPatternCount())
 }

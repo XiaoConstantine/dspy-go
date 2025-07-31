@@ -138,12 +138,12 @@ func TestCacheStats_HitRateAndMissRateSum(t *testing.T) {
 			Hits:   tc.hits,
 			Misses: tc.misses,
 		}
-		
+
 		hitRate := stats.HitRate()
 		missRate := stats.MissRate()
-		
+
 		// Should sum to 1.0 when there are hits or misses
-		assert.InDelta(t, 1.0, hitRate+missRate, 0.001, 
+		assert.InDelta(t, 1.0, hitRate+missRate, 0.001,
 			"HitRate (%f) + MissRate (%f) should equal 1.0", hitRate, missRate)
 	}
 }
@@ -159,7 +159,7 @@ func TestCacheStats_ZeroDivisionSafety(t *testing.T) {
 		MaxSize:    1000,
 		LastAccess: time.Now(),
 	}
-	
+
 	// These should not panic and should return 0.0
 	assert.Equal(t, 0.0, stats.HitRate())
 	assert.Equal(t, 0.0, stats.MissRate())

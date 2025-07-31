@@ -243,7 +243,7 @@ func (c *CachedLLM) withCache(ctx context.Context, key string, fn func() (*core.
 			}
 		}
 		metadata["cache_hit"] = false
-		
+
 		// Create a copy of the response for caching and return
 		responseCopy := *response
 		responseCopy.Metadata = metadata
@@ -251,7 +251,7 @@ func (c *CachedLLM) withCache(ctx context.Context, key string, fn func() (*core.
 		if data, err := json.Marshal(responseCopy); err == nil {
 			_ = c.cache.Set(ctx, key, data, c.ttl)
 		}
-		
+
 		// Return the copied response (not the original) to avoid race conditions
 		return &responseCopy, nil
 	}

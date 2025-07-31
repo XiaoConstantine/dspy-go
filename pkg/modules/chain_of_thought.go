@@ -123,12 +123,12 @@ func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map
 
 	// Create correct ModuleInfo for ChainOfThought (not Predict)
 	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature())
-	
+
 	// Create handler that calls our own Process method
 	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 		return c.Process(ctx, inputs, opts...)
 	}
-	
+
 	// Chain interceptors and execute
 	chainedInterceptor := core.ChainModuleInterceptors(interceptors...)
 	return chainedInterceptor(ctx, inputs, info, handler, opts...)

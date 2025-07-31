@@ -23,7 +23,7 @@ func (e *ValidationError) Error() string {
 	if e.Message != "" {
 		return e.Message
 	}
-	
+
 	// Generate custom message based on tag
 	switch e.Tag {
 	case "required":

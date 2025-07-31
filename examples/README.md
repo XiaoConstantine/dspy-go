@@ -39,18 +39,18 @@ func main() {
         FallbackEnabled:           true,
     }
     registry := tools.NewSmartToolRegistry(config)
-    
+
     // Register tools
     searchTool := &MySearchTool{}
     registry.Register(searchTool)
-    
+
     // Intelligent selection based on intent
     ctx := context.Background()
     tool, err := registry.SelectBest(ctx, "find user information")
     if err != nil {
         panic(err)
     }
-    
+
     // Execute with performance tracking
     result, err := registry.ExecuteWithTracking(ctx, tool.Name(), params)
 }
@@ -70,23 +70,23 @@ import (
 func main() {
     // Create a language model
     lm := dspy.NewOpenAI(openai.DefaultConfig("your-api-key"))
-    
+
     // Create a signature for classification
     signature := dspy.Signature{
         Input:  []string{"text"},
         Output: []string{"sentiment"},
         Instructions: "Classify the sentiment of the given text as positive, negative, or neutral.",
     }
-    
+
     // Create a module
     classifier := dspy.NewPredict(lm, signature)
-    
+
     // Use the module
     ctx := context.Background()
     result, err := classifier.Forward(ctx, map[string]interface{}{
         "text": "I love this product!",
     })
-    
+
     fmt.Printf("Sentiment: %s\n", result["sentiment"])
 }
 ```
@@ -140,13 +140,13 @@ func (m *IntelligentModule) Forward(ctx context.Context, inputs map[string]inter
     if err != nil {
         return nil, err
     }
-    
+
     // Execute with performance tracking
     result, err := m.registry.ExecuteWithTracking(ctx, tool.Name(), inputs)
     if err != nil {
         return nil, err
     }
-    
+
     return result.Data.(map[string]interface{}), nil
 }
 ```

@@ -33,7 +33,7 @@ func getDefaultLLMConfig() LLMConfig {
 			BackoffMultiplier: 2.0,
 		},
 	}
-	
+
 	defaultGeneration := GenerationConfig{
 		MaxTokens:        8192,
 		Temperature:      0.5,
@@ -42,7 +42,7 @@ func getDefaultLLMConfig() LLMConfig {
 		FrequencyPenalty: 0.0,
 		StopSequences:    []string{},
 	}
-	
+
 	return LLMConfig{
 		Default: LLMProviderConfig{
 			Provider: "anthropic",
@@ -1239,4 +1239,3 @@ func mergeTPEConfig(partial TPEConfig, defaults TPEConfig) TPEConfig {
 
 	return result
 }
-

@@ -15,28 +15,28 @@ func TestGetDefaultLLMProviderConfig(t *testing.T) {
 	assert.Equal(t, "anthropic", anthropicConfig.Provider)
 	assert.Equal(t, "claude-3-sonnet-20240229", anthropicConfig.ModelID)
 	assert.Equal(t, "https://api.anthropic.com", anthropicConfig.Endpoint.BaseURL)
-	
+
 	// Test getting google config
 	googleConfig := GetDefaultLLMProviderConfig("google")
 	require.NotNil(t, googleConfig)
 	assert.Equal(t, "google", googleConfig.Provider)
 	assert.Equal(t, "gemini-2.0-flash", googleConfig.ModelID)
 	assert.Equal(t, "https://generativelanguage.googleapis.com", googleConfig.Endpoint.BaseURL)
-	
+
 	// Test getting ollama config
 	ollamaConfig := GetDefaultLLMProviderConfig("ollama")
 	require.NotNil(t, ollamaConfig)
 	assert.Equal(t, "ollama", ollamaConfig.Provider)
 	assert.Equal(t, "ollama:llama3.2", ollamaConfig.ModelID)
 	assert.Equal(t, "http://localhost:11434", ollamaConfig.Endpoint.BaseURL)
-	
+
 	// Test getting llamacpp config
 	llamacppConfig := GetDefaultLLMProviderConfig("llamacpp")
 	require.NotNil(t, llamacppConfig)
 	assert.Equal(t, "llamacpp", llamacppConfig.Provider)
 	assert.Equal(t, "llamacpp:default", llamacppConfig.ModelID)
 	assert.Equal(t, "http://localhost:8080", llamacppConfig.Endpoint.BaseURL)
-	
+
 	// Test getting non-existent provider (should fallback to anthropic)
 	fallbackConfig := GetDefaultLLMProviderConfig("nonexistent")
 	require.NotNil(t, fallbackConfig)
@@ -46,7 +46,7 @@ func TestGetDefaultLLMProviderConfig(t *testing.T) {
 func TestGetDefaultGenerationConfig(t *testing.T) {
 	config := GetDefaultGenerationConfig()
 	require.NotNil(t, config)
-	
+
 	assert.Equal(t, 8192, config.MaxTokens)
 	assert.Equal(t, 0.5, config.Temperature)
 	assert.Equal(t, 0.9, config.TopP)
@@ -58,12 +58,12 @@ func TestGetDefaultGenerationConfig(t *testing.T) {
 func TestGetDefaultEndpointConfig(t *testing.T) {
 	config := GetDefaultEndpointConfig()
 	require.NotNil(t, config)
-	
+
 	assert.Equal(t, "", config.BaseURL)
 	assert.Equal(t, "", config.Path)
 	assert.Equal(t, "application/json", config.Headers["Content-Type"])
 	assert.Equal(t, 30*time.Second, config.Timeout)
-	
+
 	assert.Equal(t, 3, config.Retry.MaxRetries)
 	assert.Equal(t, 1*time.Second, config.Retry.InitialBackoff)
 	assert.Equal(t, 30*time.Second, config.Retry.MaxBackoff)
@@ -73,7 +73,7 @@ func TestGetDefaultEndpointConfig(t *testing.T) {
 func TestGetDefaultRetryConfig(t *testing.T) {
 	config := GetDefaultRetryConfig()
 	require.NotNil(t, config)
-	
+
 	assert.Equal(t, 3, config.MaxRetries)
 	assert.Equal(t, 1*time.Second, config.InitialBackoff)
 	assert.Equal(t, 30*time.Second, config.MaxBackoff)
@@ -83,7 +83,7 @@ func TestGetDefaultRetryConfig(t *testing.T) {
 func TestGetDefaultEmbeddingConfig(t *testing.T) {
 	config := GetDefaultEmbeddingConfig()
 	require.NotNil(t, config)
-	
+
 	assert.Equal(t, "", config.Model)
 	assert.Equal(t, 32, config.BatchSize)
 	assert.NotNil(t, config.Params)
@@ -95,7 +95,7 @@ func TestMergeWithDefaults(t *testing.T) {
 	result := MergeWithDefaults(nil)
 	require.NotNil(t, result)
 	assert.Equal(t, "anthropic", result.LLM.Default.Provider)
-	
+
 	// Test with partial config
 	partial := &Config{
 		LLM: LLMConfig{
@@ -105,14 +105,14 @@ func TestMergeWithDefaults(t *testing.T) {
 			},
 		},
 	}
-	
+
 	result = MergeWithDefaults(partial)
 	require.NotNil(t, result)
-	
+
 	// Should keep the provided values
 	assert.Equal(t, "google", result.LLM.Default.Provider)
 	assert.Equal(t, "gemini-2.0-flash", result.LLM.Default.ModelID)
-	
+
 	// Should fill in defaults for missing fields
 	assert.Equal(t, "INFO", result.Logging.Level)
 	assert.Equal(t, 5*time.Minute, result.Execution.DefaultTimeout)
@@ -140,10 +140,10 @@ func TestMergeWithDefaultsEmptyFields(t *testing.T) {
 			DefaultTimeout: 0, // Zero timeout should trigger default merge
 		},
 	}
-	
+
 	result := MergeWithDefaults(partial)
 	require.NotNil(t, result)
-	
+
 	// Should use defaults for empty/zero fields
 	assert.Equal(t, "anthropic", result.LLM.Default.Provider)
 	assert.Empty(t, result.LLM.Teacher.Provider) // Teacher remains empty by default
@@ -178,10 +178,10 @@ func TestMergeWithDefaultsPreservesNonEmptyValues(t *testing.T) {
 			DefaultTimeout: 10 * time.Minute,
 		},
 	}
-	
+
 	result := MergeWithDefaults(partial)
 	require.NotNil(t, result)
-	
+
 	// Should preserve non-empty values
 	assert.Equal(t, "google", result.LLM.Default.Provider)
 	assert.Equal(t, "gemini-2.0-flash", result.LLM.Default.ModelID)
@@ -199,7 +199,7 @@ func TestValidateDefaults(t *testing.T) {
 
 func TestDefaultConfigProviders(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	// Test that all expected providers are present
 	expectedProviders := []string{"anthropic", "google", "ollama", "llamacpp"}
 	for _, provider := range expectedProviders {
@@ -212,29 +212,29 @@ func TestDefaultConfigProviders(t *testing.T) {
 
 func TestDefaultConfigLogging(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	assert.Equal(t, "INFO", config.Logging.Level)
 	assert.Equal(t, uint32(1), config.Logging.SampleRate)
 	assert.Len(t, config.Logging.Outputs, 1)
-	
+
 	output := config.Logging.Outputs[0]
 	assert.Equal(t, "console", output.Type)
 	assert.Equal(t, "text", output.Format)
 	assert.True(t, output.Colors)
-	
+
 	assert.NotEmpty(t, config.Logging.DefaultFields)
 	assert.Equal(t, "dspy-go", config.Logging.DefaultFields["service"])
 }
 
 func TestDefaultConfigExecution(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	assert.Equal(t, 5*time.Minute, config.Execution.DefaultTimeout)
 	assert.Equal(t, 10, config.Execution.MaxConcurrency)
-	
+
 	assert.Equal(t, 2*time.Minute, config.Execution.Context.DefaultTimeout)
 	assert.Equal(t, 1000, config.Execution.Context.BufferSize)
-	
+
 	assert.False(t, config.Execution.Tracing.Enabled)
 	assert.Equal(t, 0.1, config.Execution.Tracing.SamplingRate)
 	assert.Equal(t, "jaeger", config.Execution.Tracing.Exporter.Type)
@@ -242,32 +242,32 @@ func TestDefaultConfigExecution(t *testing.T) {
 
 func TestDefaultConfigModules(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	// Chain of Thought
 	assert.Equal(t, 10, config.Modules.ChainOfThought.MaxSteps)
 	assert.True(t, config.Modules.ChainOfThought.IncludeReasoning)
 	assert.Equal(t, "\n---\n", config.Modules.ChainOfThought.StepDelimiter)
-	
+
 	// Multi-Chain Comparison
 	assert.Equal(t, 3, config.Modules.MultiChainComparison.NumChains)
 	assert.Equal(t, "majority_vote", config.Modules.MultiChainComparison.ComparisonStrategy)
 	assert.True(t, config.Modules.MultiChainComparison.ParallelExecution)
-	
+
 	// ReAct
 	assert.Equal(t, 5, config.Modules.ReAct.MaxCycles)
 	assert.Equal(t, 30*time.Second, config.Modules.ReAct.ActionTimeout)
 	assert.True(t, config.Modules.ReAct.IncludeIntermediateSteps)
-	
+
 	// Refine
 	assert.Equal(t, 3, config.Modules.Refine.MaxIterations)
 	assert.Equal(t, 0.95, config.Modules.Refine.ConvergenceThreshold)
 	assert.Equal(t, "iterative_improvement", config.Modules.Refine.RefinementStrategy)
-	
+
 	// Predict
 	assert.True(t, config.Modules.Predict.DefaultSettings.IncludeConfidence)
 	assert.Equal(t, 0.5, config.Modules.Predict.DefaultSettings.Temperature)
 	assert.Equal(t, 50, config.Modules.Predict.DefaultSettings.TopK)
-	
+
 	assert.True(t, config.Modules.Predict.Caching.Enabled)
 	assert.Equal(t, 1*time.Hour, config.Modules.Predict.Caching.TTL)
 	assert.Equal(t, int64(100*1024*1024), config.Modules.Predict.Caching.MaxSize)
@@ -276,21 +276,21 @@ func TestDefaultConfigModules(t *testing.T) {
 
 func TestDefaultConfigAgents(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	// Default agent
 	assert.Equal(t, 100, config.Agents.Default.MaxHistory)
 	assert.Equal(t, 5*time.Minute, config.Agents.Default.Timeout)
 	assert.Equal(t, 10, config.Agents.Default.ToolUse.MaxTools)
 	assert.Equal(t, 30*time.Second, config.Agents.Default.ToolUse.Timeout)
 	assert.False(t, config.Agents.Default.ToolUse.ParallelExecution)
-	
+
 	// Memory
 	assert.Equal(t, "buffered", config.Agents.Memory.Type)
 	assert.Equal(t, 1000, config.Agents.Memory.Capacity)
 	assert.False(t, config.Agents.Memory.Persistence.Enabled)
 	assert.Equal(t, "./data/agent_memory", config.Agents.Memory.Persistence.Path)
 	assert.Equal(t, 5*time.Minute, config.Agents.Memory.Persistence.SyncInterval)
-	
+
 	// Workflows
 	assert.Equal(t, 10*time.Minute, config.Agents.Workflows.DefaultTimeout)
 	assert.Equal(t, 5, config.Agents.Workflows.MaxParallel)
@@ -300,53 +300,52 @@ func TestDefaultConfigAgents(t *testing.T) {
 
 func TestDefaultConfigTools(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	// Registry
 	assert.Equal(t, 100, config.Tools.Registry.MaxTools)
 	assert.Contains(t, config.Tools.Registry.DiscoveryPaths, "./tools")
 	assert.Contains(t, config.Tools.Registry.DiscoveryPaths, "./plugins")
 	assert.True(t, config.Tools.Registry.AutoDiscovery)
-	
+
 	// MCP
 	assert.Empty(t, config.Tools.MCP.Servers)
 	assert.Equal(t, 30*time.Second, config.Tools.MCP.DefaultTimeout)
 	assert.Equal(t, 10, config.Tools.MCP.ConnectionPool.MaxConnections)
 	assert.Equal(t, 10*time.Second, config.Tools.MCP.ConnectionPool.ConnectionTimeout)
 	assert.Equal(t, 5*time.Minute, config.Tools.MCP.ConnectionPool.IdleTimeout)
-	
+
 	// Functions
 	assert.Equal(t, 30*time.Second, config.Tools.Functions.MaxExecutionTime)
 }
 
 func TestDefaultConfigOptimizers(t *testing.T) {
 	config := GetDefaultConfig()
-	
+
 	// Bootstrap Few-Shot
 	assert.Equal(t, 50, config.Optimizers.BootstrapFewShot.MaxExamples)
 	assert.Equal(t, "claude-3-opus-20240229", config.Optimizers.BootstrapFewShot.TeacherModel)
 	assert.Equal(t, "claude-3-sonnet-20240229", config.Optimizers.BootstrapFewShot.StudentModel)
 	assert.Equal(t, 3, config.Optimizers.BootstrapFewShot.BootstrapIterations)
-	
+
 	// MIPRO
 	assert.Equal(t, 20, config.Optimizers.MIPRO.PopulationSize)
 	assert.Equal(t, 10, config.Optimizers.MIPRO.NumGenerations)
 	assert.Equal(t, 0.1, config.Optimizers.MIPRO.MutationRate)
 	assert.Equal(t, 0.8, config.Optimizers.MIPRO.CrossoverRate)
-	
+
 	// COPRO
 	assert.Equal(t, 10, config.Optimizers.COPRO.MaxIterations)
 	assert.Equal(t, 0.01, config.Optimizers.COPRO.ConvergenceThreshold)
 	assert.Equal(t, 0.1, config.Optimizers.COPRO.LearningRate)
-	
+
 	// SIMBA
 	assert.Equal(t, 10, config.Optimizers.SIMBA.NumCandidates)
 	assert.Equal(t, "tournament", config.Optimizers.SIMBA.SelectionStrategy)
 	assert.Equal(t, "accuracy", config.Optimizers.SIMBA.EvaluationMetric)
-	
+
 	// TPE
 	assert.Equal(t, 100, config.Optimizers.TPE.NumTrials)
 	assert.Equal(t, 10, config.Optimizers.TPE.NumStartupTrials)
 	assert.Equal(t, 0.15, config.Optimizers.TPE.Percentile)
 	assert.Equal(t, int64(42), config.Optimizers.TPE.RandomSeed)
 }
-

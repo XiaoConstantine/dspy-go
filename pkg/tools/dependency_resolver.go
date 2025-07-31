@@ -62,7 +62,7 @@ func (dg *DependencyGraph) AddNode(node *DependencyNode) error {
 
 	// Store the node
 	dg.nodes[node.ToolName] = node
-	
+
 	// Initialize edges if not present
 	if _, exists := dg.edges[node.ToolName]; !exists {
 		dg.edges[node.ToolName] = make([]string, 0)
@@ -196,7 +196,7 @@ func (dg *DependencyGraph) topologicalSortByPhases() ([]ExecutionPhase, error) {
 		// Remove current phase tools and update in-degrees
 		for _, tool := range currentPhase {
 			delete(remaining, tool)
-			
+
 			// Reduce in-degree for dependent tools
 			for _, dependent := range dg.reverseEdges[tool] {
 				if remaining[dependent] {
@@ -213,13 +213,13 @@ func (dg *DependencyGraph) topologicalSortByPhases() ([]ExecutionPhase, error) {
 func (dg *DependencyGraph) detectCycle() (bool, []string) {
 	color := make(map[string]int) // 0: white, 1: gray, 2: black
 	parent := make(map[string]string)
-	
+
 	var cycle []string
-	
+
 	var dfs func(string) bool
 	dfs = func(node string) bool {
 		color[node] = 1 // gray
-		
+
 		for _, dep := range dg.edges[node] {
 			if color[dep] == 1 {
 				// Back edge found - cycle detected
@@ -233,11 +233,11 @@ func (dg *DependencyGraph) detectCycle() (bool, []string) {
 				}
 			}
 		}
-		
+
 		color[node] = 2 // black
 		return false
 	}
-	
+
 	for node := range dg.nodes {
 		if color[node] == 0 {
 			if dfs(node) {
@@ -245,7 +245,7 @@ func (dg *DependencyGraph) detectCycle() (bool, []string) {
 			}
 		}
 	}
-	
+
 	return false, nil
 }
 
@@ -254,18 +254,18 @@ func (dg *DependencyGraph) buildCyclePath(start, end string, parent map[string]s
 	var path []string
 	current := end
 	path = append(path, current)
-	
+
 	for current != start && parent[current] != "" {
 		current = parent[current]
 		path = append(path, current)
 	}
 	path = append(path, start)
-	
+
 	// Reverse to get proper order
 	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
 		path[i], path[j] = path[j], path[i]
 	}
-	
+
 	return path
 }
 
@@ -273,11 +273,11 @@ func (dg *DependencyGraph) buildCyclePath(start, end string, parent map[string]s
 func (dg *DependencyGraph) GetNode(toolName string) (*DependencyNode, error) {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	
+
 	if node, exists := dg.nodes[toolName]; exists {
 		return node, nil
 	}
-	
+
 	return nil, errors.WithFields(
 		errors.New(errors.ResourceNotFound, "tool not found in graph"),
 		errors.Fields{"tool_name": toolName},
@@ -288,13 +288,13 @@ func (dg *DependencyGraph) GetNode(toolName string) (*DependencyNode, error) {
 func (dg *DependencyGraph) GetDependencies(toolName string) ([]string, error) {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	
+
 	if deps, exists := dg.edges[toolName]; exists {
 		result := make([]string, len(deps))
 		copy(result, deps)
 		return result, nil
 	}
-	
+
 	return nil, errors.WithFields(
 		errors.New(errors.ResourceNotFound, "tool not found in graph"),
 		errors.Fields{"tool_name": toolName},
@@ -305,13 +305,13 @@ func (dg *DependencyGraph) GetDependencies(toolName string) ([]string, error) {
 func (dg *DependencyGraph) GetDependents(toolName string) ([]string, error) {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	
+
 	if dependents, exists := dg.reverseEdges[toolName]; exists {
 		result := make([]string, len(dependents))
 		copy(result, dependents)
 		return result, nil
 	}
-	
+
 	return nil, errors.WithFields(
 		errors.New(errors.ResourceNotFound, "tool not found in graph"),
 		errors.Fields{"tool_name": toolName},
@@ -331,9 +331,9 @@ func NewDependencyPipeline(name string, registry core.ToolRegistry, graph *Depen
 	if err != nil {
 		return nil, err
 	}
-	
+
 	basePipeline := NewToolPipeline(name, registry, options)
-	
+
 	return &DependencyPipeline{
 		ToolPipeline: basePipeline,
 		graph:       graph,
@@ -365,7 +365,7 @@ func (dp *DependencyPipeline) ExecuteWithDependencies(ctx context.Context, initi
 	// Execute phases in order
 	for phaseIdx, phase := range dp.plan.Phases {
 		phaseStart := time.Now()
-		
+
 		if phase.ParallelOk && len(phase.Tools) > 1 {
 			// Execute phase tools in parallel
 			err := dp.executePhaseParallel(ctx, phase, toolResults, result, phaseIdx)
@@ -385,7 +385,7 @@ func (dp *DependencyPipeline) ExecuteWithDependencies(ctx context.Context, initi
 				return result, err
 			}
 		}
-		
+
 		// Phase completed successfully
 		fmt.Printf("Phase %d completed in %v\n", phaseIdx, time.Since(phaseStart))
 	}
@@ -399,22 +399,22 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstError error
-	
+
 	// Channel to limit parallelism if needed
 	semaphore := make(chan struct{}, phase.MaxParallel)
-	
+
 	for toolIdx, toolName := range phase.Tools {
 		wg.Add(1)
 		go func(tName string, tIdx int) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			
+
 			stepID := fmt.Sprintf("phase_%d_step_%d_%s", phaseIdx, tIdx, tName)
 			stepStart := time.Now()
-			
+
 			// Prepare input from dependencies
 			input, err := dp.prepareToolInput(tName, toolResults, &mu)
 			if err != nil {
@@ -426,13 +426,13 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 				mu.Unlock()
 				return
 			}
-			
+
 			// Execute tool
 			stepResult, err := dp.executeToolStep(ctx, tName, input)
-			
+
 			mu.Lock()
 			defer mu.Unlock()
-			
+
 			if err != nil {
 				if firstError == nil {
 					firstError = err
@@ -442,7 +442,7 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 				toolResults[tName] = stepResult
 				result.Results = append(result.Results, stepResult)
 			}
-			
+
 			result.StepMetadata[stepID] = StepMetadata{
 				ToolName: tName,
 				Duration: time.Since(stepStart),
@@ -450,7 +450,7 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 			}
 		}(toolName, toolIdx)
 	}
-	
+
 	wg.Wait()
 	return firstError
 }
@@ -460,14 +460,14 @@ func (dp *DependencyPipeline) executePhaseSequential(ctx context.Context, phase 
 	for toolIdx, toolName := range phase.Tools {
 		stepID := fmt.Sprintf("phase_%d_step_%d_%s", phaseIdx, toolIdx, toolName)
 		stepStart := time.Now()
-		
+
 		// Prepare input from dependencies (no mutex needed for sequential execution)
 		input, err := dp.prepareToolInput(toolName, toolResults, nil)
 		if err != nil {
 			result.FailedStep = toolName
 			return err
 		}
-		
+
 		// Execute tool
 		stepResult, err := dp.executeToolStep(ctx, toolName, input)
 		if err != nil {
@@ -479,14 +479,14 @@ func (dp *DependencyPipeline) executePhaseSequential(ctx context.Context, phase 
 			toolResults[toolName] = stepResult
 			result.Results = append(result.Results, stepResult)
 		}
-		
+
 		result.StepMetadata[stepID] = StepMetadata{
 			ToolName: toolName,
 			Duration: time.Since(stepStart),
 			Success:  err == nil,
 		}
 	}
-	
+
 	return nil
 }
 
@@ -496,9 +496,9 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 	if err != nil {
 		return nil, err
 	}
-	
+
 	input := make(map[string]interface{})
-	
+
 	// If no dependencies, use initial input
 	if len(node.Dependencies) == 0 {
 		if mu != nil {
@@ -515,7 +515,7 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 		}
 		return input, nil
 	}
-	
+
 	// Combine outputs from dependencies
 	if mu != nil {
 		mu.Lock()
@@ -541,7 +541,7 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 	if mu != nil {
 		mu.Unlock()
 	}
-	
+
 	return input, nil
 }
 
@@ -551,7 +551,7 @@ func (dp *DependencyPipeline) executeToolStep(ctx context.Context, toolName stri
 	if err != nil {
 		return core.ToolResult{}, err
 	}
-	
+
 	return tool.Execute(ctx, input)
 }
 

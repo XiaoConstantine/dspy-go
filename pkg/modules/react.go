@@ -262,7 +262,7 @@ func appendReActFields(signature core.Signature) core.Signature {
      action: [your action]
      observation: [result from previous action, if any]
      answer: [your final answer when complete]
-  
+
   2. ALWAYS include both 'thought' and EXACTLY ONE valid 'action' field (formatted as an XML block described in the action field description) in EVERY response. Do NOT output multiple <action> blocks.
   `
 	newSignature := signature

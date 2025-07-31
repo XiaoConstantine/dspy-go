@@ -69,13 +69,13 @@ func (m *RegistryMockLLM) StreamGenerateWithContent(ctx context.Context, content
 	for _, block := range content {
 		textContent += block.String() + " "
 	}
-	
+
 	chunkChan <- StreamChunk{
 		Content: "mock stream response for " + textContent,
 		Done:    true,
 	}
 	close(chunkChan)
-	
+
 	return &StreamResponse{
 		ChunkChannel: chunkChan,
 		Cancel:       func() {},

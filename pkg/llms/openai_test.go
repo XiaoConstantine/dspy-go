@@ -59,7 +59,7 @@ func TestNewOpenAILLM(t *testing.T) {
 					}
 				}()
 			}
-			
+
 			llm, err := NewOpenAI(tt.modelID, tt.apiKey)
 
 			if tt.expectError {

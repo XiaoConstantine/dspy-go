@@ -146,7 +146,7 @@ Example GitHub Actions workflow:
 - name: Run Optimizer Benchmarks
   run: |
     go test -bench=Benchmark -benchtime=1s -benchmem ./pkg/optimizers > benchmarks.txt
-    
+
 - name: Compare Performance
   run: |
     benchstat baseline.txt benchmarks.txt

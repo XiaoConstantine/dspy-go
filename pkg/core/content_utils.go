@@ -270,7 +270,7 @@ func detectImageMimeType(data []byte, filename string) string {
 	if detected != "" && isValidImageMimeType(detected) {
 		return detected
 	}
-	
+
 	return ""
 }
 
@@ -321,7 +321,7 @@ func detectAudioMimeType(data []byte, filename string) string {
 	if detected != "" && isValidAudioMimeType(detected) {
 		return detected
 	}
-	
+
 	return ""
 }
 
@@ -329,7 +329,7 @@ func detectAudioMimeType(data []byte, filename string) string {
 func isValidImageMimeType(mimeType string) bool {
 	validTypes := []string{
 		"image/jpeg",
-		"image/png", 
+		"image/png",
 		"image/gif",
 		"image/webp",
 		"image/bmp",

@@ -39,7 +39,7 @@ func TestModuleInterceptorIntegration(t *testing.T) {
 	// Test without interceptors (direct call to the test module's Process method)
 	ctx := context.Background()
 	inputs := map[string]any{"test": "value"}
-	
+
 	result, err := testModule.Process(ctx, inputs)
 	require.NoError(t, err)
 	assert.Equal(t, "processed", result["result"])

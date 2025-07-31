@@ -40,7 +40,7 @@ go run examples/multi_chain_comparison/main.go -api-key YOUR_API_KEY
 ### 1. Mathematical Reasoning Comparison
 Compares 3 different approaches to solving a quadratic equation:
 - Algebraic manipulation
-- Quadratic formula application  
+- Quadratic formula application
 - Factoring approach
 
 ### 2. Text Analysis with Multiple Perspectives

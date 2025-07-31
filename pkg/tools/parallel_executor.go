@@ -70,18 +70,18 @@ func (ps *PriorityScheduler) Schedule(tasks []*ParallelTask) []*ParallelTask {
 	// Create a copy to avoid modifying the original slice
 	scheduled := make([]*ParallelTask, len(tasks))
 	copy(scheduled, tasks)
-	
+
 	// Sort by priority (descending) then by submit time (ascending)
 	for i := 0; i < len(scheduled)-1; i++ {
 		for j := i + 1; j < len(scheduled); j++ {
 			if scheduled[i].Priority < scheduled[j].Priority ||
-				(scheduled[i].Priority == scheduled[j].Priority && 
+				(scheduled[i].Priority == scheduled[j].Priority &&
 				 scheduled[i].SubmitTime.After(scheduled[j].SubmitTime)) {
 				scheduled[i], scheduled[j] = scheduled[j], scheduled[i]
 			}
 		}
 	}
-	
+
 	return scheduled
 }
 
@@ -104,24 +104,24 @@ func (fs *FairShareScheduler) Name() string {
 func (fs *FairShareScheduler) Schedule(tasks []*ParallelTask) []*ParallelTask {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	
+
 	// Create a copy
 	scheduled := make([]*ParallelTask, len(tasks))
 	copy(scheduled, tasks)
-	
+
 	// Sort by tool execution count (ascending) then priority (descending)
 	for i := 0; i < len(scheduled)-1; i++ {
 		for j := i + 1; j < len(scheduled); j++ {
 			count1 := fs.toolCounts[scheduled[i].ToolName]
 			count2 := fs.toolCounts[scheduled[j].ToolName]
-			
+
 			if count1 > count2 ||
 				(count1 == count2 && scheduled[i].Priority < scheduled[j].Priority) {
 				scheduled[i], scheduled[j] = scheduled[j], scheduled[i]
 			}
 		}
 	}
-	
+
 	return scheduled
 }
 
@@ -136,7 +136,7 @@ func NewParallelExecutor(registry core.ToolRegistry, maxWorkers int) *ParallelEx
 	if maxWorkers <= 0 {
 		maxWorkers = runtime.NumCPU() * 2 // Default to 2x CPU cores
 	}
-	
+
 	return &ParallelExecutor{
 		registry:   registry,
 		maxWorkers: maxWorkers,
@@ -150,56 +150,56 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 	if len(tasks) == 0 {
 		return []ParallelResult{}, nil
 	}
-	
+
 	// Schedule tasks
 	if scheduler == nil {
 		scheduler = &PriorityScheduler{}
 	}
 	scheduledTasks := scheduler.Schedule(tasks)
-	
+
 	// Create result collection
 	results := make([]ParallelResult, len(tasks))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	
+
 	resultMap := make(map[string]int) // taskID -> result index
 	for i, task := range tasks {
 		resultMap[task.ID] = i
 	}
-	
+
 	// Execute tasks
 	for _, task := range scheduledTasks {
 		wg.Add(1)
 		go func(t *ParallelTask) {
 			defer wg.Done()
-			
+
 			// Execute with worker pool
 			result := pe.executeWithWorkerPool(ctx, t)
-			
+
 			// Store result
 			mu.Lock()
 			if idx, exists := resultMap[result.TaskID]; exists {
 				results[idx] = result
 			}
 			mu.Unlock()
-			
+
 			// Update metrics
 			pe.updateMetrics(result)
-			
+
 			// Update scheduler metrics if applicable
 			if fairShare, ok := scheduler.(*FairShareScheduler); ok {
 				fairShare.recordExecution(t.ToolName)
 			}
 		}(task)
 	}
-	
+
 	// Wait for completion or context cancellation
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		return results, nil
@@ -211,7 +211,7 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 // executeWithWorkerPool executes a task using the worker pool.
 func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *ParallelTask) ParallelResult {
 	waitStart := time.Now()
-	
+
 	// Acquire worker
 	select {
 	case pe.workerPool <- struct{}{}:
@@ -229,20 +229,20 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 			WaitTime: time.Since(waitStart),
 		}
 	}
-	
+
 	defer func() { <-pe.workerPool }() // Release worker
-	
+
 	waitTime := time.Since(waitStart)
 	execStart := time.Now()
-	
+
 	// Get worker ID (approximate)
 	workerID := len(pe.workerPool)
-	
+
 	// Execute the task with retries
 	var result core.ToolResult
 	var err error
 	retries := 0
-	
+
 	for attempt := 0; attempt <= task.Retries; attempt++ {
 		// Set up task timeout
 		taskCtx := task.Context
@@ -251,20 +251,20 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 			taskCtx, cancel = context.WithTimeout(task.Context, task.Timeout)
 			defer cancel()
 		}
-		
+
 		// Execute tool
 		result, err = pe.executeTool(taskCtx, task.ToolName, task.Input)
 		if err == nil {
 			break // Success
 		}
-		
+
 		retries = attempt
-		
+
 		// Don't retry on context cancellation
 		if taskCtx.Err() != nil {
 			break
 		}
-		
+
 		// Wait before retry with exponential backoff
 		if attempt < task.Retries {
 			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
@@ -276,7 +276,7 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 			}
 		}
 	}
-	
+
 	return ParallelResult{
 		TaskID:   task.ID,
 		Result:   result,
@@ -294,7 +294,7 @@ func (pe *ParallelExecutor) executeTool(ctx context.Context, toolName string, in
 	if err != nil {
 		return core.ToolResult{}, err
 	}
-	
+
 	return tool.Execute(ctx, input)
 }
 
@@ -302,22 +302,22 @@ func (pe *ParallelExecutor) executeTool(ctx context.Context, toolName string, in
 func (pe *ParallelExecutor) updateMetrics(result ParallelResult) {
 	pe.metrics.mu.Lock()
 	defer pe.metrics.mu.Unlock()
-	
+
 	pe.metrics.TotalExecutions++
 	pe.metrics.ParallelTasks++
-	
+
 	// Update average wait time
 	oldAvgWait := pe.metrics.AverageWaitTime
 	pe.metrics.AverageWaitTime = time.Duration(
 		(int64(oldAvgWait)*(pe.metrics.TotalExecutions-1) + int64(result.WaitTime)) / pe.metrics.TotalExecutions,
 	)
-	
+
 	// Update average execution time
 	oldAvgExec := pe.metrics.AverageExecTime
 	pe.metrics.AverageExecTime = time.Duration(
 		(int64(oldAvgExec)*(pe.metrics.TotalExecutions-1) + int64(result.Duration)) / pe.metrics.TotalExecutions,
 	)
-	
+
 	// Calculate worker utilization (approximate)
 	activeWorkers := len(pe.workerPool)
 	pe.metrics.WorkerUtilization = float64(activeWorkers) / float64(pe.maxWorkers)
@@ -327,7 +327,7 @@ func (pe *ParallelExecutor) updateMetrics(result ParallelResult) {
 func (pe *ParallelExecutor) GetMetrics() ExecutorMetrics {
 	pe.metrics.mu.RLock()
 	defer pe.metrics.mu.RUnlock()
-	
+
 	return ExecutorMetrics{
 		TotalExecutions:   pe.metrics.TotalExecutions,
 		ParallelTasks:     pe.metrics.ParallelTasks,
@@ -356,7 +356,7 @@ func NewBatchExecutor(executor *ParallelExecutor, scheduler TaskScheduler) *Batc
 	if scheduler == nil {
 		scheduler = &PriorityScheduler{}
 	}
-	
+
 	return &BatchExecutor{
 		executor:  executor,
 		scheduler: scheduler,
@@ -366,7 +366,7 @@ func NewBatchExecutor(executor *ParallelExecutor, scheduler TaskScheduler) *Batc
 // ExecuteBatch executes a batch of tool calls in parallel.
 func (be *BatchExecutor) ExecuteBatch(ctx context.Context, calls []ToolCall) ([]ParallelResult, error) {
 	tasks := make([]*ParallelTask, len(calls))
-	
+
 	for i, call := range calls {
 		tasks[i] = &ParallelTask{
 			ID:         fmt.Sprintf("batch_%d_%s", i, call.ToolName),
@@ -379,7 +379,7 @@ func (be *BatchExecutor) ExecuteBatch(ctx context.Context, calls []ToolCall) ([]
 			SubmitTime: time.Now(),
 		}
 	}
-	
+
 	return be.executor.ExecuteParallel(ctx, tasks, be.scheduler)
 }
 
@@ -410,15 +410,15 @@ func NewParallelPipelineExecutor(pipeline *ToolPipeline, executor *ParallelExecu
 func (ppe *ParallelPipelineExecutor) ExecuteWithParallelSteps(ctx context.Context, input map[string]interface{}) (*PipelineResult, error) {
 	// This is a simplified implementation that identifies independent steps
 	// In a full implementation, you would analyze step dependencies
-	
+
 	steps := ppe.pipeline.GetSteps()
 	if len(steps) == 0 {
 		return nil, errors.New(errors.InvalidInput, "pipeline has no steps")
 	}
-	
+
 	// For now, execute all steps in parallel (assuming independence)
 	// In practice, you'd need dependency analysis
-	
+
 	tasks := make([]*ParallelTask, len(steps))
 	for i, step := range steps {
 		tasks[i] = &ParallelTask{
@@ -432,10 +432,10 @@ func (ppe *ParallelPipelineExecutor) ExecuteWithParallelSteps(ctx context.Contex
 			SubmitTime: time.Now(),
 		}
 	}
-	
+
 	start := time.Now()
 	results, err := ppe.executor.ExecuteParallel(ctx, tasks, &PriorityScheduler{})
-	
+
 	// Convert to pipeline result format
 	pipelineResult := &PipelineResult{
 		Results:      make([]core.ToolResult, len(results)),
@@ -444,7 +444,7 @@ func (ppe *ParallelPipelineExecutor) ExecuteWithParallelSteps(ctx context.Contex
 		Success:      err == nil,
 		Cache:        make(map[string]core.ToolResult),
 	}
-	
+
 	for i, result := range results {
 		pipelineResult.Results[i] = result.Result
 		pipelineResult.StepMetadata[result.TaskID] = StepMetadata{
@@ -453,13 +453,13 @@ func (ppe *ParallelPipelineExecutor) ExecuteWithParallelSteps(ctx context.Contex
 			Success:  result.Error == nil,
 			Retries:  result.Retries,
 		}
-		
+
 		if result.Error != nil && pipelineResult.Error == nil {
 			pipelineResult.Error = result.Error
 			pipelineResult.FailedStep = steps[i].ToolName
 			pipelineResult.Success = false
 		}
 	}
-	
+
 	return pipelineResult, err
 }

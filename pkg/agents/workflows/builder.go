@@ -55,7 +55,7 @@ type BuilderStage struct {
 	Next        []string                 // IDs of next stages
 	RetryConfig *RetryConfig
 	Metadata    map[string]interface{} // Additional metadata
-	
+
 	// Advanced pattern fields
 	LoopCondition     LoopConditionFunc     // For while/until loops
 	IteratorFunc      IteratorFunc          // For forEach loops
@@ -642,15 +642,15 @@ func (wb *WorkflowBuilder) validateStage(stage *BuilderStage) error {
 		}
 	case StageTypeWhile, StageTypeUntil:
 		if stage.LoopCondition == nil {
-			return fmt.Errorf("%s stage must have a loop condition function", 
+			return fmt.Errorf("%s stage must have a loop condition function",
 				map[StageType]string{StageTypeWhile: "while", StageTypeUntil: "until"}[stage.Type])
 		}
 		if stage.LoopBody == nil {
-			return fmt.Errorf("%s stage must have a loop body", 
+			return fmt.Errorf("%s stage must have a loop body",
 				map[StageType]string{StageTypeWhile: "while", StageTypeUntil: "until"}[stage.Type])
 		}
 		if stage.MaxIterations <= 0 {
-			return fmt.Errorf("%s stage must have a positive maximum iteration count", 
+			return fmt.Errorf("%s stage must have a positive maximum iteration count",
 				map[StageType]string{StageTypeWhile: "while", StageTypeUntil: "until"}[stage.Type])
 		}
 	case StageTypeTemplate:
@@ -751,12 +751,12 @@ func (wb *WorkflowBuilder) determineWorkflowType() string {
 	if hasConditional {
 		return "router"
 	}
-	
+
 	// Only use parallel workflow if it's purely parallel stages
 	if hasParallel && len(wb.stages) == 1 {
 		return "parallel"
 	}
-	
+
 	// Default to chain workflow for all other cases
 	return "chain"
 }
@@ -770,7 +770,7 @@ func (wb *WorkflowBuilder) buildChainWorkflow() (Workflow, error) {
 
 	for _, stage := range wb.stages {
 		var module core.Module
-		
+
 		// Handle different stage types
 		switch stage.Type {
 		case StageTypeSequential:

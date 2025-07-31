@@ -181,7 +181,7 @@ completions := []map[string]interface{}{
         "solution": "Implement automation to reduce operational costs",
     },
     {
-        "reasoning": "prioritize customer satisfaction strategy", 
+        "reasoning": "prioritize customer satisfaction strategy",
         "solution": "Invest in customer service improvements",
     },
     {
@@ -279,7 +279,7 @@ program := core.NewProgram(
         if err != nil {
             return nil, err
         }
-        
+
         // Then generate an answer using the retrieved documents
         generatorInputs := map[string]interface{}{
             "question": inputs["question"],
@@ -345,7 +345,7 @@ optimizedProgram, err := simba.Compile(ctx, program, dataset, metricFunc)
 
 // Access SIMBA's introspective insights
 state := simba.GetState()
-fmt.Printf("Optimization completed in %d steps with score %.3f\n", 
+fmt.Printf("Optimization completed in %d steps with score %.3f\n",
     state.CurrentStep, state.BestScore)
 
 // View detailed introspective analysis
@@ -399,7 +399,7 @@ fmt.Printf("Elite solutions preserved: %d\n", len(archive))
 
 // Each solution in archive excels in different objectives:
 // - Success rate vs efficiency trade-offs
-// - Quality vs speed optimizations  
+// - Quality vs speed optimizations
 // - Robustness vs generalization balance
 ```
 
@@ -448,7 +448,7 @@ workflow.AddStep(&workflows.Step{
 })
 
 workflow.AddStep(&workflows.Step{
-    ID: "step2", 
+    ID: "step2",
     Module: modules.NewPredict(signature2),
 })
 
@@ -654,13 +654,13 @@ func (t *WeatherTool) CanHandle(action string) bool {
 func (t *WeatherTool) Execute(ctx context.Context, action string) (string, error) {
     // Parse location from action
     location := parseLocation(action)
-    
+
     // Fetch weather data (implementation detail)
     weather, err := fetchWeather(location)
     if err != nil {
         return "", err
     }
-    
+
     return fmt.Sprintf("Weather in %s: %s, %d°C", location, weather.Condition, weather.Temperature), nil
 }
 
@@ -699,7 +699,7 @@ result, err := registry.ExecuteWithTracking(ctx, tool.Name(), params)
 
 **Key Features:**
 - 🧠 **Bayesian Tool Selection**: Multi-factor scoring with configurable weights
-- 📊 **Performance Tracking**: Real-time metrics and reliability scoring  
+- 📊 **Performance Tracking**: Real-time metrics and reliability scoring
 - 🔍 **Capability Analysis**: Automatic capability extraction and matching
 - 🔄 **Auto-Discovery**: Dynamic tool registration from MCP servers
 - 🛡️ **Fallback Mechanisms**: Intelligent fallback when tools fail
@@ -719,7 +719,7 @@ import "github.com/XiaoConstantine/dspy-go/pkg/tools"
 pipeline, err := tools.NewPipelineBuilder("data_processing", registry).
     Step("data_extractor").
     StepWithTransformer("data_validator", tools.TransformExtractField("result")).
-    ConditionalStep("data_enricher", 
+    ConditionalStep("data_enricher",
         tools.ConditionExists("validation_result"),
         tools.ConditionEquals("status", "validated")).
     StepWithRetries("data_transformer", 3).
@@ -771,7 +771,7 @@ graph.AddNode(&tools.DependencyNode{
 })
 
 graph.AddNode(&tools.DependencyNode{
-    ToolName:     "data_validator", 
+    ToolName:     "data_validator",
     Dependencies: []string{"data_extractor"},
     Inputs:       []string{"raw_data"},
     Outputs:      []string{"validated_data"},
@@ -802,7 +802,7 @@ tasks := []*tools.ParallelTask{
         Priority: 1,
     },
     {
-        ID:       "task2", 
+        ID:       "task2",
         ToolName: "processor",
         Input:    data2,
         Priority: 2,
@@ -828,14 +828,14 @@ type CompositeTool struct {
 }
 
 // Helper function to create composite tools
-func NewCompositeTool(name string, registry core.ToolRegistry, 
+func NewCompositeTool(name string, registry core.ToolRegistry,
     builder func(*tools.PipelineBuilder) *tools.PipelineBuilder) (*CompositeTool, error) {
-    
+
     pipeline, err := builder(tools.NewPipelineBuilder(name+"_pipeline", registry)).Build()
     if err != nil {
         return nil, err
     }
-    
+
     return &CompositeTool{
         name:     name,
         pipeline: pipeline,
@@ -843,7 +843,7 @@ func NewCompositeTool(name string, registry core.ToolRegistry,
 }
 
 // Create a composite tool
-textProcessor, err := NewCompositeTool("text_processor", registry, 
+textProcessor, err := NewCompositeTool("text_processor", registry,
     func(builder *tools.PipelineBuilder) *tools.PipelineBuilder {
         return builder.
             Step("text_uppercase").
@@ -976,7 +976,7 @@ python compare_results.py
 
 The framework tests:
 - **API Compatibility**: Parameter names, types, and behavior
-- **Performance Parity**: Score differences within acceptable thresholds  
+- **Performance Parity**: Score differences within acceptable thresholds
 - **Behavioral Consistency**: Similar optimization patterns and convergence
 - **All Four Optimizers**: BootstrapFewShot, MIPRO, SIMBA, and GEPA
 
@@ -1026,7 +1026,7 @@ The Smart Tool Registry examples demonstrate:
 cd examples/tool_chaining
 go run main.go
 
-# Run tool composition examples  
+# Run tool composition examples
 cd examples/tool_composition
 go run main.go
 ```

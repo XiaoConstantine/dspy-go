@@ -288,9 +288,9 @@ func runQAExample(ctx context.Context) {
 	refiner := modules.NewRefine(qa, config)
 
 	// Test context and question
-	context := `The Python programming language was created by Guido van Rossum and first released in 1991. 
-	Python is known for its simplicity and readability, making it popular for beginners and experts alike. 
-	It supports multiple programming paradigms including procedural, object-oriented, and functional programming. 
+	context := `The Python programming language was created by Guido van Rossum and first released in 1991.
+	Python is known for its simplicity and readability, making it popular for beginners and experts alike.
+	It supports multiple programming paradigms including procedural, object-oriented, and functional programming.
 	Python has a large standard library and extensive third-party package ecosystem through PyPI (Python Package Index).`
 
 	question := "What makes Python popular among programmers?"
