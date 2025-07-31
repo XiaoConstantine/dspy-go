@@ -14,25 +14,25 @@ import (
 type Event struct {
 	// ID uniquely identifies this event instance
 	ID string `json:"id"`
-	
+
 	// Type categorizes the event (e.g., "pr_created", "user_message")
 	Type string `json:"type"`
-	
+
 	// Data contains the event payload
 	Data interface{} `json:"data"`
-	
+
 	// Priority affects event processing order (1=highest, 10=lowest)
 	Priority int `json:"priority"`
-	
+
 	// Timestamp when the event was created
 	Timestamp time.Time `json:"timestamp"`
-	
+
 	// Context provides additional metadata
 	Context map[string]interface{} `json:"context"`
-	
+
 	// Source identifies where the event originated
 	Source string `json:"source"`
-	
+
 	// CorrelationID links related events
 	CorrelationID string `json:"correlation_id"`
 }
@@ -60,31 +60,31 @@ const (
 type EventBus struct {
 	// subscribers maps event types to their handlers
 	subscribers map[string][]EventHandler
-	
+
 	// filters apply to all events before distribution
 	filters []EventFilter
-	
+
 	// transformers modify events before distribution
 	transformers []EventTransformer
-	
+
 	// eventChan buffers incoming events
 	eventChan chan Event
-	
+
 	// responseChan handles request-response patterns
 	responseChan map[string]chan interface{}
-	
+
 	// config holds bus configuration
 	config EventBusConfig
-	
+
 	// mu protects concurrent access
 	mu sync.RWMutex
-	
+
 	// responseMu protects response channel map
 	responseMu sync.RWMutex
-	
+
 	// running indicates if the bus is active
 	running bool
-	
+
 	// shutdown signals bus termination
 	shutdown chan struct{}
 }
@@ -149,11 +149,11 @@ func (eb *EventBus) Start(ctx context.Context) error {
 func (eb *EventBus) Stop() error {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	if !eb.running {
 		return fmt.Errorf("event bus is not running")
 	}
-	
+
 	close(eb.shutdown)
 	eb.running = false
 	return nil
@@ -163,11 +163,11 @@ func (eb *EventBus) Stop() error {
 func (eb *EventBus) Subscribe(eventType string, handler EventHandler) error {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	if len(eb.subscribers[eventType]) >= eb.config.MaxHandlers {
 		return fmt.Errorf("maximum handlers reached for event type: %s", eventType)
 	}
-	
+
 	eb.subscribers[eventType] = append(eb.subscribers[eventType], handler)
 	return nil
 }
@@ -176,7 +176,7 @@ func (eb *EventBus) Subscribe(eventType string, handler EventHandler) error {
 func (eb *EventBus) Unsubscribe(eventType string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	
+
 	delete(eb.subscribers, eventType)
 }
 
@@ -186,21 +186,21 @@ func (eb *EventBus) Emit(event Event) error {
 	for _, transformer := range eb.transformers {
 		event = transformer(event)
 	}
-	
+
 	// Apply filters
 	for _, filter := range eb.filters {
 		if !filter(event) {
 			return nil // Event filtered out
 		}
 	}
-	
+
 	// Persist if enabled
 	if eb.config.EnablePersistence && eb.config.PersistenceStore != nil {
 		if err := eb.config.PersistenceStore.Store(event); err != nil {
 			return fmt.Errorf("failed to persist event: %w", err)
 		}
 	}
-	
+
 	// Try to send event, handle backpressure
 	select {
 	case eb.eventChan <- event:
@@ -214,21 +214,21 @@ func (eb *EventBus) Emit(event Event) error {
 func (eb *EventBus) Request(event Event, timeout time.Duration) (interface{}, error) {
 	responseID := event.ID + "_response"
 	responseChan := make(chan interface{}, 1)
-	
+
 	eb.responseMu.Lock()
 	eb.responseChan[responseID] = responseChan
 	eb.responseMu.Unlock()
-	
+
 	defer func() {
 		eb.responseMu.Lock()
 		delete(eb.responseChan, responseID)
 		eb.responseMu.Unlock()
 	}()
-	
+
 	if err := eb.Emit(event); err != nil {
 		return nil, err
 	}
-	
+
 	select {
 	case response := <-responseChan:
 		return response, nil
@@ -240,15 +240,15 @@ func (eb *EventBus) Request(event Event, timeout time.Duration) (interface{}, er
 // Respond sends a response to a request event.
 func (eb *EventBus) Respond(requestID string, response interface{}) error {
 	responseID := requestID + "_response"
-	
+
 	eb.responseMu.RLock()
 	responseChan, exists := eb.responseChan[responseID]
 	eb.responseMu.RUnlock()
-	
+
 	if !exists {
 		return fmt.Errorf("no pending request found for ID: %s", requestID)
 	}
-	
+
 	select {
 	case responseChan <- response:
 		return nil
@@ -297,12 +297,12 @@ func (eb *EventBus) handleEvent(ctx context.Context, event Event) {
 	handlers := eb.subscribers[event.Type]
 	broadcastHandlers := eb.subscribers["broadcast"]
 	eb.mu.RUnlock()
-	
+
 	// Handle specific event type subscribers
 	for _, handler := range handlers {
 		go eb.executeHandler(ctx, handler, event)
 	}
-	
+
 	// Handle broadcast subscribers
 	if event.Type != "broadcast" {
 		for _, handler := range broadcastHandlers {
@@ -315,12 +315,12 @@ func (eb *EventBus) handleEvent(ctx context.Context, event Event) {
 func (eb *EventBus) executeHandler(ctx context.Context, handler EventHandler, event Event) {
 	handlerCtx, cancel := context.WithTimeout(ctx, eb.config.HandlerTimeout)
 	defer cancel()
-	
+
 	done := make(chan error, 1)
 	go func() {
 		done <- handler(handlerCtx, event)
 	}()
-	
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -339,7 +339,7 @@ func (eb *EventBus) handleBackpressure(event Event) error {
 	case BackpressureBlock:
 		eb.eventChan <- event // This will block
 		return nil
-		
+
 	case BackpressureDropOldest:
 		// Try to drain oldest event
 		select {
@@ -348,21 +348,21 @@ func (eb *EventBus) handleBackpressure(event Event) error {
 		}
 		eb.eventChan <- event
 		return nil
-		
+
 	case BackpressureDropNewest:
 		return fmt.Errorf("event dropped due to backpressure")
-		
+
 	case BackpressureDropLowest:
 		// Find and drop lowest priority event in buffer
 		return eb.dropLowestPriorityEvent(event)
-		
+
 	default:
 		return fmt.Errorf("unknown backpressure strategy")
 	}
 }
 
 // dropLowestPriorityEvent implements priority-based dropping.
-// NOTE: This is a simplified implementation that doesn't actually implement 
+// NOTE: This is a simplified implementation that doesn't actually implement
 // priority-based dropping. It behaves the same as BackpressureDropNewest.
 // A proper implementation would require a priority queue data structure
 // to efficiently find and remove the lowest priority event from the buffer.
@@ -381,16 +381,16 @@ func (eb *EventBus) dropLowestPriorityEvent(newEvent Event) error {
 type ReactiveWorkflow struct {
 	// handlers maps event types to workflow handlers
 	handlers map[string]Workflow
-	
+
 	// eventBus handles event distribution
 	eventBus *EventBus
-	
+
 	// memory provides state persistence
 	memory agents.Memory
-	
+
 	// config holds reactive workflow configuration
 	config ReactiveWorkflowConfig
-	
+
 	// mu protects concurrent access
 	mu sync.RWMutex
 }
@@ -420,16 +420,16 @@ func NewReactiveWorkflow(memory agents.Memory) *ReactiveWorkflow {
 	if memory == nil {
 		memory = agents.NewInMemoryStore()
 	}
-	
+
 	eventBus := NewEventBus(DefaultEventBusConfig())
-	
+
 	rw := &ReactiveWorkflow{
 		handlers: make(map[string]Workflow),
 		eventBus: eventBus,
 		memory:   memory,
 		config:   DefaultReactiveWorkflowConfig(),
 	}
-	
+
 	return rw
 }
 
@@ -437,12 +437,12 @@ func NewReactiveWorkflow(memory agents.Memory) *ReactiveWorkflow {
 func (rw *ReactiveWorkflow) On(eventType string, workflow Workflow) *ReactiveWorkflow {
 	rw.mu.Lock()
 	defer rw.mu.Unlock()
-	
+
 	rw.handlers[eventType] = workflow
-	
+
 	// Register handler with event bus
 	_ = rw.eventBus.Subscribe(eventType, rw.createEventHandler(workflow))
-	
+
 	return rw
 }
 
@@ -454,19 +454,19 @@ func (rw *ReactiveWorkflow) OnModule(eventType string, module core.Module) *Reac
 		Module: module,
 	}
 	_ = workflow.AddStep(step)
-	
+
 	return rw.On(eventType, workflow)
 }
 
 // WithEventBus allows using a custom event bus.
 func (rw *ReactiveWorkflow) WithEventBus(eventBus *EventBus) *ReactiveWorkflow {
 	rw.eventBus = eventBus
-	
+
 	// Re-register all handlers with new bus
 	for eventType, workflow := range rw.handlers {
 		_ = rw.eventBus.Subscribe(eventType, rw.createEventHandler(workflow))
 	}
-	
+
 	return rw
 }
 
@@ -529,11 +529,11 @@ func (rw *ReactiveWorkflow) createEventHandler(workflow Workflow) EventHandler {
 			"timestamp":  event.Timestamp,
 			"context":    event.Context,
 		}
-		
+
 		// Execute workflow with timeout
 		workflowCtx, cancel := context.WithTimeout(ctx, rw.config.DefaultTimeout)
 		defer cancel()
-		
+
 		_, err := workflow.Execute(workflowCtx, inputs)
 		return err
 	}

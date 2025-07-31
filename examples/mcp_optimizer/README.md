@@ -16,7 +16,7 @@ The MCP optimizer uses **KNNFewShot + Statistical Weighting** methodology to hel
 When tested with challenging git tool selection scenarios:
 
 - **Baseline (no optimizer)**: 50.0% accuracy
-- **With MCP optimizer**: 75.0% accuracy  
+- **With MCP optimizer**: 75.0% accuracy
 - **Improvement**: +25 percentage points (50% relative improvement)
 
 ## How It Works
@@ -31,7 +31,7 @@ When tested with challenging git tool selection scenarios:
 ### Prerequisites
 
 1. **Install Ollama**: https://ollama.ai
-2. **Pull the model**: 
+2. **Pull the model**:
    ```bash
    ollama pull llama3.2:1b
    ```
@@ -64,7 +64,7 @@ The demo will show:
 
 - ✅ **Real MCP Protocol**: Full JSON-RPC communication with actual MCP server
 - ✅ **Genuine Tool Execution**: Tools actually run git commands on live repository
-- ✅ **Small Model Focus**: Demonstrates value for resource-constrained scenarios  
+- ✅ **Small Model Focus**: Demonstrates value for resource-constrained scenarios
 - ✅ **Measurable Results**: Clear before/after metrics with statistical significance
 - ✅ **Production Ready**: Professional logging, error handling, and cleanup
 
@@ -77,7 +77,7 @@ This demo validates the core value proposition: **MCP optimizer helps small lang
 The optimizer consists of five core components:
 
 1. **PatternCollector**: Logs successful tool interactions with context embeddings
-2. **SimilarityMatcher**: KNN-based context matching using semantic embeddings  
+2. **SimilarityMatcher**: KNN-based context matching using semantic embeddings
 3. **ExampleSelector**: Statistical weighting system prioritizing successful patterns
 4. **ToolOrchestrator**: Multi-tool workflow optimization with dependency tracking
 5. **MetricsEvaluator**: MCP-specific performance metrics and success rate tracking
@@ -109,7 +109,7 @@ The optimizer showed significant improvement in complex scenarios:
 
 ### Baseline Errors (Fixed by Optimizer):
 - ❌ "line-by-line file blame" → `git_log` (wrong) → ✅ `git_blame` (correct)
-- ❌ "file changes between commits" → `git_log` (wrong) → ✅ `git_diff` (correct)  
+- ❌ "file changes between commits" → `git_log` (wrong) → ✅ `git_diff` (correct)
 - ❌ "who wrote each line" → `git_log` (wrong) → ✅ `git_blame` (correct)
 
 ### What This Proves:

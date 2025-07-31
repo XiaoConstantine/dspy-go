@@ -329,7 +329,7 @@ func main() {
 	// Create two simple agents with shared event bus
 	agentA := NewSimpleAgent("agent_a")
 	agentB := NewSimpleAgent("agent_b")
-	
+
 	// Configure agents to use the shared event bus
 	agentA.reactive.WithEventBus(sharedEventBus)
 	agentB.reactive.WithEventBus(sharedEventBus)

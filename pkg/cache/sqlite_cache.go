@@ -117,7 +117,7 @@ func (c *SQLiteCache) Get(ctx context.Context, key string) ([]byte, bool, error)
 	atomic.AddInt64(&c.stats.Misses, 1) // Assume miss, will correct if hit
 
 	query := `
-	SELECT value, expires_at FROM cache_entries 
+	SELECT value, expires_at FROM cache_entries
 	WHERE key = ? AND (expires_at = 0 OR expires_at > ?)
 	`
 
@@ -256,7 +256,7 @@ func (c *SQLiteCache) Clear(ctx context.Context) error {
 func (c *SQLiteCache) Stats() CacheStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	stats := CacheStats{
 		Hits:       atomic.LoadInt64(&c.stats.Hits),
 		Misses:     atomic.LoadInt64(&c.stats.Misses),
@@ -289,7 +289,7 @@ func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64) error
 		var oldestKey string
 		var deletedSize int64
 		selectQuery := `SELECT key, size FROM cache_entries ORDER BY accessed_at ASC LIMIT 1`
-		
+
 		err := c.db.QueryRowContext(ctx, selectQuery).Scan(&oldestKey, &deletedSize)
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -428,7 +428,7 @@ func (c *SQLiteCache) Import(ctx context.Context, entries []CacheEntry) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	
+
 	// Track if transaction was committed successfully
 	var committed bool
 	defer func() {

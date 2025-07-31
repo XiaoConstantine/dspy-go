@@ -813,7 +813,7 @@ func TestOllamaLLM_BatchEmbeddings(t *testing.T) {
 					Index:     0,
 				},
 				{
-					Object:    "embedding", 
+					Object:    "embedding",
 					Embedding: []float64{0.4, 0.5, 0.6},
 					Index:     1,
 				},

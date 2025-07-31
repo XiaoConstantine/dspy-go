@@ -30,10 +30,10 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 		limit:      limit,
 		window:     window,
 	}
-	
+
 	// Start cleanup goroutine to prevent memory leaks
 	go rl.periodicCleanup()
-	
+
 	return rl
 }
 
@@ -128,7 +128,7 @@ func RateLimitingAgentInterceptor(limit int, window time.Duration) core.AgentInt
 		key := fmt.Sprintf("agent:%s", info.AgentID)
 
 		if !limiter.Allow(key) {
-			return nil, fmt.Errorf("rate limit exceeded for agent %s: %d requests per %v", 
+			return nil, fmt.Errorf("rate limit exceeded for agent %s: %d requests per %v",
 				info.AgentID, limit, window)
 		}
 
@@ -146,7 +146,7 @@ func RateLimitingToolInterceptor(limit int, window time.Duration) core.ToolInter
 		key := fmt.Sprintf("tool:%s", info.Name)
 
 		if !limiter.Allow(key) {
-			return core.ToolResult{}, fmt.Errorf("rate limit exceeded for tool %s: %d requests per %v", 
+			return core.ToolResult{}, fmt.Errorf("rate limit exceeded for tool %s: %d requests per %v",
 				info.Name, limit, window)
 		}
 
@@ -374,7 +374,7 @@ func validateValue(value interface{}, config ValidationConfig, patterns []*regex
 				return fmt.Errorf("input contains forbidden pattern: %s", pattern.String())
 			}
 		}
-		
+
 		// Check HTML content if not allowed
 		if !config.AllowHTML && containsHTML(v) {
 			return fmt.Errorf("HTML content not allowed in input")
@@ -422,21 +422,21 @@ func sanitizeValue(value interface{}) interface{} {
 	case string:
 		// Multi-layered sanitization for strings
 		sanitized := v
-		
+
 		// HTML escape to prevent XSS
 		sanitized = html.EscapeString(sanitized)
-		
+
 		// Remove or replace dangerous characters
 		sanitized = strings.ReplaceAll(sanitized, "\x00", "") // Remove null bytes
 		sanitized = strings.ReplaceAll(sanitized, "\r\n", " ") // Normalize line endings
 		sanitized = strings.ReplaceAll(sanitized, "\n", " ")
 		sanitized = strings.ReplaceAll(sanitized, "\r", " ")
-		
+
 		// Limit string length to prevent DoS
 		if len(sanitized) > 10000 {
 			sanitized = sanitized[:10000]
 		}
-		
+
 		return sanitized
 
 	case map[string]interface{}:
@@ -457,7 +457,7 @@ func sanitizeValue(value interface{}) interface{} {
 		if len(v) > maxSize {
 			v = v[:maxSize]
 		}
-		
+
 		result := make([]interface{}, len(v))
 		for i, subValue := range v {
 			result[i] = sanitizeValue(subValue)
@@ -583,14 +583,14 @@ func hasAnyPermission(userPermissions, requiredPermissions []string) bool {
 }
 
 // matchesPermission checks if a user permission matches a required permission.
-// Supports wildcard matching where user permissions ending with "*" match 
+// Supports wildcard matching where user permissions ending with "*" match
 // required permissions that start with the prefix (excluding the "*").
 func matchesPermission(userPerm, requiredPerm string) bool {
 	// Exact match
 	if userPerm == requiredPerm {
 		return true
 	}
-	
+
 	// Wildcard matching - user permission ends with "*"
 	if strings.HasSuffix(userPerm, "*") {
 		prefix := strings.TrimSuffix(userPerm, "*")
@@ -598,7 +598,7 @@ func matchesPermission(userPerm, requiredPerm string) bool {
 		// and is longer than the prefix (prevents prefix matching itself and empty prefixes)
 		return len(prefix) > 0 && len(requiredPerm) > len(prefix) && strings.HasPrefix(requiredPerm, prefix)
 	}
-	
+
 	return false
 }
 
@@ -619,7 +619,7 @@ func containsHTML(s string) bool {
 	htmlTagPattern := regexp.MustCompile(`<\s*/?[a-zA-Z][^>]*>`)
 	// Check for HTML comments
 	htmlCommentPattern := regexp.MustCompile(`<!--.*?-->`)
-	
+
 	return htmlTagPattern.MatchString(s) || htmlCommentPattern.MatchString(s)
 }
 
@@ -628,12 +628,12 @@ func containsHTML(s string) bool {
 func (rl *RateLimiter) periodicCleanup() {
 	ticker := time.NewTicker(rl.window * 2) // Cleanup every 2x window duration
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		rl.mu.Lock()
 		now := time.Now()
 		cleanupThreshold := now.Add(-rl.window * 2) // Remove keys not accessed for 2x window
-		
+
 		for key, lastAccess := range rl.lastAccess {
 			if lastAccess.Before(cleanupThreshold) {
 				delete(rl.requests, key)

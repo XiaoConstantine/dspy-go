@@ -44,7 +44,7 @@ func RunGSM8KExample(configPath string, apiKey string) {
 
 	// Setup LLM
 	llms.EnsureFactory()
-	
+
 	// Use API key from parameter or environment
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
@@ -55,14 +55,14 @@ func RunGSM8KExample(configPath string, apiKey string) {
 			apiKey = os.Getenv("DSPY_API_KEY")
 		}
 	}
-	
+
 	// Configure LLM - use config if available, otherwise fallback to default
 	if apiKey != "" {
 		modelID := core.ModelGoogleGeminiFlash // Default
 		if cfg != nil && cfg.LLM.Default.ModelID != "" {
 			modelID = core.ModelID(cfg.LLM.Default.ModelID)
 		}
-		
+
 		err := core.ConfigureDefaultLLM(apiKey, modelID)
 		if err != nil {
 			logger.Fatalf(ctx, "Failed to setup LLM: %v", err)
@@ -85,34 +85,34 @@ func RunGSM8KExample(configPath string, apiKey string) {
 
 	// Create ChainOfThought module
 	cot := modules.NewChainOfThought(signature)
-	
+
 	// Setup interceptors to showcase functionality
 	logger.Info(ctx, "Setting up module interceptors for enhanced observability and reliability...")
-	
+
 	// Create memory cache for caching module results
 	cache := interceptors.NewMemoryCache()
 	defer cache.Stop() // Clean up background goroutines
-	
+
 	// Configure interceptors for the ChainOfThought module
 	moduleInterceptors := []core.ModuleInterceptor{
 		// Logging interceptor - logs module execution start/completion
 		interceptors.LoggingModuleInterceptor(),
-		
+
 		// Metrics interceptor - tracks performance metrics
 		interceptors.MetricsModuleInterceptor(),
-		
+
 		// Tracing interceptor - adds distributed tracing spans
 		interceptors.TracingModuleInterceptor(),
-		
+
 		// Input validation interceptor - validates inputs for safety
 		interceptors.ValidationModuleInterceptor(interceptors.DefaultValidationConfig()),
-		
+
 		// Caching interceptor - caches results for identical inputs (5 minute TTL)
 		interceptors.CachingModuleInterceptor(cache, 5*time.Minute),
-		
+
 		// Timeout interceptor - prevents modules from running too long
 		interceptors.TimeoutModuleInterceptor(30*time.Second),
-		
+
 		// Retry interceptor - retries failed executions with exponential backoff
 		interceptors.RetryModuleInterceptor(interceptors.RetryConfig{
 			MaxAttempts: 3,
@@ -120,7 +120,7 @@ func RunGSM8KExample(configPath string, apiKey string) {
 			Backoff:     2.0,
 		}),
 	}
-	
+
 	// Set interceptors on the module
 	// ChainOfThought implements InterceptableModule interface
 	cot.SetInterceptors(moduleInterceptors)
@@ -130,14 +130,14 @@ func RunGSM8KExample(configPath string, apiKey string) {
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
 		temperature := 0.7
 		maxTokens := 8192
-		
+
 		// Use config values if available
 		if cfg != nil {
 			// The config manager handles defaults, so we can use the values directly.
 			temperature = cfg.LLM.Default.Generation.Temperature
 			maxTokens = cfg.LLM.Default.Generation.MaxTokens
 		}
-		
+
 		// Use ProcessWithInterceptors with the configured interceptors
 		// ChainOfThought implements InterceptableModule interface
 		return cot.ProcessWithInterceptors(ctx, inputs, nil, core.WithGenerateOptions(
@@ -191,7 +191,7 @@ func RunGSM8KExample(configPath string, apiKey string) {
 	logger.Info(ctx, "- Caching: Duplicate questions will be served from cache")
 	logger.Info(ctx, "- Timeout: Protection against long-running operations")
 	logger.Info(ctx, "- Retry: Automatic retry on failures with exponential backoff\n")
-	
+
 	for i, ex := range examples[10:15] {
 		logger.Info(ctx, "--- Processing question %d ---", i+1)
 		result, err := compiledProgram.Execute(ctx, map[string]interface{}{"question": ex.Question})
@@ -204,25 +204,25 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		logger.Info(ctx, "Predicted Answer: %s", result["answer"])
 		logger.Info(ctx, "Actual Answer: %s\n", ex.Answer)
 	}
-	
+
 	// Demonstrate caching by asking the same question twice
 	logger.Info(ctx, "\n=== Demonstrating caching interceptor ===")
 	logger.Info(ctx, "Running the same question twice - second execution should be cached:")
-	
+
 	testQuestion := map[string]interface{}{"question": examples[10].Question}
-	
+
 	logger.Info(ctx, "\nFirst execution (will be cached):")
 	start := time.Now()
 	result1, _ := compiledProgram.Execute(ctx, testQuestion)
 	duration1 := time.Since(start)
 	logger.Info(ctx, "First execution took: %v", duration1)
-	
+
 	logger.Info(ctx, "\nSecond execution (should use cache):")
 	start = time.Now()
 	result2, _ := compiledProgram.Execute(ctx, testQuestion)
 	duration2 := time.Since(start)
 	logger.Info(ctx, "Second execution took: %v (should be much faster due to caching)", duration2)
-	
+
 	// Verify results are identical
 	if result1["answer"] == result2["answer"] {
 		logger.Info(ctx, "✅ Cache working correctly - identical results in %v vs %v", duration1, duration2)

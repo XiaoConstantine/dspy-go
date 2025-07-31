@@ -14,7 +14,7 @@ func NewLiteLLM(modelID core.ModelID, apiKey string, opts ...OpenAIOption) (*Ope
 			errors.New(errors.InvalidInput, "LiteLLM API key is required"),
 			errors.Fields{"provider": "litellm"})
 	}
-	
+
 	// Default LiteLLM configuration
 	defaultOpts := []OpenAIOption{
 		WithAPIKey(apiKey),

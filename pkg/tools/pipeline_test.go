@@ -533,7 +533,7 @@ func TestPipeline_ParallelExecution(t *testing.T) {
 	// Test that parallel execution actually works by verifying all tools were executed
 	// In parallel mode, all tools should run simultaneously with the same input
 	toolsExecuted := make(map[string]bool)
-	
+
 	for _, result := range result.Results {
 		if resultData, ok := result.Data.(map[string]interface{}); ok {
 			if processedBy, ok := resultData["processed_by"].(string); ok {
@@ -541,12 +541,12 @@ func TestPipeline_ParallelExecution(t *testing.T) {
 			}
 		}
 	}
-	
+
 	expectedTools := []string{"parser", "validator", "transformer"}
 	for _, tool := range expectedTools {
 		assert.True(t, toolsExecuted[tool], "Tool %s should have been executed", tool)
 	}
-	
+
 	// Log timing for debugging (but don't assert on it)
 	t.Logf("Parallel execution took %v (expected ~20ms, sequential would be ~30ms)", duration)
 }

@@ -18,7 +18,7 @@ func TestNewImageFromFile(t *testing.T) {
 		// Create a temporary PNG file
 		tempDir := t.TempDir()
 		pngPath := filepath.Join(tempDir, "test.png")
-		
+
 		// PNG signature + minimal data
 		pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D}
 		err := os.WriteFile(pngPath, pngData, 0644)
@@ -38,7 +38,7 @@ func TestNewImageFromFile(t *testing.T) {
 	t.Run("Valid JPEG file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		jpegPath := filepath.Join(tempDir, "test.jpg")
-		
+
 		// JPEG signature + minimal data
 		jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
 		err := os.WriteFile(jpegPath, jpegData, 0644)
@@ -69,7 +69,7 @@ func TestNewImageFromFile(t *testing.T) {
 	t.Run("Unsupported file format", func(t *testing.T) {
 		tempDir := t.TempDir()
 		txtPath := filepath.Join(tempDir, "test.txt")
-		
+
 		err := os.WriteFile(txtPath, []byte("not an image"), 0644)
 		require.NoError(t, err)
 
@@ -215,7 +215,7 @@ func TestNewAudioFromFile(t *testing.T) {
 	t.Run("Valid MP3 file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		mp3Path := filepath.Join(tempDir, "test.mp3")
-		
+
 		// MP3 signature + minimal data
 		mp3Data := []byte{0xFF, 0xFB, 0x90, 0x00, 0x00, 0x00, 0x00, 0x00}
 		err := os.WriteFile(mp3Path, mp3Data, 0644)
@@ -235,7 +235,7 @@ func TestNewAudioFromFile(t *testing.T) {
 	t.Run("Valid WAV file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		wavPath := filepath.Join(tempDir, "test.wav")
-		
+
 		// WAV signature + minimal data
 		wavData := []byte{'R', 'I', 'F', 'F', 0x00, 0x00, 0x00, 0x00, 'W', 'A', 'V', 'E'}
 		err := os.WriteFile(wavPath, wavData, 0644)
@@ -266,7 +266,7 @@ func TestNewAudioFromFile(t *testing.T) {
 	t.Run("Unsupported file format", func(t *testing.T) {
 		tempDir := t.TempDir()
 		txtPath := filepath.Join(tempDir, "test.txt")
-		
+
 		err := os.WriteFile(txtPath, []byte("not an audio"), 0644)
 		require.NoError(t, err)
 
@@ -557,7 +557,7 @@ func TestContentUtilsIntegration(t *testing.T) {
 
 		// Convert to base64
 		base64Data := base64.StdEncoding.EncodeToString(pngData)
-		
+
 		// Load from base64
 		block2, err := NewImageFromBase64(base64Data, "image/png")
 		require.NoError(t, err)
@@ -566,7 +566,7 @@ func TestContentUtilsIntegration(t *testing.T) {
 		assert.Equal(t, block1.Type, block2.Type)
 		assert.Equal(t, block1.MimeType, block2.MimeType)
 		assert.Equal(t, block1.Data, block2.Data)
-		
+
 		// Metadata should be different
 		assert.Equal(t, "file", block1.Metadata["source"])
 		assert.Equal(t, "base64", block2.Metadata["source"])
@@ -586,7 +586,7 @@ func TestContentUtilsIntegration(t *testing.T) {
 
 		// Convert to base64
 		base64Data := base64.StdEncoding.EncodeToString(mp3Data)
-		
+
 		// Load from base64
 		block2, err := NewAudioFromBase64(base64Data, "audio/mpeg")
 		require.NoError(t, err)
@@ -595,7 +595,7 @@ func TestContentUtilsIntegration(t *testing.T) {
 		assert.Equal(t, block1.Type, block2.Type)
 		assert.Equal(t, block1.MimeType, block2.MimeType)
 		assert.Equal(t, block1.Data, block2.Data)
-		
+
 		// Metadata should be different
 		assert.Equal(t, "file", block1.Metadata["source"])
 		assert.Equal(t, "base64", block2.Metadata["source"])

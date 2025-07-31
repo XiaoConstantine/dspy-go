@@ -245,7 +245,7 @@ Use proper HTML structure with html, head, and body tags.`)
 
 	// Compile the program
 	logger.Info(ctx, "Compiling HTML extraction program...")
-	
+
 	// Create dataset from training examples
 	trainDataset := datasets.NewSimpleDataset(trainingExamples)
 

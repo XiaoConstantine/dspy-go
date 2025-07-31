@@ -357,7 +357,7 @@ func TestProviderCache_Close(t *testing.T) {
 func TestProviderCache_Options(t *testing.T) {
 	t.Run("WithCache", func(t *testing.T) {
 		pc := &ProviderCache{}
-		
+
 		config := CacheConfig{
 			Type:       "memory",
 			MaxSize:    1024 * 1024,
@@ -372,7 +372,7 @@ func TestProviderCache_Options(t *testing.T) {
 
 	t.Run("WithCache error", func(t *testing.T) {
 		pc := &ProviderCache{}
-		
+
 		config := CacheConfig{
 			Type:         "sqlite",
 			SQLiteConfig: SQLiteConfig{Path: "/invalid/path/cache.db"},

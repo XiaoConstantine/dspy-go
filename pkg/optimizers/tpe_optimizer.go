@@ -94,7 +94,7 @@ func NewTPEOptimizer(config TPEConfig) SearchStrategy {
 // Initialize sets up the search space and constraints.
 func (t *TPEOptimizer) Initialize(config SearchConfig) error {
 	logger := logging.GetLogger()
-	
+
 	if len(config.ParamSpace) == 0 {
 		return fmt.Errorf("parameter space cannot be empty")
 	}
@@ -103,7 +103,7 @@ func (t *TPEOptimizer) Initialize(config SearchConfig) error {
 	t.maxTrials = config.MaxTrials
 	t.currentTrials = 0
 
-	logger.Info(context.Background(), "TPE optimizer initialized - max_trials: %d, param_space_size: %d, gamma: %.3f, seed: %d", 
+	logger.Info(context.Background(), "TPE optimizer initialized - max_trials: %d, param_space_size: %d, gamma: %.3f, seed: %d",
 		t.maxTrials, len(t.paramSpace), t.gamma, t.seed)
 
 	return nil
@@ -140,7 +140,7 @@ func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{
 // UpdateResults updates the internal state with the results of the last trial.
 func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float64) error {
 	logger := logging.GetLogger()
-	
+
 	t.observations = append(t.observations, observation{
 		params: params,
 		score:  score,
@@ -148,12 +148,12 @@ func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float6
 
 	// Update best parameters if score is better
 	if score > t.bestScore {
-		logger.Info(context.Background(), "TPE found new best parameters - score: %.6f, previous_best: %.6f, params: %v", 
+		logger.Info(context.Background(), "TPE found new best parameters - score: %.6f, previous_best: %.6f, params: %v",
 			score, t.bestScore, params)
 		t.bestScore = score
 		t.bestParams = cloneParams(params)
 	} else {
-		logger.Debug(context.Background(), "TPE updated with result - score: %.6f, best_score: %.6f, total_observations: %d", 
+		logger.Debug(context.Background(), "TPE updated with result - score: %.6f, best_score: %.6f, total_observations: %d",
 			score, t.bestScore, len(t.observations))
 	}
 

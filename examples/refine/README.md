@@ -7,7 +7,7 @@ This example demonstrates the `Refine` module in dspy-go, which improves predict
 The `Refine` module runs a base module multiple times with varying temperatures and selects the best output based on a custom reward function. This is particularly useful for:
 
 - **Quality Improvement**: Get better outputs by trying multiple approaches
-- **Consistency**: Achieve more reliable results through multiple attempts  
+- **Consistency**: Achieve more reliable results through multiple attempts
 - **Optimization**: Fine-tune outputs based on specific quality criteria
 
 ## Key Features
@@ -89,7 +89,7 @@ result, _ := refine.Process(ctx, map[string]interface{}{"question": "What is X?"
 - **Goal**: Get accurate solutions with step-by-step explanations
 - **Threshold**: High (0.8) for mathematical accuracy
 
-### 2. Creative Writing  
+### 2. Creative Writing
 - **Reward Function**: Evaluates creativity, descriptive language, narrative structure
 - **Goal**: Generate engaging, well-structured stories
 - **Threshold**: Moderate (0.7) to allow creative flexibility
@@ -104,7 +104,7 @@ result, _ := refine.Process(ctx, map[string]interface{}{"question": "What is X?"
 Good reward functions should:
 
 1. **Be Specific**: Target the exact quality you want to improve
-2. **Be Scaled**: Return values between 0.0 and 1.0  
+2. **Be Scaled**: Return values between 0.0 and 1.0
 3. **Be Fast**: Avoid expensive computations during refinement
 4. **Be Stable**: Consistent scoring for similar outputs
 
@@ -120,7 +120,7 @@ lengthReward := func(inputs, outputs map[string]interface{}) float64 {
     return float64(len(text)) / 100.0
 }
 
-// Keyword-based reward  
+// Keyword-based reward
 keywordReward := func(inputs, outputs map[string]interface{}) float64 {
     text := strings.ToLower(outputs["answer"].(string))
     score := 0.0
@@ -136,18 +136,18 @@ keywordReward := func(inputs, outputs map[string]interface{}) float64 {
 // Multi-criteria reward
 combinedReward := func(inputs, outputs map[string]interface{}) float64 {
     answer := outputs["answer"].(string)
-    
+
     // Length component (0-0.3)
     lengthScore := math.Min(float64(len(answer))/200.0, 0.3)
-    
-    // Completeness component (0-0.4)  
+
+    // Completeness component (0-0.4)
     completeScore := 0.0
     if strings.Contains(answer, ".") { completeScore += 0.2 }
     if len(strings.Fields(answer)) > 10 { completeScore += 0.2 }
-    
+
     // Relevance component (0-0.3)
     relevanceScore := calculateRelevance(inputs["question"], answer)
-    
+
     return lengthScore + completeScore + relevanceScore
 }
 ```
@@ -157,7 +157,7 @@ combinedReward := func(inputs, outputs map[string]interface{}) float64 {
 ```go
 type RefineConfig struct {
     N         int             // Number of refinement attempts
-    RewardFn  RewardFunction  // Quality evaluation function  
+    RewardFn  RewardFunction  // Quality evaluation function
     Threshold float64         // Early termination threshold
     FailCount *int           // Max failures before giving up (optional)
 }
@@ -172,7 +172,7 @@ Generate advice for improving module performance:
 feedback := modules.NewOfferFeedback()
 advice, _ := feedback.Process(ctx, map[string]interface{}{
     "program_inputs":   inputs,
-    "program_outputs":  outputs, 
+    "program_outputs":  outputs,
     "reward_value":     "0.3",
     "target_threshold": "0.8",
 })
@@ -202,7 +202,7 @@ refiner.UpdateConfig(modules.RefineConfig{
 ### Common Issues
 
 1. **No Early Termination**: Lower your threshold or improve reward function
-2. **All Attempts Fail**: Check that base module works independently  
+2. **All Attempts Fail**: Check that base module works independently
 3. **Poor Quality**: Adjust reward function to better capture desired qualities
 4. **Slow Performance**: Reduce number of attempts or optimize reward function
 
@@ -230,6 +230,6 @@ config := modules.RefineConfig{N: 1, ...} // Single attempt for testing
 ## Related Modules
 
 - **[Predict](../predict/)**: Base prediction module
-- **[ChainOfThought](../chain_of_thought/)**: Step-by-step reasoning  
+- **[ChainOfThought](../chain_of_thought/)**: Step-by-step reasoning
 - **[BestOfN](../best_of_n/)**: Alternative quality improvement approach
 - **[Retry](../retry/)**: Error recovery and retry mechanisms

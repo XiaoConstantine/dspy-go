@@ -141,7 +141,7 @@ func (es *EnvironmentSource) Load(config *Config, paths []string) error {
 	for key := range envVars {
 		keys = append(keys, key)
 	}
-	
+
 	// Sort by length (descending) then alphabetically for consistent ordering
 	sort.Slice(keys, func(i, j int) bool {
 		if len(keys[i]) != len(keys[j]) {
@@ -1090,16 +1090,16 @@ func (es *EnvironmentSource) parseDuration(value string) (time.Duration, error) 
 	if duration, err := time.ParseDuration(value); err == nil {
 		return duration, nil
 	}
-	
+
 	// If that fails, try parsing as seconds (plain number)
 	if seconds, err := strconv.Atoi(value); err == nil {
 		return time.Duration(seconds) * time.Second, nil
 	}
-	
+
 	// If both fail, try parsing as float seconds
 	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
 		return time.Duration(seconds * float64(time.Second)), nil
 	}
-	
+
 	return 0, fmt.Errorf("invalid duration format: %s", value)
 }

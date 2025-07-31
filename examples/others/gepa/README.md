@@ -7,7 +7,7 @@ This example demonstrates the GEPA optimizer, a state-of-the-art evolutionary ap
 GEPA represents a breakthrough in prompt optimization by combining:
 
 - **Multi-objective Pareto optimization** across 7 dimensions
-- **LLM-based self-reflection** for prompt analysis and critique  
+- **LLM-based self-reflection** for prompt analysis and critique
 - **Semantic diversity metrics** using language model similarity
 - **Elite archive management** preserving diverse high-quality solutions
 - **Real-time system monitoring** with context-aware performance tracking
@@ -19,7 +19,7 @@ GEPA represents a breakthrough in prompt optimization by combining:
 - Success rate, quality, efficiency, robustness, generalization, diversity, innovation
 - Pareto-based selection maintaining diverse trade-off solutions
 
-### 🤔 **LLM-Based Self-Reflection** 
+### 🤔 **LLM-Based Self-Reflection**
 - Language models analyze and critique their own prompt performance
 - Structured feedback with strengths, weaknesses, and improvement suggestions
 - Reflection-driven evolution every few generations
@@ -111,7 +111,7 @@ Elite Solution 1:
   Optimization Focus: High accuracy with detailed reasoning
 
 Elite Solution 2:
-  Generation: 4  
+  Generation: 4
   Fitness: 0.7800
   Instruction: Solve this math problem efficiently with clear steps.
   Optimization Focus: Fast execution with good quality
@@ -146,7 +146,7 @@ This example faithfully implements the key contributions from the GEPA research 
 - Context-aware performance tracking
 - Real-time system monitoring integration
 
-### **Semantic Diversity Assessment**  
+### **Semantic Diversity Assessment**
 - LLM-based similarity for true semantic diversity
 - Beyond simple string matching to meaningful prompt differences
 - Enhanced with cosine similarity and Jaccard coefficients
@@ -158,7 +158,7 @@ This example faithfully implements the key contributions from the GEPA research 
 - **Metric**: Exact answer matching with numerical extraction
 - **Signature**: Question → Reasoning + Answer
 
-### HotPotQA  
+### HotPotQA
 - **Task**: Multi-hop question answering
 - **Metric**: String similarity with partial credit
 - **Signature**: Question → Reasoning + Answer

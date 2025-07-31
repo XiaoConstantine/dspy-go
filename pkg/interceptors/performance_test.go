@@ -51,7 +51,7 @@ func TestMemoryCache(t *testing.T) {
 
 	// Test Stop functionality
 	cache.Stop()
-	
+
 	// Test that cache still works after stop (just cleanup stops)
 	cache.Set("after_stop", "value", time.Second)
 	value, found = cache.Get("after_stop")
@@ -63,10 +63,10 @@ func TestMemoryCache(t *testing.T) {
 func TestMemoryCacheConcurrentAccess(t *testing.T) {
 	cache := NewMemoryCache()
 	defer cache.Stop()
-	
+
 	// Test concurrent access to verify race condition fix
 	done := make(chan bool)
-	
+
 	// Writer goroutine
 	go func() {
 		for i := 0; i < 100; i++ {
@@ -75,7 +75,7 @@ func TestMemoryCacheConcurrentAccess(t *testing.T) {
 		}
 		done <- true
 	}()
-	
+
 	// Reader goroutine
 	go func() {
 		for i := 0; i < 100; i++ {
@@ -84,18 +84,18 @@ func TestMemoryCacheConcurrentAccess(t *testing.T) {
 		}
 		done <- true
 	}()
-	
+
 	// Wait for both goroutines
 	<-done
 	<-done
-	
+
 	// If we get here without panic, the race condition is fixed
 }
 
 func TestMemoryCacheClear(t *testing.T) {
 	cache := NewMemoryCache()
 	defer cache.Stop()
-	
+
 	// Test Clear
 	cache.Set("key1", "value1", time.Second)
 	cache.Set("key2", "value2", time.Second)

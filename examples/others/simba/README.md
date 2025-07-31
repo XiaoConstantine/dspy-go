@@ -60,7 +60,7 @@ The example will show:
 Starting SIMBA optimization with introspective learning...
 SIMBA will:
   • Generate instruction variants using LLM-based perturbation
-  • Evaluate candidates on mini-batches for efficiency  
+  • Evaluate candidates on mini-batches for efficiency
   • Use temperature-controlled sampling for exploration
   • Perform introspective analysis every 2 steps
   • Detect convergence automatically

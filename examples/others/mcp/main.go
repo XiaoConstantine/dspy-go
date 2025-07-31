@@ -73,13 +73,13 @@ func main() {
 	// Load configuration using specified path or automatic discovery
 	var manager *config.Manager
 	var err error
-	
+
 	if *configPath != "" {
 		manager, err = config.NewManager(config.WithConfigPath(*configPath))
 	} else {
 		manager, err = config.NewManager()
 	}
-	
+
 	if err != nil {
 		fmt.Printf("Failed to create config manager: %v\n", err)
 		os.Exit(1)
@@ -101,7 +101,7 @@ func main() {
 
 	// Setup logging from config
 	ctx := core.WithExecutionState(context.Background())
-	
+
 	// Create logger manually from config (since NewFromConfig doesn't exist yet)
 	var outputs []dspyLogging.Output
 	for _, outputCfg := range cfg.Logging.Outputs {
@@ -110,7 +110,7 @@ func main() {
 			outputs = append(outputs, output)
 		}
 	}
-	
+
 	// Convert log level string to severity using utility function
 	severity := dspyLogging.ParseSeverity(cfg.Logging.Level)
 
@@ -129,9 +129,9 @@ func main() {
 	var mcpClients []interface{} // Use interface{} until we fix the type issue
 	for _, serverCfg := range cfg.Tools.MCP.Servers {
 		logger.Info(ctx, "Starting MCP server: %s", serverCfg.Name)
-		
+
 		cmd := exec.Command(serverCfg.Command, serverCfg.Args...)
-		
+
 		// Set environment variables from config
 		if len(serverCfg.Env) > 0 {
 			cmd.Env = os.Environ()
@@ -139,7 +139,7 @@ func main() {
 				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 			}
 		}
-		
+
 		// Set working directory if specified
 		if serverCfg.WorkingDir != "" {
 			cmd.Dir = serverCfg.WorkingDir
@@ -181,7 +181,7 @@ func main() {
 			logger.Warn(ctx, "Failed to create MCP client for %s: %v", serverCfg.Name, err)
 			continue
 		}
-		
+
 		mcpClients = append(mcpClients, mcpClient)
 		logger.Info(ctx, "Successfully connected to MCP server: %s", serverCfg.Name)
 	}

@@ -463,11 +463,11 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, workflow)
-	
+
 	// Verify it's a router workflow (because it contains conditional stages)
 	_, ok := workflow.(*ConditionalRouterWorkflow)
 	assert.True(t, ok, "Complex workflow with conditional stages should create a ConditionalRouterWorkflow")
-	
+
 	// The router workflow should handle conditional routing
 	// We can test its basic functionality by executing it
 	result, err := workflow.Execute(context.Background(), map[string]interface{}{
@@ -476,7 +476,7 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 			"confidence": 0.9, // High confidence should route to "true" branch
 		},
 	})
-	
+
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	// The result should come from the high confidence processor since confidence > 0.8

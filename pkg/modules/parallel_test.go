@@ -150,7 +150,7 @@ func TestParallelBatchProcessing(t *testing.T) {
 	for _, res := range results {
 	output, ok := res["output"].(string)
 	require.True(t, ok)
-	
+
 	// Extract the original input from the output (format: "processed_itemX_call_Y")
 	parts := strings.SplitN(strings.TrimPrefix(output, "processed_"), "_", 2)
 	if len(parts) > 0 {
@@ -187,7 +187,7 @@ func TestParallelWithFailures(t *testing.T) {
 	results, ok := result["results"].([]map[string]interface{})
 	require.True(t, ok)
 	assert.Len(t, results, 2) // Same length as input, but with nil values
-	
+
 	// Check that failed results are nil
 	for _, res := range results {
 		assert.Nil(t, res)
@@ -259,7 +259,7 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 	results, ok := result["results"].([]map[string]interface{})
 	require.True(t, ok)
 	assert.Len(t, results, 4) // Same length as input batch
-	
+
 	// Check results - should have successes for item1,item3 (indices 0,2) and nil for item2,item4 (indices 1,3)
 	successCount := 0
 	nilCount := 0
@@ -281,7 +281,7 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 	failures, ok := result["failures"].([]map[string]interface{})
 	require.True(t, ok)
 	assert.Len(t, failures, 2) // Two failures
-	
+
 	// Check that failure indices are correct
 	for _, failure := range failures {
 		idx := failure["index"].(int)
@@ -422,13 +422,13 @@ func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []core.
 	for _, block := range content {
 		textContent += block.String() + " "
 	}
-	
+
 	chunkChan <- core.StreamChunk{
 		Content: "mock stream response for content: " + textContent,
 		Done:    true,
 	}
 	close(chunkChan)
-	
+
 	return &core.StreamResponse{
 		ChunkChannel: chunkChan,
 		Cancel:       func() {},

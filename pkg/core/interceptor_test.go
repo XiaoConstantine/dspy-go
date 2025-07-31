@@ -383,7 +383,7 @@ func TestChainModuleInterceptors(t *testing.T) {
 
 	t.Run("options propagation", func(t *testing.T) {
 		var receivedOpts []Option
-		
+
 		handlerWithOptionsCheck := func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
 			receivedOpts = opts
 			return mockModuleHandler(ctx, inputs, opts...)
@@ -394,15 +394,15 @@ func TestChainModuleInterceptors(t *testing.T) {
 		}
 
 		chained := ChainModuleInterceptors(interceptor)
-		
+
 		// Create a dummy option for testing
 		testOption := func(*ModuleOptions) {}
-		
+
 		_, err := chained(ctx, inputs, info, handlerWithOptionsCheck, testOption)
 		if err != nil {
 			t.Errorf("Expected no error, got %v", err)
 		}
-		
+
 		if len(receivedOpts) != 1 {
 			t.Errorf("Expected 1 option to be passed through, got %d", len(receivedOpts))
 		}

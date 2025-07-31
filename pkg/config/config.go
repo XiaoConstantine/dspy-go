@@ -349,7 +349,7 @@ type CachingConfig struct {
 	// SQLite specific configuration
 	SQLiteConfig SQLiteCacheConfig `yaml:"sqlite_config,omitempty"`
 
-	// Memory cache specific configuration  
+	// Memory cache specific configuration
 	MemoryConfig MemoryCacheConfig `yaml:"memory_config,omitempty"`
 }
 
@@ -628,4 +628,3 @@ type TPEConfig struct {
 func (c *Config) Validate() error {
 	return ValidateConfiguration(c)
 }
-

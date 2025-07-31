@@ -155,7 +155,7 @@ tasks:<tasks>
 		// Mock the analyzer response in the format expected by Predict module
 		analyzerResp := &core.LLMResponse{
 			Content: `analysis: Task has been analyzed and decomposed for parallel execution
- 
+
  tasks: <tasks>
      <task id="task1" type="test" processor="test" priority="1">
          <description>Parallel task 1</description>
@@ -206,7 +206,7 @@ tasks:<tasks>
 
 		analyzerResp := &core.LLMResponse{
 			Content: `analysis: Task has been analyzed for retry testing
- 
+
  tasks: <tasks>
      <task id="retry-task" type="test" processor="test" priority="1">
          <description>Retry task</description>

@@ -102,7 +102,7 @@ func NewMemoryCache(config CacheConfig) (*MemoryCache, error) {
 	if config.MemoryConfig.CleanupInterval == 0 {
 		config.MemoryConfig.CleanupInterval = time.Minute
 	}
-	
+
 	// Store the config with the corrected cleanup interval
 	cache.config = config
 
@@ -228,7 +228,7 @@ func (c *MemoryCache) Stats() CacheStats {
 	c.mu.RLock()
 	lastAccess := c.stats.LastAccess
 	c.mu.RUnlock()
-	
+
 	return CacheStats{
 		Hits:       atomic.LoadInt64(&c.stats.Hits),
 		Misses:     atomic.LoadInt64(&c.stats.Misses),
@@ -284,10 +284,10 @@ func (c *MemoryCache) cleanupRoutine() {
 
 func (c *MemoryCache) cleanupExpired() {
 	now := time.Now()
-	
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	var keysToDelete []string
 	for key, entry := range c.entries {
 		if entry.expiresAt.After(time.Time{}) && now.After(entry.expiresAt) {

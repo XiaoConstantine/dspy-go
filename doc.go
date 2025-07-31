@@ -158,17 +158,17 @@
 //	        []core.InputField{{Field: core.Field{Name: "question"}}},
 //	        []core.OutputField{{Field: core.Field{Name: "answer"}}},
 //	    )
-//	    
+//
 //	    cot := modules.NewChainOfThought(signature)
 //	    cot.SetLLM(llm) // Use LiteLLM, LocalAI, or custom provider
-//	    
+//
 //	    result, err := cot.Process(context.Background(), map[string]interface{}{
 //	        "question": "What are the benefits of using OpenAI-compatible APIs?",
 //	    })
 //	    if err != nil {
 //	        log.Fatalf("Error processing: %v", err)
 //	    }
-//	    
+//
 //	    fmt.Printf("Answer: %s\n", result["answer"])
 //	}
 //
@@ -252,7 +252,7 @@
 //	        []core.InputField{{Field: core.Field{Name: "question"}}},
 //	        []core.OutputField{{Field: core.Field{Name: "answer"}}},
 //	    )
-//	    
+//
 //	    module := modules.NewPredict(signature)
 //	    program := core.NewProgram(
 //	        map[string]core.Module{"predictor": module},
@@ -308,7 +308,7 @@
 //	    fmt.Printf("Optimization completed in %d generations\n", state.CurrentGeneration)
 //	    fmt.Printf("Best fitness achieved: %.3f\n", state.BestFitness)
 //	    fmt.Printf("Best prompt: %s\n", state.BestCandidate.Instruction)
-//	    
+//
 //	    // Access Pareto archive of elite solutions
 //	    archive := state.GetParetoArchive()
 //	    fmt.Printf("Elite solutions in archive: %d\n", len(archive))
@@ -333,7 +333,7 @@
 //
 //   - Metric-Based Optimization: Improve module performance based on custom evaluation metrics
 //
-//   - Smart Tool Management: Intelligent tool selection, performance tracking, auto-discovery, 
+//   - Smart Tool Management: Intelligent tool selection, performance tracking, auto-discovery,
 //     chaining, and composition for building complex tool workflows
 //
 //   - Custom Tool Integration: Extend ReAct modules with domain-specific tools
@@ -392,7 +392,7 @@
 //	    Outputs: []string{"raw_data"},
 //	})
 //	graph.AddNode(&tools.DependencyNode{
-//	    ToolName: "validator", 
+//	    ToolName: "validator",
 //	    Dependencies: []string{"extractor"},
 //	    Inputs: []string{"raw_data"},
 //	})
@@ -413,12 +413,12 @@
 //	    name     string
 //	    pipeline *tools.ToolPipeline
 //	}
-//	
-//	textProcessor, err := NewCompositeTool("text_processor", registry, 
+//
+//	textProcessor, err := NewCompositeTool("text_processor", registry,
 //	    func(builder *tools.PipelineBuilder) *tools.PipelineBuilder {
 //	        return builder.Step("uppercase").Step("reverse").Step("length")
 //	    })
-//	
+//
 //	// Register and use composite tool like any other tool
 //	registry.Register(textProcessor)
 //	result, err := textProcessor.Execute(ctx, input)
@@ -455,7 +455,7 @@
 //	    Module: modules.NewPredict(signature1),
 //	})
 //	workflow.AddStep(&workflows.Step{
-//	    ID: "step2", 
+//	    ID: "step2",
 //	    Module: modules.NewPredict(signature2),
 //	    // Configurable retry logic
 //	    RetryConfig: &workflows.RetryConfig{

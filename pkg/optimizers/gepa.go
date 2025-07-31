@@ -960,7 +960,7 @@ Instruction 2: "%s"
 
 Consider:
 - Core intent and purpose
-- Task complexity and scope  
+- Task complexity and scope
 - Semantic meaning beyond word overlap
 - Functional equivalence
 
@@ -4029,7 +4029,7 @@ Parent 1 (fitness: %.3f): "%s"
 Parent 2 (fitness: %.3f): "%s"
 
 Generate two offspring that:
-1. Combine semantic elements from both parents  
+1. Combine semantic elements from both parents
 2. Maintain clarity and effectiveness
 3. Create novel but coherent instructions
 4. Each offspring should be on a separate line

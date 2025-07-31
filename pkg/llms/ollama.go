@@ -72,12 +72,12 @@ func NewOllamaLLM(modelID core.ModelID, options ...OllamaOption) (*OllamaLLM, er
 		BaseURL:     "http://localhost:11434",
 		Timeout:     60,
 	}
-	
+
 	// Apply options to override defaults
 	for _, option := range options {
 		option(&config)
 	}
-	
+
 	return newOllamaLLMWithConfig(config, modelID)
 }
 
@@ -89,7 +89,7 @@ func NewOllamaLLMFromConfig(ctx context.Context, config core.ProviderConfig, mod
 			errors.Wrap(err, errors.InvalidInput, "failed to parse Ollama configuration"),
 			errors.Fields{"model": modelID})
 	}
-	
+
 	return newOllamaLLMWithConfig(ollamaConfig, modelID)
 }
 
@@ -111,7 +111,7 @@ func newOllamaLLMWithConfig(config OllamaConfig, modelID core.ModelID) (*OllamaL
 		if config.APIKey != "" {
 			headers["Authorization"] = "Bearer " + config.APIKey
 		}
-		
+
 		endpointCfg = &core.EndpointConfig{
 			BaseURL:    config.BaseURL,
 			Path:       "/v1/chat/completions",
@@ -232,7 +232,7 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 			errors.Fields{"model": o.ModelID()})
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", 
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
 		o.GetEndpointConfig().BaseURL+"/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, errors.WithFields(
@@ -323,7 +323,7 @@ func (o *OllamaLLM) generateNative(ctx context.Context, prompt string, options .
 			errors.Fields{"model": o.ModelID()})
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", 
+	req, err := http.NewRequestWithContext(ctx, "POST",
 		o.GetEndpointConfig().BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, errors.WithFields(
@@ -708,7 +708,7 @@ func (o *OllamaLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 			textContent += block.Text + "\n"
 		}
 	}
-	
+
 	if textContent == "" {
 		return nil, errors.WithFields(
 			errors.New(errors.UnsupportedOperation, "multimodal content not yet supported for Ollama"),
@@ -717,7 +717,7 @@ func (o *OllamaLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 				"model":    o.ModelID(),
 			})
 	}
-	
+
 	return o.Generate(ctx, strings.TrimSpace(textContent), options...)
 }
 
@@ -730,7 +730,7 @@ func (o *OllamaLLM) StreamGenerateWithContent(ctx context.Context, content []cor
 			textContent += block.Text + "\n"
 		}
 	}
-	
+
 	if textContent == "" {
 		return nil, errors.WithFields(
 			errors.New(errors.UnsupportedOperation, "multimodal streaming not yet supported for Ollama"),
@@ -739,7 +739,7 @@ func (o *OllamaLLM) StreamGenerateWithContent(ctx context.Context, content []cor
 				"model":    o.ModelID(),
 			})
 	}
-	
+
 	return o.StreamGenerate(ctx, strings.TrimSpace(textContent), options...)
 }
 

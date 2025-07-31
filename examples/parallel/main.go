@@ -145,7 +145,7 @@ func runSentimentAnalysisExample(ctx context.Context) {
 
 	for i, res := range results {
 	if res != nil {
-	fmt.Printf("Review %d: %s (confidence: %s)\n", 
+	fmt.Printf("Review %d: %s (confidence: %s)\n",
 	   i+1, res["sentiment"], res["confidence"])
 		} else {
 			fmt.Printf("Review %d: [FAILED]\n", i+1)
@@ -208,10 +208,10 @@ func runTranslationExample(ctx context.Context) {
 	for i, res := range results {
 	original := translations[i]
 	if res != nil {
-	fmt.Printf("%s → %s: %s\n", 
+	fmt.Printf("%s → %s: %s\n",
 	   original["text"], original["target_language"], res["translation"])
 		} else {
-			fmt.Printf("%s → %s: [FAILED]\n", 
+			fmt.Printf("%s → %s: [FAILED]\n",
 				original["text"], original["target_language"])
 		}
 	}

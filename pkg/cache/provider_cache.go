@@ -145,11 +145,11 @@ func WithCacheMiddleware(middleware *Middleware) ProviderOption {
 //         model:  model,
 //         cache:  &cache.ProviderCache{},
 //     }
-//     
+//
 //     for _, opt := range opts {
 //         opt(p.cache)
 //     }
-//     
+//
 //     return p
 // }
 //

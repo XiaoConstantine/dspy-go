@@ -95,7 +95,7 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
             3. Explain any charges or discrepancies clearly
             4. List concrete next steps with timeline
             5. End with payment options if relevant
-            
+
             Keep responses professional but friendly.,
 	    Input:`,
 
@@ -105,7 +105,7 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
             3. Include system requirements if relevant
             4. Provide workarounds for common problems
             5. End with escalation path if needed
-            
+
             Use clear, numbered steps and technical details.
 		Input:`,
 		"account": `You are an account security specialist. Follow these guidelines:
@@ -114,7 +114,7 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
 	        3. Provide clear steps for account recovery/changes
 	        4. Include security tips and warnings
 		5. Set clear expectations for resolution time
-    
+
 		Maintain a serious, security-focused tone.
 		Input:`,
 		"product": `You are a product specialist. Follow these guidelines:
@@ -123,14 +123,14 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
     3. Include specific examples of usage
     4. Link to relevant documentation sections
     5. Suggest related features that might help
-    
+
     Be educational and encouraging in tone.
 		Input:`,
 	}
 	tickets := []string{
 		`Subject: Can't access my account
-        Message: Hi, I've been trying to log in for the past hour but keep getting an 'invalid password' error. 
-        I'm sure I'm using the right password. Can you help me regain access? This is urgent as I need to 
+        Message: Hi, I've been trying to log in for the past hour but keep getting an 'invalid password' error.
+        I'm sure I'm using the right password. Can you help me regain access? This is urgent as I need to
         submit a report by end of day.
         - John`,
 		`Subject: Unexpected charge on my card

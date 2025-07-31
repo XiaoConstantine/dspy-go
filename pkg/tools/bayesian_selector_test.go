@@ -50,10 +50,10 @@ func TestBayesianToolSelector_ScoreTools(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			scores, err := selector.ScoreTools(ctx, tt.intent, tools)
-			
+
 			require.NoError(t, err)
 			assert.Len(t, scores, tt.minScores)
-			
+
 			// Find the best scoring tool
 			var bestScore ToolScore
 			for _, score := range scores {
@@ -61,7 +61,7 @@ func TestBayesianToolSelector_ScoreTools(t *testing.T) {
 					bestScore = score
 				}
 			}
-			
+
 			assert.Equal(t, tt.expectedBest, bestScore.Tool.Name())
 			assert.True(t, bestScore.FinalScore > 0)
 			assert.True(t, bestScore.MatchScore >= 0)
@@ -101,7 +101,7 @@ func TestBayesianToolSelector_SelectBest(t *testing.T) {
 
 	ctx := context.Background()
 	bestTool, err := selector.SelectBest(ctx, "test intent", scores)
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, "high", bestTool.Name())
 }
@@ -208,7 +208,7 @@ func TestBayesianToolSelector_CalculateMatchScore(t *testing.T) {
 	selector := NewBayesianToolSelector()
 
 	tool := newMockTool("search_engine", "A tool to search for information", []string{"search"})
-	
+
 	tests := []struct {
 		name         string
 		intentTokens []string
@@ -359,7 +359,7 @@ func TestBayesianToolSelector_UpdatePriorProbabilities(t *testing.T) {
 
 func TestBayesianToolSelector_CalculateFinalScore(t *testing.T) {
 	selector := NewBayesianToolSelector()
-	
+
 	// Set up prior probabilities
 	selector.PriorProbabilities["test_tool"] = 0.8
 
@@ -406,7 +406,7 @@ func TestBayesianToolSelector_EmptyInputs(t *testing.T) {
 
 func BenchmarkBayesianToolSelector_ScoreTools(b *testing.B) {
 	selector := NewBayesianToolSelector()
-	
+
 	// Create a larger set of tools
 	tools := make([]core.Tool, 100)
 	for i := 0; i < 100; i++ {

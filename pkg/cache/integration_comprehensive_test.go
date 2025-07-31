@@ -179,7 +179,7 @@ func TestCachedLLM_GenerateWithFunctions(t *testing.T) {
 
 		result, err := cachedLLM.GenerateWithFunctions(ctx, prompt, functions)
 		assert.NoError(t, err)
-		
+
 		// Verify the result structure
 		assert.Contains(t, result, "function_call")
 
@@ -300,7 +300,7 @@ func TestGlobalCacheFunctions(t *testing.T) {
 
 		// Test SetGlobalCacheEnabled false
 		SetGlobalCacheEnabled(false)
-		
+
 		// Clean up
 		resetGlobalCache()
 	})

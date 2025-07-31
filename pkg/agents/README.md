@@ -13,25 +13,25 @@ sequenceDiagram
 
     Client->>Orchestrator: Process(task, context)
     activate Orchestrator
-    
+
     Note over Orchestrator,Analyzer: Phase 1: Task Analysis
     Orchestrator->>Analyzer: Analyze task breakdown
     activate Analyzer
     Analyzer-->>Orchestrator: Raw analysis output (XML format)
     deactivate Analyzer
-    
+
     Note over Orchestrator,TaskParser: Phase 2: Task Parsing
     Orchestrator->>TaskParser: Parse(analyzerOutput)
     activate TaskParser
     TaskParser-->>Orchestrator: Structured Task objects
     deactivate TaskParser
-    
+
     Note over Orchestrator,PlanCreator: Phase 3: Plan Creation
     Orchestrator->>PlanCreator: CreatePlan(tasks)
     activate PlanCreator
     PlanCreator-->>Orchestrator: Execution phases
     deactivate PlanCreator
-    
+
     Note over Orchestrator,Processor: Phase 4: Execution
     loop For each phase
         loop For each task in phase (parallel)
@@ -41,7 +41,7 @@ sequenceDiagram
             deactivate Processor
         end
     end
-    
+
     Orchestrator-->>Client: OrchestratorResult
     deactivate Orchestrator
 ```
@@ -88,7 +88,7 @@ Error handling and retry flow explained
 stateDiagram-v2
     [*] --> TaskReceived
     TaskReceived --> Analyzing
-    
+
     state Analyzing {
         [*] --> AttemptAnalysis
         AttemptAnalysis --> AnalysisSuccess
@@ -97,7 +97,7 @@ stateDiagram-v2
         RetryAnalysis --> AttemptAnalysis
         AnalysisFailure --> AnalysisFailed: Retry >= MaxAttempts
     }
-    
+
     state Execution {
         [*] --> ExecuteTask
         ExecuteTask --> TaskSuccess
@@ -106,7 +106,7 @@ stateDiagram-v2
         RetryTask --> ExecuteTask
         TaskFailure --> TaskFailed: Retry >= MaxAttempts
     }
-    
+
     Analyzing --> Execution: Analysis Success
     Analyzing --> [*]: Analysis Failed
     Execution --> [*]: All Tasks Complete/Failed

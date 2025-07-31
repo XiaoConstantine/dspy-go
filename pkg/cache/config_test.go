@@ -31,7 +31,7 @@ func TestLoadCacheConfig(t *testing.T) {
 
 	t.Run("Default config with nil file config", func(t *testing.T) {
 		cfg := LoadCacheConfig(nil)
-		
+
 		assert.Equal(t, "memory", cfg.Type)
 		assert.Equal(t, time.Hour, cfg.DefaultTTL)
 		assert.Equal(t, int64(100*1024*1024), cfg.MaxSize)
@@ -54,7 +54,7 @@ func TestLoadCacheConfig(t *testing.T) {
 		}
 
 		cfg := LoadCacheConfig(fileConfig)
-		
+
 		assert.Equal(t, "sqlite", cfg.Type)
 		assert.Equal(t, 2*time.Hour, cfg.DefaultTTL)
 		assert.Equal(t, int64(200*1024*1024), cfg.MaxSize)
@@ -80,7 +80,7 @@ func TestLoadCacheConfig(t *testing.T) {
 		}
 
 		cfg := LoadCacheConfig(fileConfig)
-		
+
 		assert.Equal(t, "sqlite", cfg.Type)
 		homeDir, _ := os.UserHomeDir()
 		expectedPath := filepath.Join(homeDir, ".dspy", "cache.db")
@@ -100,7 +100,7 @@ func TestLoadCacheConfig(t *testing.T) {
 		}
 
 		cfg := LoadCacheConfig(fileConfig)
-		
+
 		assert.Equal(t, "memory", cfg.Type)
 		assert.Equal(t, 30*time.Second, cfg.MemoryConfig.CleanupInterval)
 		assert.Equal(t, 32, cfg.MemoryConfig.ShardCount)
@@ -150,7 +150,7 @@ func TestApplyEnvConfig(t *testing.T) {
 		os.Setenv("DSPY_CACHE_WAL", "true")
 		os.Setenv("DSPY_CACHE_VACUUM_INTERVAL", "12h")
 		os.Setenv("DSPY_CACHE_MAX_CONNECTIONS", "25")
-		
+
 		defer func() {
 			for _, envVar := range envVars {
 				os.Unsetenv(envVar)
@@ -158,7 +158,7 @@ func TestApplyEnvConfig(t *testing.T) {
 		}()
 
 		cfg := LoadCacheConfig(nil)
-		
+
 		assert.Equal(t, "sqlite", cfg.Type)
 		assert.Equal(t, 2*time.Hour, cfg.DefaultTTL)
 		assert.Equal(t, int64(500*1024*1024), cfg.MaxSize)
@@ -172,7 +172,7 @@ func TestApplyEnvConfig(t *testing.T) {
 		os.Setenv("DSPY_CACHE_TYPE", "memory")
 		os.Setenv("DSPY_CACHE_CLEANUP_INTERVAL", "30s")
 		os.Setenv("DSPY_CACHE_SHARD_COUNT", "32")
-		
+
 		defer func() {
 			for _, envVar := range envVars {
 				os.Unsetenv(envVar)
@@ -180,7 +180,7 @@ func TestApplyEnvConfig(t *testing.T) {
 		}()
 
 		cfg := LoadCacheConfig(nil)
-		
+
 		assert.Equal(t, "memory", cfg.Type)
 		assert.Equal(t, 30*time.Second, cfg.MemoryConfig.CleanupInterval)
 		assert.Equal(t, 32, cfg.MemoryConfig.ShardCount)
@@ -191,7 +191,7 @@ func TestApplyEnvConfig(t *testing.T) {
 		os.Setenv("DSPY_CACHE_MAX_SIZE", "invalid")
 		os.Setenv("DSPY_CACHE_MAX_CONNECTIONS", "invalid")
 		os.Setenv("DSPY_CACHE_SHARD_COUNT", "invalid")
-		
+
 		defer func() {
 			for _, envVar := range envVars {
 				os.Unsetenv(envVar)
@@ -199,7 +199,7 @@ func TestApplyEnvConfig(t *testing.T) {
 		}()
 
 		cfg := LoadCacheConfig(nil)
-		
+
 		// Should use default values
 		assert.Equal(t, time.Hour, cfg.DefaultTTL)
 		assert.Equal(t, int64(100*1024*1024), cfg.MaxSize)
@@ -332,7 +332,7 @@ func TestGetDefaultCacheConfig(t *testing.T) {
 	}
 
 	cfg := GetDefaultCacheConfig()
-	
+
 	assert.Equal(t, "memory", cfg.Type)
 	assert.Equal(t, time.Hour, cfg.DefaultTTL)
 	assert.Equal(t, int64(100*1024*1024), cfg.MaxSize)

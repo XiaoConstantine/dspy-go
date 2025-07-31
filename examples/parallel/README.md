@@ -73,14 +73,14 @@ parallel := modules.NewParallel(module,
 2. **Collect Failures**:
    ```go
    // Failed inputs are included in the output with error details
-   parallel := modules.NewParallel(module, 
+   parallel := modules.NewParallel(module,
        modules.WithReturnFailures(true))
    ```
 
 3. **Stop on First Error**:
    ```go
    // Processing stops immediately when any input fails
-   parallel := modules.NewParallel(module, 
+   parallel := modules.NewParallel(module,
        modules.WithStopOnFirstError(true))
    ```
 
