@@ -197,7 +197,7 @@ func (tm *TestModule) Process(ctx context.Context, inputs map[string]any, opts .
 }
 
 func (tm *TestModule) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, opts ...Option) (map[string]any, error) {
-	return tm.processWithInterceptorsImpl(ctx, inputs, interceptors, tm.Process, opts...)
+	return tm.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, tm.Process, opts...)
 }
 
 func (tm *TestModule) Clone() Module {
@@ -216,7 +216,7 @@ func (em *ErrorModule) Process(ctx context.Context, inputs map[string]any, opts 
 }
 
 func (em *ErrorModule) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, opts ...Option) (map[string]any, error) {
-	return em.processWithInterceptorsImpl(ctx, inputs, interceptors, em.Process, opts...)
+	return em.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, em.Process, opts...)
 }
 
 func (em *ErrorModule) Clone() Module {

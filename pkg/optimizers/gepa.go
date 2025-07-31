@@ -2822,8 +2822,8 @@ func (g *GEPA) installInterceptors(program core.Program) core.Program {
 
 	// Apply interceptors to all modules that support them
 	for name, module := range clonedProgram.Modules {
-		if interceptable, ok := module.(interface{ SetInterceptors(*core.InterceptorChain) }); ok {
-			interceptable.SetInterceptors(chain)
+		if interceptable, ok := module.(core.InterceptableModule); ok {
+			interceptable.SetInterceptors(chain.GetModuleInterceptors())
 		} else {
 			// Log warning if module doesn't support interceptors
 			logging.GetLogger().Warn(context.Background(),

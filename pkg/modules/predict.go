@@ -21,6 +21,7 @@ type Predict struct {
 
 // Ensure Predict implements core.Module.
 var _ core.Module = (*Predict)(nil)
+var _ core.InterceptableModule = (*Predict)(nil)
 
 // Ensure Predict implements demo interfaces for saving/loading.
 var _ core.DemoProvider = (*Predict)(nil)
@@ -93,27 +94,27 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	}
 
 	signature := p.GetSignature()
-	
+
 	// Check if inputs contain multimodal content
 	if core.IsMultimodalContent(signature, inputs) {
 		// Use structured content approach
 		content := core.ConvertInputsToContentBlocks(signature, inputs)
 		logger.Debug(ctx, "Using multimodal content generation with %d blocks", len(content))
-		
+
 		resp, err := p.LLM.GenerateWithContent(ctx, content, finalOptions.GenerateOptions...)
 		if err != nil {
 			span.WithError(err)
 			return nil, errors.WithFields(
 				errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate multimodal prediction"),
 				errors.Fields{
-					"module": "Predict",
+					"module":         "Predict",
 					"content_blocks": len(content),
-					"model":  p.LLM,
+					"model":          p.LLM,
 				})
 		}
-		
+
 		logger.Debug(ctx, "LLM Multimodal Completion: %v", resp.Content)
-		
+
 		if resp.Usage != nil {
 			if state := core.GetExecutionState(ctx); state != nil {
 				state.WithTokenUsage(&core.TokenUsage{
@@ -123,15 +124,15 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 				})
 			}
 		}
-		
+
 		// Parse the response (same as text-based)
 		cleaned := stripMarkdown(resp.Content, signature)
 		outputs := parseCompletion(cleaned, signature)
 		formattedOutputs := p.FormatOutputs(outputs)
-		
+
 		return formattedOutputs, nil
 	}
-	
+
 	// Fall back to traditional text-based approach
 	prompt := formatPrompt(signature, p.Demos, inputs)
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
@@ -705,4 +706,10 @@ func parseJSONResponse(content string, signature core.Signature) string {
 	}
 
 	return strings.TrimSpace(result.String())
+}
+
+// ProcessWithInterceptors executes the module's logic with interceptor support.
+func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
+	// Use the BaseModule's helper method with our own Process implementation
+	return p.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, p.Process, opts...)
 }

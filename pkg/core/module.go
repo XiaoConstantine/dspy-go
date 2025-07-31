@@ -173,12 +173,12 @@ func (bm *BaseModule) Clone() Module {
 func (bm *BaseModule) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, opts ...Option) (map[string]any, error) {
 	// This is a fallback implementation that uses the BaseModule's Process method.
 	// Concrete types should override this method to call their own Process implementation.
-	return bm.processWithInterceptorsImpl(ctx, inputs, interceptors, bm.Process, opts...)
+	return bm.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, bm.Process, opts...)
 }
 
-// processWithInterceptorsImpl is a helper method that implements the interceptor logic.
+// ProcessWithInterceptorsImpl is a helper method that implements the interceptor logic.
 // It accepts a process function as a parameter to allow concrete types to pass their own Process method.
-func (bm *BaseModule) processWithInterceptorsImpl(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, processFunc func(context.Context, map[string]any, ...Option) (map[string]any, error), opts ...Option) (map[string]any, error) {
+func (bm *BaseModule) ProcessWithInterceptorsImpl(ctx context.Context, inputs map[string]any, interceptors []ModuleInterceptor, processFunc func(context.Context, map[string]any, ...Option) (map[string]any, error), opts ...Option) (map[string]any, error) {
 	// Use provided interceptors, or fall back to module's default interceptors
 	if interceptors == nil {
 		interceptors = bm.interceptors
