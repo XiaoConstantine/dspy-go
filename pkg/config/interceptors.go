@@ -8,6 +8,43 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 )
 
+// Default values for interceptor configurations.
+const (
+	// Default timeouts.
+	DefaultModuleTimeout = 30 * time.Second
+	DefaultAgentTimeout  = 60 * time.Second
+	DefaultToolTimeout   = 30 * time.Second
+
+	// Default cache TTL.
+	DefaultCacheTTL = 5 * time.Minute
+
+	// Default circuit breaker settings.
+	DefaultFailureThreshold = 5
+	DefaultRecoveryTimeout  = 30 * time.Second
+	DefaultHalfOpenRequests = 3
+
+	// Default retry settings.
+	DefaultMaxRetries     = 3
+	DefaultInitialBackoff = 100 * time.Millisecond
+	DefaultMaxBackoff     = 10 * time.Second
+	DefaultBackoffFactor  = 2.0
+
+	// Default rate limiting.
+	DefaultRequestsPerMinute = 60
+	DefaultBurstSize         = 10
+	DefaultRateWindow        = 1 * time.Minute
+
+	// Default validation settings.
+	DefaultMaxStringLength = 1000
+	DefaultMaxInputSize    = 1024 * 1024 // 1MB
+
+	// Default sanitization settings.
+	DefaultSanitizationMaxLength = 10240 // 10KB
+
+	// Default audit settings.
+	DefaultAuditLogLevel = "INFO"
+)
+
 // InterceptorBuilder provides a fluent interface for building interceptor chains from configuration.
 type InterceptorBuilder struct {
 	config *InterceptorsConfig
@@ -23,9 +60,11 @@ func (b *InterceptorBuilder) createCache(config CachingInterceptorConfig) (inter
 	switch config.Type {
 	case "memory", "":
 		// Default to memory cache
+		// Default to memory cache
+		// TODO: Apply MaxSize configuration when cache interface supports it
 		return interceptors.NewMemoryCache(), nil
 	case "sqlite":
-		// TODO: Implement SQLite cache when available
+		// Return error instead of silent fallback to prevent security issues
 		return nil, fmt.Errorf("sqlite cache is not yet implemented")
 	default:
 		return nil, fmt.Errorf("unsupported cache type: %s", config.Type)
@@ -60,7 +99,7 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache: %w", err)
 		}
-		ttl := 5 * time.Minute // Default TTL
+		ttl := DefaultCacheTTL
 		if moduleConfig.Caching.TTL > 0 {
 			ttl = moduleConfig.Caching.TTL
 		}
@@ -68,7 +107,7 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	}
 
 	if moduleConfig.Timeout.Enabled {
-		timeout := 30 * time.Second // Default timeout
+		timeout := DefaultModuleTimeout
 		if moduleConfig.Timeout.Timeout > 0 {
 			timeout = moduleConfig.Timeout.Timeout
 		} else if b.config.Global.DefaultTimeout > 0 {
@@ -78,9 +117,9 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	}
 
 	if moduleConfig.CircuitBreaker.Enabled {
-		failureThreshold := 5
-		recoveryTimeout := 30 * time.Second
-		halfOpenRequests := 3
+		failureThreshold := DefaultFailureThreshold
+		recoveryTimeout := DefaultRecoveryTimeout
+		halfOpenRequests := DefaultHalfOpenRequests
 
 		if moduleConfig.CircuitBreaker.FailureThreshold > 0 {
 			failureThreshold = moduleConfig.CircuitBreaker.FailureThreshold
@@ -98,10 +137,10 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 
 	if moduleConfig.Retry.Enabled {
 		config := interceptors.RetryConfig{
-			MaxAttempts: 3,
-			Delay:       100 * time.Millisecond,
-			MaxBackoff:  10 * time.Second, // Default max backoff
-			Backoff:     2.0,
+			MaxAttempts: DefaultMaxRetries,
+			Delay:       DefaultInitialBackoff,
+			MaxBackoff:  DefaultMaxBackoff,
+			Backoff:     DefaultBackoffFactor,
 		}
 		if moduleConfig.Retry.MaxRetries > 0 {
 			config.MaxAttempts = moduleConfig.Retry.MaxRetries
@@ -122,7 +161,7 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	if moduleConfig.Validation.Enabled {
 		config := interceptors.ValidationConfig{
 			MaxInputSize:    int(moduleConfig.Validation.MaxInputSize),
-			MaxStringLength: 1000, // Default string length limit
+			MaxStringLength: DefaultMaxStringLength,
 			RequiredFields:  moduleConfig.Validation.RequiredFields,
 			AllowHTML:       !moduleConfig.Validation.StrictMode, // Invert strict mode
 		}
@@ -157,11 +196,9 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	}
 
 	if moduleConfig.Sanitization.Enabled {
-		// TODO: The current SanitizingModuleInterceptor doesn't accept configuration.
+		// TODO: Current SanitizingModuleInterceptor doesn't accept configuration.
 		// Configuration values (RemoveHTML, RemoveSQL, RemoveScript, CustomPatterns, MaxStringLength)
-		// are currently ignored. The interceptor uses hardcoded sanitization rules:
-		// - HTML escaping, null byte removal, newline normalization, 10KB string limit
-		// To fully implement configuration, the interceptor would need to accept SanitizationConfig
+		// will be used when the interceptor is enhanced to accept SanitizationConfig
 		moduleInterceptors = append(moduleInterceptors, interceptors.SanitizingModuleInterceptor())
 	}
 
@@ -198,8 +235,8 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 
 	// Performance interceptors
 	if agentConfig.RateLimit.Enabled {
-		limit := 60 // requests per minute
-		window := 1 * time.Minute
+		limit := DefaultRequestsPerMinute
+		window := DefaultRateWindow
 
 		if agentConfig.RateLimit.RequestsPerMinute > 0 {
 			limit = agentConfig.RateLimit.RequestsPerMinute
@@ -207,15 +244,15 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 		if agentConfig.RateLimit.WindowSize > 0 {
 			window = agentConfig.RateLimit.WindowSize
 		}
-		// TODO: BurstSize field from RateLimitInterceptorConfig is not implemented
-		// The underlying RateLimiter uses a sliding window algorithm without burst capability
-		// Consider implementing token bucket algorithm if burst functionality is needed
+		// TODO: BurstSize configuration is not yet supported by RateLimitingAgentInterceptor
+		// The current implementation only accepts limit and window parameters
+		// if agentConfig.RateLimit.BurstSize > 0 { burstSize = agentConfig.RateLimit.BurstSize }
 
 		agentInterceptors = append(agentInterceptors, interceptors.RateLimitingAgentInterceptor(limit, window))
 	}
 
 	if agentConfig.Timeout.Enabled {
-		timeout := 60 * time.Second // Default timeout for agents
+		timeout := DefaultAgentTimeout
 		if agentConfig.Timeout.Timeout > 0 {
 			timeout = agentConfig.Timeout.Timeout
 		} else if b.config.Global.DefaultTimeout > 0 {
@@ -244,8 +281,9 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 	}
 
 	if agentConfig.Audit.Enabled {
-		// TODO: Implement proper audit interceptor with AuditInterceptorConfig
-		// Returning error to avoid silent failure and false sense of security
+		// TODO: Audit interceptor is not yet implemented in the interceptors package
+		// Configuration values (LogLevel, IncludeInput, IncludeOutput, AuditPath)
+		// will be used when the audit interceptor is implemented
 		return nil, fmt.Errorf("audit interceptor is not yet implemented")
 	}
 
@@ -286,7 +324,7 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache: %w", err)
 		}
-		ttl := 5 * time.Minute // Default TTL
+		ttl := DefaultCacheTTL
 		if toolConfig.Caching.TTL > 0 {
 			ttl = toolConfig.Caching.TTL
 		}
@@ -294,7 +332,7 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 	}
 
 	if toolConfig.Timeout.Enabled {
-		timeout := 30 * time.Second // Default timeout
+		timeout := DefaultToolTimeout
 		if toolConfig.Timeout.Timeout > 0 {
 			timeout = toolConfig.Timeout.Timeout
 		} else if b.config.Global.DefaultTimeout > 0 {
@@ -307,7 +345,7 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 	if toolConfig.Validation.Enabled {
 		config := interceptors.ValidationConfig{
 			MaxInputSize:    int(toolConfig.Validation.MaxInputSize),
-			MaxStringLength: 1000, // Default string length limit
+			MaxStringLength: DefaultMaxStringLength,
 			RequiredFields:  toolConfig.Validation.RequiredFields,
 			AllowHTML:       !toolConfig.Validation.StrictMode,
 		}
@@ -340,11 +378,9 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 	}
 
 	if toolConfig.Sanitization.Enabled {
-		// TODO: The current SanitizingToolInterceptor doesn't accept configuration.
+		// TODO: Current SanitizingToolInterceptor doesn't accept configuration.
 		// Configuration values (RemoveHTML, RemoveSQL, RemoveScript, CustomPatterns, MaxStringLength)
-		// are currently ignored. The interceptor uses hardcoded sanitization rules:
-		// - HTML escaping, null byte removal, newline normalization, 10KB string limit
-		// To fully implement configuration, the interceptor would need to accept SanitizationConfig
+		// will be used when the interceptor is enhanced to accept SanitizationConfig
 		toolInterceptors = append(toolInterceptors, interceptors.SanitizingToolInterceptor())
 	}
 
@@ -393,7 +429,7 @@ func SetupStandardInterceptors() *InterceptorsConfig {
 	return &InterceptorsConfig{
 		Global: GlobalInterceptorConfig{
 			Enabled:            true,
-			DefaultTimeout:     30 * time.Second,
+			DefaultTimeout:     DefaultModuleTimeout,
 			MaxChainLength:     10,
 			MonitorPerformance: true,
 		},
@@ -401,23 +437,23 @@ func SetupStandardInterceptors() *InterceptorsConfig {
 			Logging:    InterceptorToggle{Enabled: true},
 			Metrics:    InterceptorToggle{Enabled: true},
 			Tracing:    InterceptorToggle{Enabled: true},
-			Caching:    CachingInterceptorConfig{Enabled: true, TTL: 5 * time.Minute, Type: "memory"},
-			Timeout:    TimeoutInterceptorConfig{Enabled: true, Timeout: 30 * time.Second},
+			Caching:    CachingInterceptorConfig{Enabled: true, TTL: DefaultCacheTTL, Type: "memory"},
+			Timeout:    TimeoutInterceptorConfig{Enabled: true, Timeout: DefaultModuleTimeout},
 			Validation: ValidationInterceptorConfig{Enabled: true, StrictMode: false},
 		},
 		Agent: AgentInterceptorsConfig{
 			Logging:   InterceptorToggle{Enabled: true},
 			Metrics:   InterceptorToggle{Enabled: true},
 			Tracing:   InterceptorToggle{Enabled: true},
-			RateLimit: RateLimitInterceptorConfig{Enabled: true, RequestsPerMinute: 60, BurstSize: 10},
-			Timeout:   TimeoutInterceptorConfig{Enabled: true, Timeout: 60 * time.Second},
+			RateLimit: RateLimitInterceptorConfig{Enabled: true, RequestsPerMinute: DefaultRequestsPerMinute, BurstSize: DefaultBurstSize},
+			Timeout:   TimeoutInterceptorConfig{Enabled: true, Timeout: DefaultAgentTimeout},
 		},
 		Tool: ToolInterceptorsConfig{
 			Logging:    InterceptorToggle{Enabled: true},
 			Metrics:    InterceptorToggle{Enabled: true},
 			Tracing:    InterceptorToggle{Enabled: true},
-			Caching:    CachingInterceptorConfig{Enabled: true, TTL: 5 * time.Minute, Type: "memory"},
-			Timeout:    TimeoutInterceptorConfig{Enabled: true, Timeout: 30 * time.Second},
+			Caching:    CachingInterceptorConfig{Enabled: true, TTL: DefaultCacheTTL, Type: "memory"},
+			Timeout:    TimeoutInterceptorConfig{Enabled: true, Timeout: DefaultToolTimeout},
 			Validation: ValidationInterceptorConfig{Enabled: true, StrictMode: false},
 		},
 	}
@@ -428,14 +464,14 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 	return &InterceptorsConfig{
 		Global: GlobalInterceptorConfig{
 			Enabled:            true,
-			DefaultTimeout:     30 * time.Second,
+			DefaultTimeout:     DefaultModuleTimeout,
 			MaxChainLength:     15,
 			MonitorPerformance: true,
 		},
 		Module: ModuleInterceptorsConfig{
 			Logging: InterceptorToggle{Enabled: true},
 			Tracing: InterceptorToggle{Enabled: true},
-			Timeout: TimeoutInterceptorConfig{Enabled: true, Timeout: 30 * time.Second},
+			Timeout: TimeoutInterceptorConfig{Enabled: true, Timeout: DefaultModuleTimeout},
 			Validation: ValidationInterceptorConfig{
 				Enabled:             true,
 				StrictMode:          true,
@@ -459,7 +495,7 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 			Logging:   InterceptorToggle{Enabled: true},
 			Tracing:   InterceptorToggle{Enabled: true},
 			RateLimit: RateLimitInterceptorConfig{Enabled: true, RequestsPerMinute: 30, BurstSize: 5},
-			Timeout:   TimeoutInterceptorConfig{Enabled: true, Timeout: 60 * time.Second},
+			Timeout:   TimeoutInterceptorConfig{Enabled: true, Timeout: DefaultAgentTimeout},
 			Authorization: AuthorizationInterceptorConfig{
 				Enabled:     true,
 				RequireAuth: true,
@@ -467,7 +503,7 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 			// Audit: Disabled because audit interceptor is not yet implemented
 			// Audit: AuditInterceptorConfig{
 			//	Enabled:       true,
-			//	LogLevel:      "INFO",
+			//	LogLevel:      DefaultAuditLogLevel,
 			//	IncludeInput:  true,
 			//	IncludeOutput: true,
 			// },
@@ -475,7 +511,7 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 		Tool: ToolInterceptorsConfig{
 			Logging: InterceptorToggle{Enabled: true},
 			Tracing: InterceptorToggle{Enabled: true},
-			Timeout: TimeoutInterceptorConfig{Enabled: true, Timeout: 30 * time.Second},
+			Timeout: TimeoutInterceptorConfig{Enabled: true, Timeout: DefaultToolTimeout},
 			Validation: ValidationInterceptorConfig{
 				Enabled:             true,
 				StrictMode:          true,
