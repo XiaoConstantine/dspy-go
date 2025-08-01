@@ -496,7 +496,8 @@ func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) stri
 type RetryConfig struct {
 	MaxAttempts int
 	Delay       time.Duration
-	Backoff     float64 // Multiplier for delay between retries
+	MaxBackoff  time.Duration // Maximum delay between retries
+	Backoff     float64       // Multiplier for delay between retries
 }
 
 // RetryModuleInterceptor creates an interceptor that retries failed module executions.
@@ -525,8 +526,11 @@ func RetryModuleInterceptor(config RetryConfig) core.ModuleInterceptor {
 			case <-time.After(delay):
 			}
 
-			// Apply backoff
+			// Apply backoff with maximum limit
 			delay = time.Duration(float64(delay) * config.Backoff)
+			if config.MaxBackoff > 0 && delay > config.MaxBackoff {
+				delay = config.MaxBackoff
+			}
 		}
 
 		return nil, fmt.Errorf("module %s failed after %d attempts: %w", info.ModuleName, config.MaxAttempts, lastErr)
@@ -559,8 +563,11 @@ func RetryAgentInterceptor(config RetryConfig) core.AgentInterceptor {
 			case <-time.After(delay):
 			}
 
-			// Apply backoff
+			// Apply backoff with maximum limit
 			delay = time.Duration(float64(delay) * config.Backoff)
+			if config.MaxBackoff > 0 && delay > config.MaxBackoff {
+				delay = config.MaxBackoff
+			}
 		}
 
 		return nil, fmt.Errorf("agent %s failed after %d attempts: %w", info.AgentID, config.MaxAttempts, lastErr)
@@ -593,8 +600,11 @@ func RetryToolInterceptor(config RetryConfig) core.ToolInterceptor {
 			case <-time.After(delay):
 			}
 
-			// Apply backoff
+			// Apply backoff with maximum limit
 			delay = time.Duration(float64(delay) * config.Backoff)
+			if config.MaxBackoff > 0 && delay > config.MaxBackoff {
+				delay = config.MaxBackoff
+			}
 		}
 
 		return core.ToolResult{}, fmt.Errorf("tool %s failed after %d attempts: %w", info.Name, config.MaxAttempts, lastErr)

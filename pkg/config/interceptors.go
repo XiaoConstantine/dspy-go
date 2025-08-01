@@ -100,6 +100,7 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 		config := interceptors.RetryConfig{
 			MaxAttempts: 3,
 			Delay:       100 * time.Millisecond,
+			MaxBackoff:  10 * time.Second, // Default max backoff
 			Backoff:     2.0,
 		}
 		if moduleConfig.Retry.MaxRetries > 0 {
@@ -107,6 +108,9 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 		}
 		if moduleConfig.Retry.InitialBackoff > 0 {
 			config.Delay = moduleConfig.Retry.InitialBackoff
+		}
+		if moduleConfig.Retry.MaxBackoff > 0 {
+			config.MaxBackoff = moduleConfig.Retry.MaxBackoff
 		}
 		if moduleConfig.Retry.BackoffFactor > 0 {
 			config.Backoff = moduleConfig.Retry.BackoffFactor
@@ -139,8 +143,10 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 
 		// Configure authorization policy based on config
 		policy := interceptors.AuthorizationPolicy{
-			RequiredRoles: moduleConfig.Authorization.AllowedRoles,
-			// Map config fields to policy fields where possible
+			RequiredRoles:  moduleConfig.Authorization.AllowedRoles,
+			RequiredScopes: moduleConfig.Authorization.RequiredScopes,
+			RequireAuth:    moduleConfig.Authorization.RequireAuth,
+			CustomRules:    moduleConfig.Authorization.CustomRules,
 		}
 
 		// Apply policy to all modules (using "*" as wildcard)
@@ -152,8 +158,10 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 
 	if moduleConfig.Sanitization.Enabled {
 		// TODO: The current SanitizingModuleInterceptor doesn't accept configuration.
-		// Configuration values (RemoveHTML, RemoveSQL, etc.) are currently ignored.
-		// The interceptor uses hardcoded sanitization rules.
+		// Configuration values (RemoveHTML, RemoveSQL, RemoveScript, CustomPatterns, MaxStringLength)
+		// are currently ignored. The interceptor uses hardcoded sanitization rules:
+		// - HTML escaping, null byte removal, newline normalization, 10KB string limit
+		// To fully implement configuration, the interceptor would need to accept SanitizationConfig
 		moduleInterceptors = append(moduleInterceptors, interceptors.SanitizingModuleInterceptor())
 	}
 
@@ -199,6 +207,9 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 		if agentConfig.RateLimit.WindowSize > 0 {
 			window = agentConfig.RateLimit.WindowSize
 		}
+		// TODO: BurstSize field from RateLimitInterceptorConfig is not implemented
+		// The underlying RateLimiter uses a sliding window algorithm without burst capability
+		// Consider implementing token bucket algorithm if burst functionality is needed
 
 		agentInterceptors = append(agentInterceptors, interceptors.RateLimitingAgentInterceptor(limit, window))
 	}
@@ -220,8 +231,10 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 
 		// Configure authorization policy based on config
 		policy := interceptors.AuthorizationPolicy{
-			RequiredRoles: agentConfig.Authorization.AllowedRoles,
-			// Map config fields to policy fields where possible
+			RequiredRoles:  agentConfig.Authorization.AllowedRoles,
+			RequiredScopes: agentConfig.Authorization.RequiredScopes,
+			RequireAuth:    agentConfig.Authorization.RequireAuth,
+			CustomRules:    agentConfig.Authorization.CustomRules,
 		}
 
 		// Apply policy to all agents (using "*" as wildcard)
@@ -314,8 +327,10 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 
 		// Configure authorization policy based on config
 		policy := interceptors.AuthorizationPolicy{
-			RequiredRoles: toolConfig.Authorization.AllowedRoles,
-			// Map config fields to policy fields where possible
+			RequiredRoles:  toolConfig.Authorization.AllowedRoles,
+			RequiredScopes: toolConfig.Authorization.RequiredScopes,
+			RequireAuth:    toolConfig.Authorization.RequireAuth,
+			CustomRules:    toolConfig.Authorization.CustomRules,
 		}
 
 		// Apply policy to all tools (using "*" as wildcard)
@@ -326,8 +341,10 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 
 	if toolConfig.Sanitization.Enabled {
 		// TODO: The current SanitizingToolInterceptor doesn't accept configuration.
-		// Configuration values (RemoveHTML, RemoveSQL, etc.) are currently ignored.
-		// The interceptor uses hardcoded sanitization rules.
+		// Configuration values (RemoveHTML, RemoveSQL, RemoveScript, CustomPatterns, MaxStringLength)
+		// are currently ignored. The interceptor uses hardcoded sanitization rules:
+		// - HTML escaping, null byte removal, newline normalization, 10KB string limit
+		// To fully implement configuration, the interceptor would need to accept SanitizationConfig
 		toolInterceptors = append(toolInterceptors, interceptors.SanitizingToolInterceptor())
 	}
 

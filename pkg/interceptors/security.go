@@ -211,6 +211,7 @@ type AuthorizationContext struct {
 	UserID      string
 	Roles       []string
 	Permissions []string
+	Scopes      []string
 	APIKey      string
 }
 
@@ -218,6 +219,9 @@ type AuthorizationContext struct {
 type AuthorizationPolicy struct {
 	RequiredRoles       []string
 	RequiredPermissions []string
+	RequiredScopes      []string
+	RequireAuth         bool
+	CustomRules         map[string]string
 	AllowedModules      []string
 	AllowedAgents       []string
 	AllowedTools        []string
@@ -522,6 +526,11 @@ func getAuthorizationContext(ctx context.Context) *AuthorizationContext {
 
 // checkAuthorization verifies if the authorization context satisfies the policy.
 func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationContext, policy AuthorizationPolicy, resource string) bool {
+	// Check if authentication is required but not present
+	if policy.RequireAuth && (authCtx.UserID == "" && authCtx.APIKey == "") {
+		return false
+	}
+
 	// Check required roles
 	if len(policy.RequiredRoles) > 0 {
 		if !hasAnyRole(authCtx.Roles, policy.RequiredRoles) {
@@ -533,6 +542,26 @@ func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationCon
 	if len(policy.RequiredPermissions) > 0 {
 		if !hasAnyPermission(authCtx.Permissions, policy.RequiredPermissions) {
 			return false
+		}
+	}
+
+	// Check required scopes
+	if len(policy.RequiredScopes) > 0 {
+		if !hasAnyScope(authCtx.Scopes, policy.RequiredScopes) {
+			return false
+		}
+	}
+
+	// Check custom rules (simple key-value matching for now)
+	// TODO: Implement more sophisticated rule evaluation if needed
+	if len(policy.CustomRules) > 0 {
+		// For now, this is a placeholder - custom rules would need specific implementation
+		// depending on the business logic requirements
+		for ruleKey, ruleValue := range policy.CustomRules {
+			// This is a basic implementation - extend as needed
+			_ = ruleKey
+			_ = ruleValue
+			// Custom rule evaluation would go here
 		}
 	}
 
@@ -575,6 +604,18 @@ func hasAnyPermission(userPermissions, requiredPermissions []string) bool {
 	for _, userPerm := range userPermissions {
 		for _, requiredPerm := range requiredPermissions {
 			if matchesPermission(userPerm, requiredPerm) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasAnyScope checks if any of the user's scopes match the required scopes.
+func hasAnyScope(userScopes, requiredScopes []string) bool {
+	for _, userScope := range userScopes {
+		for _, requiredScope := range requiredScopes {
+			if userScope == requiredScope {
 				return true
 			}
 		}
