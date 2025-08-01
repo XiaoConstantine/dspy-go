@@ -750,6 +750,7 @@ type ValidationInterceptorConfig struct {
 	StrictMode           bool     `yaml:"strict_mode,omitempty"`
 	RequiredFields       []string `yaml:"required_fields,omitempty"`
 	MaxInputSize         int64    `yaml:"max_input_size,omitempty" validate:"omitempty,min=1"`
+	MaxStringLength      int      `yaml:"max_string_length,omitempty" validate:"omitempty,min=1"`
 	AllowedContentTypes  []string `yaml:"allowed_content_types,omitempty"`
 }
 

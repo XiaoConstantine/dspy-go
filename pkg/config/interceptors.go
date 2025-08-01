@@ -18,6 +18,21 @@ func NewInterceptorBuilder(config *InterceptorsConfig) *InterceptorBuilder {
 	return &InterceptorBuilder{config: config}
 }
 
+// createCache creates a cache instance based on the configuration.
+func (b *InterceptorBuilder) createCache(config CachingInterceptorConfig) (interceptors.Cache, error) {
+	switch config.Type {
+	case "memory", "":
+		// Default to memory cache
+		return interceptors.NewMemoryCache(), nil
+	case "sqlite":
+		// For now, sqlite cache is not implemented, fall back to memory
+		// TODO: Implement SQLite cache when available
+		return interceptors.NewMemoryCache(), nil
+	default:
+		return nil, fmt.Errorf("unsupported cache type: %s", config.Type)
+	}
+}
+
 // BuildModuleInterceptors builds a chain of module interceptors from configuration.
 func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor, error) {
 	if b.config == nil || !b.config.Global.Enabled {
@@ -42,8 +57,11 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 
 	// Performance interceptors
 	if moduleConfig.Caching.Enabled {
-		cache := interceptors.NewMemoryCache() // Default cache
-		ttl := 5 * time.Minute                 // Default TTL
+		cache, err := b.createCache(moduleConfig.Caching)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cache: %w", err)
+		}
+		ttl := 5 * time.Minute // Default TTL
 		if moduleConfig.Caching.TTL > 0 {
 			ttl = moduleConfig.Caching.TTL
 		}
@@ -101,9 +119,13 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	if moduleConfig.Validation.Enabled {
 		config := interceptors.ValidationConfig{
 			MaxInputSize:    int(moduleConfig.Validation.MaxInputSize),
-			MaxStringLength: int(moduleConfig.Validation.MaxInputSize), // Use same value for simplicity
+			MaxStringLength: 1000, // Default string length limit
 			RequiredFields:  moduleConfig.Validation.RequiredFields,
 			AllowHTML:       !moduleConfig.Validation.StrictMode, // Invert strict mode
+		}
+		// Use configured max string length if provided
+		if moduleConfig.Validation.MaxStringLength > 0 {
+			config.MaxStringLength = moduleConfig.Validation.MaxStringLength
 		}
 		// Add forbidden patterns for strict mode
 		if moduleConfig.Validation.StrictMode {
@@ -226,8 +248,11 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 
 	// Performance interceptors
 	if toolConfig.Caching.Enabled {
-		cache := interceptors.NewMemoryCache() // Default cache
-		ttl := 5 * time.Minute                 // Default TTL
+		cache, err := b.createCache(toolConfig.Caching)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cache: %w", err)
+		}
+		ttl := 5 * time.Minute // Default TTL
 		if toolConfig.Caching.TTL > 0 {
 			ttl = toolConfig.Caching.TTL
 		}
@@ -248,9 +273,13 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 	if toolConfig.Validation.Enabled {
 		config := interceptors.ValidationConfig{
 			MaxInputSize:    int(toolConfig.Validation.MaxInputSize),
-			MaxStringLength: int(toolConfig.Validation.MaxInputSize),
+			MaxStringLength: 1000, // Default string length limit
 			RequiredFields:  toolConfig.Validation.RequiredFields,
 			AllowHTML:       !toolConfig.Validation.StrictMode,
+		}
+		// Use configured max string length if provided
+		if toolConfig.Validation.MaxStringLength > 0 {
+			config.MaxStringLength = toolConfig.Validation.MaxStringLength
 		}
 		if toolConfig.Validation.StrictMode {
 			config.ForbiddenPatterns = []string{"<script", "javascript:", "data:"}
@@ -359,6 +388,7 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 				Enabled:             true,
 				StrictMode:          true,
 				MaxInputSize:        1024 * 1024, // 1MB
+				MaxStringLength:     10000,       // 10K characters
 				AllowedContentTypes: []string{"text/plain", "application/json"},
 			},
 			Authorization: AuthorizationInterceptorConfig{
@@ -397,6 +427,7 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 				Enabled:             true,
 				StrictMode:          true,
 				MaxInputSize:        512 * 1024, // 512KB
+				MaxStringLength:     5000,       // 5K characters
 				AllowedContentTypes: []string{"text/plain", "application/json"},
 			},
 			Authorization: AuthorizationInterceptorConfig{

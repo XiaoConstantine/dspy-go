@@ -346,6 +346,7 @@ func TestSetupSecurityInterceptors(t *testing.T) {
 	assert.True(t, config.Module.Validation.Enabled)
 	assert.True(t, config.Module.Validation.StrictMode)
 	assert.Equal(t, int64(1024*1024), config.Module.Validation.MaxInputSize)
+	assert.Equal(t, 10000, config.Module.Validation.MaxStringLength)
 	assert.Equal(t, []string{"text/plain", "application/json"}, config.Module.Validation.AllowedContentTypes)
 
 	assert.True(t, config.Module.Authorization.Enabled)
@@ -374,6 +375,7 @@ func TestSetupSecurityInterceptors(t *testing.T) {
 	assert.True(t, config.Tool.Validation.Enabled)
 	assert.True(t, config.Tool.Validation.StrictMode)
 	assert.Equal(t, int64(512*1024), config.Tool.Validation.MaxInputSize)
+	assert.Equal(t, 5000, config.Tool.Validation.MaxStringLength)
 
 	assert.True(t, config.Tool.Authorization.Enabled)
 	assert.True(t, config.Tool.Authorization.RequireAuth)
@@ -1033,4 +1035,92 @@ func TestInterceptorBuilder_ConfigurationMapping(t *testing.T) {
 	toolInterceptors, err := builder.BuildToolInterceptors()
 	require.NoError(t, err)
 	assert.Len(t, toolInterceptors, 0)
+}
+
+func TestInterceptorBuilder_CreateCache(t *testing.T) {
+	builder := NewInterceptorBuilder(&InterceptorsConfig{})
+
+	tests := []struct {
+		name        string
+		config      CachingInterceptorConfig
+		expectError bool
+	}{
+		{
+			name:        "memory cache",
+			config:      CachingInterceptorConfig{Type: "memory"},
+			expectError: false,
+		},
+		{
+			name:        "empty type defaults to memory",
+			config:      CachingInterceptorConfig{Type: ""},
+			expectError: false,
+		},
+		{
+			name:        "sqlite cache (fallback to memory)",
+			config:      CachingInterceptorConfig{Type: "sqlite"},
+			expectError: false,
+		},
+		{
+			name:        "unsupported cache type",
+			config:      CachingInterceptorConfig{Type: "redis"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache, err := builder.createCache(tt.config)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, cache)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, cache)
+			}
+		})
+	}
+}
+
+func TestValidationInterceptorConfig_MaxStringLength(t *testing.T) {
+	config := &InterceptorsConfig{
+		Global: GlobalInterceptorConfig{Enabled: true},
+		Module: ModuleInterceptorsConfig{
+			Validation: ValidationInterceptorConfig{
+				Enabled:         true,
+				MaxInputSize:    2048,
+				MaxStringLength: 500,
+				StrictMode:      true,
+			},
+		},
+	}
+
+	builder := NewInterceptorBuilder(config)
+	interceptors, err := builder.BuildModuleInterceptors()
+
+	require.NoError(t, err)
+	assert.Len(t, interceptors, 1) // Only validation interceptor enabled
+
+	// Test that MaxStringLength is properly configured
+	// Note: This is a structural test since we can't easily inspect the interceptor config
+	// In a real implementation, we'd need to modify the interceptor constructors to expose config
+}
+
+func TestInterceptorBuilder_CacheCreationError(t *testing.T) {
+	config := &InterceptorsConfig{
+		Global: GlobalInterceptorConfig{Enabled: true},
+		Module: ModuleInterceptorsConfig{
+			Caching: CachingInterceptorConfig{
+				Enabled: true,
+				Type:    "unsupported",
+			},
+		},
+	}
+
+	builder := NewInterceptorBuilder(config)
+	interceptors, err := builder.BuildModuleInterceptors()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create cache")
+	assert.Nil(t, interceptors)
 }
