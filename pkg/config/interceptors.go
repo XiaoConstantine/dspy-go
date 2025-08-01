@@ -25,9 +25,8 @@ func (b *InterceptorBuilder) createCache(config CachingInterceptorConfig) (inter
 		// Default to memory cache
 		return interceptors.NewMemoryCache(), nil
 	case "sqlite":
-		// For now, sqlite cache is not implemented, fall back to memory
 		// TODO: Implement SQLite cache when available
-		return interceptors.NewMemoryCache(), nil
+		return nil, fmt.Errorf("sqlite cache is not yet implemented")
 	default:
 		return nil, fmt.Errorf("unsupported cache type: %s", config.Type)
 	}
@@ -135,15 +134,26 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	}
 
 	if moduleConfig.Authorization.Enabled {
-		// Create authorization interceptor instance
+		// Create authorization interceptor instance with configuration
 		authInterceptor := interceptors.NewAuthorizationInterceptor()
-		// Note: In a real implementation, you would set policies based on config
-		// For now, we'll use default behavior
+
+		// Configure authorization policy based on config
+		policy := interceptors.AuthorizationPolicy{
+			RequiredRoles: moduleConfig.Authorization.AllowedRoles,
+			// Map config fields to policy fields where possible
+		}
+
+		// Apply policy to all modules (using "*" as wildcard)
+		// TODO: In future, support per-module policies from config
+		authInterceptor.SetPolicy("*", policy)
+
 		moduleInterceptors = append(moduleInterceptors, authInterceptor.ModuleAuthorizationInterceptor())
 	}
 
 	if moduleConfig.Sanitization.Enabled {
-		// Use the sanitizing interceptor
+		// TODO: The current SanitizingModuleInterceptor doesn't accept configuration.
+		// Configuration values (RemoveHTML, RemoveSQL, etc.) are currently ignored.
+		// The interceptor uses hardcoded sanitization rules.
 		moduleInterceptors = append(moduleInterceptors, interceptors.SanitizingModuleInterceptor())
 	}
 
@@ -205,14 +215,25 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 
 	// Security interceptors
 	if agentConfig.Authorization.Enabled {
+		// Create authorization interceptor instance with configuration
 		authInterceptor := interceptors.NewAuthorizationInterceptor()
+
+		// Configure authorization policy based on config
+		policy := interceptors.AuthorizationPolicy{
+			RequiredRoles: agentConfig.Authorization.AllowedRoles,
+			// Map config fields to policy fields where possible
+		}
+
+		// Apply policy to all agents (using "*" as wildcard)
+		authInterceptor.SetPolicy("*", policy)
+
 		agentInterceptors = append(agentInterceptors, authInterceptor.AgentAuthorizationInterceptor())
 	}
 
-	// Note: Audit functionality would be implemented as a logging interceptor variant
-	// For now, we'll use the standard logging interceptor if audit is enabled
 	if agentConfig.Audit.Enabled {
-		agentInterceptors = append(agentInterceptors, interceptors.LoggingAgentInterceptor())
+		// TODO: Implement proper audit interceptor with AuditInterceptorConfig
+		// Returning error to avoid silent failure and false sense of security
+		return nil, fmt.Errorf("audit interceptor is not yet implemented")
 	}
 
 	// Validate chain length
@@ -288,11 +309,25 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 	}
 
 	if toolConfig.Authorization.Enabled {
+		// Create authorization interceptor instance with configuration
 		authInterceptor := interceptors.NewAuthorizationInterceptor()
+
+		// Configure authorization policy based on config
+		policy := interceptors.AuthorizationPolicy{
+			RequiredRoles: toolConfig.Authorization.AllowedRoles,
+			// Map config fields to policy fields where possible
+		}
+
+		// Apply policy to all tools (using "*" as wildcard)
+		authInterceptor.SetPolicy("*", policy)
+
 		toolInterceptors = append(toolInterceptors, authInterceptor.ToolAuthorizationInterceptor())
 	}
 
 	if toolConfig.Sanitization.Enabled {
+		// TODO: The current SanitizingToolInterceptor doesn't accept configuration.
+		// Configuration values (RemoveHTML, RemoveSQL, etc.) are currently ignored.
+		// The interceptor uses hardcoded sanitization rules.
 		toolInterceptors = append(toolInterceptors, interceptors.SanitizingToolInterceptor())
 	}
 
@@ -412,12 +447,13 @@ func SetupSecurityInterceptors() *InterceptorsConfig {
 				Enabled:     true,
 				RequireAuth: true,
 			},
-			Audit: AuditInterceptorConfig{
-				Enabled:       true,
-				LogLevel:      "INFO",
-				IncludeInput:  true,
-				IncludeOutput: true,
-			},
+			// Audit: Disabled because audit interceptor is not yet implemented
+			// Audit: AuditInterceptorConfig{
+			//	Enabled:       true,
+			//	LogLevel:      "INFO",
+			//	IncludeInput:  true,
+			//	IncludeOutput: true,
+			// },
 		},
 		Tool: ToolInterceptorsConfig{
 			Logging: InterceptorToggle{Enabled: true},

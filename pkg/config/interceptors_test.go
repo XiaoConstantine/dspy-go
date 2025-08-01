@@ -197,8 +197,10 @@ func TestInterceptorBuilder_BuildAgentInterceptors(t *testing.T) {
 	builder := NewInterceptorBuilder(config)
 	interceptors, err := builder.BuildAgentInterceptors()
 
-	require.NoError(t, err)
-	assert.Len(t, interceptors, 7) // all enabled interceptors
+	// This should now error because audit is not implemented
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "audit interceptor is not yet implemented")
+	assert.Nil(t, interceptors)
 }
 
 func TestInterceptorBuilder_BuildAgentInterceptors_Disabled(t *testing.T) {
@@ -223,7 +225,7 @@ func TestInterceptorBuilder_BuildToolInterceptors(t *testing.T) {
 				Enabled: true,
 				TTL:     8 * time.Minute,
 				MaxSize: 1024 * 1024,
-				Type:    "sqlite",
+				Type:    "memory",
 			},
 			Timeout: TimeoutInterceptorConfig{
 				Enabled: true,
@@ -366,10 +368,8 @@ func TestSetupSecurityInterceptors(t *testing.T) {
 	assert.True(t, config.Agent.Authorization.Enabled)
 	assert.True(t, config.Agent.Authorization.RequireAuth)
 
-	assert.True(t, config.Agent.Audit.Enabled)
-	assert.Equal(t, "INFO", config.Agent.Audit.LogLevel)
-	assert.True(t, config.Agent.Audit.IncludeInput)
-	assert.True(t, config.Agent.Audit.IncludeOutput)
+	// Audit is currently disabled in security preset because it's not implemented
+	assert.False(t, config.Agent.Audit.Enabled)
 
 	// Test tool security settings
 	assert.True(t, config.Tool.Validation.Enabled)
@@ -659,7 +659,7 @@ func TestInterceptorBuilder_BuildAgentInterceptors_AllCombinations(t *testing.T)
 		expectedLen int
 	}{
 		{
-			name: "all interceptors enabled",
+			name: "all interceptors except audit enabled",
 			config: AgentInterceptorsConfig{
 				Logging:       InterceptorToggle{Enabled: true},
 				Metrics:       InterceptorToggle{Enabled: true},
@@ -667,9 +667,9 @@ func TestInterceptorBuilder_BuildAgentInterceptors_AllCombinations(t *testing.T)
 				RateLimit:     RateLimitInterceptorConfig{Enabled: true},
 				Timeout:       TimeoutInterceptorConfig{Enabled: true},
 				Authorization: AuthorizationInterceptorConfig{Enabled: true},
-				Audit:         AuditInterceptorConfig{Enabled: true},
+				// Audit: Disabled because it errors when enabled
 			},
-			expectedLen: 7,
+			expectedLen: 6,
 		},
 		{
 			name: "only standard interceptors",
@@ -987,7 +987,7 @@ func TestInterceptorBuilder_ConfigurationMapping(t *testing.T) {
 				Enabled: true,
 				TTL:     10 * time.Minute,
 				MaxSize: 2048,
-				Type:    "sqlite",
+				Type:    "memory",
 			},
 			CircuitBreaker: CircuitBreakerInterceptorConfig{
 				Enabled:          true,
@@ -1056,9 +1056,9 @@ func TestInterceptorBuilder_CreateCache(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "sqlite cache (fallback to memory)",
+			name:        "sqlite cache (not implemented - should error)",
 			config:      CachingInterceptorConfig{Type: "sqlite"},
-			expectError: false,
+			expectError: true,
 		},
 		{
 			name:        "unsupported cache type",
@@ -1122,5 +1122,21 @@ func TestInterceptorBuilder_CacheCreationError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create cache")
+	assert.Nil(t, interceptors)
+}
+
+func TestInterceptorBuilder_AuditInterceptorError(t *testing.T) {
+	config := &InterceptorsConfig{
+		Global: GlobalInterceptorConfig{Enabled: true},
+		Agent: AgentInterceptorsConfig{
+			Audit: AuditInterceptorConfig{Enabled: true},
+		},
+	}
+
+	builder := NewInterceptorBuilder(config)
+	interceptors, err := builder.BuildAgentInterceptors()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "audit interceptor is not yet implemented")
 	assert.Nil(t, interceptors)
 }
