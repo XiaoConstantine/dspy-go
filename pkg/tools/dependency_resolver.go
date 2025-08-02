@@ -436,13 +436,20 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 			default:
 			}
 
-			// Acquire semaphore
+			// Acquire semaphore with timeout to prevent deadlock
+			semCtx, semCancel := context.WithTimeout(ctx, 30*time.Second)
+			defer semCancel()
+
 			select {
 			case semaphore <- struct{}{}:
-			case <-ctx.Done():
+			case <-semCtx.Done():
 				mu.Lock()
 				if firstError == nil {
-					firstError = ctx.Err()
+					if semCtx.Err() == context.DeadlineExceeded {
+						firstError = fmt.Errorf("semaphore acquire timeout for tool %s", tName)
+					} else {
+						firstError = ctx.Err() // Original context was cancelled
+					}
 				}
 				mu.Unlock()
 				return
