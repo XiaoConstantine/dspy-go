@@ -296,10 +296,32 @@ func TimeoutModuleInterceptor(timeout time.Duration) core.ModuleInterceptor {
 		}
 		resultChan := make(chan result, 1)
 
-		// Execute handler in goroutine
+		// Execute handler in goroutine with proper context cancellation
 		go func() {
+			defer func() {
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					resultChan <- result{output: nil, err: fmt.Errorf("module %s panicked: %v", info.ModuleName, r)}
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-timeoutCtx.Done():
+				resultChan <- result{output: nil, err: timeoutCtx.Err()}
+				return
+			default:
+			}
+
 			output, err := handler(timeoutCtx, inputs, opts...)
-			resultChan <- result{output: output, err: err}
+
+			// Ensure we can send result without blocking
+			select {
+			case resultChan <- result{output: output, err: err}:
+			case <-timeoutCtx.Done():
+				// Context cancelled, don't block
+				return
+			}
 		}()
 
 		// Wait for result or timeout
@@ -326,10 +348,32 @@ func TimeoutAgentInterceptor(timeout time.Duration) core.AgentInterceptor {
 		}
 		resultChan := make(chan result, 1)
 
-		// Execute handler in goroutine
+		// Execute handler in goroutine with proper context cancellation
 		go func() {
+			defer func() {
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					resultChan <- result{output: nil, err: fmt.Errorf("agent %s panicked: %v", info.AgentID, r)}
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-timeoutCtx.Done():
+				resultChan <- result{output: nil, err: timeoutCtx.Err()}
+				return
+			default:
+			}
+
 			output, err := handler(timeoutCtx, input)
-			resultChan <- result{output: output, err: err}
+
+			// Ensure we can send result without blocking
+			select {
+			case resultChan <- result{output: output, err: err}:
+			case <-timeoutCtx.Done():
+				// Context cancelled, don't block
+				return
+			}
 		}()
 
 		// Wait for result or timeout
@@ -356,10 +400,32 @@ func TimeoutToolInterceptor(timeout time.Duration) core.ToolInterceptor {
 		}
 		resultChan := make(chan result, 1)
 
-		// Execute handler in goroutine
+		// Execute handler in goroutine with proper context cancellation
 		go func() {
+			defer func() {
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					resultChan <- result{output: core.ToolResult{}, err: fmt.Errorf("tool %s panicked: %v", info.Name, r)}
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-timeoutCtx.Done():
+				resultChan <- result{output: core.ToolResult{}, err: timeoutCtx.Err()}
+				return
+			default:
+			}
+
 			output, err := handler(timeoutCtx, args)
-			resultChan <- result{output: output, err: err}
+
+			// Ensure we can send result without blocking
+			select {
+			case resultChan <- result{output: output, err: err}:
+			case <-timeoutCtx.Done():
+				// Context cancelled, don't block
+				return
+			}
 		}()
 
 		// Wait for result or timeout

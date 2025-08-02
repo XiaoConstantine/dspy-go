@@ -110,7 +110,26 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 	for _, step := range stage.Steps {
 		wg.Add(1)
 		go func(step *BuilderStep) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					mu.Lock()
+					allErrors = append(allErrors, fmt.Errorf("builder step panicked: %v", r))
+					mu.Unlock()
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				allErrors = append(allErrors, ctx.Err())
+				mu.Unlock()
+				return
+			default:
+			}
+
 			result, err := step.Module.Process(ctx, state)
 			if err != nil {
 				mu.Lock()
@@ -122,7 +141,13 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 				for k, v := range result {
 					converted[k] = v
 				}
-				results <- converted
+
+				// Send result without blocking if context is cancelled
+				select {
+				case results <- converted:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}(step)
 	}

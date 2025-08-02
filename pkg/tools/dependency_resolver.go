@@ -406,11 +406,47 @@ func (dp *DependencyPipeline) executePhaseParallel(ctx context.Context, phase Ex
 	for toolIdx, toolName := range phase.Tools {
 		wg.Add(1)
 		go func(tName string, tIdx int) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+				// Release semaphore on any exit path
+				select {
+				case <-semaphore:
+				default:
+				}
+
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					mu.Lock()
+					if firstError == nil {
+						firstError = fmt.Errorf("tool %s panicked: %v", tName, r)
+					}
+					mu.Unlock()
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				if firstError == nil {
+					firstError = ctx.Err()
+				}
+				mu.Unlock()
+				return
+			default:
+			}
 
 			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			select {
+			case semaphore <- struct{}{}:
+			case <-ctx.Done():
+				mu.Lock()
+				if firstError == nil {
+					firstError = ctx.Err()
+				}
+				mu.Unlock()
+				return
+			}
 
 			stepID := fmt.Sprintf("phase_%d_step_%d_%s", phaseIdx, tIdx, tName)
 			stepStart := time.Now()

@@ -2211,6 +2211,24 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 	// Wait for pipeline workers and collect results
 	var doneOnce sync.Once
 	go func() {
+		defer func() {
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Log panic but continue - recovery is intentionally handled silently
+				_ = r
+			}
+		}()
+
+		// Check if context is cancelled before waiting
+		select {
+		case <-ctx.Done():
+			doneOnce.Do(func() {
+				close(s.pipelineChannels.Done)
+			})
+			return
+		default:
+		}
+
 		wg.Wait()
 		doneOnce.Do(func() {
 			close(s.pipelineChannels.Done)

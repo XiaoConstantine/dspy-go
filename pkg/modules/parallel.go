@@ -167,7 +167,15 @@ func (p *Parallel) Process(ctx context.Context, inputs map[string]interface{}, o
 
 	// Send jobs
 	go func() {
-		defer close(jobs)
+		defer func() {
+			close(jobs)
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Log panic but continue
+				_ = r
+			}
+		}()
+
 		for i, input := range batchInputs {
 			select {
 			case jobs <- jobInput{index: i, inputs: input}:
@@ -179,8 +187,16 @@ func (p *Parallel) Process(ctx context.Context, inputs map[string]interface{}, o
 
 	// Collect results
 	go func() {
+		defer func() {
+			close(results)
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Log panic but continue
+				_ = r
+			}
+		}()
+
 		wg.Wait()
-		close(results)
 	}()
 
 	// Process results

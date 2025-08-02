@@ -251,14 +251,51 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 	for i, step := range tp.steps {
 		wg.Add(1)
 		go func(idx int, s PipelineStep) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					// Send panic as error result
+					stepID := fmt.Sprintf("step_%d_%s", idx, s.ToolName)
+					resultChan <- stepResult{
+						index:   idx,
+						result:  core.ToolResult{},
+						error:   fmt.Errorf("pipeline step %s panicked: %v", stepID, r),
+						stepID:  stepID,
+						metadata: StepMetadata{
+							ToolName: s.ToolName,
+							Success:  false,
+						},
+					}
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-ctx.Done():
+				stepID := fmt.Sprintf("step_%d_%s", idx, s.ToolName)
+				resultChan <- stepResult{
+					index:   idx,
+					result:  core.ToolResult{},
+					error:   ctx.Err(),
+					stepID:  stepID,
+					metadata: StepMetadata{
+						ToolName: s.ToolName,
+						Success:  false,
+					},
+				}
+				return
+			default:
+			}
 
 			stepStart := time.Now()
 			stepID := fmt.Sprintf("step_%d_%s", idx, s.ToolName)
 
 			stepRes, err := tp.executeStep(ctx, s, initialInput)
 
-			resultChan <- stepResult{
+			// Send result without blocking if context is cancelled
+			select {
+			case resultChan <- stepResult{
 				index:   idx,
 				result:  stepRes,
 				error:   err,
@@ -268,14 +305,25 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 					Duration: time.Since(stepStart),
 					Success:  err == nil,
 				},
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}(i, step)
 	}
 
 	// Wait for all steps to complete
 	go func() {
+		defer func() {
+			close(resultChan)
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Log panic but continue
+				_ = r
+			}
+		}()
+
 		wg.Wait()
-		close(resultChan)
 	}()
 
 	// Collect results

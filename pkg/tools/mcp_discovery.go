@@ -252,6 +252,7 @@ func (d *DefaultMCPDiscoveryService) performDiscovery() {
 					_ = r
 				}
 			}()
+
 			cb(tools)
 		}(callback)
 	}

@@ -40,11 +40,35 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]interf
 	for _, step := range w.steps {
 		wg.Add(1)
 		go func(s *Step) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+				// Release semaphore on any exit path
+				select {
+				case <-sem:
+				default:
+				}
+
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					errors <- fmt.Errorf("step %s panicked: %v", s.ID, r)
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-ctx.Done():
+				errors <- ctx.Err()
+				return
+			default:
+			}
 
 			// Acquire semaphore
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				errors <- ctx.Err()
+				return
+			}
 
 			// Prepare inputs for this step
 			stepInputs := make(map[string]interface{})
@@ -62,12 +86,26 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]interf
 				errors <- fmt.Errorf("step %s failed: %w", s.ID, err)
 				return
 			}
-			results <- result
+
+			// Send result without blocking if context is cancelled
+			select {
+			case results <- result:
+			case <-ctx.Done():
+				return
+			}
 		}(step)
 	}
 
 	// Wait for all steps to complete
 	go func() {
+		defer func() {
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Log panic but continue
+				_ = r
+			}
+		}()
+
 		wg.Wait()
 		close(results)
 		close(errors)
