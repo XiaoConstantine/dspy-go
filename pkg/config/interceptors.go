@@ -72,7 +72,8 @@ func (b *InterceptorBuilder) createCache(config CachingInterceptorConfig) (inter
 	}
 }
 
-// 3. Default timeout for the component type.
+// resolveTimeout determines the effective timeout duration by checking for a specific
+// timeout, falling back to a global default, and finally to a component-level default.
 func (b *InterceptorBuilder) resolveTimeout(specificTimeout, defaultTimeout time.Duration) time.Duration {
 	if specificTimeout > 0 {
 		return specificTimeout
@@ -135,10 +136,7 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache: %w", err)
 		}
-		ttl := DefaultCacheTTL
-		if moduleConfig.Caching.TTL > 0 {
-			ttl = moduleConfig.Caching.TTL
-		}
+		ttl := resolveDuration(moduleConfig.Caching.TTL, DefaultCacheTTL)
 		moduleInterceptors = append(moduleInterceptors, interceptors.CachingModuleInterceptor(cache, ttl))
 	}
 
@@ -182,11 +180,6 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 			config.RequiredFields = moduleConfig.Validation.RequiredFields
 		}
 		config.AllowHTML = !moduleConfig.Validation.StrictMode
-
-		// In strict mode, ensure HTML is disallowed. The default patterns are already strict.
-		if moduleConfig.Validation.StrictMode {
-			config.AllowHTML = false
-		}
 		moduleInterceptors = append(moduleInterceptors, interceptors.ValidationModuleInterceptor(config))
 	}
 
@@ -327,10 +320,7 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cache: %w", err)
 		}
-		ttl := DefaultCacheTTL
-		if toolConfig.Caching.TTL > 0 {
-			ttl = toolConfig.Caching.TTL
-		}
+		ttl := resolveDuration(toolConfig.Caching.TTL, DefaultCacheTTL)
 		toolInterceptors = append(toolInterceptors, interceptors.CachingToolInterceptor(cache, ttl))
 	}
 
@@ -355,11 +345,6 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 			config.RequiredFields = toolConfig.Validation.RequiredFields
 		}
 		config.AllowHTML = !toolConfig.Validation.StrictMode
-
-		// In strict mode, ensure HTML is disallowed. The default patterns are already strict.
-		if toolConfig.Validation.StrictMode {
-			config.AllowHTML = false
-		}
 		toolInterceptors = append(toolInterceptors, interceptors.ValidationToolInterceptor(config))
 	}
 
