@@ -552,17 +552,12 @@ func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationCon
 		}
 	}
 
-	// Check custom rules (simple key-value matching for now)
-	// TODO: Implement more sophisticated rule evaluation if needed
+	// Check custom rules - currently not implemented
+	// Return false if custom rules are configured to prevent silent security bypass
 	if len(policy.CustomRules) > 0 {
-		// For now, this is a placeholder - custom rules would need specific implementation
-		// depending on the business logic requirements
-		for ruleKey, ruleValue := range policy.CustomRules {
-			// This is a basic implementation - extend as needed
-			_ = ruleKey
-			_ = ruleValue
-			// Custom rule evaluation would go here
-		}
+		// Custom rules are not yet implemented - deny access to prevent false sense of security
+		// TODO: Implement custom rule evaluation based on business requirements
+		return false
 	}
 
 	// Check resource-specific allowlists

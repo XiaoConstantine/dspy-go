@@ -83,6 +83,30 @@ func (b *InterceptorBuilder) resolveTimeout(specificTimeout, defaultTimeout time
 	return defaultTimeout
 }
 
+// resolveInt resolves integer configuration with fallback to default.
+func resolveInt(specificValue, defaultValue int) int {
+	if specificValue > 0 {
+		return specificValue
+	}
+	return defaultValue
+}
+
+// resolveDuration resolves duration configuration with fallback to default.
+func resolveDuration(specificValue, defaultValue time.Duration) time.Duration {
+	if specificValue > 0 {
+		return specificValue
+	}
+	return defaultValue
+}
+
+// resolveFloat64 resolves float64 configuration with fallback to default.
+func resolveFloat64(specificValue, defaultValue float64) float64 {
+	if specificValue > 0 {
+		return specificValue
+	}
+	return defaultValue
+}
+
 // BuildModuleInterceptors builds a chain of module interceptors from configuration.
 func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor, error) {
 	if b.config == nil || !b.config.Global.Enabled {
@@ -124,19 +148,9 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	}
 
 	if moduleConfig.CircuitBreaker.Enabled {
-		failureThreshold := DefaultFailureThreshold
-		recoveryTimeout := DefaultRecoveryTimeout
-		halfOpenRequests := DefaultHalfOpenRequests
-
-		if moduleConfig.CircuitBreaker.FailureThreshold > 0 {
-			failureThreshold = moduleConfig.CircuitBreaker.FailureThreshold
-		}
-		if moduleConfig.CircuitBreaker.RecoveryTimeout > 0 {
-			recoveryTimeout = moduleConfig.CircuitBreaker.RecoveryTimeout
-		}
-		if moduleConfig.CircuitBreaker.HalfOpenRequests > 0 {
-			halfOpenRequests = moduleConfig.CircuitBreaker.HalfOpenRequests
-		}
+		failureThreshold := resolveInt(moduleConfig.CircuitBreaker.FailureThreshold, DefaultFailureThreshold)
+		recoveryTimeout := resolveDuration(moduleConfig.CircuitBreaker.RecoveryTimeout, DefaultRecoveryTimeout)
+		halfOpenRequests := resolveInt(moduleConfig.CircuitBreaker.HalfOpenRequests, DefaultHalfOpenRequests)
 
 		cb := interceptors.NewCircuitBreaker(failureThreshold, recoveryTimeout, halfOpenRequests)
 		moduleInterceptors = append(moduleInterceptors, interceptors.CircuitBreakerModuleInterceptor(cb))
@@ -144,22 +158,10 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 
 	if moduleConfig.Retry.Enabled {
 		config := interceptors.RetryConfig{
-			MaxAttempts: DefaultMaxRetries,
-			Delay:       DefaultInitialBackoff,
-			MaxBackoff:  DefaultMaxBackoff,
-			Backoff:     DefaultBackoffFactor,
-		}
-		if moduleConfig.Retry.MaxRetries > 0 {
-			config.MaxAttempts = moduleConfig.Retry.MaxRetries
-		}
-		if moduleConfig.Retry.InitialBackoff > 0 {
-			config.Delay = moduleConfig.Retry.InitialBackoff
-		}
-		if moduleConfig.Retry.MaxBackoff > 0 {
-			config.MaxBackoff = moduleConfig.Retry.MaxBackoff
-		}
-		if moduleConfig.Retry.BackoffFactor > 0 {
-			config.Backoff = moduleConfig.Retry.BackoffFactor
+			MaxAttempts: resolveInt(moduleConfig.Retry.MaxRetries, DefaultMaxRetries),
+			Delay:       resolveDuration(moduleConfig.Retry.InitialBackoff, DefaultInitialBackoff),
+			MaxBackoff:  resolveDuration(moduleConfig.Retry.MaxBackoff, DefaultMaxBackoff),
+			Backoff:     resolveFloat64(moduleConfig.Retry.BackoffFactor, DefaultBackoffFactor),
 		}
 		moduleInterceptors = append(moduleInterceptors, interceptors.RetryModuleInterceptor(config))
 	}
@@ -247,15 +249,9 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 
 	// Performance interceptors
 	if agentConfig.RateLimit.Enabled {
-		limit := DefaultRequestsPerMinute
-		window := DefaultRateWindow
+		limit := resolveInt(agentConfig.RateLimit.RequestsPerMinute, DefaultRequestsPerMinute)
+		window := resolveDuration(agentConfig.RateLimit.WindowSize, DefaultRateWindow)
 
-		if agentConfig.RateLimit.RequestsPerMinute > 0 {
-			limit = agentConfig.RateLimit.RequestsPerMinute
-		}
-		if agentConfig.RateLimit.WindowSize > 0 {
-			window = agentConfig.RateLimit.WindowSize
-		}
 		// TODO: BurstSize configuration is not yet supported by RateLimitingAgentInterceptor
 		// The current implementation only accepts limit and window parameters
 		// if agentConfig.RateLimit.BurstSize > 0 { burstSize = agentConfig.RateLimit.BurstSize }
