@@ -588,12 +588,15 @@ func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationCon
 }
 
 // hasAnyRole checks if any of the user's roles match the required roles.
+// Uses a map-based lookup for improved performance with large role lists.
 func hasAnyRole(userRoles, requiredRoles []string) bool {
-	for _, userRole := range userRoles {
-		for _, requiredRole := range requiredRoles {
-			if userRole == requiredRole {
-				return true
-			}
+	userRoleSet := make(map[string]struct{}, len(userRoles))
+	for _, role := range userRoles {
+		userRoleSet[role] = struct{}{}
+	}
+	for _, requiredRole := range requiredRoles {
+		if _, exists := userRoleSet[requiredRole]; exists {
+			return true
 		}
 	}
 	return false
@@ -612,12 +615,15 @@ func hasAnyPermission(userPermissions, requiredPermissions []string) bool {
 }
 
 // hasAnyScope checks if any of the user's scopes match the required scopes.
+// Uses a map-based lookup for improved performance with large scope lists.
 func hasAnyScope(userScopes, requiredScopes []string) bool {
-	for _, userScope := range userScopes {
-		for _, requiredScope := range requiredScopes {
-			if userScope == requiredScope {
-				return true
-			}
+	userScopeSet := make(map[string]struct{}, len(userScopes))
+	for _, scope := range userScopes {
+		userScopeSet[scope] = struct{}{}
+	}
+	for _, requiredScope := range requiredScopes {
+		if _, exists := userScopeSet[requiredScope]; exists {
+			return true
 		}
 	}
 	return false

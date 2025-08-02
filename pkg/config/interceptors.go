@@ -60,8 +60,9 @@ func (b *InterceptorBuilder) createCache(config CachingInterceptorConfig) (inter
 	switch config.Type {
 	case "memory", "":
 		// Default to memory cache
-		// Default to memory cache
 		// TODO: Apply MaxSize configuration when cache interface supports it
+		// Currently MaxSize field in CachingInterceptorConfig is ignored as MemoryCache doesn't support size limits
+		// Users should be aware that cache size limiting is not yet implemented
 		return interceptors.NewMemoryCache(), nil
 	case "sqlite":
 		// Return error instead of silent fallback to prevent security issues
@@ -69,6 +70,17 @@ func (b *InterceptorBuilder) createCache(config CachingInterceptorConfig) (inter
 	default:
 		return nil, fmt.Errorf("unsupported cache type: %s", config.Type)
 	}
+}
+
+// 3. Default timeout for the component type.
+func (b *InterceptorBuilder) resolveTimeout(specificTimeout, defaultTimeout time.Duration) time.Duration {
+	if specificTimeout > 0 {
+		return specificTimeout
+	}
+	if b.config.Global.DefaultTimeout > 0 {
+		return b.config.Global.DefaultTimeout
+	}
+	return defaultTimeout
 }
 
 // BuildModuleInterceptors builds a chain of module interceptors from configuration.
@@ -107,12 +119,7 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 	}
 
 	if moduleConfig.Timeout.Enabled {
-		timeout := DefaultModuleTimeout
-		if moduleConfig.Timeout.Timeout > 0 {
-			timeout = moduleConfig.Timeout.Timeout
-		} else if b.config.Global.DefaultTimeout > 0 {
-			timeout = b.config.Global.DefaultTimeout
-		}
+		timeout := b.resolveTimeout(moduleConfig.Timeout.Timeout, DefaultModuleTimeout)
 		moduleInterceptors = append(moduleInterceptors, interceptors.TimeoutModuleInterceptor(timeout))
 	}
 
@@ -159,19 +166,24 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 
 	// Security interceptors
 	if moduleConfig.Validation.Enabled {
-		config := interceptors.ValidationConfig{
-			MaxInputSize:    int(moduleConfig.Validation.MaxInputSize),
-			MaxStringLength: DefaultMaxStringLength,
-			RequiredFields:  moduleConfig.Validation.RequiredFields,
-			AllowHTML:       !moduleConfig.Validation.StrictMode, // Invert strict mode
+		// Start with the secure default configuration to ensure all security patterns are included
+		config := interceptors.DefaultValidationConfig()
+
+		// Override defaults with values from the user's configuration
+		if moduleConfig.Validation.MaxInputSize > 0 {
+			config.MaxInputSize = int(moduleConfig.Validation.MaxInputSize)
 		}
-		// Use configured max string length if provided
 		if moduleConfig.Validation.MaxStringLength > 0 {
 			config.MaxStringLength = moduleConfig.Validation.MaxStringLength
 		}
-		// Add forbidden patterns for strict mode
+		if len(moduleConfig.Validation.RequiredFields) > 0 {
+			config.RequiredFields = moduleConfig.Validation.RequiredFields
+		}
+		config.AllowHTML = !moduleConfig.Validation.StrictMode
+
+		// In strict mode, ensure HTML is disallowed. The default patterns are already strict.
 		if moduleConfig.Validation.StrictMode {
-			config.ForbiddenPatterns = []string{"<script", "javascript:", "data:"}
+			config.AllowHTML = false
 		}
 		moduleInterceptors = append(moduleInterceptors, interceptors.ValidationModuleInterceptor(config))
 	}
@@ -252,12 +264,7 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 	}
 
 	if agentConfig.Timeout.Enabled {
-		timeout := DefaultAgentTimeout
-		if agentConfig.Timeout.Timeout > 0 {
-			timeout = agentConfig.Timeout.Timeout
-		} else if b.config.Global.DefaultTimeout > 0 {
-			timeout = b.config.Global.DefaultTimeout
-		}
+		timeout := b.resolveTimeout(agentConfig.Timeout.Timeout, DefaultAgentTimeout)
 		agentInterceptors = append(agentInterceptors, interceptors.TimeoutAgentInterceptor(timeout))
 	}
 
@@ -332,29 +339,30 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 	}
 
 	if toolConfig.Timeout.Enabled {
-		timeout := DefaultToolTimeout
-		if toolConfig.Timeout.Timeout > 0 {
-			timeout = toolConfig.Timeout.Timeout
-		} else if b.config.Global.DefaultTimeout > 0 {
-			timeout = b.config.Global.DefaultTimeout
-		}
+		timeout := b.resolveTimeout(toolConfig.Timeout.Timeout, DefaultToolTimeout)
 		toolInterceptors = append(toolInterceptors, interceptors.TimeoutToolInterceptor(timeout))
 	}
 
 	// Security interceptors
 	if toolConfig.Validation.Enabled {
-		config := interceptors.ValidationConfig{
-			MaxInputSize:    int(toolConfig.Validation.MaxInputSize),
-			MaxStringLength: DefaultMaxStringLength,
-			RequiredFields:  toolConfig.Validation.RequiredFields,
-			AllowHTML:       !toolConfig.Validation.StrictMode,
+		// Start with the secure default configuration to ensure all security patterns are included
+		config := interceptors.DefaultValidationConfig()
+
+		// Override defaults with values from the user's configuration
+		if toolConfig.Validation.MaxInputSize > 0 {
+			config.MaxInputSize = int(toolConfig.Validation.MaxInputSize)
 		}
-		// Use configured max string length if provided
 		if toolConfig.Validation.MaxStringLength > 0 {
 			config.MaxStringLength = toolConfig.Validation.MaxStringLength
 		}
+		if len(toolConfig.Validation.RequiredFields) > 0 {
+			config.RequiredFields = toolConfig.Validation.RequiredFields
+		}
+		config.AllowHTML = !toolConfig.Validation.StrictMode
+
+		// In strict mode, ensure HTML is disallowed. The default patterns are already strict.
 		if toolConfig.Validation.StrictMode {
-			config.ForbiddenPatterns = []string{"<script", "javascript:", "data:"}
+			config.AllowHTML = false
 		}
 		toolInterceptors = append(toolInterceptors, interceptors.ValidationToolInterceptor(config))
 	}
