@@ -491,7 +491,7 @@
                     <div class="feature-card">
                         <div class="feature-icon">🎯</div>
                         <h3>Systematic Optimization</h3>
-                        <p>Automatically optimize prompts with advanced algorithms like MIPRO, SIMBA, and BootstrapFewShot for improved performance.</p>
+                        <p>Automatically optimize prompts with advanced algorithms like MIPRO, SIMBA, GEPA, and BootstrapFewShot for improved performance.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-icon">⚡</div>
@@ -502,6 +502,11 @@
                         <div class="feature-icon">🔧</div>
                         <h3>Smart Tool Management</h3>
                         <p>Intelligent tool selection with Bayesian inference, performance tracking, and auto-discovery from MCP servers.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🛡️</div>
+                        <h3>Interceptor System</h3>
+                        <p>Production-ready interceptors for security, performance, and observability. YAML configuration, input validation, rate limiting, caching, and circuit breakers.</p>
                     </div>
                     <div class="feature-card">
                         <div class="feature-icon">🤖</div>
@@ -521,7 +526,7 @@
                     <div class="feature-card">
                         <div class="feature-icon">🌐</div>
                         <h3>Multi-Provider Support</h3>
-                        <p>Native support for Anthropic Claude, Google Gemini (with multimodal), Ollama, and LlamaCPP with seamless provider switching.</p>
+                        <p>Native support for Anthropic Claude, OpenAI GPT, Google Gemini (with multimodal), Ollama, LlamaCPP, and custom OpenAI-compatible providers with seamless switching.</p>
                     </div>
                 </div>
             </div>
@@ -535,7 +540,11 @@
                         <p>Core Modules</p>
                     </div>
                     <div class="stat-item">
-                        <h3>4+</h3>
+                        <h3>12+</h3>
+                        <p>Built-in Interceptors</p>
+                    </div>
+                    <div class="stat-item">
+                        <h3>6+</h3>
                         <p>LLM Providers</p>
                     </div>
                     <div class="stat-item">
@@ -543,8 +552,8 @@
                         <p>AI Support</p>
                     </div>
                     <div class="stat-item">
-                        <h3>12+</h3>
-                        <p>Examples</p>
+                        <h3>Production</h3>
+                        <p>Ready</p>
                     </div>
                 </div>
             </div>
@@ -609,6 +618,55 @@ func main() {
     }
 
     fmt.Printf("Answer: %s\n", result["answer"])
+}</code></pre>
+                </div>
+
+                <h3 style="text-align: center; margin-top: 3rem; margin-bottom: 1rem; color: var(--text);">Interceptors Example</h3>
+                <p style="text-align: center; color: var(--text-secondary); margin-bottom: 2rem;">
+                    Production-ready interceptors for security, performance, and observability
+                </p>
+
+                <div class="code-example">
+                    <pre><code class="language-go">package main
+
+import (
+    "context"
+    "time"
+    
+    "github.com/XiaoConstantine/dspy-go/pkg/core"
+    "github.com/XiaoConstantine/dspy-go/pkg/interceptors"
+    "github.com/XiaoConstantine/dspy-go/pkg/tools"
+)
+
+func main() {
+    // Create tool interceptors for enhanced security and reliability
+    toolInterceptors := []core.ToolInterceptor{
+        // Security: Input validation and sanitization
+        interceptors.ValidationToolInterceptor(interceptors.DefaultValidationConfig()),
+        interceptors.SanitizingToolInterceptor(),
+        
+        // Performance: Caching, timeouts, and rate limiting
+        interceptors.CachingToolInterceptor(cache, 5*time.Minute),
+        interceptors.TimeoutToolInterceptor(15*time.Second),
+        interceptors.RateLimitingToolInterceptor(10, time.Minute),
+        
+        // Reliability: Retries and circuit breakers
+        interceptors.RetryToolInterceptor(interceptors.RetryConfig{
+            MaxAttempts: 3,
+            Delay:       500*time.Millisecond,
+            Backoff:     1.5,
+        }),
+        
+        // Observability: Logging and metrics
+        interceptors.LoggingToolInterceptor(),
+        interceptors.MetricsToolInterceptor(),
+    }
+    
+    // Apply interceptors to your tools automatically
+    registry := tools.NewSmartToolRegistry(config)
+    
+    // Tools are now protected with comprehensive interceptor chains
+    result, err := registry.ExecuteWithTracking(ctx, "my_tool", params)
 }</code></pre>
                 </div>
 
@@ -691,8 +749,13 @@ func main() {
                     </div>
                     <div class="doc-card">
                         <h3>Optimizers</h3>
-                        <p>Discover MIPRO, SIMBA, and BootstrapFewShot for automatic prompt optimization.</p>
+                        <p>Discover MIPRO, SIMBA, GEPA, and BootstrapFewShot for automatic prompt optimization.</p>
                         <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/optimizers">Learn Optimizers →</a>
+                    </div>
+                    <div class="doc-card">
+                        <h3>Interceptors</h3>
+                        <p>Production-ready interceptors for security, performance, and observability with YAML configuration.</p>
+                        <a href="https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/interceptors">Explore Interceptors →</a>
                     </div>
                     <div class="doc-card">
                         <h3>Examples</h3>
