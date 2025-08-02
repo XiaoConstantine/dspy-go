@@ -318,7 +318,30 @@ func (eb *EventBus) executeHandler(ctx context.Context, handler EventHandler, ev
 
 	done := make(chan error, 1)
 	go func() {
-		done <- handler(handlerCtx, event)
+		defer func() {
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("event handler panicked: %v", r)
+			}
+		}()
+
+		// Check if context is already cancelled before execution
+		select {
+		case <-handlerCtx.Done():
+			done <- handlerCtx.Err()
+			return
+		default:
+		}
+
+		err := handler(handlerCtx, event)
+
+		// Ensure we can send result without blocking
+		select {
+		case done <- err:
+		case <-handlerCtx.Done():
+			// Context cancelled, don't block
+			return
+		}
 	}()
 
 	select {

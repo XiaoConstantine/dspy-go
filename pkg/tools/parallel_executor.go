@@ -171,7 +171,40 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 	for _, task := range scheduledTasks {
 		wg.Add(1)
 		go func(t *ParallelTask) {
-			defer wg.Done()
+			defer func() {
+				wg.Done()
+				// Ensure goroutine cleanup on panic
+				if r := recover(); r != nil {
+					// Create an error result for the panic
+					result := ParallelResult{
+						TaskID: t.ID,
+						Error:  fmt.Errorf("task %s panicked: %v", t.ID, r),
+					}
+
+					// Store panic result
+					mu.Lock()
+					if idx, exists := resultMap[result.TaskID]; exists {
+						results[idx] = result
+					}
+					mu.Unlock()
+				}
+			}()
+
+			// Check if context is already cancelled before execution
+			select {
+			case <-ctx.Done():
+				result := ParallelResult{
+					TaskID: t.ID,
+					Error:  ctx.Err(),
+				}
+				mu.Lock()
+				if idx, exists := resultMap[result.TaskID]; exists {
+					results[idx] = result
+				}
+				mu.Unlock()
+				return
+			default:
+			}
 
 			// Execute with worker pool
 			result := pe.executeWithWorkerPool(ctx, t)
@@ -196,6 +229,14 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 	// Wait for completion or context cancellation
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Log panic but continue
+				_ = r
+			}
+		}()
+
 		wg.Wait()
 		close(done)
 	}()
