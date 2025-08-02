@@ -211,6 +211,7 @@ type AuthorizationContext struct {
 	UserID      string
 	Roles       []string
 	Permissions []string
+	Scopes      []string
 	APIKey      string
 }
 
@@ -218,6 +219,9 @@ type AuthorizationContext struct {
 type AuthorizationPolicy struct {
 	RequiredRoles       []string
 	RequiredPermissions []string
+	RequiredScopes      []string
+	RequireAuth         bool
+	CustomRules         map[string]string
 	AllowedModules      []string
 	AllowedAgents       []string
 	AllowedTools        []string
@@ -522,6 +526,11 @@ func getAuthorizationContext(ctx context.Context) *AuthorizationContext {
 
 // checkAuthorization verifies if the authorization context satisfies the policy.
 func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationContext, policy AuthorizationPolicy, resource string) bool {
+	// Check if authentication is required but not present
+	if policy.RequireAuth && (authCtx.UserID == "" && authCtx.APIKey == "") {
+		return false
+	}
+
 	// Check required roles
 	if len(policy.RequiredRoles) > 0 {
 		if !hasAnyRole(authCtx.Roles, policy.RequiredRoles) {
@@ -534,6 +543,21 @@ func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationCon
 		if !hasAnyPermission(authCtx.Permissions, policy.RequiredPermissions) {
 			return false
 		}
+	}
+
+	// Check required scopes
+	if len(policy.RequiredScopes) > 0 {
+		if !hasAnyScope(authCtx.Scopes, policy.RequiredScopes) {
+			return false
+		}
+	}
+
+	// Check custom rules - currently not implemented
+	// Return false if custom rules are configured to prevent silent security bypass
+	if len(policy.CustomRules) > 0 {
+		// Custom rules are not yet implemented - deny access to prevent false sense of security
+		// TODO: Implement custom rule evaluation based on business requirements
+		return false
 	}
 
 	// Check resource-specific allowlists
@@ -559,12 +583,15 @@ func (ai *AuthorizationInterceptor) checkAuthorization(authCtx *AuthorizationCon
 }
 
 // hasAnyRole checks if any of the user's roles match the required roles.
+// Uses a map-based lookup for improved performance with large role lists.
 func hasAnyRole(userRoles, requiredRoles []string) bool {
-	for _, userRole := range userRoles {
-		for _, requiredRole := range requiredRoles {
-			if userRole == requiredRole {
-				return true
-			}
+	userRoleSet := make(map[string]struct{}, len(userRoles))
+	for _, role := range userRoles {
+		userRoleSet[role] = struct{}{}
+	}
+	for _, requiredRole := range requiredRoles {
+		if _, exists := userRoleSet[requiredRole]; exists {
+			return true
 		}
 	}
 	return false
@@ -577,6 +604,21 @@ func hasAnyPermission(userPermissions, requiredPermissions []string) bool {
 			if matchesPermission(userPerm, requiredPerm) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasAnyScope checks if any of the user's scopes match the required scopes.
+// Uses a map-based lookup for improved performance with large scope lists.
+func hasAnyScope(userScopes, requiredScopes []string) bool {
+	userScopeSet := make(map[string]struct{}, len(userScopes))
+	for _, scope := range userScopes {
+		userScopeSet[scope] = struct{}{}
+	}
+	for _, requiredScope := range requiredScopes {
+		if _, exists := userScopeSet[requiredScope]; exists {
+			return true
 		}
 	}
 	return false

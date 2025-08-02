@@ -27,6 +27,9 @@ type Config struct {
 	// Optimizer configuration
 	Optimizers OptimizersConfig `yaml:"optimizers,omitempty" validate:"omitempty"`
 
+	// Interceptors configuration
+	Interceptors InterceptorsConfig `yaml:"interceptors,omitempty" validate:"omitempty"`
+
 }
 
 // LLMConfig holds configuration for Language Learning Models.
@@ -623,6 +626,169 @@ type TPEConfig struct {
 	RandomSeed int64 `yaml:"random_seed"`
 }
 
+// InterceptorsConfig holds interceptor configuration.
+type InterceptorsConfig struct {
+	// Module interceptors configuration
+	Module ModuleInterceptorsConfig `yaml:"module,omitempty" validate:"omitempty"`
+
+	// Agent interceptors configuration
+	Agent AgentInterceptorsConfig `yaml:"agent,omitempty" validate:"omitempty"`
+
+	// Tool interceptors configuration
+	Tool ToolInterceptorsConfig `yaml:"tool,omitempty" validate:"omitempty"`
+
+	// Global interceptor settings
+	Global GlobalInterceptorConfig `yaml:"global,omitempty" validate:"omitempty"`
+}
+
+// ModuleInterceptorsConfig holds module-specific interceptor configuration.
+type ModuleInterceptorsConfig struct {
+	// Standard interceptors
+	Logging   InterceptorToggle     `yaml:"logging,omitempty"`
+	Metrics   InterceptorToggle     `yaml:"metrics,omitempty"`
+	Tracing   InterceptorToggle     `yaml:"tracing,omitempty"`
+
+	// Performance interceptors
+	Caching       CachingInterceptorConfig       `yaml:"caching,omitempty"`
+	Timeout       TimeoutInterceptorConfig       `yaml:"timeout,omitempty"`
+	CircuitBreaker CircuitBreakerInterceptorConfig `yaml:"circuit_breaker,omitempty"`
+	Retry         RetryInterceptorConfig         `yaml:"retry,omitempty"`
+
+	// Security interceptors
+	Validation    ValidationInterceptorConfig    `yaml:"validation,omitempty"`
+	Authorization AuthorizationInterceptorConfig `yaml:"authorization,omitempty"`
+	Sanitization  SanitizationInterceptorConfig  `yaml:"sanitization,omitempty"`
+}
+
+// AgentInterceptorsConfig holds agent-specific interceptor configuration.
+type AgentInterceptorsConfig struct {
+	// Standard interceptors
+	Logging   InterceptorToggle `yaml:"logging,omitempty"`
+	Metrics   InterceptorToggle `yaml:"metrics,omitempty"`
+	Tracing   InterceptorToggle `yaml:"tracing,omitempty"`
+
+	// Performance interceptors
+	RateLimit RateLimitInterceptorConfig `yaml:"rate_limit,omitempty"`
+	Timeout   TimeoutInterceptorConfig   `yaml:"timeout,omitempty"`
+
+	// Security interceptors
+	Authorization AuthorizationInterceptorConfig `yaml:"authorization,omitempty"`
+	Audit         AuditInterceptorConfig         `yaml:"audit,omitempty"`
+}
+
+// ToolInterceptorsConfig holds tool-specific interceptor configuration.
+type ToolInterceptorsConfig struct {
+	// Standard interceptors
+	Logging   InterceptorToggle `yaml:"logging,omitempty"`
+	Metrics   InterceptorToggle `yaml:"metrics,omitempty"`
+	Tracing   InterceptorToggle `yaml:"tracing,omitempty"`
+
+	// Performance interceptors
+	Caching CachingInterceptorConfig `yaml:"caching,omitempty"`
+	Timeout TimeoutInterceptorConfig `yaml:"timeout,omitempty"`
+
+	// Security interceptors
+	Validation   ValidationInterceptorConfig   `yaml:"validation,omitempty"`
+	Authorization AuthorizationInterceptorConfig `yaml:"authorization,omitempty"`
+	Sanitization SanitizationInterceptorConfig  `yaml:"sanitization,omitempty"`
+}
+
+// GlobalInterceptorConfig holds global interceptor settings.
+type GlobalInterceptorConfig struct {
+	// Enable interceptors globally
+	Enabled bool `yaml:"enabled"`
+
+	// Default timeout for all interceptors
+	DefaultTimeout time.Duration `yaml:"default_timeout,omitempty" validate:"omitempty,min=1s"`
+
+	// Maximum interceptor chain length
+	MaxChainLength int `yaml:"max_chain_length,omitempty" validate:"omitempty,min=1"`
+
+	// Enable performance monitoring for interceptors
+	MonitorPerformance bool `yaml:"monitor_performance,omitempty"`
+}
+
+// InterceptorToggle represents a simple on/off toggle for interceptors.
+type InterceptorToggle struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// CachingInterceptorConfig holds caching interceptor configuration.
+type CachingInterceptorConfig struct {
+	Enabled bool          `yaml:"enabled"`
+	TTL     time.Duration `yaml:"ttl,omitempty" validate:"omitempty,min=1s"`
+	MaxSize int64         `yaml:"max_size,omitempty" validate:"omitempty,min=1"`
+	Type    string        `yaml:"type,omitempty" validate:"omitempty,oneof=memory sqlite"`
+}
+
+// TimeoutInterceptorConfig holds timeout interceptor configuration.
+type TimeoutInterceptorConfig struct {
+	Enabled bool          `yaml:"enabled"`
+	Timeout time.Duration `yaml:"timeout,omitempty" validate:"omitempty,min=1s"`
+}
+
+// CircuitBreakerInterceptorConfig holds circuit breaker interceptor configuration.
+type CircuitBreakerInterceptorConfig struct {
+	Enabled           bool          `yaml:"enabled"`
+	FailureThreshold  int           `yaml:"failure_threshold,omitempty" validate:"omitempty,min=1"`
+	RecoveryTimeout   time.Duration `yaml:"recovery_timeout,omitempty" validate:"omitempty,min=1s"`
+	HalfOpenRequests  int           `yaml:"half_open_requests,omitempty" validate:"omitempty,min=1"`
+}
+
+// RetryInterceptorConfig holds retry interceptor configuration.
+type RetryInterceptorConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	MaxRetries     int           `yaml:"max_retries,omitempty" validate:"omitempty,min=1"`
+	InitialBackoff time.Duration `yaml:"initial_backoff,omitempty" validate:"omitempty,min=1ms"`
+	MaxBackoff     time.Duration `yaml:"max_backoff,omitempty" validate:"omitempty,min=1ms"`
+	BackoffFactor  float64       `yaml:"backoff_factor,omitempty" validate:"omitempty,min=1.0"`
+}
+
+// ValidationInterceptorConfig holds validation interceptor configuration.
+type ValidationInterceptorConfig struct {
+	Enabled              bool     `yaml:"enabled"`
+	StrictMode           bool     `yaml:"strict_mode,omitempty"`
+	RequiredFields       []string `yaml:"required_fields,omitempty"`
+	MaxInputSize         int64    `yaml:"max_input_size,omitempty" validate:"omitempty,min=1"`
+	MaxStringLength      int      `yaml:"max_string_length,omitempty" validate:"omitempty,min=1"`
+	AllowedContentTypes  []string `yaml:"allowed_content_types,omitempty"`
+}
+
+// AuthorizationInterceptorConfig holds authorization interceptor configuration.
+type AuthorizationInterceptorConfig struct {
+	Enabled         bool              `yaml:"enabled"`
+	RequireAuth     bool              `yaml:"require_auth,omitempty"`
+	AllowedRoles    []string          `yaml:"allowed_roles,omitempty"`
+	RequiredScopes  []string          `yaml:"required_scopes,omitempty"`
+	CustomRules     map[string]string `yaml:"custom_rules,omitempty"`
+}
+
+// SanitizationInterceptorConfig holds sanitization interceptor configuration.
+type SanitizationInterceptorConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	RemoveHTML      bool     `yaml:"remove_html,omitempty"`
+	RemoveSQL       bool     `yaml:"remove_sql,omitempty"`
+	RemoveScript    bool     `yaml:"remove_script,omitempty"`
+	CustomPatterns  []string `yaml:"custom_patterns,omitempty"`
+	MaxStringLength int      `yaml:"max_string_length,omitempty" validate:"omitempty,min=1"`
+}
+
+// RateLimitInterceptorConfig holds rate limiting interceptor configuration.
+type RateLimitInterceptorConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	RequestsPerMinute int       `yaml:"requests_per_minute,omitempty" validate:"omitempty,min=1"`
+	BurstSize     int           `yaml:"burst_size,omitempty" validate:"omitempty,min=1"`
+	WindowSize    time.Duration `yaml:"window_size,omitempty" validate:"omitempty,min=1s"`
+}
+
+// AuditInterceptorConfig holds audit interceptor configuration.
+type AuditInterceptorConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	LogLevel     string `yaml:"log_level,omitempty" validate:"omitempty,oneof=DEBUG INFO WARN ERROR"`
+	IncludeInput bool   `yaml:"include_input,omitempty"`
+	IncludeOutput bool  `yaml:"include_output,omitempty"`
+	AuditPath    string `yaml:"audit_path,omitempty"`
+}
 
 // Validate validates the configuration using the singleton validator.
 func (c *Config) Validate() error {
