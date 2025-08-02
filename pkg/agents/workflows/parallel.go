@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 )
@@ -62,11 +63,18 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]interf
 			default:
 			}
 
-			// Acquire semaphore
+			// Acquire semaphore with timeout to prevent deadlock
+			semCtx, semCancel := context.WithTimeout(ctx, 30*time.Second)
+			defer semCancel()
+
 			select {
 			case sem <- struct{}{}:
-			case <-ctx.Done():
-				errors <- ctx.Err()
+			case <-semCtx.Done():
+				if semCtx.Err() == context.DeadlineExceeded {
+					errors <- fmt.Errorf("semaphore acquire timeout for step %s", s.ID)
+				} else {
+					errors <- ctx.Err() // Original context was cancelled
+				}
 				return
 			}
 
