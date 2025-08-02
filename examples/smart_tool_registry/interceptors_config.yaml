@@ -1,0 +1,82 @@
+interceptors:
+  global:
+    enabled: true
+    default_timeout: 30s
+    max_chain_length: 10
+    monitor_performance: true
+
+  tool:
+    # Standard observability interceptors
+    logging:
+      enabled: true
+    metrics:
+      enabled: true
+    tracing:
+      enabled: true
+
+    # Performance interceptors
+    caching:
+      enabled: true
+      ttl: 5m
+      type: memory
+    timeout:
+      enabled: true
+      timeout: 15s
+
+    # Security interceptors
+    validation:
+      enabled: true
+      strict_mode: true
+      max_input_size: 1048576  # 1MB
+      max_string_length: 5000
+      allowed_content_types:
+        - "text/plain"
+        - "application/json"
+
+    authorization:
+      enabled: true
+      require_auth: false  # Disabled for demo, but can be enabled in production
+      allowed_roles: []
+      required_scopes: []
+
+    sanitization:
+      enabled: true
+      remove_html: true
+      remove_sql: true
+      remove_script: true
+      max_string_length: 5000
+
+  # Agent interceptors (for future reactive agents example)
+  agent:
+    logging:
+      enabled: true
+    metrics:
+      enabled: true
+    rate_limit:
+      enabled: true
+      requests_per_minute: 30
+      window_size: 1m
+    timeout:
+      enabled: true
+      timeout: 60s
+    authorization:
+      enabled: true
+      require_auth: false
+
+  # Module interceptors (for future examples)
+  module:
+    logging:
+      enabled: true
+    metrics:
+      enabled: true
+    caching:
+      enabled: true
+      ttl: 10m
+      type: memory
+    timeout:
+      enabled: true
+      timeout: 30s
+    validation:
+      enabled: true
+      strict_mode: false
+      max_string_length: 10000

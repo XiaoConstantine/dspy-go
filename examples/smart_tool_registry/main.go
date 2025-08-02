@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
@@ -194,11 +194,18 @@ func (m *MockMCPDiscovery) Subscribe(callback func(tools []core.Tool)) error {
 
 // - Reliability: Timeouts, retries, and error handling.
 func main() {
-	fmt.Println("🚀 Smart Tool Registry with Interceptors Example")
-	fmt.Println("================================================")
+	// Initialize DSPy-Go logger
+	logger := logging.NewLogger(logging.Config{
+		Severity: logging.INFO,
+		Outputs:  []logging.Output{logging.NewConsoleOutput(false)},
+	})
+	ctx := context.Background()
+
+	logger.Info(ctx, "🚀 Smart Tool Registry with Interceptors Example")
+	logger.Info(ctx, "================================================")
 
 	// 1. Create Smart Tool Registry with full configuration
-	fmt.Println("\n1. Setting up Smart Tool Registry...")
+	logger.Info(ctx, "\n1. Setting up Smart Tool Registry...")
 
 	mockDiscovery := &MockMCPDiscovery{
 		tools: []core.Tool{
@@ -216,7 +223,7 @@ func main() {
 	registry := tools.NewSmartToolRegistry(config)
 
 	// Setup tool interceptors for enhanced security, observability and reliability
-	fmt.Println("   → Configuring tool interceptors...")
+	logger.Info(ctx, "   → Configuring tool interceptors...")
 
 	// Create tool interceptors
 	toolInterceptors := []core.ToolInterceptor{
@@ -246,10 +253,10 @@ func main() {
 		}),
 	}
 
-	fmt.Printf("   → Configured %d tool interceptors for enhanced tool execution\n", len(toolInterceptors))
+	logger.Info(ctx, "   → Configured %d tool interceptors for enhanced tool execution", len(toolInterceptors))
 
 	// 2. Register example tools
-	fmt.Println("\n2. Registering tools...")
+	logger.Info(ctx, "\n2. Registering tools...")
 
 	searchTool := &SearchTool{name: "advanced_search"}
 	createTool := &CreateTool{name: "document_creator"}
@@ -260,25 +267,25 @@ func main() {
 	for _, tool := range tools_list {
 		err := registry.Register(tool)
 		if err != nil {
-			log.Printf("Error registering tool %s: %v", tool.Name(), err)
+			logger.Error(ctx, "Error registering tool %s: %v", tool.Name(), err)
 		} else {
-			fmt.Printf("✅ Registered: %s\n", tool.Name())
+			logger.Info(ctx, "✅ Registered: %s", tool.Name())
 		}
 	}
 
 	// 3. Configure fallbacks
-	fmt.Println("\n3. Configuring fallbacks...")
+	logger.Info(ctx, "\n3. Configuring fallbacks...")
 
 	err := registry.AddFallback("search data", "advanced_search")
 	if err != nil {
-		log.Printf("Error adding fallback: %v", err)
+		logger.Error(ctx, "Error adding fallback: %v", err)
 	} else {
-		fmt.Println("✅ Added fallback for search operations")
+		logger.Info(ctx, "✅ Added fallback for search operations")
 	}
 
 	// 4. Demonstrate intelligent tool selection
-	fmt.Println("\n4. Intelligent Tool Selection Examples")
-	fmt.Println("=====================================")
+	logger.Info(ctx, "\n4. Intelligent Tool Selection Examples")
+	logger.Info(ctx, "=====================================")
 
 	intents := []string{
 		"I need to find user information in the database",
@@ -288,46 +295,41 @@ func main() {
 		"Process the incoming data stream",
 	}
 
-	ctx := context.Background()
-
 	for _, intent := range intents {
-		fmt.Printf("\n🎯 Intent: \"%s\"\n", intent)
+		logger.Info(ctx, "\n🎯 Intent: \"%s\"", intent)
 
 		// Get best tool
 		selectedTool, err := registry.SelectBest(ctx, intent)
 		if err != nil {
-			log.Printf("Error selecting tool: %v", err)
+			logger.Error(ctx, "Error selecting tool: %v", err)
 			continue
 		}
 
-		fmt.Printf("   → Selected Tool: %s\n", selectedTool.Name())
+		logger.Info(ctx, "   → Selected Tool: %s", selectedTool.Name())
 
 		// Show all matching tools with scores
 		matches := registry.Match(intent)
-		fmt.Printf("   → All Matches: ")
+		matchNames := make([]string, len(matches))
 		for i, match := range matches {
-			if i > 0 {
-				fmt.Print(", ")
-			}
-			fmt.Print(match.Name())
+			matchNames[i] = match.Name()
 		}
-		fmt.Println()
+		logger.Info(ctx, "   → All Matches: %v", matchNames)
 	}
 
 	// 5. Execute tools with performance tracking
-	fmt.Println("\n5. Executing Tools with Performance Tracking")
-	fmt.Println("==========================================")
+	logger.Info(ctx, "\n5. Executing Tools with Performance Tracking")
+	logger.Info(ctx, "==========================================")
 
 	// Execute search tool multiple times with interceptors
-	fmt.Println("\n📊 Executing search operations with tool interceptors...")
-	fmt.Println("   → The following executions demonstrate interceptor benefits:")
-	fmt.Println("     • Logging: Start/completion of each tool execution")
-	fmt.Println("     • Metrics: Performance timing and success/failure tracking")
-	fmt.Println("     • Validation: Input safety checks against injection attacks")
-	fmt.Println("     • Sanitization: Input cleaning and normalization")
-	fmt.Println("     • Rate Limiting: Prevents tool abuse (10 calls/min per tool)")
-	fmt.Println("     • Timeout: Protection against long-running operations")
-	fmt.Println("     • Retry: Automatic retry on failures with exponential backoff")
+	logger.Info(ctx, "\n📊 Executing search operations with tool interceptors...")
+	logger.Info(ctx, "   → The following executions demonstrate interceptor benefits:")
+	logger.Info(ctx, "     • Logging: Start/completion of each tool execution")
+	logger.Info(ctx, "     • Metrics: Performance timing and success/failure tracking")
+	logger.Info(ctx, "     • Validation: Input safety checks against injection attacks")
+	logger.Info(ctx, "     • Sanitization: Input cleaning and normalization")
+	logger.Info(ctx, "     • Rate Limiting: Prevents tool abuse (10 calls/min per tool)")
+	logger.Info(ctx, "     • Timeout: Protection against long-running operations")
+	logger.Info(ctx, "     • Retry: Automatic retry on failures with exponential backoff")
 
 	for i := 0; i < 3; i++ {
 		params := map[string]interface{}{
@@ -335,23 +337,23 @@ func main() {
 			"limit": 5,
 		}
 
-		fmt.Printf("\n   → Executing search operation %d with interceptors...\n", i+1)
+		logger.Info(ctx, "\n   → Executing search operation %d with interceptors...", i+1)
 		result, err := registry.ExecuteWithTracking(ctx, "advanced_search", params)
 		if err != nil {
-			log.Printf("Execution error: %v", err)
+			logger.Error(ctx, "Execution error: %v", err)
 			continue
 		}
 
-		fmt.Printf("   ✅ Search execution %d completed successfully\n", i+1)
+		logger.Info(ctx, "   ✅ Search execution %d completed successfully", i+1)
 		if data, ok := result.Data.(map[string]interface{}); ok {
 			if count, ok := data["count"].(int); ok {
-				fmt.Printf("      → Found %d results\n", count)
+				logger.Info(ctx, "      → Found %d results", count)
 			}
 		}
 	}
 
 	// Execute create tool with interceptors
-	fmt.Println("\n📝 Executing create operation with tool interceptors...")
+	logger.Info(ctx, "\n📝 Executing create operation with tool interceptors...")
 	params := map[string]interface{}{
 		"type": "report",
 		"name": "Q4 Analysis Report",
@@ -359,87 +361,87 @@ func main() {
 
 	result, err := registry.ExecuteWithTracking(ctx, "document_creator", params)
 	if err != nil {
-		log.Printf("Execution error: %v", err)
+		logger.Error(ctx, "Execution error: %v", err)
 	} else {
-		fmt.Println("   ✅ Creation completed with interceptor protection")
+		logger.Info(ctx, "   ✅ Creation completed with interceptor protection")
 		if data, ok := result.Data.(map[string]interface{}); ok {
 			if item, ok := data["created_item"].(map[string]interface{}); ok {
-				fmt.Printf("      → Created: %s (ID: %s)\n", item["name"], item["id"])
+				logger.Info(ctx, "      → Created: %s (ID: %s)", item["name"], item["id"])
 			}
 		}
 	}
 
 	// Execute analyze tool with interceptors
-	fmt.Println("\n🔍 Executing analysis operation with tool interceptors...")
+	logger.Info(ctx, "\n🔍 Executing analysis operation with tool interceptors...")
 	params = map[string]interface{}{
 		"data": "performance metrics dataset",
 	}
 
 	result, err = registry.ExecuteWithTracking(ctx, "data_analyzer", params)
 	if err != nil {
-		log.Printf("Execution error: %v", err)
+		logger.Error(ctx, "Execution error: %v", err)
 	} else {
-		fmt.Println("   ✅ Analysis completed with security validation")
+		logger.Info(ctx, "   ✅ Analysis completed with security validation")
 		if data, ok := result.Data.(map[string]interface{}); ok {
 			if analysis, ok := data["analysis"].(map[string]interface{}); ok {
-				fmt.Printf("      → Score: %.1f, Confidence: %.2f\n",
+				logger.Info(ctx, "      → Score: %.1f, Confidence: %.2f",
 					analysis["score"], analysis["confidence"])
 			}
 		}
 	}
 
 	// 6. Show performance metrics
-	fmt.Println("\n6. Performance Metrics")
-	fmt.Println("=====================")
+	logger.Info(ctx, "\n6. Performance Metrics")
+	logger.Info(ctx, "=====================")
 
 	for _, toolName := range []string{"advanced_search", "document_creator", "data_analyzer"} {
 		metrics, err := registry.GetPerformanceMetrics(toolName)
 		if err != nil {
-			log.Printf("Error getting metrics for %s: %v", toolName, err)
+			logger.Error(ctx, "Error getting metrics for %s: %v", toolName, err)
 			continue
 		}
 
-		fmt.Printf("\n📈 %s:\n", toolName)
-		fmt.Printf("   → Executions: %d\n", metrics.ExecutionCount)
-		fmt.Printf("   → Success Rate: %.1f%%\n", metrics.SuccessRate*100)
-		fmt.Printf("   → Avg Latency: %v\n", metrics.AverageLatency)
-		fmt.Printf("   → Reliability: %.2f/1.0\n", metrics.ReliabilityScore)
+		logger.Info(ctx, "\n📈 %s:", toolName)
+		logger.Info(ctx, "   → Executions: %d", metrics.ExecutionCount)
+		logger.Info(ctx, "   → Success Rate: %.1f%%", metrics.SuccessRate*100)
+		logger.Info(ctx, "   → Avg Latency: %v", metrics.AverageLatency)
+		logger.Info(ctx, "   → Reliability: %.2f/1.0", metrics.ReliabilityScore)
 	}
 
 	// 7. Show tool capabilities
-	fmt.Println("\n7. Tool Capabilities")
-	fmt.Println("===================")
+	logger.Info(ctx, "\n7. Tool Capabilities")
+	logger.Info(ctx, "===================")
 
 	for _, toolName := range []string{"advanced_search", "document_creator", "data_analyzer"} {
 		capabilities, err := registry.GetCapabilities(toolName)
 		if err != nil {
-			log.Printf("Error getting capabilities for %s: %v", toolName, err)
+			logger.Error(ctx, "Error getting capabilities for %s: %v", toolName, err)
 			continue
 		}
 
-		fmt.Printf("\n🔧 %s capabilities:\n", toolName)
+		logger.Info(ctx, "\n🔧 %s capabilities:", toolName)
 		for _, cap := range capabilities {
-			fmt.Printf("   → %s (confidence: %.2f)\n", cap.Name, cap.Confidence)
+			logger.Info(ctx, "   → %s (confidence: %.2f)", cap.Name, cap.Confidence)
 		}
 	}
 
 	// 8. Wait for auto-discovery to trigger
-	fmt.Println("\n8. Auto-Discovery Demonstration")
-	fmt.Println("==============================")
+	logger.Info(ctx, "\n8. Auto-Discovery Demonstration")
+	logger.Info(ctx, "==============================")
 
-	fmt.Println("⏳ Waiting for auto-discovery (simulated MCP server)...")
+	logger.Info(ctx, "⏳ Waiting for auto-discovery (simulated MCP server)...")
 	time.Sleep(3 * time.Second)
 
 	// List all tools to show discovered ones
 	allTools := registry.List()
-	fmt.Printf("📋 Total registered tools: %d\n", len(allTools))
+	logger.Info(ctx, "📋 Total registered tools: %d", len(allTools))
 	for _, tool := range allTools {
-		fmt.Printf("   → %s\n", tool.Name())
+		logger.Info(ctx, "   → %s", tool.Name())
 	}
 
 	// 9. Demonstrate Bayesian selector configuration
-	fmt.Println("\n9. Advanced Selector Configuration")
-	fmt.Println("=================================")
+	logger.Info(ctx, "\n9. Advanced Selector Configuration")
+	logger.Info(ctx, "==================================")
 
 	// Create a custom selector with different weights
 	customSelector := tools.NewBayesianToolSelector()
@@ -455,25 +457,25 @@ func main() {
 	}
 	customSelector.UpdatePriorProbabilities(usageStats)
 
-	fmt.Println("✅ Custom Bayesian selector configured")
-	fmt.Printf("   → Match Weight: %.1f\n", customSelector.MatchWeight)
-	fmt.Printf("   → Performance Weight: %.1f\n", customSelector.PerformanceWeight)
-	fmt.Printf("   → Capability Weight: %.1f\n", customSelector.CapabilityWeight)
+	logger.Info(ctx, "✅ Custom Bayesian selector configured")
+	logger.Info(ctx, "   → Match Weight: %.1f", customSelector.MatchWeight)
+	logger.Info(ctx, "   → Performance Weight: %.1f", customSelector.PerformanceWeight)
+	logger.Info(ctx, "   → Capability Weight: %.1f", customSelector.CapabilityWeight)
 
 	// Test custom selection
 	testIntent := "search for technical documentation"
 	scores, err := customSelector.ScoreTools(ctx, testIntent, allTools)
 	if err == nil && len(scores) > 0 {
-		fmt.Printf("   → Best tool for '%s': %s (score: %.3f)\n",
+		logger.Info(ctx, "   → Best tool for '%s': %s (score: %.3f)",
 			testIntent, scores[0].Tool.Name(), scores[0].FinalScore)
 	}
 
 	// 10. Demonstrate tool interceptor security features
-	fmt.Println("\n10. Tool Interceptor Security Demonstration")
-	fmt.Println("==========================================")
+	logger.Info(ctx, "\n10. Tool Interceptor Security Demonstration")
+	logger.Info(ctx, "==========================================")
 
-	fmt.Println("\n🔒 Testing security interceptors with potentially malicious inputs...")
-	fmt.Println("   → These examples show how interceptors protect against attacks:")
+	logger.Info(ctx, "\n🔒 Testing security interceptors with potentially malicious inputs...")
+	logger.Info(ctx, "   → These examples show how interceptors protect against attacks:")
 
 	// Test XSS protection
 	maliciousInputs := []map[string]interface{}{
@@ -493,7 +495,7 @@ func main() {
 	testCases := []string{"XSS injection", "SQL injection", "Template injection"}
 
 	for i, testInput := range maliciousInputs {
-		fmt.Printf("\n   🚨 Testing %s protection...\n", testCases[i])
+		logger.Info(ctx, "\n   🚨 Testing %s protection...", testCases[i])
 
 		// Try to execute with malicious input - interceptors will sanitize/validate
 		toolName := "advanced_search"
@@ -506,30 +508,30 @@ func main() {
 
 		result, err := registry.ExecuteWithTracking(ctx, toolName, testInput)
 		if err != nil {
-			fmt.Printf("      ✅ %s blocked by security interceptors: %v\n", testCases[i], err)
+			logger.Info(ctx, "      ✅ %s blocked by security interceptors: %v", testCases[i], err)
 		} else {
-			fmt.Printf("      ✅ %s sanitized and processed safely\n", testCases[i])
+			logger.Info(ctx, "      ✅ %s sanitized and processed safely", testCases[i])
 			if data, ok := result.Data.(map[string]interface{}); ok {
 				if toolName == "advanced_search" {
 					if count, ok := data["count"].(int); ok {
-						fmt.Printf("         → Sanitized query processed, found %d results\n", count)
+						logger.Info(ctx, "         → Sanitized query processed, found %d results", count)
 					}
 				}
 			}
 		}
 	}
 
-	fmt.Println("\n🎉 Smart Tool Registry with Interceptors demonstration completed!")
-	fmt.Println("\nKey features demonstrated:")
-	fmt.Println("  ✅ Intelligent tool selection with Bayesian inference")
-	fmt.Println("  ✅ Real-time performance tracking and metrics")
-	fmt.Println("  ✅ Automatic capability extraction and matching")
-	fmt.Println("  ✅ Auto-discovery from MCP servers")
-	fmt.Println("  ✅ Fallback mechanisms and error handling")
-	fmt.Println("  ✅ Configurable selection algorithms")
-	fmt.Println("  ✅ Comprehensive tool metadata and scoring")
-	fmt.Println("  ✅ Tool interceptors for security, logging, and reliability")
-	fmt.Println("  ✅ Input validation and sanitization against attacks")
-	fmt.Println("  ✅ Rate limiting and timeout protection")
-	fmt.Println("  ✅ Automatic retry with exponential backoff")
+	logger.Info(ctx, "\n🎉 Smart Tool Registry with Interceptors demonstration completed!")
+	logger.Info(ctx, "\nKey features demonstrated:")
+	logger.Info(ctx, "  ✅ Intelligent tool selection with Bayesian inference")
+	logger.Info(ctx, "  ✅ Real-time performance tracking and metrics")
+	logger.Info(ctx, "  ✅ Automatic capability extraction and matching")
+	logger.Info(ctx, "  ✅ Auto-discovery from MCP servers")
+	logger.Info(ctx, "  ✅ Fallback mechanisms and error handling")
+	logger.Info(ctx, "  ✅ Configurable selection algorithms")
+	logger.Info(ctx, "  ✅ Comprehensive tool metadata and scoring")
+	logger.Info(ctx, "  ✅ Tool interceptors for security, logging, and reliability")
+	logger.Info(ctx, "  ✅ Input validation and sanitization against attacks")
+	logger.Info(ctx, "  ✅ Rate limiting and timeout protection")
+	logger.Info(ctx, "  ✅ Automatic retry with exponential backoff")
 }
