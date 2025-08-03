@@ -758,8 +758,8 @@ func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, in
 func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
 	var zero TOutput
 
-	// Create typed signature for validation
-	typedSig := core.NewTypedSignature[TInput, TOutput]()
+	// Create typed signature for validation (cached for performance)
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
 
 	// Validate inputs
 	if err := typedSig.ValidateInput(inputs); err != nil {
@@ -792,7 +792,7 @@ func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predic
 
 // NewTypedPredict creates a new type-safe Predict module from a typed signature.
 func NewTypedPredict[TInput, TOutput any]() *Predict {
-	typedSig := core.NewTypedSignature[TInput, TOutput]()
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
 	legacySig := typedSig.ToLegacySignature()
 
 	predict := NewPredict(legacySig)

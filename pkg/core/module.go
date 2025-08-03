@@ -317,8 +317,8 @@ func ProcessTyped[TInput, TOutput any](ctx context.Context, module Module, input
 func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, module Module, inputs TInput, opts ...Option) (TOutput, error) {
 	var zero TOutput
 
-	// Create typed signature for validation
-	typedSig := NewTypedSignature[TInput, TOutput]()
+	// Create typed signature for validation (cached for performance)
+	typedSig := NewTypedSignatureCached[TInput, TOutput]()
 
 	// Validate inputs
 	if err := typedSig.ValidateInput(inputs); err != nil {

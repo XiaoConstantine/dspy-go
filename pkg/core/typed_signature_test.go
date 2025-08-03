@@ -271,11 +271,6 @@ func TestWithInstruction(t *testing.T) {
 }
 
 // Benchmark tests to ensure performance is acceptable.
-func BenchmarkNewTypedSignature(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_ = NewTypedSignature[TestInputs, TestOutputs]()
-	}
-}
 
 func BenchmarkStructTagParsing(b *testing.B) {
 	for i := 0; i < b.N; i++ {
@@ -295,5 +290,39 @@ func BenchmarkInputValidation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = sig.ValidateInput(input)
+	}
+}
+
+func TestNewTypedSignatureCached(t *testing.T) {
+	// Test that caching returns the same instance for the same types
+	sig1 := NewTypedSignatureCached[TestInputs, TestOutputs]()
+	sig2 := NewTypedSignatureCached[TestInputs, TestOutputs]()
+
+	// The cached version should return the same instance
+	assert.Equal(t, sig1, sig2, "Cached signatures should be the same instance")
+
+	// Test with different types should return different instances
+	sig3 := NewTypedSignatureCached[TestComplexInputs, TestOutputs]()
+	assert.NotEqual(t, sig1, sig3, "Different type signatures should be different instances")
+
+	// Verify functionality is the same as non-cached version
+	nonCachedSig := NewTypedSignature[TestInputs, TestOutputs]()
+	cachedSig := NewTypedSignatureCached[TestInputs, TestOutputs]()
+
+	// Both should have the same metadata
+	assert.Equal(t, nonCachedSig.GetFieldMetadata(), cachedSig.GetFieldMetadata())
+	assert.Equal(t, nonCachedSig.GetInputType(), cachedSig.GetInputType())
+	assert.Equal(t, nonCachedSig.GetOutputType(), cachedSig.GetOutputType())
+}
+
+func BenchmarkNewTypedSignature(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = NewTypedSignature[TestInputs, TestOutputs]()
+	}
+}
+
+func BenchmarkNewTypedSignatureCached(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = NewTypedSignatureCached[TestInputs, TestOutputs]()
 	}
 }

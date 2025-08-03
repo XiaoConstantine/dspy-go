@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -258,7 +259,10 @@ func convertToInt(value any) (int64, bool) {
 	case uint32:
 		return int64(v), true
 	case uint64:
-		return int64(v), true // Note: this can overflow for large uint64 values
+		if v > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(v), true
 	case float32:
 		return int64(v), true
 	case float64:

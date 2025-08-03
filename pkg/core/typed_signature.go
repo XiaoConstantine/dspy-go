@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 // TypedSignature provides compile-time type safety for module inputs and outputs.
@@ -83,6 +84,62 @@ func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
 	}
 }
 
+// Global cache for TypedSignature instances to improve performance.
+var typedSignatureCache sync.Map
+
+// signatureCacheKey represents a composite key for caching TypedSignatures.
+type signatureCacheKey struct {
+	inputType  reflect.Type
+	outputType reflect.Type
+}
+
+// NewTypedSignatureCached creates a cached typed signature for the given input/output types.
+// This function provides better performance for repeated calls with the same types.
+func NewTypedSignatureCached[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
+	var input TInput
+	var output TOutput
+
+	inputType := reflect.TypeOf(input)
+	outputType := reflect.TypeOf(output)
+
+	// Handle pointer types for cache key
+	actualInputType := inputType
+	actualOutputType := outputType
+	if inputType != nil && inputType.Kind() == reflect.Ptr {
+		actualInputType = inputType.Elem()
+	}
+	if outputType != nil && outputType.Kind() == reflect.Ptr {
+		actualOutputType = outputType.Elem()
+	}
+
+	// Create cache key
+	key := signatureCacheKey{
+		inputType:  actualInputType,
+		outputType: actualOutputType,
+	}
+
+	// Try to get from cache first
+	if cached, ok := typedSignatureCache.Load(key); ok {
+		return cached.(TypedSignature[TInput, TOutput])
+	}
+
+	// Not in cache, create new signature
+	metadata := SignatureMetadata{
+		Inputs:  parseStructFields(actualInputType, true),
+		Outputs: parseStructFields(actualOutputType, false),
+	}
+
+	signature := &typedSignatureImpl[TInput, TOutput]{
+		inputType:  actualInputType,
+		outputType: actualOutputType,
+		metadata:   metadata,
+	}
+
+	// Store in cache for future use
+	typedSignatureCache.Store(key, signature)
+
+	return signature
+}
 
 func (ts *typedSignatureImpl[TInput, TOutput]) GetInputType() reflect.Type {
 	return ts.inputType
