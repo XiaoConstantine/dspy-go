@@ -37,6 +37,7 @@ type SignatureMetadata struct {
 // FieldMetadata represents parsed struct tag information.
 type FieldMetadata struct {
 	Name        string       // Field name from struct tag or field name
+	GoFieldName string       // Original Go struct field name for direct lookup
 	Required    bool         // Whether field is required
 	Description string       // Field description
 	Prefix      string       // Output prefix for LLM generation
@@ -46,10 +47,9 @@ type FieldMetadata struct {
 
 // typedSignatureImpl implements TypedSignature.
 type typedSignatureImpl[TInput, TOutput any] struct {
-	inputType   reflect.Type
-	outputType  reflect.Type
-	metadata    SignatureMetadata
-	instruction string
+	inputType  reflect.Type
+	outputType reflect.Type
+	metadata   SignatureMetadata
 }
 
 // NewTypedSignature creates a new typed signature for the given input/output types.
@@ -84,7 +84,6 @@ func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
 func WithInstruction[TInput, TOutput any](instruction string) func(TypedSignature[TInput, TOutput]) TypedSignature[TInput, TOutput] {
 	return func(ts TypedSignature[TInput, TOutput]) TypedSignature[TInput, TOutput] {
 		if impl, ok := ts.(*typedSignatureImpl[TInput, TOutput]); ok {
-			impl.instruction = instruction
 			impl.metadata.Instruction = instruction
 		}
 		return ts
@@ -138,8 +137,8 @@ func (ts *typedSignatureImpl[TInput, TOutput]) ToLegacySignature() Signature {
 	}
 
 	signature := NewSignature(inputs, outputs)
-	if ts.instruction != "" {
-		signature = signature.WithInstruction(ts.instruction)
+	if ts.metadata.Instruction != "" {
+		signature = signature.WithInstruction(ts.metadata.Instruction)
 	}
 
 	return signature
@@ -176,9 +175,10 @@ func parseStructFields(t reflect.Type, isInput bool) []FieldMetadata {
 // parseFieldMetadata parses struct tag information for a single field.
 func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 	metadata := FieldMetadata{
-		Name:   field.Name,
-		GoType: field.Type,
-		Type:   FieldTypeText, // Default to text
+		Name:        field.Name,
+		GoFieldName: field.Name, // Cache the Go field name for efficient lookup
+		GoType:      field.Type,
+		Type:        FieldTypeText, // Default to text
 	}
 
 	// Parse dspy struct tag: `dspy:"fieldname,required"`
@@ -235,7 +235,7 @@ func inferFieldType(t reflect.Type) FieldType {
 	}
 }
 
-// validateStruct performs runtime validation of struct fields.
+// validateStruct performs runtime validation of struct fields and maps.
 func validateStruct(value any, expectedFields []FieldMetadata, fieldType string) error {
 	if value == nil {
 		return fmt.Errorf("%s cannot be nil", fieldType)
@@ -251,46 +251,41 @@ func validateStruct(value any, expectedFields []FieldMetadata, fieldType string)
 		v = v.Elem()
 	}
 
-	if v.Kind() != reflect.Struct {
-		return fmt.Errorf("%s must be a struct, got %s", fieldType, v.Kind())
+	// Handle map validation (for legacy signatures)
+	if v.Kind() == reflect.Map {
+		for _, expected := range expectedFields {
+			if !expected.Required {
+				continue
+			}
+			key := reflect.ValueOf(expected.Name)
+			mapValue := v.MapIndex(key)
+			if !mapValue.IsValid() || mapValue.IsZero() {
+				return fmt.Errorf("required %s field '%s' cannot be empty", fieldType, expected.Name)
+			}
+		}
+		return nil
 	}
 
-	t := v.Type()
+	// Handle struct validation
+	if v.Kind() != reflect.Struct {
+		return fmt.Errorf("%s must be a struct or map, got %s", fieldType, v.Kind())
+	}
 
-	// Validate required fields by matching Go field names
+	// Validate required fields using cached Go field names
 	for _, expected := range expectedFields {
 		if !expected.Required {
 			continue
 		}
 
-		// Find the Go field name that corresponds to this metadata
-		var goFieldName string
-		for i := 0; i < t.NumField(); i++ {
-			field := t.Field(i)
-			if !field.IsExported() {
-				continue
-			}
-
-			// Get the dspy tag name or use field name
-			fieldName := field.Name
-			if dspyTag := field.Tag.Get("dspy"); dspyTag != "" {
-				parts := strings.Split(dspyTag, ",")
-				if len(parts) > 0 && parts[0] != "" {
-					fieldName = parts[0]
-				}
-			}
-
-			if fieldName == expected.Name {
-				goFieldName = field.Name
-				break
-			}
+		// Use cached GoFieldName for efficient lookup
+		var field reflect.Value
+		if expected.GoFieldName != "" {
+			field = v.FieldByName(expected.GoFieldName)
+		} else {
+			// Fallback for legacy metadata without GoFieldName
+			field = v.FieldByName(expected.Name)
 		}
 
-		if goFieldName == "" {
-			return fmt.Errorf("required %s field '%s' is missing", fieldType, expected.Name)
-		}
-
-		field := v.FieldByName(goFieldName)
 		if !field.IsValid() {
 			return fmt.Errorf("required %s field '%s' is missing", fieldType, expected.Name)
 		}
@@ -314,6 +309,7 @@ func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[strin
 	for _, input := range sig.Inputs {
 		metadata.Inputs = append(metadata.Inputs, FieldMetadata{
 			Name:        input.Name,
+			GoFieldName: input.Name, // For maps, GoFieldName is the same as Name
 			Description: input.Description,
 			Prefix:      input.Prefix,
 			Type:        input.Type,
@@ -326,6 +322,7 @@ func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[strin
 	for _, output := range sig.Outputs {
 		metadata.Outputs = append(metadata.Outputs, FieldMetadata{
 			Name:        output.Name,
+			GoFieldName: output.Name, // For maps, GoFieldName is the same as Name
 			Description: output.Description,
 			Prefix:      output.Prefix,
 			Type:        output.Type,
@@ -335,9 +332,8 @@ func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[strin
 	}
 
 	return &typedSignatureImpl[map[string]any, map[string]any]{
-		inputType:   reflect.TypeOf(map[string]any{}),
-		outputType:  reflect.TypeOf(map[string]any{}),
-		metadata:    metadata,
-		instruction: sig.Instruction,
+		inputType:  reflect.TypeOf(map[string]any{}),
+		outputType: reflect.TypeOf(map[string]any{}),
+		metadata:   metadata,
 	}
 }

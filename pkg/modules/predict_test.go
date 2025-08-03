@@ -229,53 +229,53 @@ func TestParseJSONResponse(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "Valid JSON with all fields",
-			content: "Here's my response:\n\n```json\n{\n  \"rationale\": \"This is the reasoning behind the answer\",\n  \"answer\": \"42\",\n  \"confidence\": \"high\"\n}\n```\n\nThat's the response.",
+			name:     "Valid JSON with all fields",
+			content:  "Here's my response:\n\n```json\n{\n  \"rationale\": \"This is the reasoning behind the answer\",\n  \"answer\": \"42\",\n  \"confidence\": \"high\"\n}\n```\n\nThat's the response.",
 			expected: "Rationale:\nThis is the reasoning behind the answer\n\nAnswer:\n42\n\nConfidence:\nhigh",
 		},
 		{
-			name: "Valid JSON with subset of fields",
-			content: "```json\n{\n  \"rationale\": \"Only rationale provided\",\n  \"answer\": \"incomplete\"\n}\n```",
+			name:     "Valid JSON with subset of fields",
+			content:  "```json\n{\n  \"rationale\": \"Only rationale provided\",\n  \"answer\": \"incomplete\"\n}\n```",
 			expected: "Rationale:\nOnly rationale provided\n\nAnswer:\nincomplete",
 		},
 		{
-			name: "JSON with extra fields (should ignore)",
-			content: "```json\n{\n  \"rationale\": \"Test rationale\",\n  \"answer\": \"test answer\",\n  \"confidence\": \"medium\",\n  \"extra_field\": \"should be ignored\"\n}\n```",
+			name:     "JSON with extra fields (should ignore)",
+			content:  "```json\n{\n  \"rationale\": \"Test rationale\",\n  \"answer\": \"test answer\",\n  \"confidence\": \"medium\",\n  \"extra_field\": \"should be ignored\"\n}\n```",
 			expected: "Rationale:\nTest rationale\n\nAnswer:\ntest answer\n\nConfidence:\nmedium",
 		},
 		{
-			name: "JSON with non-string values",
-			content: "```json\n{\n  \"rationale\": \"Number test\",\n  \"answer\": 123,\n  \"confidence\": true\n}\n```",
+			name:     "JSON with non-string values",
+			content:  "```json\n{\n  \"rationale\": \"Number test\",\n  \"answer\": 123,\n  \"confidence\": true\n}\n```",
 			expected: "Rationale:\nNumber test\n\nAnswer:\n123\n\nConfidence:\ntrue",
 		},
 		{
-			name: "Malformed JSON (should fall back)",
-			content: "```json\n{\n  \"rationale\": \"incomplete json\"\n  \"answer\": \"missing comma\"\n}\n```",
+			name:     "Malformed JSON (should fall back)",
+			content:  "```json\n{\n  \"rationale\": \"incomplete json\"\n  \"answer\": \"missing comma\"\n}\n```",
 			expected: "```json\n{\n  \"rationale\": \"incomplete json\"\n  \"answer\": \"missing comma\"\n}\n```",
 		},
 		{
-			name: "No JSON markers (should fall back)",
-			content: "This is just plain text\nrationale: Some reasoning\nanswer: Some answer",
+			name:     "No JSON markers (should fall back)",
+			content:  "This is just plain text\nrationale: Some reasoning\nanswer: Some answer",
 			expected: "This is just plain text\nrationale: Some reasoning\nanswer: Some answer",
 		},
 		{
-			name: "Empty JSON object",
-			content: "```json\n{}\n```",
+			name:     "Empty JSON object",
+			content:  "```json\n{}\n```",
 			expected: "",
 		},
 		{
-			name: "Missing closing marker (should fall back)",
-			content: "```json\n{\n  \"rationale\": \"test\",\n  \"answer\": \"test\"\n}",
+			name:     "Missing closing marker (should fall back)",
+			content:  "```json\n{\n  \"rationale\": \"test\",\n  \"answer\": \"test\"\n}",
 			expected: "```json\n{\n  \"rationale\": \"test\",\n  \"answer\": \"test\"\n}",
 		},
 		{
-			name: "Multiple JSON blocks (should use first)",
-			content: "First block:\n```json\n{\n  \"rationale\": \"first\",\n  \"answer\": \"first answer\"\n}\n```\n\nSecond block:\n```json\n{\n  \"rationale\": \"second\",\n  \"answer\": \"second answer\"\n}\n```",
+			name:     "Multiple JSON blocks (should use first)",
+			content:  "First block:\n```json\n{\n  \"rationale\": \"first\",\n  \"answer\": \"first answer\"\n}\n```\n\nSecond block:\n```json\n{\n  \"rationale\": \"second\",\n  \"answer\": \"second answer\"\n}\n```",
 			expected: "Rationale:\nfirst\n\nAnswer:\nfirst answer",
 		},
 		{
-			name: "JSON with newlines in values",
-			content: "```json\n{\n  \"rationale\": \"This is a\\nmulti-line\\nrationale\",\n  \"answer\": \"Simple answer\"\n}\n```",
+			name:     "JSON with newlines in values",
+			content:  "```json\n{\n  \"rationale\": \"This is a\\nmulti-line\\nrationale\",\n  \"answer\": \"Simple answer\"\n}\n```",
 			expected: "Rationale:\nThis is a\nmulti-line\nrationale\n\nAnswer:\nSimple answer",
 		},
 	}
@@ -318,4 +318,298 @@ func TestParseJSONResponse_FieldOrderPreservation(t *testing.T) {
 
 	result := parseJSONResponse(content, signature)
 	assert.Equal(t, expected, result)
+}
+
+// Type-safe Predict module tests
+
+type TestQAInputs struct {
+	Question string `dspy:"question,required" description:"The question to answer"`
+	Context  string `dspy:"context,required" description:"Context for answering"`
+}
+
+type TestQAOutputs struct {
+	Answer     string `dspy:"answer" description:"The generated answer" prefix:"Answer:"`
+	Confidence int    `dspy:"confidence" description:"Confidence score" prefix:"Confidence:"`
+}
+
+func TestPredictTyped(t *testing.T) {
+	// Create a mock LLM
+	mockLLM := new(testutil.MockLLM)
+
+	// Set up the expected behavior
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: `Answer:
+		Machine learning is a subset of AI
+
+		Confidence:
+		85`,
+	}, nil)
+
+	// Create a typed Predict module
+	predict := NewTypedPredict[TestQAInputs, TestQAOutputs]()
+	predict.SetLLM(mockLLM)
+
+	// Test the ProcessTyped method
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	inputs := TestQAInputs{
+		Question: "What is machine learning?",
+		Context:  "ML is a type of artificial intelligence",
+	}
+
+	outputs, err := ProcessTyped[TestQAInputs, TestQAOutputs](ctx, predict, inputs)
+
+	// Assert the results
+	assert.NoError(t, err)
+	assert.Contains(t, outputs.Answer, "Machine learning")
+	assert.Equal(t, 85, outputs.Confidence)
+
+	// Verify that the mock was called as expected
+	mockLLM.AssertExpectations(t)
+}
+
+func TestPredictTypedWithValidation(t *testing.T) {
+	// Create a mock LLM
+	mockLLM := new(testutil.MockLLM)
+
+	// Set up the expected behavior
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: `Answer:
+		Deep learning uses neural networks
+
+		Confidence:
+		90`,
+	}, nil)
+
+	// Create a typed Predict module
+	predict := NewTypedPredict[TestQAInputs, TestQAOutputs]()
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	// Test with valid inputs
+	validInputs := TestQAInputs{
+		Question: "What is deep learning?",
+		Context:  "Deep learning is a subset of machine learning",
+	}
+
+	outputs, err := ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, predict, validInputs)
+
+	// Assert the results
+	assert.NoError(t, err)
+	assert.Contains(t, outputs.Answer, "Deep learning")
+	assert.Equal(t, 90, outputs.Confidence)
+
+	// Verify that the mock was called as expected
+	mockLLM.AssertExpectations(t)
+}
+
+func TestPredictTypedWithValidation_InvalidInput(t *testing.T) {
+	// Create a typed Predict module (no need for mock LLM since validation should fail first)
+	predict := NewTypedPredict[TestQAInputs, TestQAOutputs]()
+
+	ctx := context.Background()
+
+	// Test with invalid inputs (missing required field)
+	invalidInputs := TestQAInputs{
+		Question: "What is AI?",
+		// Context missing - should fail validation
+	}
+
+	outputs, err := ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, predict, invalidInputs)
+
+	// Assert that validation failed
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "typed input validation failed")
+	assert.Contains(t, err.Error(), "required input field 'context' cannot be empty")
+	assert.Empty(t, outputs.Answer)
+	assert.Equal(t, 0, outputs.Confidence)
+}
+
+func TestPredictTypedWithMapInputs(t *testing.T) {
+	// Create a mock LLM
+	mockLLM := new(testutil.MockLLM)
+
+	// Set up the expected behavior
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: `Answer:
+		Artificial intelligence systems
+
+		Confidence:
+		95`,
+	}, nil)
+
+	// Create a regular Predict module
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewTextField("question", core.WithDescription("The question"))},
+			{Field: core.NewTextField("context", core.WithDescription("Context"))},
+		},
+		[]core.OutputField{
+			{Field: core.NewTextField("answer", core.WithCustomPrefix("Answer:"))},
+			{Field: core.NewTextField("confidence", core.WithCustomPrefix("Confidence:"))},
+		},
+	)
+	predict := NewPredict(signature)
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+
+	// Test that ProcessTyped works with map inputs and typed outputs
+	legacyInputs := map[string]any{
+		"question": "What is AI?",
+		"context":  "AI stands for artificial intelligence",
+	}
+
+	outputs, err := ProcessTyped[map[string]any, TestQAOutputs](ctx, predict, legacyInputs)
+
+	// Assert the results
+	assert.NoError(t, err)
+	assert.Contains(t, outputs.Answer, "Artificial intelligence")
+	assert.Equal(t, 95, outputs.Confidence)
+
+	// Verify that the mock was called as expected
+	mockLLM.AssertExpectations(t)
+}
+
+func TestPredictTypedWithMapOutputs(t *testing.T) {
+	// Create a mock LLM
+	mockLLM := new(testutil.MockLLM)
+
+	// Set up the expected behavior
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: `Answer:
+		Machine learning algorithms
+
+		Confidence:
+		80`,
+	}, nil)
+
+	// Create a regular Predict module
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewTextField("question", core.WithDescription("The question"))},
+			{Field: core.NewTextField("context", core.WithDescription("Context"))},
+		},
+		[]core.OutputField{
+			{Field: core.NewTextField("answer", core.WithCustomPrefix("Answer:"))},
+			{Field: core.NewTextField("confidence", core.WithCustomPrefix("Confidence:"))},
+		},
+	)
+	predict := NewPredict(signature)
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+
+	// Test that ProcessTyped works with typed inputs and map outputs
+	inputs := TestQAInputs{
+		Question: "What is ML?",
+		Context:  "ML means machine learning",
+	}
+
+	outputs, err := ProcessTyped[TestQAInputs, map[string]any](ctx, predict, inputs)
+
+	// Assert the results
+	assert.NoError(t, err)
+
+	answer, exists := outputs["answer"]
+	assert.True(t, exists)
+	assert.Contains(t, answer.(string), "Machine learning")
+
+	confidence, exists := outputs["confidence"]
+	assert.True(t, exists)
+	assert.Equal(t, "80", confidence.(string))
+
+	// Verify that the mock was called as expected
+	mockLLM.AssertExpectations(t)
+}
+
+func TestNewTypedPredict(t *testing.T) {
+	// Test that NewTypedPredict creates a properly configured module
+	predict := NewTypedPredict[TestQAInputs, TestQAOutputs]()
+
+	// Verify the module is properly initialized
+	assert.NotNil(t, predict)
+	assert.Contains(t, predict.GetDisplayName(), "TypedPredict")
+	assert.Equal(t, "Predict", predict.GetModuleType())
+
+	// Verify the signature was properly converted
+	signature := predict.GetSignature()
+	assert.Len(t, signature.Inputs, 2)
+	assert.Len(t, signature.Outputs, 2)
+
+	// Check input fields
+	questionField := signature.Inputs[0].Field
+	contextField := signature.Inputs[1].Field
+	assert.Equal(t, "question", questionField.Name)
+	assert.Equal(t, "context", contextField.Name)
+
+	// Check output fields
+	answerField := signature.Outputs[0].Field
+	confidenceField := signature.Outputs[1].Field
+	assert.Equal(t, "answer", answerField.Name)
+	assert.Equal(t, "confidence", confidenceField.Name)
+	assert.Equal(t, "Answer:", answerField.Prefix)
+	assert.Equal(t, "Confidence:", confidenceField.Prefix)
+}
+
+// Benchmark type-safe vs legacy processing.
+func BenchmarkPredictTyped(b *testing.B) {
+	mockLLM := new(testutil.MockLLM)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: "Answer:\nTest answer\n\nConfidence:\n85",
+	}, nil)
+
+	predict := NewTypedPredict[TestQAInputs, TestQAOutputs]()
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	inputs := TestQAInputs{
+		Question: "Test question",
+		Context:  "Test context",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ProcessTyped[TestQAInputs, TestQAOutputs](ctx, predict, inputs)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkPredictLegacy(b *testing.B) {
+	mockLLM := new(testutil.MockLLM)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: "Answer:\nTest answer\n\nConfidence:\n85",
+	}, nil)
+
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewTextField("question", core.WithDescription("The question"))},
+			{Field: core.NewTextField("context", core.WithDescription("Context"))},
+		},
+		[]core.OutputField{
+			{Field: core.NewTextField("answer", core.WithCustomPrefix("Answer:"))},
+			{Field: core.NewTextField("confidence", core.WithCustomPrefix("Confidence:"))},
+		},
+	)
+	predict := NewPredict(signature)
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	inputs := map[string]any{
+		"question": "Test question",
+		"context":  "Test context",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := predict.Process(ctx, inputs)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

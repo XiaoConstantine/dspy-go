@@ -232,24 +232,38 @@ func TestFromLegacySignature(t *testing.T) {
 	require.Len(t, metadata.Outputs, 1)
 	assert.Equal(t, "answer", metadata.Outputs[0].Name)
 	assert.False(t, metadata.Outputs[0].Required) // Outputs not required
+
+	// Test validation with map inputs (legacy compatibility)
+	mapInputs := map[string]any{
+		"question": "What is machine learning?",
+		"context":  "ML is a subset of AI",
+	}
+	err := typed.ValidateInput(mapInputs)
+	assert.NoError(t, err)
+
+	// Test validation with missing required field in map
+	incompleteInputs := map[string]any{
+		"question": "What is machine learning?",
+		// context missing
+	}
+	err = typed.ValidateInput(incompleteInputs)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "required input field 'context' cannot be empty")
 }
 
 func TestWithInstruction(t *testing.T) {
 	sig := NewTypedSignature[TestInputs, TestOutputs]()
 	instruction := "Answer the question using the provided context"
 
-	// Note: This test assumes we'll implement a fluent API for WithInstruction
-	// For now, we'll test the current implementation
-	if impl, ok := sig.(*typedSignatureImpl[TestInputs, TestOutputs]); ok {
-		impl.instruction = instruction
-		impl.metadata.Instruction = instruction
+	// Test the public API using WithInstruction modifier
+	instructionModifier := WithInstruction[TestInputs, TestOutputs](instruction)
+	modifiedSig := instructionModifier(sig)
 
-		metadata := sig.GetFieldMetadata()
-		assert.Equal(t, instruction, metadata.Instruction)
+	metadata := modifiedSig.GetFieldMetadata()
+	assert.Equal(t, instruction, metadata.Instruction)
 
-		legacy := sig.ToLegacySignature()
-		assert.Equal(t, instruction, legacy.Instruction)
-	}
+	legacy := modifiedSig.ToLegacySignature()
+	assert.Equal(t, instruction, legacy.Instruction)
 }
 
 // Benchmark tests to ensure performance is acceptable.
