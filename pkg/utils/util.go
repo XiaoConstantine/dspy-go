@@ -257,6 +257,9 @@ func convertToInt(value any) (int64, bool) {
 	case int64:
 		return v, true
 	case uint:
+		if uint64(v) > math.MaxInt64 {
+			return 0, false
+		}
 		return int64(v), true
 	case uint8:
 		return int64(v), true

@@ -565,6 +565,8 @@ func TestConvertToInt(t *testing.T) {
 		{"nil", nil, 0, false},
 		{"uint64 max safe value", uint64(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64
 		{"uint64 overflow value", uint64(18446744073709551615), 0, false},                // math.MaxUint64, should fail
+		{"uint max safe value", uint(9223372036854775807), 9223372036854775807, true},    // math.MaxInt64 as uint
+		{"uint overflow value", uint(18446744073709551615), 0, false},                   // math.MaxUint64 as uint, should fail
 	}
 
 	for _, tt := range tests {
