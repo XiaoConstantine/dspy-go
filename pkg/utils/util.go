@@ -123,14 +123,14 @@ func ConvertLegacyOutputsToTyped[T any](outputs map[string]any) (T, error) {
 		if mapValue, ok := any(outputs).(T); ok {
 			return mapValue, nil
 		}
-		return zero, fmt.Errorf("output type is %T, but map cannot be asserted to it", zero)
+		return zero, fmt.Errorf("failed to convert map[string]any to type %T: type assertion failed (ensure the target type is compatible with map types)", zero)
 	}
 
 	// Handle pointer to struct types
 	if outputType.Kind() == reflect.Ptr {
 		elemType := outputType.Elem()
 		if elemType.Kind() != reflect.Struct {
-			return zero, fmt.Errorf("output type is a pointer to non-struct: %T", zero)
+			return zero, fmt.Errorf("unsupported output type %T: pointers are only supported for struct types, not %s", zero, elemType.Kind())
 		}
 		newValue := reflect.New(elemType)
 		if err := PopulateStructFromMap(newValue.Elem(), elemType, outputs); err != nil {
@@ -141,7 +141,7 @@ func ConvertLegacyOutputsToTyped[T any](outputs map[string]any) (T, error) {
 
 	// Handle struct types
 	if outputType.Kind() != reflect.Struct {
-		return zero, fmt.Errorf("output type must be a struct, map, or interface, got %T", zero)
+		return zero, fmt.Errorf("unsupported output type %T (kind: %s): only struct, map[string]any, and interface{} types are supported for conversion", zero, outputType.Kind())
 	}
 
 	// Create a new instance of the struct

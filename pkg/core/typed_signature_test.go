@@ -227,7 +227,7 @@ func TestFromLegacySignature(t *testing.T) {
 
 	require.Len(t, metadata.Inputs, 2)
 	assert.Equal(t, "question", metadata.Inputs[0].Name)
-	assert.True(t, metadata.Inputs[0].Required) // Legacy fields assumed required
+	assert.False(t, metadata.Inputs[0].Required) // Legacy fields default to optional for backward compatibility
 
 	require.Len(t, metadata.Outputs, 1)
 	assert.Equal(t, "answer", metadata.Outputs[0].Name)
@@ -241,14 +241,13 @@ func TestFromLegacySignature(t *testing.T) {
 	err := typed.ValidateInput(mapInputs)
 	assert.NoError(t, err)
 
-	// Test validation with missing required field in map
+	// Test validation with missing optional field in map (should pass now)
 	incompleteInputs := map[string]any{
 		"question": "What is machine learning?",
-		// context missing
+		// context missing - but it's optional for legacy compatibility
 	}
 	err = typed.ValidateInput(incompleteInputs)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "required input field 'context' cannot be empty")
+	assert.NoError(t, err) // Should pass since legacy fields are optional by default
 }
 
 func TestWithInstruction(t *testing.T) {

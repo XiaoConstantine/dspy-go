@@ -856,7 +856,7 @@ func TestConvertLegacyOutputsToTypedEdgeCases(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error for non-struct non-map type")
 		}
-		if !strings.Contains(err.Error(), "output type must be a struct, map, or interface") {
+		if !strings.Contains(err.Error(), "unsupported output type") || !strings.Contains(err.Error(), "only struct, map[string]any, and interface{} types are supported") {
 			t.Errorf("Unexpected error: %v", err)
 		}
 	})

@@ -56,8 +56,24 @@ type typedSignatureImpl[TInput, TOutput any] struct {
 	metadata   SignatureMetadata
 }
 
-// NewTypedSignature creates a new typed signature for the given input/output types.
-func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
+// createTypedSignatureImpl is a helper function that creates a TypedSignature implementation.
+// This reduces code duplication between cached and non-cached versions.
+func createTypedSignatureImpl[TInput, TOutput any](inputType, outputType reflect.Type) *typedSignatureImpl[TInput, TOutput] {
+	metadata := SignatureMetadata{
+		Inputs:  parseStructFields(inputType, true),
+		Outputs: parseStructFields(outputType, false),
+	}
+
+	return &typedSignatureImpl[TInput, TOutput]{
+		inputType:  inputType,
+		outputType: outputType,
+		metadata:   metadata,
+	}
+}
+
+// getReflectTypes extracts and normalizes reflect.Type information for the given generic types.
+// It handles pointer types by extracting the underlying element type.
+func getReflectTypes[TInput, TOutput any]() (reflect.Type, reflect.Type) {
 	var input TInput
 	var output TOutput
 
@@ -72,16 +88,13 @@ func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
 		outputType = outputType.Elem()
 	}
 
-	metadata := SignatureMetadata{
-		Inputs:  parseStructFields(inputType, true),
-		Outputs: parseStructFields(outputType, false),
-	}
+	return inputType, outputType
+}
 
-	return &typedSignatureImpl[TInput, TOutput]{
-		inputType:  inputType,
-		outputType: outputType,
-		metadata:   metadata,
-	}
+// NewTypedSignature creates a new typed signature for the given input/output types.
+func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
+	inputType, outputType := getReflectTypes[TInput, TOutput]()
+	return createTypedSignatureImpl[TInput, TOutput](inputType, outputType)
 }
 
 // Global cache for TypedSignature instances to improve performance.
@@ -96,26 +109,12 @@ type signatureCacheKey struct {
 // NewTypedSignatureCached creates a cached typed signature for the given input/output types.
 // This function provides better performance for repeated calls with the same types.
 func NewTypedSignatureCached[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
-	var input TInput
-	var output TOutput
-
-	inputType := reflect.TypeOf(input)
-	outputType := reflect.TypeOf(output)
-
-	// Handle pointer types for cache key
-	actualInputType := inputType
-	actualOutputType := outputType
-	if inputType != nil && inputType.Kind() == reflect.Ptr {
-		actualInputType = inputType.Elem()
-	}
-	if outputType != nil && outputType.Kind() == reflect.Ptr {
-		actualOutputType = outputType.Elem()
-	}
+	inputType, outputType := getReflectTypes[TInput, TOutput]()
 
 	// Create cache key
 	key := signatureCacheKey{
-		inputType:  actualInputType,
-		outputType: actualOutputType,
+		inputType:  inputType,
+		outputType: outputType,
 	}
 
 	// Try to get from cache first
@@ -123,17 +122,8 @@ func NewTypedSignatureCached[TInput, TOutput any]() TypedSignature[TInput, TOutp
 		return cached.(TypedSignature[TInput, TOutput])
 	}
 
-	// Not in cache, create new signature
-	metadata := SignatureMetadata{
-		Inputs:  parseStructFields(actualInputType, true),
-		Outputs: parseStructFields(actualOutputType, false),
-	}
-
-	signature := &typedSignatureImpl[TInput, TOutput]{
-		inputType:  actualInputType,
-		outputType: actualOutputType,
-		metadata:   metadata,
-	}
+	// Not in cache, create new signature using the helper
+	signature := createTypedSignatureImpl[TInput, TOutput](inputType, outputType)
 
 	// Store in cache for future use
 	typedSignatureCache.Store(key, signature)
@@ -196,9 +186,16 @@ func (ts *typedSignatureImpl[TInput, TOutput]) ToLegacySignature() Signature {
 }
 
 func (ts *typedSignatureImpl[TInput, TOutput]) WithInstruction(instruction string) TypedSignature[TInput, TOutput] {
-	// Create a copy with the new instruction
-	newMetadata := ts.metadata
-	newMetadata.Instruction = instruction
+	// Create a deep copy with the new instruction to avoid shallow copy issues
+	newMetadata := SignatureMetadata{
+		Instruction: instruction,
+		Inputs:      make([]FieldMetadata, len(ts.metadata.Inputs)),
+		Outputs:     make([]FieldMetadata, len(ts.metadata.Outputs)),
+	}
+
+	// Deep copy the input and output field metadata
+	copy(newMetadata.Inputs, ts.metadata.Inputs)
+	copy(newMetadata.Outputs, ts.metadata.Outputs)
 
 	return &typedSignatureImpl[TInput, TOutput]{
 		inputType:  ts.inputType,
@@ -376,7 +373,7 @@ func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[strin
 			Description: input.Description,
 			Prefix:      input.Prefix,
 			Type:        input.Type,
-			Required:    true,               // Assume legacy fields are required
+			Required:    false,              // Default to optional for backward compatibility
 			GoType:      reflect.TypeOf(""), // Default to string
 		})
 	}
