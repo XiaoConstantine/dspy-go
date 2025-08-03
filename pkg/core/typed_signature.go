@@ -337,14 +337,8 @@ func validateStruct(value any, expectedFields []FieldMetadata, fieldType string)
 			continue
 		}
 
-		// Use cached GoFieldName for efficient lookup
-		var field reflect.Value
-		if expected.GoFieldName != "" {
-			field = v.FieldByName(expected.GoFieldName)
-		} else {
-			// Fallback for legacy metadata without GoFieldName
-			field = v.FieldByName(expected.Name)
-		}
+		// Use cached GoFieldName for efficient lookup. It is guaranteed to be populated.
+		field := v.FieldByName(expected.GoFieldName)
 
 		if !field.IsValid() {
 			return fmt.Errorf("required %s field '%s' is missing", fieldType, expected.Name)

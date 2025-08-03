@@ -206,24 +206,24 @@ func SetFieldValue(fieldValue reflect.Value, value any) error {
 		return nil
 	}
 
-	// Type conversion if possible
-	if valueReflect.Type().ConvertibleTo(fieldType) {
-		fieldValue.Set(valueReflect.Convert(fieldType))
-		return nil
-	}
-
-	// Handle special cases
+	// Handle special cases with overflow checks BEFORE general conversion
 	switch fieldType.Kind() {
 	case reflect.String:
 		fieldValue.SetString(fmt.Sprintf("%v", value))
 		return nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if intVal, ok := convertToInt(value); ok {
+			if fieldValue.OverflowInt(intVal) {
+				return fmt.Errorf("value %v overflows field of type %s", value, fieldType)
+			}
 			fieldValue.SetInt(intVal)
 			return nil
 		}
 	case reflect.Float32, reflect.Float64:
 		if floatVal, ok := convertToFloat(value); ok {
+			if fieldValue.OverflowFloat(floatVal) {
+				return fmt.Errorf("value %v overflows field of type %s", value, fieldType)
+			}
 			fieldValue.SetFloat(floatVal)
 			return nil
 		}
@@ -232,6 +232,12 @@ func SetFieldValue(fieldValue reflect.Value, value any) error {
 			fieldValue.SetBool(boolVal)
 			return nil
 		}
+	}
+
+	// Type conversion if possible (fallback for other types)
+	if valueReflect.Type().ConvertibleTo(fieldType) {
+		fieldValue.Set(valueReflect.Convert(fieldType))
+		return nil
 	}
 
 	return fmt.Errorf("cannot convert %T to %s", value, fieldType)

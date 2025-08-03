@@ -749,6 +749,8 @@ func TestSetFieldValueEdgeCases(t *testing.T) {
 		IntField    int
 		BoolField   bool
 		FloatField  float64
+		Int8Field   int8   // For overflow testing
+		Float32Field float32 // For overflow testing
 	}
 
 	tests := []struct {
@@ -821,6 +823,20 @@ func TestSetFieldValueEdgeCases(t *testing.T) {
 			fieldName: "StringField",
 			value:     struct{ Name string }{Name: "test"}, // struct that will use fmt.Sprintf
 			wantErr:   false,
+		},
+		{
+			name:      "int8 field with overflow value",
+			fieldName: "Int8Field",
+			value:     int64(300), // Exceeds int8 max value (127)
+			wantErr:   true,
+			errMsg:    "overflows field of type",
+		},
+		{
+			name:      "float32 field with overflow value",
+			fieldName: "Float32Field",
+			value:     float64(1e40), // Exceeds float32 range
+			wantErr:   true,
+			errMsg:    "overflows field of type",
 		},
 	}
 
