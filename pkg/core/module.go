@@ -30,13 +30,6 @@ type Module interface {
 	GetModuleType() string
 }
 
-// TypeSafeModule extends Module with compile-time type safety.
-type TypeSafeModule interface {
-	Module
-
-	// ProcessTyped executes the module's logic with type-safe inputs/outputs
-	ProcessTyped(ctx context.Context, inputs any, opts ...Option) (any, error)
-}
 
 // InterceptableModule extends Module with interceptor support.
 // This interface provides backward-compatible enhancement for modules that support interceptors.

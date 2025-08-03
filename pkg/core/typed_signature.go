@@ -25,6 +25,9 @@ type TypedSignature[TInput, TOutput any] interface {
 
 	// ToLegacySignature converts to the existing Signature interface for backward compatibility
 	ToLegacySignature() Signature
+
+	// WithInstruction returns a new TypedSignature with the specified instruction
+	WithInstruction(instruction string) TypedSignature[TInput, TOutput]
 }
 
 // SignatureMetadata contains parsed information from struct tags.
@@ -80,15 +83,6 @@ func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
 	}
 }
 
-// WithInstruction sets an instruction for the typed signature.
-func WithInstruction[TInput, TOutput any](instruction string) func(TypedSignature[TInput, TOutput]) TypedSignature[TInput, TOutput] {
-	return func(ts TypedSignature[TInput, TOutput]) TypedSignature[TInput, TOutput] {
-		if impl, ok := ts.(*typedSignatureImpl[TInput, TOutput]); ok {
-			impl.metadata.Instruction = instruction
-		}
-		return ts
-	}
-}
 
 func (ts *typedSignatureImpl[TInput, TOutput]) GetInputType() reflect.Type {
 	return ts.inputType
@@ -142,6 +136,18 @@ func (ts *typedSignatureImpl[TInput, TOutput]) ToLegacySignature() Signature {
 	}
 
 	return signature
+}
+
+func (ts *typedSignatureImpl[TInput, TOutput]) WithInstruction(instruction string) TypedSignature[TInput, TOutput] {
+	// Create a copy with the new instruction
+	newMetadata := ts.metadata
+	newMetadata.Instruction = instruction
+
+	return &typedSignatureImpl[TInput, TOutput]{
+		inputType:  ts.inputType,
+		outputType: ts.outputType,
+		metadata:   newMetadata,
+	}
 }
 
 // parseStructFields extracts field metadata from struct tags.

@@ -796,7 +796,10 @@ func NewTypedPredict[TInput, TOutput any]() *Predict {
 	legacySig := typedSig.ToLegacySignature()
 
 	predict := NewPredict(legacySig)
-	predict.DisplayName = fmt.Sprintf("TypedPredict[%T,%T]", *new(TInput), *new(TOutput))
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	predict.DisplayName = fmt.Sprintf("TypedPredict[%T,%T]", i, o)
 
 	return predict
 }

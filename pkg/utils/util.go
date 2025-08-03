@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -249,11 +250,9 @@ func convertToInt(value any) (int64, bool) {
 	case float64:
 		return int64(v), true
 	case string:
-		if parsed, err := fmt.Sscanf(v, "%d", new(int64)); err == nil && parsed == 1 {
-			var result int64
-			if _, err := fmt.Sscanf(v, "%d", &result); err == nil {
-				return result, true
-			}
+		// Use strconv for robust and idiomatic integer parsing
+		if i, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+			return i, true
 		}
 	}
 	return 0, false
@@ -272,11 +271,9 @@ func convertToFloat(value any) (float64, bool) {
 	case int64:
 		return float64(v), true
 	case string:
-		if parsed, err := fmt.Sscanf(v, "%f", new(float64)); err == nil && parsed == 1 {
-			var result float64
-			if _, err := fmt.Sscanf(v, "%f", &result); err == nil {
-				return result, true
-			}
+		// Use strconv for robust and idiomatic float parsing
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			return f, true
 		}
 	}
 	return 0, false
@@ -287,11 +284,10 @@ func convertToBool(value any) (bool, bool) {
 	case bool:
 		return v, true
 	case string:
-		if v == "true" || v == "1" {
-			return true, true
-		}
-		if v == "false" || v == "0" {
-			return false, true
+		// Use strconv.ParseBool for robust and idiomatic bool parsing
+		// Handles "true", "TRUE", "True", "1", "false", "FALSE", "False", "0", etc.
+		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			return b, true
 		}
 	case int:
 		return v != 0, true

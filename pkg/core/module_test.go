@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -196,9 +197,15 @@ func NewMockTypedModule() *MockTypedModule {
 }
 
 func (m *MockTypedModule) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
-	// Simple mock implementation
-	question, _ := inputs["question"].(string)
-	context, _ := inputs["context"].(string)
+	// Simple mock implementation with proper type assertion checking
+	question, ok := inputs["question"].(string)
+	if !ok {
+		return nil, errors.New("mock input 'question' is not a string or is missing")
+	}
+	context, ok := inputs["context"].(string)
+	if !ok {
+		return nil, errors.New("mock input 'context' is not a string or is missing")
+	}
 
 	return map[string]any{
 		"answer":     "Based on " + context + ", the answer to '" + question + "' is mocked",

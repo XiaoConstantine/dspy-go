@@ -557,6 +557,8 @@ func TestConvertToInt(t *testing.T) {
 		{"float32", float32(42.0), 42, true},
 		{"float64", float64(42.0), 42, true},
 		{"string number", "42", 42, true},
+		{"string with whitespace", "  42  ", 42, true},
+		{"string partial number (strconv improvement)", "42abc", 0, false}, // strconv.ParseInt is stricter than fmt.Sscanf
 		{"string non-number", "hello", 0, false},
 		{"empty string", "", 0, false},
 		{"bool", true, 0, false},
@@ -590,6 +592,8 @@ func TestConvertToFloat(t *testing.T) {
 		{"int64", int64(42), 42.0, true},
 		{"string float", "3.14", 3.14, true},
 		{"string int", "42", 42.0, true},
+		{"string with whitespace", "  3.14  ", 3.14, true},
+		{"string partial float (strconv improvement)", "3.14abc", 0, false}, // strconv.ParseFloat is stricter than fmt.Sscanf
 		{"string non-number", "hello", 0, false},
 		{"empty string", "", 0, false},
 		{"bool", true, 0, false},
@@ -619,9 +623,13 @@ func TestConvertToBool(t *testing.T) {
 		{"bool true", true, true, true},
 		{"bool false", false, false, true},
 		{"string true", "true", true, true},
+		{"string TRUE (strconv improvement)", "TRUE", true, true}, // strconv.ParseBool handles case-insensitive
+		{"string True", "True", true, true},
 		{"string 1", "1", true, true},
 		{"string false", "false", false, true},
+		{"string FALSE", "FALSE", false, true},
 		{"string 0", "0", false, true},
+		{"string with whitespace", "  true  ", true, true},
 		{"int non-zero", 42, true, true},
 		{"int zero", 0, false, true},
 		{"float non-zero", 3.14, true, true},

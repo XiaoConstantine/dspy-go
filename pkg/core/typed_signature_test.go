@@ -255,10 +255,14 @@ func TestWithInstruction(t *testing.T) {
 	sig := NewTypedSignature[TestInputs, TestOutputs]()
 	instruction := "Answer the question using the provided context"
 
-	// Test the public API using WithInstruction modifier
-	instructionModifier := WithInstruction[TestInputs, TestOutputs](instruction)
-	modifiedSig := instructionModifier(sig)
+	// Test the fluent API using WithInstruction method
+	modifiedSig := sig.WithInstruction(instruction)
 
+	// Verify the original signature is unchanged (immutability)
+	originalMetadata := sig.GetFieldMetadata()
+	assert.Equal(t, "", originalMetadata.Instruction)
+
+	// Verify the modified signature has the instruction
 	metadata := modifiedSig.GetFieldMetadata()
 	assert.Equal(t, instruction, metadata.Instruction)
 
