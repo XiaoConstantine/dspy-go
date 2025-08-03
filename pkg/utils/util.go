@@ -117,31 +117,35 @@ func ConvertLegacyOutputsToTyped[T any](outputs map[string]any) (T, error) {
 	// Get the type information for T
 	outputType := reflect.TypeOf(zero)
 
-	// Handle pointer types
+	// Handle interface types like `any` or `map[string]any`
+	if outputType == nil || outputType.Kind() == reflect.Map {
+		if mapValue, ok := any(outputs).(T); ok {
+			return mapValue, nil
+		}
+		return zero, fmt.Errorf("output type is %T, but map cannot be asserted to it", zero)
+	}
+
+	// Handle pointer to struct types
 	if outputType.Kind() == reflect.Ptr {
-		outputType = outputType.Elem()
-		// Create a new instance of the pointed-to type
-		newValue := reflect.New(outputType)
-		err := PopulateStructFromMap(newValue.Elem(), outputType, outputs)
-		if err != nil {
+		elemType := outputType.Elem()
+		if elemType.Kind() != reflect.Struct {
+			return zero, fmt.Errorf("output type is a pointer to non-struct: %T", zero)
+		}
+		newValue := reflect.New(elemType)
+		if err := PopulateStructFromMap(newValue.Elem(), elemType, outputs); err != nil {
 			return zero, err
 		}
 		return newValue.Interface().(T), nil
 	}
 
-	// Handle direct struct types
+	// Handle struct types
 	if outputType.Kind() != reflect.Struct {
-		// Handle map[string]any case
-		if mapValue, ok := any(outputs).(T); ok {
-			return mapValue, nil
-		}
-		return zero, fmt.Errorf("output type must be a struct or map[string]any, got %T", zero)
+		return zero, fmt.Errorf("output type must be a struct, map, or interface, got %T", zero)
 	}
 
 	// Create a new instance of the struct
 	newValue := reflect.New(outputType).Elem()
-	err := PopulateStructFromMap(newValue, outputType, outputs)
-	if err != nil {
+	if err := PopulateStructFromMap(newValue, outputType, outputs); err != nil {
 		return zero, err
 	}
 
@@ -245,6 +249,16 @@ func convertToInt(value any) (int64, bool) {
 		return int64(v), true
 	case int64:
 		return v, true
+	case uint:
+		return int64(v), true
+	case uint8:
+		return int64(v), true
+	case uint16:
+		return int64(v), true
+	case uint32:
+		return int64(v), true
+	case uint64:
+		return int64(v), true // Note: this can overflow for large uint64 values
 	case float32:
 		return int64(v), true
 	case float64:
@@ -266,9 +280,23 @@ func convertToFloat(value any) (float64, bool) {
 		return v, true
 	case int:
 		return float64(v), true
+	case int8:
+		return float64(v), true
+	case int16:
+		return float64(v), true
 	case int32:
 		return float64(v), true
 	case int64:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint8:
+		return float64(v), true
+	case uint16:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case uint64:
 		return float64(v), true
 	case string:
 		// Use strconv for robust and idiomatic float parsing
@@ -289,10 +317,12 @@ func convertToBool(value any) (bool, bool) {
 		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
 			return b, true
 		}
-	case int:
-		return v != 0, true
-	case float64:
-		return v != 0, true
+	case int, int8, int16, int32, int64:
+		return reflect.ValueOf(v).Int() != 0, true
+	case uint, uint8, uint16, uint32, uint64:
+		return reflect.ValueOf(v).Uint() != 0, true
+	case float32, float64:
+		return reflect.ValueOf(v).Float() != 0, true
 	}
 	return false, false
 }
