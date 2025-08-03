@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -159,5 +160,243 @@ func TestModuleChain(t *testing.T) {
 	}
 	if len(sig.Outputs) != 1 || sig.Outputs[0].Name != "output2" {
 		t.Error("Chain signature outputs are incorrect")
+	}
+}
+
+// Test types for typed module functionality.
+type TestQAInputs struct {
+	Question string `dspy:"question,required" description:"The question to answer"`
+	Context  string `dspy:"context,required" description:"Context for answering"`
+}
+
+type TestQAOutputs struct {
+	Answer     string `dspy:"answer" description:"The generated answer"`
+	Confidence int    `dspy:"confidence" description:"Confidence score"`
+}
+
+// Enhanced MockLLM for testing typed modules.
+type MockTypedModule struct {
+	*BaseModule
+}
+
+func NewMockTypedModule() *MockTypedModule {
+	signature := NewSignature(
+		[]InputField{
+			{Field: NewTextField("question", WithDescription("The question"))},
+			{Field: NewTextField("context", WithDescription("Context"))},
+		},
+		[]OutputField{
+			{Field: NewTextField("answer", WithDescription("The answer"))},
+			{Field: NewTextField("confidence", WithDescription("Confidence"))},
+		},
+	)
+
+	return &MockTypedModule{
+		BaseModule: NewModule(signature),
+	}
+}
+
+func (m *MockTypedModule) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
+	// Simple mock implementation with proper type assertion checking
+	question, ok := inputs["question"].(string)
+	if !ok {
+		return nil, errors.New("mock input 'question' is not a string or is missing")
+	}
+	contextStr, ok := inputs["context"].(string)
+	if !ok {
+		return nil, errors.New("mock input 'context' is not a string or is missing")
+	}
+
+	return map[string]any{
+		"answer":     "Based on " + contextStr + ", the answer to '" + question + "' is mocked",
+		"confidence": 85,
+	}, nil
+}
+
+func TestProcessTyped(t *testing.T) {
+	ctx := context.Background()
+	module := NewMockTypedModule()
+
+	inputs := TestQAInputs{
+		Question: "What is AI?",
+		Context:  "AI is artificial intelligence",
+	}
+
+	// Test type-safe processing
+	outputs, err := ProcessTyped[TestQAInputs, TestQAOutputs](ctx, module, inputs)
+
+	if err != nil {
+		t.Fatalf("ProcessTyped failed: %v", err)
+	}
+
+	if !strings.Contains(outputs.Answer, "What is AI?") {
+		t.Errorf("Expected answer to contain question, got: %s", outputs.Answer)
+	}
+
+	if !strings.Contains(outputs.Answer, "AI is artificial intelligence") {
+		t.Errorf("Expected answer to contain context, got: %s", outputs.Answer)
+	}
+
+	if outputs.Confidence != 85 {
+		t.Errorf("Expected confidence 85, got: %d", outputs.Confidence)
+	}
+}
+
+func TestProcessTypedWithValidation(t *testing.T) {
+	ctx := context.Background()
+	module := NewMockTypedModule()
+
+	tests := []struct {
+		name    string
+		inputs  TestQAInputs
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid inputs",
+			inputs: TestQAInputs{
+				Question: "What is AI?",
+				Context:  "AI is artificial intelligence",
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing required field",
+			inputs: TestQAInputs{
+				Question: "What is AI?",
+				// Context missing
+			},
+			wantErr: true,
+			errMsg:  "required input field 'context' cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputs, err := ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, module, tt.inputs)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error to contain '%s', got: %s", tt.errMsg, err.Error())
+				}
+				if outputs.Answer != "" {
+					t.Errorf("Expected empty answer on error, got: %s", outputs.Answer)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if outputs.Answer == "" {
+					t.Errorf("Expected non-empty answer")
+				}
+				if outputs.Confidence != 85 {
+					t.Errorf("Expected confidence 85, got: %d", outputs.Confidence)
+				}
+			}
+		})
+	}
+}
+
+func TestProcessTypedWithMapInputs(t *testing.T) {
+	ctx := context.Background()
+	module := NewMockTypedModule()
+
+	// Test that legacy map inputs still work
+	legacyInputs := map[string]any{
+		"question": "What is deep learning?",
+		"context":  "Deep learning uses neural networks",
+	}
+
+	outputs, err := ProcessTyped[map[string]any, TestQAOutputs](ctx, module, legacyInputs)
+
+	if err != nil {
+		t.Fatalf("ProcessTyped with map inputs failed: %v", err)
+	}
+
+	if !strings.Contains(outputs.Answer, "What is deep learning?") {
+		t.Errorf("Expected answer to contain question, got: %s", outputs.Answer)
+	}
+
+	if outputs.Confidence != 85 {
+		t.Errorf("Expected confidence 85, got: %d", outputs.Confidence)
+	}
+}
+
+func TestProcessTypedWithMapOutputs(t *testing.T) {
+	ctx := context.Background()
+	module := NewMockTypedModule()
+
+	inputs := TestQAInputs{
+		Question: "What is reinforcement learning?",
+		Context:  "RL is learning through interaction",
+	}
+
+	// Test that legacy map outputs still work
+	outputs, err := ProcessTyped[TestQAInputs, map[string]any](ctx, module, inputs)
+
+	if err != nil {
+		t.Fatalf("ProcessTyped with map outputs failed: %v", err)
+	}
+
+	answer, exists := outputs["answer"]
+	if !exists {
+		t.Errorf("Expected 'answer' field in outputs")
+	}
+
+	if answerStr, ok := answer.(string); !ok {
+		t.Errorf("Expected answer to be string, got %T", answer)
+	} else if !strings.Contains(answerStr, "What is reinforcement learning?") {
+		t.Errorf("Expected answer to contain question, got: %s", answerStr)
+	}
+
+	confidence, exists := outputs["confidence"]
+	if !exists {
+		t.Errorf("Expected 'confidence' field in outputs")
+	}
+
+	if confInt, ok := confidence.(int); !ok {
+		t.Errorf("Expected confidence to be int, got %T", confidence)
+	} else if confInt != 85 {
+		t.Errorf("Expected confidence 85, got: %d", confInt)
+	}
+}
+
+// Benchmark to ensure performance is acceptable.
+func BenchmarkProcessTyped(b *testing.B) {
+	ctx := context.Background()
+	module := NewMockTypedModule()
+
+	inputs := TestQAInputs{
+		Question: "What is AI?",
+		Context:  "AI is artificial intelligence",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ProcessTyped[TestQAInputs, TestQAOutputs](ctx, module, inputs)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkProcessTypedWithValidation(b *testing.B) {
+	ctx := context.Background()
+	module := NewMockTypedModule()
+
+	inputs := TestQAInputs{
+		Question: "What is AI?",
+		Context:  "AI is artificial intelligence",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, module, inputs)
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }

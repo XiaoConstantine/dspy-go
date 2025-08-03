@@ -8,6 +8,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
@@ -715,4 +716,90 @@ func parseJSONResponse(content string, signature core.Signature) string {
 	}
 
 	return strings.TrimSpace(result.String())
+}
+
+// ProcessTyped provides type-safe processing with compile-time type validation.
+func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
+	var zero TOutput
+
+	// Convert typed inputs to legacy format
+	legacyInputs, err := utils.ConvertTypedInputsToLegacy(inputs)
+	if err != nil {
+		return zero, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to convert typed inputs"),
+			errors.Fields{
+				"module": "Predict",
+				"type":   fmt.Sprintf("%T", inputs),
+			})
+	}
+
+	// Call the legacy Process method
+	legacyOutputs, err := predict.Process(ctx, legacyInputs, opts...)
+	if err != nil {
+		return zero, err
+	}
+
+	// Convert legacy outputs to typed format
+	typedOutputs, err := utils.ConvertLegacyOutputsToTyped[TOutput](legacyOutputs)
+	if err != nil {
+		return zero, errors.WithFields(
+			errors.Wrap(err, errors.InvalidResponse, "failed to convert legacy outputs"),
+			errors.Fields{
+				"module":  "Predict",
+				"type":    fmt.Sprintf("%T", zero),
+				"outputs": legacyOutputs,
+			})
+	}
+
+	return typedOutputs, nil
+}
+
+// ProcessTypedWithValidation provides type-safe processing with input and output validation.
+func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
+	var zero TOutput
+
+	// Create typed signature for validation (cached for performance)
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
+
+	// Validate inputs
+	if err := typedSig.ValidateInput(inputs); err != nil {
+		return zero, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "typed input validation failed"),
+			errors.Fields{
+				"module": "Predict",
+				"type":   fmt.Sprintf("%T", inputs),
+			})
+	}
+
+	// Process with type conversion
+	result, err := ProcessTyped[TInput, TOutput](ctx, predict, inputs, opts...)
+	if err != nil {
+		return zero, err
+	}
+
+	// Validate outputs
+	if err := typedSig.ValidateOutput(result); err != nil {
+		return zero, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "typed output validation failed"),
+			errors.Fields{
+				"module": "Predict",
+				"type":   fmt.Sprintf("%T", result),
+			})
+	}
+
+	return result, nil
+}
+
+// NewTypedPredict creates a new type-safe Predict module from a typed signature.
+func NewTypedPredict[TInput, TOutput any]() *Predict {
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
+	legacySig := typedSig.ToLegacySignature()
+
+	predict := NewPredict(legacySig)
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	predict.DisplayName = fmt.Sprintf("TypedPredict[%T,%T]", i, o)
+
+	return predict
 }

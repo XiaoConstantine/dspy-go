@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // Module represents a basic unit of computation in DSPy.
@@ -27,6 +29,7 @@ type Module interface {
 	// GetModuleType returns the category/type of this module
 	GetModuleType() string
 }
+
 
 // InterceptableModule extends Module with interceptor support.
 // This interface provides backward-compatible enhancement for modules that support interceptors.
@@ -283,4 +286,55 @@ func NewModuleChain(modules ...Module) *ModuleChain {
 		},
 		Modules: modules,
 	}
+}
+
+// ProcessTyped provides type-safe module processing using generics.
+func ProcessTyped[TInput, TOutput any](ctx context.Context, module Module, inputs TInput, opts ...Option) (TOutput, error) {
+	var zero TOutput
+
+	// Convert typed inputs to legacy format
+	legacyInputs, err := utils.ConvertTypedInputsToLegacy(inputs)
+	if err != nil {
+		return zero, err
+	}
+
+	// Call the legacy Process method
+	legacyOutputs, err := module.Process(ctx, legacyInputs, opts...)
+	if err != nil {
+		return zero, err
+	}
+
+	// Convert legacy outputs to typed format
+	typedOutputs, err := utils.ConvertLegacyOutputsToTyped[TOutput](legacyOutputs)
+	if err != nil {
+		return zero, err
+	}
+
+	return typedOutputs, nil
+}
+
+// ProcessTypedWithValidation provides type-safe processing with signature validation.
+func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, module Module, inputs TInput, opts ...Option) (TOutput, error) {
+	var zero TOutput
+
+	// Create typed signature for validation (cached for performance)
+	typedSig := NewTypedSignatureCached[TInput, TOutput]()
+
+	// Validate inputs
+	if err := typedSig.ValidateInput(inputs); err != nil {
+		return zero, err
+	}
+
+	// Process with type conversion
+	result, err := ProcessTyped[TInput, TOutput](ctx, module, inputs, opts...)
+	if err != nil {
+		return zero, err
+	}
+
+	// Validate outputs
+	if err := typedSig.ValidateOutput(result); err != nil {
+		return zero, err
+	}
+
+	return result, nil
 }
