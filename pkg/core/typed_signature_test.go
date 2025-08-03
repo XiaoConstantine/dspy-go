@@ -2,6 +2,7 @@ package core
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -324,4 +325,43 @@ func BenchmarkNewTypedSignatureCached(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = NewTypedSignatureCached[TestInputs, TestOutputs]()
 	}
+}
+
+func TestNewTypedSignatureCachedConcurrency(t *testing.T) {
+	// Test concurrent access to ensure no race conditions
+	const numGoroutines = 100
+	const numIterations = 10
+
+	// Clear the cache first
+	typedSignatureCache = sync.Map{}
+
+	results := make([]TypedSignature[TestInputs, TestOutputs], numGoroutines*numIterations)
+	var wg sync.WaitGroup
+
+	// Launch multiple goroutines that call NewTypedSignatureCached concurrently
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < numIterations; j++ {
+				sig := NewTypedSignatureCached[TestInputs, TestOutputs]()
+				results[goroutineID*numIterations+j] = sig
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// All signatures should be the same instance (cached)
+	firstSig := results[0]
+	for i, sig := range results {
+		if sig != firstSig {
+			t.Errorf("Result %d is not the same instance as the first result", i)
+		}
+	}
+
+	// Verify the signature is still functional
+	metadata := firstSig.GetFieldMetadata()
+	assert.Len(t, metadata.Inputs, 3)
+	assert.Len(t, metadata.Outputs, 2)
 }

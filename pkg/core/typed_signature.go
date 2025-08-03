@@ -125,9 +125,11 @@ func NewTypedSignatureCached[TInput, TOutput any]() TypedSignature[TInput, TOutp
 	// Not in cache, create new signature using the helper
 	signature := createTypedSignatureImpl[TInput, TOutput](inputType, outputType)
 
-	// Store in cache for future use
-	typedSignatureCache.Store(key, signature)
-
+	// Use LoadOrStore to prevent race condition where multiple goroutines
+	// could create and store signatures for the same key concurrently
+	if actual, loaded := typedSignatureCache.LoadOrStore(key, signature); loaded {
+		return actual.(TypedSignature[TInput, TOutput])
+	}
 	return signature
 }
 
