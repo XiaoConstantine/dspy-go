@@ -273,8 +273,14 @@ func convertToInt(value any) (int64, bool) {
 		}
 		return int64(v), true
 	case float32:
+		if v > math.MaxInt64 || v < math.MinInt64 {
+			return 0, false
+		}
 		return int64(v), true
 	case float64:
+		if v > math.MaxInt64 || v < math.MinInt64 {
+			return 0, false
+		}
 		return int64(v), true
 	case string:
 		// Use strconv for robust and idiomatic integer parsing

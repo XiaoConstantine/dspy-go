@@ -556,6 +556,12 @@ func TestConvertToInt(t *testing.T) {
 		{"int64", int64(42), 42, true},
 		{"float32", float32(42.0), 42, true},
 		{"float64", float64(42.0), 42, true},
+		{"float32 max safe value", float32(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64 as float32
+		{"float32 overflow positive", float32(1e20), 0, false},                             // Large positive float32, should fail
+		{"float32 overflow negative", float32(-1e20), 0, false},                            // Large negative float32, should fail
+		{"float64 max safe value", float64(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64 as float64
+		{"float64 overflow positive", float64(1e20), 0, false},                             // Large positive float64, should fail
+		{"float64 overflow negative", float64(-1e20), 0, false},                            // Large negative float64, should fail
 		{"string number", "42", 42, true},
 		{"string with whitespace", "  42  ", 42, true},
 		{"string partial number (strconv improvement)", "42abc", 0, false}, // strconv.ParseInt is stricter than fmt.Sscanf
