@@ -530,29 +530,28 @@ func (tp *TaskPlanner) canRunInParallel(step1, step2 *PlanStep, dependents map[s
 	return true
 }
 
-// hasTransitiveDependency checks if sourceStep transitively depends on targetStep.
+// hasTransitiveDependency checks if sourceStep transitively depends on targetStep using efficient DFS.
 func (tp *TaskPlanner) hasTransitiveDependency(sourceStep, targetStep string, dependents map[string][]string) bool {
 	visited := make(map[string]bool)
-	return tp.hasTransitiveDependencyRecursive(sourceStep, targetStep, dependents, visited)
-}
+	stack := []string{sourceStep}
 
-// hasTransitiveDependencyRecursive performs recursive dependency check with cycle detection.
-func (tp *TaskPlanner) hasTransitiveDependencyRecursive(sourceStep, targetStep string, dependents map[string][]string, visited map[string]bool) bool {
-	if visited[sourceStep] {
-		return false // Cycle detected, return false to avoid infinite recursion
-	}
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
 
-	visited[sourceStep] = true
-	defer func() { visited[sourceStep] = false }() // Clean up for other branches
-
-	// Check direct dependencies
-	for _, dependent := range dependents[sourceStep] {
-		if dependent == targetStep {
-			return true
+		if visited[current] {
+			continue // Skip already visited nodes
 		}
-		// Recursively check transitive dependencies
-		if tp.hasTransitiveDependencyRecursive(dependent, targetStep, dependents, visited) {
-			return true
+		visited[current] = true
+
+		// Check direct dependencies of current node
+		for _, dependent := range dependents[current] {
+			if dependent == targetStep {
+				return true
+			}
+			if !visited[dependent] {
+				stack = append(stack, dependent)
+			}
 		}
 	}
 

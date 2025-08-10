@@ -15,16 +15,21 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
+const (
+	// memorySummaryThreshold is the number of memories after which summarization begins.
+	memorySummaryThreshold = 5
+)
+
 // MemoryOptimizer implements memory optimization with forgetting curve.
 type MemoryOptimizer struct {
-	retention           time.Duration
-	threshold           float64
+	retention            time.Duration
+	threshold            float64
 	compressionThreshold int
-	memory              agents.Memory
-	index               *MemoryIndex
-	forgetting          *ForgettingCurve
-	compressor          *MemoryCompressor
-	mu                  sync.RWMutex
+	memory               agents.Memory
+	index                *MemoryIndex
+	forgetting           *ForgettingCurve
+	compressor           *MemoryCompressor
+	mu                   sync.RWMutex
 }
 
 // MemoryIndex provides fast access to memory items.
@@ -85,13 +90,13 @@ func NewMemoryOptimizerWithCompressionThreshold(retention time.Duration, thresho
 		compressionThreshold = 100 // Default fallback
 	}
 	return &MemoryOptimizer{
-		retention:           retention,
-		threshold:           threshold,
+		retention:            retention,
+		threshold:            threshold,
 		compressionThreshold: compressionThreshold,
-		memory:              agents.NewInMemoryStore(),
-		index:               NewMemoryIndex(),
-		forgetting:          NewForgettingCurve(),
-		compressor:          NewMemoryCompressor(),
+		memory:               agents.NewInMemoryStore(),
+		index:                NewMemoryIndex(),
+		forgetting:           NewForgettingCurve(),
+		compressor:           NewMemoryCompressor(),
 	}
 }
 
@@ -320,7 +325,7 @@ func (mo *MemoryOptimizer) compressBySummarization(ctx context.Context) {
 			}
 
 			// Remove individual items
-			for _, item := range items[5:] {
+			for _, item := range items[memorySummaryThreshold:] {
 				mo.index.Remove(item.Key)
 				if err := mo.memory.Delete(item.Key); err != nil {
 					// Log error but continue processing
@@ -338,27 +343,74 @@ func (mo *MemoryOptimizer) compressBySummarization(ctx context.Context) {
 	}
 }
 
-// compressByMerging merges similar memories.
+// compressByMerging merges similar memories using optimized similarity search.
 func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
-	// Find and merge duplicate or very similar memories
-	for key1, item1 := range mo.index.items {
-		for key2, item2 := range mo.index.items {
-			if key1 != key2 && mo.areSimilar(item1, item2) {
-				// Merge items
-				merged := mo.mergeItems(item1, item2)
+	// Group items by hash and category for efficient similarity checking
+	hashGroups := make(map[string][]*MemoryItem)
+	categoryGroups := make(map[string][]*MemoryItem)
 
-				// Remove old items
-				mo.index.Remove(key2)
-				if err := mo.memory.Delete(key2); err != nil {
-					// Log error but continue processing
+	for _, item := range mo.index.items {
+		// Group by hash (exact duplicates)
+		if item.Hash != "" {
+			hashGroups[item.Hash] = append(hashGroups[item.Hash], item)
+		}
+		// Group by category for semantic similarity
+		categoryGroups[item.Category] = append(categoryGroups[item.Category], item)
+	}
+
+	// Process exact hash duplicates first (O(n) instead of O(n^2))
+	for _, items := range hashGroups {
+		if len(items) > 1 {
+			base := items[0]
+			for i := 1; i < len(items); i++ {
+				merged := mo.mergeItems(base, items[i])
+
+				// Remove duplicate item
+				mo.index.Remove(items[i].Key)
+				if err := mo.memory.Delete(items[i].Key); err != nil {
 					continue
 				}
 
-				// Update first item
-				mo.index.items[key1] = merged
-				if err := mo.memory.Store(key1, merged.Value); err != nil {
-					// Log error but continue processing
+				// Update base item
+				base = merged
+				mo.index.Add(merged)
+				if err := mo.memory.Store(merged.Key, merged.Value); err != nil {
 					continue
+				}
+			}
+		}
+	}
+
+	// Process semantic similarity within categories (reduced search space)
+	for _, items := range categoryGroups {
+		if len(items) <= 1 {
+			continue
+		}
+
+		// Only check similarity within the same category
+		for i := 0; i < len(items); i++ {
+			for j := i + 1; j < len(items); j++ {
+				if mo.areSimilar(items[i], items[j]) {
+					// Merge items
+					merged := mo.mergeItems(items[i], items[j])
+
+					// Remove old items
+					mo.index.Remove(items[j].Key)
+					if err := mo.memory.Delete(items[j].Key); err != nil {
+						// Log error but continue processing
+						continue
+					}
+
+					// Update first item with merged data
+					mo.index.Add(merged)
+					if err := mo.memory.Store(merged.Key, merged.Value); err != nil {
+						// Log error but continue processing
+						continue
+					}
+
+					// Remove j from items slice to avoid reprocessing
+					items = append(items[:j], items[j+1:]...)
+					break // Move to next i
 				}
 			}
 		}
@@ -672,14 +724,13 @@ func (mi *MemoryIndex) Remove(key string) {
 			mi.categories[item.Category] = newCatItems
 		}
 
-		// Remove from timestamps
-		newTimestamps := make([]time.Time, 0, len(mi.timestamps)-1)
-		for _, ts := range mi.timestamps {
-			if !ts.Equal(item.Created) {
-				newTimestamps = append(newTimestamps, ts)
+		// Remove from timestamps - find and remove only the first occurrence
+		for i, ts := range mi.timestamps {
+			if ts.Equal(item.Created) {
+				mi.timestamps = append(mi.timestamps[:i], mi.timestamps[i+1:]...)
+				break // Remove only the first occurrence
 			}
 		}
-		mi.timestamps = newTimestamps
 	}
 }
 
