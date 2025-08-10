@@ -487,18 +487,49 @@ func (tp *TaskPlanner) optimizePlan(ctx context.Context, plan *Plan, tools []cor
 func (tp *TaskPlanner) identifyParallelSteps(plan *Plan) {
 	// Build dependency graph
 	dependents := make(map[string][]string)
+	dependencies := make(map[string][]string)
 	for _, step := range plan.Steps {
+		dependencies[step.ID] = step.DependsOn
 		for _, dep := range step.DependsOn {
 			dependents[dep] = append(dependents[dep], step.ID)
 		}
 	}
 
-	// Find steps with no dependencies or same dependencies
-	for i := range plan.Steps {
-		for j := i + 1; j < len(plan.Steps); j++ {
-			if tp.canRunInParallel(&plan.Steps[i], &plan.Steps[j], dependents) {
-				plan.Steps[i].Parallel = true
-				plan.Steps[j].Parallel = true
+	// Group steps by their dependencies - steps with the same dependencies can run in parallel
+	dependencyGroups := make(map[string][]int)
+	for i, step := range plan.Steps {
+		// Create a key from sorted dependencies
+		depKey := strings.Join(step.DependsOn, ",")
+		dependencyGroups[depKey] = append(dependencyGroups[depKey], i)
+	}
+
+	// Mark steps that can run in parallel within their dependency group
+	for _, group := range dependencyGroups {
+		if len(group) > 1 {
+			// All steps in this group have the same dependencies
+			// Check if they don't depend on each other
+			canParallelize := true
+			for i := 0; i < len(group); i++ {
+				for j := i + 1; j < len(group); j++ {
+					step1 := &plan.Steps[group[i]]
+					step2 := &plan.Steps[group[j]]
+					// Check if there's any dependency between them
+					if tp.hasTransitiveDependency(step1.ID, step2.ID, dependents) ||
+						tp.hasTransitiveDependency(step2.ID, step1.ID, dependents) {
+						canParallelize = false
+						break
+					}
+				}
+				if !canParallelize {
+					break
+				}
+			}
+
+			// If all steps in the group are independent of each other, mark them as parallel
+			if canParallelize {
+				for _, idx := range group {
+					plan.Steps[idx].Parallel = true
+				}
 			}
 		}
 	}

@@ -309,8 +309,8 @@ func (mo *MemoryOptimizer) compressBySummarization(ctx context.Context) {
 	groups := mo.groupSimilarMemories()
 
 	for category, items := range groups {
-		if len(items) > 5 {
-			// Create summary
+		if len(items) > memorySummaryThreshold {
+			// Create summary of all items
 			summary := mo.createSummary(items)
 
 			// Replace individual items with summary
@@ -324,23 +324,41 @@ func (mo *MemoryOptimizer) compressBySummarization(ctx context.Context) {
 				Created:      time.Now(),
 			}
 
-			// Remove individual items
-			for _, item := range items[memorySummaryThreshold:] {
+			// Track successful deletions
+			deletedItems := make([]*MemoryItem, 0, len(items))
+			allDeleted := true
+
+			// Remove all individual items that were summarized
+			for _, item := range items {
 				mo.index.Remove(item.Key)
 				if err := mo.memory.Delete(item.Key); err != nil {
 					// Log error and revert the index change to maintain consistency
 					logger := logging.GetLogger()
 					logger.Error(ctx, "Failed to delete item from memory store, reverting index change for key: %s", item.Key)
 					mo.index.Add(item) // Re-add to index to maintain consistency
-					continue
+					allDeleted = false
+					// Revert all previously deleted items if we can't delete all
+					for _, deletedItem := range deletedItems {
+						mo.index.Add(deletedItem)
+						_ = mo.memory.Store(deletedItem.Key, deletedItem.Value) // Best effort restore
+					}
+					break
 				}
+				deletedItems = append(deletedItems, item)
 			}
 
-			// Add summary
-			mo.index.Add(summaryItem)
-			if err := mo.memory.Store(summaryItem.Key, summaryItem.Value); err != nil {
-				// Log error but continue processing
-				continue
+			// Only add summary if all items were successfully deleted
+			if allDeleted {
+				mo.index.Add(summaryItem)
+				if err := mo.memory.Store(summaryItem.Key, summaryItem.Value); err != nil {
+					// Restore deleted items if we can't store the summary
+					logger := logging.GetLogger()
+					logger.Error(ctx, "Failed to store summary, restoring original items")
+					for _, item := range deletedItems {
+						mo.index.Add(item)
+						_ = mo.memory.Store(item.Key, item.Value) // Best effort restore
+					}
+				}
 			}
 		}
 	}

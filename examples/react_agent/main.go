@@ -385,14 +385,12 @@ Always use the exact tool names as specified above. Use XML format for actions: 
 			fmt.Printf("❌ Error: %v\n", err)
 		} else {
 			// The result might be the full prediction map or just the result value
+			// The result is expected to contain a "result" key as per the ReActOutput schema.
 			if resultValue, ok := result["result"]; ok {
 				fmt.Printf("✅ Result: %v\n", resultValue)
-			} else if answerValue, ok := result["answer"]; ok {
-				// If there's an "answer" key, use that
-				fmt.Printf("✅ Result: %v\n", answerValue)
 			} else {
-				// If no standard keys, display the whole result but clean it up
-				fmt.Printf("✅ Result: %v\n", result)
+				// If the expected key is not found, display the raw result for debugging.
+				fmt.Printf("✅ Result (raw): %v\n", result)
 			}
 		}
 
@@ -423,16 +421,17 @@ Always use the exact tool names as specified above. Use XML format for actions: 
 	history := agent.GetExecutionHistory()
 	fmt.Printf("Total executions: %d\n", len(history))
 
-	successful := 0
-	totalActions := 0
-	for _, exec := range history {
-		if exec.Success {
-			successful++
+	// Only calculate stats manually if reflection is disabled
+	if !*reflectionFlag && len(history) > 0 {
+		successful := 0
+		totalActions := 0
+		for _, exec := range history {
+			if exec.Success {
+				successful++
+			}
+			totalActions += len(exec.Actions)
 		}
-		totalActions += len(exec.Actions)
-	}
 
-	if len(history) > 0 {
 		fmt.Printf("Success rate: %.1f%%\n", float64(successful)/float64(len(history))*100)
 		fmt.Printf("Average actions per task: %.1f\n", float64(totalActions)/float64(len(history)))
 	}
