@@ -321,41 +321,35 @@ Always use the exact tool names as specified above. Use XML format for actions: 
 		os.Exit(1)
 	}
 
-	// Register tools
+	// Create tool instances once for efficiency
+	searchToolInstance := NewSearchTool()
 	searchTool := tools.NewFuncTool("search", "Search for information",
-		NewSearchTool().InputSchema(),
+		searchToolInstance.InputSchema(),
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return NewSearchTool().Call(ctx, args)
+			return searchToolInstance.Call(ctx, args)
 		})
 
+	calculatorToolInstance := NewCalculatorTool()
 	calculatorTool := tools.NewFuncTool("calculator", "Perform calculations",
-		NewCalculatorTool().InputSchema(),
+		calculatorToolInstance.InputSchema(),
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return NewCalculatorTool().Call(ctx, args)
+			return calculatorToolInstance.Call(ctx, args)
 		})
 
+	summarizerToolInstance := NewSummarizerTool()
 	summarizerTool := tools.NewFuncTool("summarize", "Summarize text",
-		NewSummarizerTool().InputSchema(),
+		summarizerToolInstance.InputSchema(),
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
-			return NewSummarizerTool().Call(ctx, args)
+			return summarizerToolInstance.Call(ctx, args)
 		})
 
-	err = agent.RegisterTool(searchTool)
-	if err != nil {
-		fmt.Printf("Failed to register search tool: %v\n", err)
-		os.Exit(1)
-	}
-
-	err = agent.RegisterTool(calculatorTool)
-	if err != nil {
-		fmt.Printf("Failed to register calculator tool: %v\n", err)
-		os.Exit(1)
-	}
-
-	err = agent.RegisterTool(summarizerTool)
-	if err != nil {
-		fmt.Printf("Failed to register summarizer tool: %v\n", err)
-		os.Exit(1)
+	// Register tools using a loop to reduce duplication
+	toolsToRegister := []core.Tool{searchTool, calculatorTool, summarizerTool}
+	for _, tool := range toolsToRegister {
+		if err := agent.RegisterTool(tool); err != nil {
+			fmt.Printf("Failed to register tool '%s': %v\n", tool.Name(), err)
+			os.Exit(1)
+		}
 	}
 
 	// Demo tasks

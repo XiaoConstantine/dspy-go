@@ -328,7 +328,10 @@ func (mo *MemoryOptimizer) compressBySummarization(ctx context.Context) {
 			for _, item := range items[memorySummaryThreshold:] {
 				mo.index.Remove(item.Key)
 				if err := mo.memory.Delete(item.Key); err != nil {
-					// Log error but continue processing
+					// Log error and revert the index change to maintain consistency
+					logger := logging.GetLogger()
+					logger.Error(ctx, "Failed to delete item from memory store, reverting index change for key: %s", item.Key)
+					mo.index.Add(item) // Re-add to index to maintain consistency
 					continue
 				}
 			}
@@ -368,6 +371,8 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 				// Remove duplicate item
 				mo.index.Remove(items[i].Key)
 				if err := mo.memory.Delete(items[i].Key); err != nil {
+					// Revert index change to maintain consistency
+					mo.index.Add(items[i])
 					continue
 				}
 
@@ -397,7 +402,8 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 					// Remove old items
 					mo.index.Remove(items[j].Key)
 					if err := mo.memory.Delete(items[j].Key); err != nil {
-						// Log error but continue processing
+						// Revert index change to maintain consistency
+						mo.index.Add(items[j])
 						continue
 					}
 
@@ -441,10 +447,14 @@ func (mo *MemoryOptimizer) compressByPruning(ctx context.Context) {
 	// Remove bottom percentile
 	cutoff := int(float64(len(pairs)) * mo.compressor.compressionRatio)
 	for i := 0; i < cutoff; i++ {
-		mo.index.Remove(pairs[i].key)
-		if err := mo.memory.Delete(pairs[i].key); err != nil {
-			// Log error but continue processing
-			continue
+		key := pairs[i].key
+		if item, exists := mo.index.items[key]; exists {
+			mo.index.Remove(key)
+			if err := mo.memory.Delete(key); err != nil {
+				// Revert index change to maintain consistency
+				mo.index.Add(item)
+				continue
+			}
 		}
 	}
 }
@@ -467,10 +477,13 @@ func (mo *MemoryOptimizer) cleanup(ctx context.Context) {
 
 	// Remove items
 	for _, key := range toRemove {
-		mo.index.Remove(key)
-		if err := mo.memory.Delete(key); err != nil {
-			// Log error but continue processing
-			continue
+		if item, exists := mo.index.items[key]; exists {
+			mo.index.Remove(key)
+			if err := mo.memory.Delete(key); err != nil {
+				// Revert index change to maintain consistency
+				mo.index.Add(item)
+				continue
+			}
 		}
 	}
 }
