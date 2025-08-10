@@ -15,6 +15,9 @@ type Memory interface {
 	// Retrieve gets a value by key
 	Retrieve(key string) (interface{}, error)
 
+	// Delete removes a value by key
+	Delete(key string) error
+
 	// List returns all stored keys
 	List() ([]string, error)
 
@@ -55,6 +58,23 @@ func (s *InMemoryStore) Retrieve(key string) (interface{}, error) {
 			})
 	}
 	return value, nil
+}
+
+func (s *InMemoryStore) Delete(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.data[key]; !exists {
+		return errors.WithFields(
+			errors.New(errors.ResourceNotFound, "key not found in memory store"),
+			errors.Fields{
+				"key":         key,
+				"access_time": time.Now().UTC(),
+			})
+	}
+
+	delete(s.data, key)
+	return nil
 }
 
 func (s *InMemoryStore) List() ([]string, error) {
