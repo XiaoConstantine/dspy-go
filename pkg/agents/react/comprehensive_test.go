@@ -232,6 +232,11 @@ func TestMemoryOptimizer_CompressionStrategies(t *testing.T) {
 
 		// Manually trigger compression to test the logic
 		optimizer.compress(ctx)
+
+		// After compression, the number of items should be reduced
+		stats := optimizer.GetStatistics()
+		totalItems := stats["total_items"].(int)
+		assert.Less(t, totalItems, 8, "Number of items should be reduced after summarization")
 	})
 
 	t.Run("Memory Similarity", func(t *testing.T) {

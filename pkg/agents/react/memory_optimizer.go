@@ -410,32 +410,64 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 			continue
 		}
 
-		// Only check similarity within the same category
+		// Mark items for merging to avoid modifying slice during iteration
+		merged := make(map[int]bool)
+		mergeOps := []struct {
+			baseIdx   int
+			mergeIdx  int
+			mergedItem *MemoryItem
+		}{}
+
+		// First pass: identify items to merge
 		for i := 0; i < len(items); i++ {
+			if merged[i] {
+				continue
+			}
 			for j := i + 1; j < len(items); j++ {
-				if mo.areSimilar(items[i], items[j]) {
-					// Merge items
-					merged := mo.mergeItems(items[i], items[j])
-
-					// Remove old items
-					mo.index.Remove(items[j].Key)
-					if err := mo.memory.Delete(items[j].Key); err != nil {
-						// Revert index change to maintain consistency
-						mo.index.Add(items[j])
-						continue
-					}
-
-					// Update first item with merged data
-					mo.index.Add(merged)
-					if err := mo.memory.Store(merged.Key, merged.Value); err != nil {
-						// Log error but continue processing
-						continue
-					}
-
-					// Remove j from items slice to avoid reprocessing
-					items = append(items[:j], items[j+1:]...)
-					break // Move to next i
+				if merged[j] {
+					continue
 				}
+				if mo.areSimilar(items[i], items[j]) {
+					mergedItem := mo.mergeItems(items[i], items[j])
+					mergeOps = append(mergeOps, struct {
+						baseIdx   int
+						mergeIdx  int
+						mergedItem *MemoryItem
+					}{i, j, mergedItem})
+					merged[j] = true // Mark j as merged
+					break // Only merge with first similar item
+				}
+			}
+		}
+
+		// Second pass: execute merge operations
+		for _, op := range mergeOps {
+			// Remove the item being merged
+			mo.index.Remove(items[op.mergeIdx].Key)
+			if err := mo.memory.Delete(items[op.mergeIdx].Key); err != nil {
+				// Revert index change to maintain consistency
+				mo.index.Add(items[op.mergeIdx])
+				continue
+			}
+
+			// Remove original item
+			mo.index.Remove(items[op.baseIdx].Key)
+			if err := mo.memory.Delete(items[op.baseIdx].Key); err != nil {
+				// Restore the merged item since we can't complete the operation
+				mo.index.Add(items[op.mergeIdx])
+				_ = mo.memory.Store(items[op.mergeIdx].Key, items[op.mergeIdx].Value) // Best effort
+				mo.index.Add(items[op.baseIdx])
+				continue
+			}
+
+			// Add merged item
+			mo.index.Add(op.mergedItem)
+			if err := mo.memory.Store(op.mergedItem.Key, op.mergedItem.Value); err != nil {
+				// Try to restore original items
+				mo.index.Add(items[op.baseIdx])
+				mo.index.Add(items[op.mergeIdx])
+				_ = mo.memory.Store(items[op.baseIdx].Key, items[op.baseIdx].Value) // Best effort
+				_ = mo.memory.Store(items[op.mergeIdx].Key, items[op.mergeIdx].Value) // Best effort
 			}
 		}
 	}
