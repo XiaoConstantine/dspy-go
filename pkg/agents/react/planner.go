@@ -12,13 +12,13 @@ import (
 
 // Plan represents a structured plan for task execution.
 type Plan struct {
-	ID          string
-	Goal        string
-	Steps       []PlanStep
-	Strategy    PlanningStrategy
-	CreatedAt   time.Time
+	ID                string
+	Goal              string
+	Steps             []PlanStep
+	Strategy          PlanningStrategy
+	CreatedAt         time.Time
 	EstimatedDuration time.Duration
-	Dependencies map[string][]string // step dependencies
+	Dependencies      map[string][]string // step dependencies
 }
 
 // PlanStep represents a single step in a plan.
@@ -27,20 +27,20 @@ type PlanStep struct {
 	Description string
 	Tool        string
 	Arguments   map[string]interface{}
-	Expected    string // expected outcome
-	Critical    bool   // if true, failure stops execution
-	Parallel    bool   // can be executed in parallel
+	Expected    string   // expected outcome
+	Critical    bool     // if true, failure stops execution
+	Parallel    bool     // can be executed in parallel
 	DependsOn   []string // IDs of steps this depends on
 	Timeout     time.Duration
 }
 
 // TaskPlanner implements task planning and decomposition.
 type TaskPlanner struct {
-	strategy     PlanningStrategy
-	maxDepth     int
-	planCache    map[string]*Plan
-	templateLib  *PlanTemplateLibrary
-	decomposer   *TaskDecomposer
+	strategy    PlanningStrategy
+	maxDepth    int
+	planCache   map[string]*Plan
+	templateLib *PlanTemplateLibrary
+	decomposer  *TaskDecomposer
 }
 
 // PlanTemplateLibrary stores reusable plan templates.
@@ -506,30 +506,54 @@ func (tp *TaskPlanner) identifyParallelSteps(plan *Plan) {
 
 // canRunInParallel checks if two steps can run in parallel.
 func (tp *TaskPlanner) canRunInParallel(step1, step2 *PlanStep, dependents map[string][]string) bool {
-	// Check if one depends on the other
+	// Check if step1 directly depends on step2
 	for _, dep := range step1.DependsOn {
 		if dep == step2.ID {
 			return false
 		}
 	}
+
+	// Check if step2 directly depends on step1
 	for _, dep := range step2.DependsOn {
 		if dep == step1.ID {
 			return false
 		}
 	}
 
-	// Check if they have the same dependencies
-	if len(step1.DependsOn) == len(step2.DependsOn) {
-		depMap := make(map[string]bool)
-		for _, dep := range step1.DependsOn {
-			depMap[dep] = true
+	// Check for transitive dependencies (step1 depends on something that depends on step2)
+	if tp.hasTransitiveDependency(step1.ID, step2.ID, dependents) ||
+		tp.hasTransitiveDependency(step2.ID, step1.ID, dependents) {
+		return false
+	}
+
+	// If no direct or transitive dependencies exist, they can run in parallel
+	return true
+}
+
+// hasTransitiveDependency checks if sourceStep transitively depends on targetStep.
+func (tp *TaskPlanner) hasTransitiveDependency(sourceStep, targetStep string, dependents map[string][]string) bool {
+	visited := make(map[string]bool)
+	return tp.hasTransitiveDependencyRecursive(sourceStep, targetStep, dependents, visited)
+}
+
+// hasTransitiveDependencyRecursive performs recursive dependency check with cycle detection.
+func (tp *TaskPlanner) hasTransitiveDependencyRecursive(sourceStep, targetStep string, dependents map[string][]string, visited map[string]bool) bool {
+	if visited[sourceStep] {
+		return false // Cycle detected, return false to avoid infinite recursion
+	}
+
+	visited[sourceStep] = true
+	defer func() { visited[sourceStep] = false }() // Clean up for other branches
+
+	// Check direct dependencies
+	for _, dependent := range dependents[sourceStep] {
+		if dependent == targetStep {
+			return true
 		}
-		for _, dep := range step2.DependsOn {
-			if !depMap[dep] {
-				return false
-			}
+		// Recursively check transitive dependencies
+		if tp.hasTransitiveDependencyRecursive(dependent, targetStep, dependents, visited) {
+			return true
 		}
-		return true
 	}
 
 	return false
@@ -780,6 +804,7 @@ func (tp *TaskPlanner) hasCircularDependencies(plan *Plan) bool {
 func (tp *TaskPlanner) GetPlanMetrics(plan *Plan) map[string]interface{} {
 	parallelSteps := 0
 	criticalSteps := 0
+	toolUsage := make(map[string]int)
 
 	for _, step := range plan.Steps {
 		if step.Parallel {
@@ -787,6 +812,10 @@ func (tp *TaskPlanner) GetPlanMetrics(plan *Plan) map[string]interface{} {
 		}
 		if step.Critical {
 			criticalSteps++
+		}
+		// Count tool usage
+		if step.Tool != "" {
+			toolUsage[step.Tool]++
 		}
 	}
 
@@ -797,5 +826,6 @@ func (tp *TaskPlanner) GetPlanMetrics(plan *Plan) map[string]interface{} {
 		"estimated_time":  plan.EstimatedDuration,
 		"strategy":        plan.Strategy,
 		"parallelization": float64(parallelSteps) / float64(len(plan.Steps)),
+		"tool_usage":      toolUsage,
 	}
 }

@@ -36,11 +36,12 @@ type Reflection struct {
 
 // SelfReflector implements self-reflection capabilities for agents.
 type SelfReflector struct {
-	depth           int
-	delay           time.Duration
-	reflectionCache []Reflection
-	patterns        map[string]*Pattern
-	metrics         *PerformanceMetrics
+	depth                int
+	delay                time.Duration
+	successRateThreshold float64
+	reflectionCache      []Reflection
+	patterns             map[string]*Pattern
+	metrics              *PerformanceMetrics
 }
 
 // Pattern represents a recurring pattern in agent behavior.
@@ -73,11 +74,20 @@ type ToolStats struct {
 
 // NewSelfReflector creates a new self-reflection module.
 func NewSelfReflector(depth int, delay time.Duration) *SelfReflector {
+	return NewSelfReflectorWithThreshold(depth, delay, 0.6)
+}
+
+// NewSelfReflectorWithThreshold creates a new self-reflection module with configurable success rate threshold.
+func NewSelfReflectorWithThreshold(depth int, delay time.Duration, successRateThreshold float64) *SelfReflector {
+	if successRateThreshold <= 0 || successRateThreshold > 1 {
+		successRateThreshold = 0.6 // Default fallback
+	}
 	return &SelfReflector{
-		depth:           depth,
-		delay:           delay,
-		reflectionCache: make([]Reflection, 0),
-		patterns:        make(map[string]*Pattern),
+		depth:                depth,
+		delay:                delay,
+		successRateThreshold: successRateThreshold,
+		reflectionCache:      make([]Reflection, 0),
+		patterns:             make(map[string]*Pattern),
 		metrics: &PerformanceMetrics{
 			ToolUsageStats: make(map[string]*ToolStats),
 			ErrorPatterns:  make(map[string]int),
@@ -202,7 +212,7 @@ func (sr *SelfReflector) reflectOnPerformance(ctx context.Context, record Execut
 	successRate := float64(sr.metrics.SuccessfulRuns) / float64(sr.metrics.TotalExecutions)
 
 	// Check if performance is degrading
-	if successRate < 0.6 {
+	if successRate < sr.successRateThreshold {
 		return &Reflection{
 			Type:       ReflectionTypePerformance,
 			Insight:    fmt.Sprintf("Success rate is below threshold: %.2f%%", successRate*100),
@@ -410,7 +420,7 @@ func (sr *SelfReflector) updateMetrics(record ExecutionRecord) {
 			} else {
 				stats.SuccessRate = (stats.SuccessRate * float64(stats.UsageCount-1)) / float64(stats.UsageCount)
 			}
-			stats.AvgDuration = (stats.AvgDuration*time.Duration(stats.UsageCount-1) + action.Duration) / time.Duration(stats.UsageCount)
+			stats.AvgDuration += (action.Duration - stats.AvgDuration) / time.Duration(stats.UsageCount)
 			stats.LastUsed = time.Now()
 		} else {
 			successRate := 0.0

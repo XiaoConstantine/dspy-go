@@ -24,6 +24,11 @@ func (m *MockMemory) Retrieve(key string) (interface{}, error) {
 	return args.Get(0), args.Error(1)
 }
 
+func (m *MockMemory) Delete(key string) error {
+	args := m.Called(key)
+	return args.Error(0)
+}
+
 func (m *MockMemory) List() ([]string, error) {
 	args := m.Called()
 	return args.Get(0).([]string), args.Error(1)

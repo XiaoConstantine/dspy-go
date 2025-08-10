@@ -3,6 +3,7 @@ package react
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -444,9 +445,71 @@ func (r *ReActAgent) analyzeTaskComplexity(input map[string]interface{}) float64
 
 // executePlanStep executes a single step of a plan.
 func (r *ReActAgent) executePlanStep(ctx context.Context, step PlanStep, previousResults map[string]interface{}) (interface{}, error) {
-	// This would execute the specific tool or action for the step
-	// Implementation depends on the step structure
-	return nil, fmt.Errorf("not implemented")
+	logger := logging.GetLogger()
+	logger.Debug(ctx, "Executing plan step: %s (tool: %s)", step.ID, step.Tool)
+
+	// Create context with timeout if specified
+	execCtx := ctx
+	if step.Timeout > 0 {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, step.Timeout)
+		defer cancel()
+	}
+
+	// Prepare arguments by merging step arguments with previous results
+	arguments := make(map[string]interface{})
+
+	// Copy step arguments
+	for k, v := range step.Arguments {
+		arguments[k] = v
+	}
+
+	// Add previous results that this step depends on
+	for _, depID := range step.DependsOn {
+		if result, exists := previousResults[depID]; exists {
+			// Use dependency ID as argument key, or a specific key if defined
+			arguments[depID+"_result"] = result
+		}
+	}
+
+	// Add all previous results as context for complex operations
+	if len(previousResults) > 0 {
+		arguments["previous_results"] = previousResults
+	}
+
+	// Execute the tool
+	if r.toolRegistry == nil {
+		return nil, fmt.Errorf("tool registry not initialized")
+	}
+
+	// Find the tool in the registry
+	tool, err := r.toolRegistry.Get(step.Tool)
+	if err != nil {
+		return nil, fmt.Errorf("tool '%s' not found in registry: %w", step.Tool, err)
+	}
+
+	// Validate arguments
+	if err := tool.Validate(arguments); err != nil {
+		return nil, fmt.Errorf("invalid parameters for tool '%s': %w", step.Tool, err)
+	}
+
+	// Execute tool
+	result, err := tool.Execute(execCtx, arguments)
+	if err != nil {
+		if step.Critical {
+			return nil, fmt.Errorf("critical step '%s' failed: %w", step.ID, err)
+		}
+		// For non-critical steps, log the error but return a result indicating failure
+		logger.Warn(ctx, "Non-critical step '%s' failed: %v", step.ID, err)
+		return map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"step_id": step.ID,
+		}, nil
+	}
+
+	logger.Debug(ctx, "Plan step '%s' executed successfully", step.ID)
+	return result, nil
 }
 
 // loadMemoryContext loads relevant memory for the task.
@@ -601,15 +664,5 @@ func (r *ReActAgent) GetExecutionHistory() []ExecutionRecord {
 // Utility functions
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (stringContains(s, substr)))
-}
-
-func stringContains(s, substr string) bool {
-	// Simple contains implementation
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }

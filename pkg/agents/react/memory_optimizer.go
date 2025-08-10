@@ -17,13 +17,14 @@ import (
 
 // MemoryOptimizer implements memory optimization with forgetting curve.
 type MemoryOptimizer struct {
-	retention  time.Duration
-	threshold  float64
-	memory     agents.Memory
-	index      *MemoryIndex
-	forgetting *ForgettingCurve
-	compressor *MemoryCompressor
-	mu         sync.RWMutex
+	retention           time.Duration
+	threshold           float64
+	compressionThreshold int
+	memory              agents.Memory
+	index               *MemoryIndex
+	forgetting          *ForgettingCurve
+	compressor          *MemoryCompressor
+	mu                  sync.RWMutex
 }
 
 // MemoryIndex provides fast access to memory items.
@@ -75,13 +76,22 @@ const (
 
 // NewMemoryOptimizer creates a new memory optimizer.
 func NewMemoryOptimizer(retention time.Duration, threshold float64) *MemoryOptimizer {
+	return NewMemoryOptimizerWithCompressionThreshold(retention, threshold, 100)
+}
+
+// NewMemoryOptimizerWithCompressionThreshold creates a new memory optimizer with configurable compression threshold.
+func NewMemoryOptimizerWithCompressionThreshold(retention time.Duration, threshold float64, compressionThreshold int) *MemoryOptimizer {
+	if compressionThreshold <= 0 {
+		compressionThreshold = 100 // Default fallback
+	}
 	return &MemoryOptimizer{
-		retention:  retention,
-		threshold:  threshold,
-		memory:     agents.NewInMemoryStore(),
-		index:      NewMemoryIndex(),
-		forgetting: NewForgettingCurve(),
-		compressor: NewMemoryCompressor(),
+		retention:           retention,
+		threshold:           threshold,
+		compressionThreshold: compressionThreshold,
+		memory:              agents.NewInMemoryStore(),
+		index:               NewMemoryIndex(),
+		forgetting:          NewForgettingCurve(),
+		compressor:          NewMemoryCompressor(),
 	}
 }
 
@@ -270,7 +280,7 @@ func (mo *MemoryOptimizer) generateEmbedding(input map[string]interface{}) []flo
 func (mo *MemoryOptimizer) shouldCompress() bool {
 	itemCount := len(mo.index.items)
 	// Compress when we have too many items
-	return itemCount > 100
+	return itemCount > mo.compressionThreshold
 }
 
 // compress reduces memory footprint.
@@ -312,7 +322,10 @@ func (mo *MemoryOptimizer) compressBySummarization(ctx context.Context) {
 			// Remove individual items
 			for _, item := range items[5:] {
 				mo.index.Remove(item.Key)
-				// Note: Memory interface doesn't have Delete, items will be cleaned up by GC
+				if err := mo.memory.Delete(item.Key); err != nil {
+					// Log error but continue processing
+					continue
+				}
 			}
 
 			// Add summary
@@ -336,7 +349,10 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 
 				// Remove old items
 				mo.index.Remove(key2)
-				// Note: Memory interface doesn't have Delete, items will be cleaned up by GC
+				if err := mo.memory.Delete(key2); err != nil {
+					// Log error but continue processing
+					continue
+				}
 
 				// Update first item
 				mo.index.items[key1] = merged
@@ -374,7 +390,10 @@ func (mo *MemoryOptimizer) compressByPruning(ctx context.Context) {
 	cutoff := int(float64(len(pairs)) * mo.compressor.compressionRatio)
 	for i := 0; i < cutoff; i++ {
 		mo.index.Remove(pairs[i].key)
-		// Note: Memory interface doesn't have Delete, items will be cleaned up by GC
+		if err := mo.memory.Delete(pairs[i].key); err != nil {
+			// Log error but continue processing
+			continue
+		}
 	}
 }
 
@@ -397,7 +416,10 @@ func (mo *MemoryOptimizer) cleanup(ctx context.Context) {
 	// Remove items
 	for _, key := range toRemove {
 		mo.index.Remove(key)
-		// Note: Memory interface doesn't have Delete, items will be cleaned up by GC
+		if err := mo.memory.Delete(key); err != nil {
+			// Log error but continue processing
+			continue
+		}
 	}
 }
 
@@ -641,7 +663,7 @@ func (mi *MemoryIndex) Remove(key string) {
 
 		// Remove from category
 		if catItems, ok := mi.categories[item.Category]; ok {
-			newCatItems := make([]*MemoryItem, 0)
+			newCatItems := make([]*MemoryItem, 0, len(catItems)-1)
 			for _, catItem := range catItems {
 				if catItem.Key != key {
 					newCatItems = append(newCatItems, catItem)
@@ -649,6 +671,15 @@ func (mi *MemoryIndex) Remove(key string) {
 			}
 			mi.categories[item.Category] = newCatItems
 		}
+
+		// Remove from timestamps
+		newTimestamps := make([]time.Time, 0, len(mi.timestamps)-1)
+		for _, ts := range mi.timestamps {
+			if !ts.Equal(item.Created) {
+				newTimestamps = append(newTimestamps, ts)
+			}
+		}
+		mi.timestamps = newTimestamps
 	}
 }
 
