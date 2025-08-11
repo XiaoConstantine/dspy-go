@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -25,16 +26,21 @@ type ReAct struct {
 // NewReAct creates a new ReAct module.
 // It takes a signature (which it modifies), a tool registry pointer, and max iterations.
 func NewReAct(signature core.Signature, registry *tools.InMemoryToolRegistry, maxIters int) *ReAct {
-	modifiedSignature := appendReActFields(signature)
+	// Create the ReAct instance first so we can call the instance method
+	react := &ReAct{
+		Registry: registry,
+		MaxIters: maxIters,
+	}
+
+	// Now modify the signature using the instance method
+	modifiedSignature := react.appendReActFields(signature)
 
 	predict := NewPredict(modifiedSignature)
 
-	return &ReAct{
-		BaseModule: *core.NewModule(modifiedSignature),
-		Predict:    predict,
-		Registry:   registry,
-		MaxIters:   maxIters,
-	}
+	react.BaseModule = *core.NewModule(modifiedSignature)
+	react.Predict = predict
+
+	return react
 }
 
 // WithDefaultOptions sets default options by configuring the underlying Predict module.
@@ -254,7 +260,7 @@ func (r *ReAct) Clone() core.Module {
 
 // appendReActFields adds the standard ReAct fields (thought, action, observation)
 // to the beginning of a signature's output fields.
-func appendReActFields(signature core.Signature) core.Signature {
+func (r *ReAct) appendReActFields(signature core.Signature) core.Signature {
 	const reactFormattingInstructions = `
   CRITICAL FORMATTING RULES:
   1. Format your response with these EXACT field headers, each on a new line:
@@ -268,10 +274,14 @@ func appendReActFields(signature core.Signature) core.Signature {
 	newSignature := signature
 
 	newSignature.Instruction = reactFormattingInstructions + "\n" + signature.Instruction
+
+	// Build dynamic action description with available tools
+	actionDescription := r.buildActionDescription()
+
 	// Define standard ReAct output fields
 	reactFields := []core.OutputField{
 		{Field: core.NewField("thought")},
-		{Field: core.NewField("action", core.WithDescription("The action to take. MUST be an XML block like '<action><tool_name>...</tool_name><arguments><arg key=\"...\">...</arg></arguments></action>'. To finish, use '<action><tool_name>Finish</tool_name></action>'. MUST INCLUDE and RETURN ONE ACTION at a time"))},
+		{Field: core.NewField("action", core.WithDescription(actionDescription))},
 		{Field: core.NewField("observation", core.WithDescription("The result of the previous action (tool output or error message). Leave empty on first step."))},
 	}
 
@@ -292,6 +302,58 @@ func appendReActFields(signature core.Signature) core.Signature {
 	}
 
 	return newSignature
+}
+
+// buildActionDescription creates a dynamic action description including available tools and their parameters.
+func (r *ReAct) buildActionDescription() string {
+	baseDescription := "The action to take. MUST be an XML block like '<action><tool_name>...</tool_name><arguments><arg key=\"param_name\">value</arg></arguments></action>'. To finish, use '<action><tool_name>Finish</tool_name></action>'. MUST INCLUDE and RETURN ONE ACTION at a time.\n\nAvailable tools:"
+
+	if r.Registry == nil {
+		return baseDescription + "\n- No tools available"
+	}
+
+	tools := r.Registry.List()
+	if len(tools) == 0 {
+		return baseDescription + "\n- No tools available"
+	}
+
+	// Sort tools by name for consistent output
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+
+	var toolDescriptions strings.Builder
+	for _, tool := range tools {
+		toolDescriptions.WriteString(fmt.Sprintf("\n- %s: %s", tool.Name(), tool.Description()))
+
+		// Get parameter information from InputSchema
+		inputSchema := tool.InputSchema()
+		if len(inputSchema.Properties) > 0 {
+			toolDescriptions.WriteString("\n  Parameters:")
+
+			// Sort parameter names for consistent output
+			paramNames := make([]string, 0, len(inputSchema.Properties))
+			for paramName := range inputSchema.Properties {
+				paramNames = append(paramNames, paramName)
+			}
+			sort.Strings(paramNames)
+
+			for _, paramName := range paramNames {
+				propSchema := inputSchema.Properties[paramName]
+				required := ""
+				if propSchema.Required {
+					required = " (required)"
+				}
+				description := "No description available"
+				if propSchema.Description != "" {
+					description = propSchema.Description
+				}
+				toolDescriptions.WriteString(fmt.Sprintf("\n    - %s: %s%s", paramName, description, required))
+			}
+		}
+	}
+
+	return baseDescription + toolDescriptions.String()
 }
 
 // formatToolResult converts a ToolResult into a string observation suitable for the LLM.

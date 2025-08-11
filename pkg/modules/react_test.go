@@ -20,6 +20,17 @@ func TestReAct(t *testing.T) {
 	// Removed unused schema definition
 	mockTool := testutil.NewMockTool("test_tool") // Use the actual tool name
 	mockTool.On("Name").Return("test_tool")
+	mockTool.On("Description").Return("A test tool for ReAct testing")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"question": {
+				Type: "string",
+				Description: "The question to ask the tool",
+				Required: true,
+			},
+		},
+	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	expectedArgs := map[string]interface{}{"question": "What is the meaning of\nlife?"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
@@ -109,6 +120,17 @@ func TestReAct_WithErroredTool(t *testing.T) {
 
 	mockWeatherTool := testutil.NewMockTool("weather_check")
 	mockWeatherTool.On("Name").Return("weather_check")
+	mockWeatherTool.On("Description").Return("A tool to check weather conditions")
+	mockWeatherTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"location": {
+				Type: "string",
+				Description: "The location to check weather for",
+				Required: true,
+			},
+		},
+	})
 	mockWeatherTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	expectedArgs := map[string]interface{}{"location": "nearby"}
 	mockWeatherTool.On("Execute", mock.Anything, expectedArgs).Return(core.ToolResult{}, errors.New(errors.LLMGenerationFailed,
@@ -166,12 +188,34 @@ func TestReAct_MaxIterations(t *testing.T) {
 
 	dbTool := testutil.NewMockTool("database_query")
 	dbTool.On("Name").Return("database_query")
+	dbTool.On("Description").Return("A tool to query the database")
+	dbTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"query": {
+				Type: "string",
+				Description: "SQL query to execute",
+				Required: true,
+			},
+		},
+	})
 	dbTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	dbExpectedArgs := map[string]interface{}{"query": "SELECT * FROM\ndata"}
 	dbTool.On("Execute", mock.Anything, dbExpectedArgs).Return(core.ToolResult{Data: "Database results"}, nil)
 
 	profileTool := testutil.NewMockTool("user_profile")
 	profileTool.On("Name").Return("user_profile")
+	profileTool.On("Description").Return("A tool to get user profile information")
+	profileTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"user_id": {
+				Type: "string",
+				Description: "The user ID to look up",
+				Required: true,
+			},
+		},
+	})
 	profileTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
 	profileExpectedArgs := map[string]interface{}{"user_id": "123"}
 	profileTool.On("Execute", mock.Anything, profileExpectedArgs).Return(core.ToolResult{Data: "User profile data"}, nil)
@@ -310,6 +354,17 @@ func TestReAct_ToolValidationError(t *testing.T) {
 
 	mockValidationTool := testutil.NewMockTool("weather_check")
 	mockValidationTool.On("Name").Return("weather_check")
+	mockValidationTool.On("Description").Return("A weather checking tool")
+	mockValidationTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"location": {
+				Type: "string",
+				Description: "Location to check weather for",
+				Required: true,
+			},
+		},
+	})
 	// Removed commented-out Metadata expectation
 	// Add Validate expectation before register
 	mockValidationTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(errors.New(errors.ValidationFailed, "validation error"))
@@ -366,6 +421,17 @@ func TestReAct_Clone(t *testing.T) {
 	)
 	mockTool := testutil.NewMockTool("test_tool")
 	mockTool.On("Name").Return("test_tool")
+	mockTool.On("Description").Return("A test tool for cloning")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"input": {
+				Type: "string",
+				Description: "Test input parameter",
+				Required: false,
+			},
+		},
+	})
 	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "test_tool"})
 	// Create registry for original
 	registry := tools.NewInMemoryToolRegistry()
