@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -316,6 +317,11 @@ func (r *ReAct) buildActionDescription() string {
 		return baseDescription + "\n- No tools available"
 	}
 
+	// Sort tools by name for consistent output
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name() < tools[j].Name()
+	})
+
 	var toolDescriptions strings.Builder
 	for _, tool := range tools {
 		toolDescriptions.WriteString(fmt.Sprintf("\n- %s: %s", tool.Name(), tool.Description()))
@@ -324,7 +330,16 @@ func (r *ReAct) buildActionDescription() string {
 		inputSchema := tool.InputSchema()
 		if len(inputSchema.Properties) > 0 {
 			toolDescriptions.WriteString("\n  Parameters:")
-			for paramName, propSchema := range inputSchema.Properties {
+
+			// Sort parameter names for consistent output
+			paramNames := make([]string, 0, len(inputSchema.Properties))
+			for paramName := range inputSchema.Properties {
+				paramNames = append(paramNames, paramName)
+			}
+			sort.Strings(paramNames)
+
+			for _, paramName := range paramNames {
+				propSchema := inputSchema.Properties[paramName]
 				required := ""
 				if propSchema.Required {
 					required = " (required)"
