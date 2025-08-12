@@ -25,6 +25,55 @@ This framework provides side-by-side comparison between the Python DSPy package 
 | SIMBA | 0.60 | 0.60 | 0.00 | 23.30s | 7.61s | Go 3.0x faster | ✅ Compatible |
 | COPRO | 0.60 | 0.60 | 0.00 | 22.72s | 8.07s | Go 2.8x faster | ✅ Compatible |
 
+## 🧬 GEPA (Generative Evolutionary Prompt Adaptation) Results
+
+### Test Status: ✅ COMPATIBLE
+*Last Updated: 2025-08-12 | Dataset Size: 10 | Model: gemini-2.0-flash*
+
+#### GEPA Compatibility Results (Cache Disabled)
+| Implementation | Score | Compilation Time | Status | Notes |
+|----------------|-------|------------------|--------|--------|
+| Python DSPy (Local Fork) | 66.7% | 99.24s | ✅ Working | Using local fork from `/Users/xiao/development/github.com/XiaoConstantine/dspy` |
+| Go dspy-go | 66.7% | 82.35s | ✅ Working | Advanced evolutionary algorithm with multi-objective optimization |
+
+### GEPA Key Features
+- **Multi-Objective Optimization**: 7-dimensional fitness evaluation with Pareto-based selection
+- **LLM-Based Evolution**: Natural language critique and semantic crossover/mutation
+- **Adaptive Selection**: Dynamic strategy switching between generations
+- **Elite Archive**: Preserves diverse high-quality solutions
+- **Real-Time Monitoring**: Context-aware performance tracking
+
+### GEPA Configuration
+| Parameter | Python | Go | Notes |
+|-----------|--------|-----|--------|
+| Mode/Strategy | `auto="light"` | `adaptive_pareto` | Different APIs, equivalent functionality |
+| Population Size | Auto-configured | 8 | Go allows explicit control |
+| Max Generations | Auto-configured | 3 | Go allows explicit control |
+| Mutation Rate | Auto-configured | 0.3 | Go exposes evolutionary parameters |
+| Crossover Rate | Auto-configured | 0.7 | Go exposes evolutionary parameters |
+
+### GEPA Compatibility Summary
+- **Score Match**: ✅ **Perfect** (Both achieve 66.7% accuracy)
+- **Performance**: ✅ **Comparable** (Go 18% faster)
+- **Algorithm**: ✅ **Consistent** (Same evolutionary approach)
+- **API Design**: ⚠️ **Different** (Python simplified, Go full-featured)
+
+### GEPA Setup Requirements
+**For Python GEPA:**
+- Requires local DSPy fork with GEPA implementation
+- Update `dspy_comparison.py` dependencies:
+  ```python
+  # dependencies = [
+  #     "dspy @ file:///Users/xiao/development/github.com/XiaoConstantine/dspy",
+  #     "google-generativeai>=0.3.0",
+  #     "numpy>=1.21.0",
+  # ]
+  ```
+
+**For Go GEPA:**
+- Fully integrated in dspy-go package
+- No additional setup required
+
 ### Configuration Summary
 All optimizers now use **matched configurations** between Python and Go implementations:
 
@@ -33,6 +82,8 @@ All optimizers now use **matched configurations** between Python and Go implemen
 | BootstrapFewShot | `max_bootstrapped_demos=4`, 3/4 dataset split |
 | MIPRO | `num_trials=5`, `max_bootstrapped_demos=3`, 3/4 dataset split |
 | SIMBA | `batch_size=4`, `max_steps=6`, `num_candidates=4`, `sampling_temperature=0.2`, 3/4 dataset split |
+| COPRO | `breadth=5`, `depth=2`, `init_temperature=1.2`, 3/4 dataset split |
+| GEPA | Python: `auto="light"`, Go: `population_size=8`, `max_generations=3`, 3/4 dataset split |
 
 ### Compatibility Summary
 - **Overall Status**: ✅ **COMPATIBLE**
@@ -62,6 +113,8 @@ The compatibility testing framework consists of:
 - **BootstrapFewShot**: Tests few-shot learning with bootstrapped demonstrations
 - **MIPRO/MIPROv2**: Tests multi-stage instruction prompt optimization with Bayesian optimization
 - **SIMBA**: Tests stochastic introspective mini-batch ascent with temperature-controlled sampling
+- **COPRO**: Tests collaborative prompt optimization with multi-agent refinement
+- **GEPA**: Tests generative evolutionary prompt adaptation with LLM-based genetic operators
 
 ### Compatibility Verification
 - API signature compatibility
@@ -130,7 +183,9 @@ Available optimizer options:
 - `bootstrap`: BootstrapFewShot only
 - `mipro`: MIPRO/MIPROv2 only
 - `simba`: SIMBA only
-- `all`: All three optimizers (default)
+- `copro`: COPRO only
+- `gepa`: GEPA only (requires local DSPy fork for Python)
+- `all`: All optimizers (default)
 
 ### Manual Execution
 
@@ -197,6 +252,21 @@ python compare_results.py
   - `num_candidates`: 4
   - `sampling_temperature`: 0.2
 
+#### COPRO
+- **Python**: `dspy.teleprompt.COPRO`
+- **Go**: `optimizers.COPRO`
+- **Parameters**:
+  - `breadth`: 5
+  - `depth`: 2
+  - `init_temperature`: 1.2
+
+#### GEPA
+- **Python**: `dspy.teleprompt.GEPA` (requires local fork)
+- **Go**: `optimizers.GEPA`
+- **Parameters**:
+  - Python: `auto="light"`
+  - Go: `population_size=8`, `max_generations=3`, `adaptive_pareto` selection
+
 ## Output Files
 
 ### `dspy_comparison_results.json`
@@ -221,6 +291,14 @@ Results from Python DSPy implementation:
     "optimizer": "SIMBA",
     "average_score": 0.88,
     "compilation_time": 18.45,
+    "demonstrations": [...]
+  },
+  "gepa": {
+    "optimizer": "GEPA",
+    "average_score": 0.67,
+    "compilation_time": 99.24,
+    "population_size": 8,
+    "max_generations": 3,
     "demonstrations": [...]
   }
 }

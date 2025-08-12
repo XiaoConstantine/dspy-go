@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # dependencies = [
-#     "dspy-ai>=2.4.0",
+#     "dspy @ git+file:///Users/xiao/development/github.com/XiaoConstantine/dspy@main",
 #     "google-generativeai>=0.3.0",
 #     "numpy>=1.21.0",
 # ]
@@ -52,6 +52,15 @@ if '--disable-cache' in sys.argv:
 
 import dspy
 from dspy.teleprompt import BootstrapFewShot, MIPROv2, SIMBA, COPRO
+
+# Try to import GEPA if available
+try:
+    from dspy.teleprompt import GEPA
+    GEPA_AVAILABLE = True
+except ImportError:
+    GEPA_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("GEPA optimizer not available in this DSPy version")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -142,6 +151,7 @@ class OptimizerComparison:
         self.mipro_metrics = ComparisonMetrics()
         self.simba_metrics = ComparisonMetrics()
         self.copro_metrics = ComparisonMetrics()
+        self.gepa_metrics = ComparisonMetrics()
 
     def create_sample_dataset(self, size: int = 20) -> List[dspy.Example]:
         """Create a sample dataset for testing"""
@@ -431,6 +441,89 @@ class OptimizerComparison:
         logger.info(f"COPRO results: {results}")
         return optimized_program, results
 
+    def test_gepa(self, dataset: List[dspy.Example],
+                  population_size: int = 8,
+                  max_generations: int = 3) -> Tuple[dspy.Module, Dict[str, Any]]:
+        """Test GEPA optimizer (if available)"""
+        logger.info("Testing GEPA optimizer")
+
+        if not GEPA_AVAILABLE:
+            logger.warning("GEPA optimizer not available, returning mock results")
+            return BasicProgram(), {
+                "optimizer": "GEPA",
+                "compilation_time": 0.0,
+                "average_score": 0.0,
+                "total_examples": 0,
+                "population_size": population_size,
+                "max_generations": max_generations,
+                "demonstrations": [],
+                "error": "GEPA not available in this DSPy version"
+            }
+
+        program = BasicProgram()
+        # Split dataset to match Go's approach: 3/4 for training, 1/4 for validation
+        dataset_size = len(dataset)
+        train_size = min(dataset_size * 3 // 4, dataset_size - 1)
+        if train_size < 1:
+            train_size = 1
+        trainset = dataset[:train_size]
+        valset = dataset[train_size:]
+
+        try:
+            # Create GEPA optimizer with the correct API for your local fork
+            teleprompter = GEPA(
+                metric=self.accuracy_metric,
+                auto="light"  # Use auto mode similar to MIPRO
+            )
+
+            # Compile program
+            import time
+            start_time = time.time()
+            optimized_program = teleprompter.compile(program, trainset=trainset)
+            compilation_time = time.time() - start_time
+
+            # Evaluate on validation set
+            total_score = 0.0
+            for example in valset:
+                try:
+                    prediction = optimized_program(question=example.question)
+                    score = self.accuracy_metric(example, prediction)
+                    total_score += score
+                    self.gepa_metrics.add_score(score)
+                except Exception as e:
+                    logger.error(f"Error during evaluation: {e}")
+                    # Continue with next example instead of failing
+                    total_score += 0.0
+                    self.gepa_metrics.add_score(0.0)
+
+            avg_score = total_score / len(valset) if valset else 0.0
+
+            results = {
+                "optimizer": "GEPA",
+                "compilation_time": compilation_time,
+                "average_score": avg_score,
+                "total_examples": len(valset),
+                "population_size": population_size,
+                "max_generations": max_generations,
+                "demonstrations": self._extract_demonstrations(optimized_program)
+            }
+
+        except Exception as e:
+            logger.error(f"Error during GEPA compilation: {e}")
+            results = {
+                "optimizer": "GEPA",
+                "compilation_time": 0.0,
+                "average_score": 0.0,
+                "total_examples": len(valset),
+                "population_size": population_size,
+                "max_generations": max_generations,
+                "demonstrations": [],
+                "error": str(e)
+            }
+
+        logger.info(f"GEPA results: {results}")
+        return program, results
+
     def _extract_demonstrations(self, program: dspy.Module) -> List[Dict[str, Any]]:
         """Extract demonstrations from optimized program"""
         demonstrations = []
@@ -511,7 +604,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='DSPy Optimizer Comparison')
-    parser.add_argument('--optimizer', choices=['bootstrap', 'mipro', 'simba', 'copro', 'all'],
+    parser.add_argument('--optimizer', choices=['bootstrap', 'mipro', 'simba', 'copro', 'gepa', 'all'],
                        default='all', help='Optimizer to test (default: all)')
     parser.add_argument('--dataset-size', type=int, default=20,
                        help='Dataset size for testing (default: 20)')
@@ -552,16 +645,23 @@ def main():
         _, copro_results = comparison.test_copro(dataset)
         results["copro"] = copro_results
 
+    if args.optimizer == 'gepa' or args.optimizer == 'all':
+        print("Testing GEPA...")
+        _, gepa_results = comparison.test_gepa(dataset)
+        results["gepa"] = gepa_results
+
     # Add comparison section if testing multiple optimizers
     if args.optimizer == 'all':
         bootstrap_score = results["bootstrap_fewshot"]["average_score"]
         mipro_score = results["mipro_v2"]["average_score"]
         simba_score = results["simba"]["average_score"]
         copro_score = results["copro"]["average_score"]
+        gepa_score = results["gepa"]["average_score"]
         bootstrap_time = results["bootstrap_fewshot"]["compilation_time"]
         mipro_time = results["mipro_v2"]["compilation_time"]
         simba_time = results["simba"]["compilation_time"]
         copro_time = results["copro"]["compilation_time"]
+        gepa_time = results["gepa"]["compilation_time"]
 
         # Find best optimizer
         best_optimizer = "BootstrapFewShot"
@@ -575,20 +675,31 @@ def main():
         if copro_score > best_score:
             best_optimizer = "COPRO"
             best_score = copro_score
+        if gepa_score > best_score:
+            best_optimizer = "GEPA"
+            best_score = gepa_score
 
         results["comparison"] = {
             "bootstrap_vs_mipro_score_diff": mipro_score - bootstrap_score,
             "bootstrap_vs_simba_score_diff": simba_score - bootstrap_score,
             "bootstrap_vs_copro_score_diff": copro_score - bootstrap_score,
+            "bootstrap_vs_gepa_score_diff": gepa_score - bootstrap_score,
             "mipro_vs_simba_score_diff": simba_score - mipro_score,
             "mipro_vs_copro_score_diff": copro_score - mipro_score,
+            "mipro_vs_gepa_score_diff": gepa_score - mipro_score,
             "simba_vs_copro_score_diff": copro_score - simba_score,
+            "simba_vs_gepa_score_diff": gepa_score - simba_score,
+            "copro_vs_gepa_score_diff": gepa_score - copro_score,
             "bootstrap_vs_mipro_time_diff": mipro_time - bootstrap_time,
             "bootstrap_vs_simba_time_diff": simba_time - bootstrap_time,
             "bootstrap_vs_copro_time_diff": copro_time - bootstrap_time,
+            "bootstrap_vs_gepa_time_diff": gepa_time - bootstrap_time,
             "mipro_vs_simba_time_diff": simba_time - mipro_time,
             "mipro_vs_copro_time_diff": copro_time - mipro_time,
+            "mipro_vs_gepa_time_diff": gepa_time - mipro_time,
             "simba_vs_copro_time_diff": copro_time - simba_time,
+            "simba_vs_gepa_time_diff": gepa_time - simba_time,
+            "copro_vs_gepa_time_diff": gepa_time - copro_time,
             "best_optimizer": best_optimizer,
             "best_score": best_score
         }
@@ -634,8 +745,23 @@ def main():
             print(f"  - Depth: {results['copro']['depth']}")
             print(f"  - Demonstrations: {len(results['copro']['demonstrations'])}")
 
+    if "gepa" in results:
+        print(f"\nGEPA:")
+        if "error" in results["gepa"]:
+            print(f"  - Error: {results['gepa']['error']}")
+        else:
+            print(f"  - Average score: {results['gepa']['average_score']:.3f}")
+            print(f"  - Compilation time: {results['gepa']['compilation_time']:.2f}s")
+            print(f"  - Population size: {results['gepa']['population_size']}")
+            print(f"  - Max generations: {results['gepa']['max_generations']}")
+            print(f"  - Demonstrations: {len(results['gepa']['demonstrations'])}")
+
     if "comparison" in results:
         print(f"\nBest optimizer: {results['comparison']['best_optimizer']} ({results['comparison']['best_score']:.3f})")
+
+    # Note about GEPA availability
+    if not GEPA_AVAILABLE and (args.optimizer == 'gepa' or args.optimizer == 'all'):
+        print(f"\nNote: GEPA optimizer is not available in the current DSPy version.")
 
 
 if __name__ == "__main__":

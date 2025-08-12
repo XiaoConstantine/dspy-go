@@ -75,6 +75,7 @@ type OptimizerComparison struct {
 	MIPROMetrics     *ComparisonMetrics
 	SIMBAMetrics     *ComparisonMetrics
 	CoProMetrics     *ComparisonMetrics
+	GEPAMetrics      *ComparisonMetrics
 }
 
 func NewOptimizerComparison(modelName string) *OptimizerComparison {
@@ -111,6 +112,7 @@ func NewOptimizerComparison(modelName string) *OptimizerComparison {
 		MIPROMetrics:     &ComparisonMetrics{},
 		SIMBAMetrics:     &ComparisonMetrics{},
 		CoProMetrics:     &ComparisonMetrics{},
+		GEPAMetrics:      &ComparisonMetrics{},
 	}
 }
 
@@ -529,6 +531,100 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 	return optimizedProgram, results
 }
 
+func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Example, populationSize int, maxGenerations int) (core.Program, map[string]interface{}) {
+	log.Println("Testing GEPA optimizer")
+
+	// Create a simple program for testing
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+	)
+	predictor := modules.NewPredict(signature)
+
+	program := core.NewProgram(
+		map[string]core.Module{
+			"predictor": predictor,
+		},
+		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			return predictor.Process(ctx, inputs)
+		},
+	)
+
+	// Split dataset - handle small datasets properly
+	datasetSize := len(dataset)
+	trainSize := min(datasetSize*3/4, datasetSize-1) // Use 3/4 for training, leave at least 1 for validation
+	if trainSize < 1 {
+		trainSize = 1
+	}
+
+	trainExamples := dataset[:trainSize]
+	valset := dataset[trainSize:]
+
+	// Create GEPA optimizer with smaller parameters for compatibility testing
+	config := optimizers.DefaultGEPAConfig()
+	config.PopulationSize = populationSize
+	config.MaxGenerations = maxGenerations
+	config.EvaluationBatchSize = 3  // Smaller batch for testing
+	config.ConcurrencyLevel = 2     // Reduced concurrency for testing
+
+	gepaOptimizer, err := optimizers.NewGEPA(config)
+	if err != nil {
+		log.Printf("Error creating GEPA optimizer: %v", err)
+		return program, map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	// Create dataset interface for GEPA
+	trainDataset := datasets.NewSimpleDataset(trainExamples)
+
+	// Define metric function for GEPA
+	metricFunc := func(example, prediction map[string]interface{}) float64 {
+		return oc.AccuracyMetric(example, prediction, ctx)
+	}
+
+	// Compile program
+	startTime := time.Now()
+	optimizedProgram, err := gepaOptimizer.Compile(ctx, program, trainDataset, metricFunc)
+	compilationTime := time.Since(startTime).Seconds()
+
+	if err != nil {
+		log.Printf("Error during compilation: %v", err)
+		return program, map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	// Evaluate on validation set
+	totalScore := 0.0
+	for _, example := range valset {
+		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		if err != nil {
+			log.Printf("Error during evaluation: %v", err)
+			continue
+		}
+
+		score := oc.AccuracyMetric(example.Outputs, prediction, ctx)
+		totalScore += score
+		oc.GEPAMetrics.AddScore(score)
+	}
+
+	avgScore := totalScore / float64(len(valset))
+
+	results := map[string]interface{}{
+		"optimizer":        "GEPA",
+		"compilation_time": compilationTime,
+		"average_score":    avgScore,
+		"total_examples":   len(valset),
+		"population_size":  populationSize,
+		"max_generations": maxGenerations,
+		"demonstrations":   oc.extractDemonstrations(optimizedProgram),
+	}
+
+	log.Printf("GEPA results: %+v", results)
+	return optimizedProgram, results
+}
+
 func (oc *OptimizerComparison) extractDemonstrations(program core.Program) []map[string]interface{} {
 	demonstrations := []map[string]interface{}{}
 
@@ -616,7 +712,7 @@ func (oc *OptimizerComparison) SaveResults(results map[string]interface{}, filen
 }
 
 func main() {
-	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, copro, or all")
+	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, copro, gepa, or all")
 	var datasetSize = flag.Int("dataset-size", 20, "Dataset size for testing")
 	var enableCache = flag.Bool("enable-cache", false, "Enable caching for performance comparison")
 	var cacheType = flag.String("cache-type", "memory", "Cache type: memory or sqlite")
@@ -688,6 +784,12 @@ func main() {
 		results["simba"] = simbaResults
 	}
 
+	if *optimizer == "gepa" || *optimizer == "all" {
+		fmt.Println("Testing GEPA...")
+		_, gepaResults := comparison.TestGEPA(ctx, dataset, 8, 3)
+		results["gepa"] = gepaResults
+	}
+
 	if *optimizer == "copro" || *optimizer == "all" {
 		fmt.Println("Testing COPRO...")
 		_, coproResults := comparison.TestCOPRO(ctx, dataset, 5, 2) // breadth=5, depth=2
@@ -700,15 +802,18 @@ func main() {
 		miproResults := results["mipro"].(map[string]interface{})
 		simbaResults := results["simba"].(map[string]interface{})
 		coproResults := results["copro"].(map[string]interface{})
+		gepaResults := results["gepa"].(map[string]interface{})
 
 		bootstrapScore := bootstrapResults["average_score"].(float64)
 		miproScore := miproResults["average_score"].(float64)
 		simbaScore := simbaResults["average_score"].(float64)
 		coproScore := coproResults["average_score"].(float64)
+		gepaScore := gepaResults["average_score"].(float64)
 		bootstrapTime := bootstrapResults["compilation_time"].(float64)
 		miproTime := miproResults["compilation_time"].(float64)
 		simbaTime := simbaResults["compilation_time"].(float64)
 		coproTime := coproResults["compilation_time"].(float64)
+		gepaTime := gepaResults["compilation_time"].(float64)
 
 		// Find best optimizer
 		bestOptimizer := "BootstrapFewShot"
@@ -725,20 +830,32 @@ func main() {
 			bestOptimizer = "COPRO"
 			bestScore = coproScore
 		}
+		if gepaScore > bestScore {
+			bestOptimizer = "GEPA"
+			bestScore = gepaScore
+		}
 
 		results["comparison"] = map[string]interface{}{
 			"bootstrap_vs_mipro_score_diff": miproScore - bootstrapScore,
 			"bootstrap_vs_simba_score_diff": simbaScore - bootstrapScore,
 			"bootstrap_vs_copro_score_diff": coproScore - bootstrapScore,
+			"bootstrap_vs_gepa_score_diff":  gepaScore - bootstrapScore,
 			"mipro_vs_simba_score_diff":     simbaScore - miproScore,
 			"mipro_vs_copro_score_diff":     coproScore - miproScore,
+			"mipro_vs_gepa_score_diff":      gepaScore - miproScore,
 			"simba_vs_copro_score_diff":     coproScore - simbaScore,
+			"simba_vs_gepa_score_diff":      gepaScore - simbaScore,
+			"copro_vs_gepa_score_diff":      gepaScore - coproScore,
 			"bootstrap_vs_mipro_time_diff":  miproTime - bootstrapTime,
 			"bootstrap_vs_simba_time_diff":  simbaTime - bootstrapTime,
 			"bootstrap_vs_copro_time_diff":  coproTime - bootstrapTime,
+			"bootstrap_vs_gepa_time_diff":   gepaTime - bootstrapTime,
 			"mipro_vs_simba_time_diff":      simbaTime - miproTime,
 			"mipro_vs_copro_time_diff":      coproTime - miproTime,
+			"mipro_vs_gepa_time_diff":       gepaTime - miproTime,
 			"simba_vs_copro_time_diff":      coproTime - simbaTime,
+			"simba_vs_gepa_time_diff":       gepaTime - simbaTime,
+			"copro_vs_gepa_time_diff":       gepaTime - coproTime,
 			"best_optimizer":                bestOptimizer,
 			"best_score":                    bestScore,
 		}
@@ -829,6 +946,38 @@ func main() {
 			fmt.Printf("  - Demonstrations: 0\n")
 		}
 		if err, exists := coproResults["error"]; exists {
+			fmt.Printf("  - Error: %s\n", err)
+		}
+	}
+
+	if gepaResults, ok := results["gepa"].(map[string]interface{}); ok {
+		fmt.Printf("\nGEPA:\n")
+		if avgScore, exists := gepaResults["average_score"]; exists && avgScore != nil {
+			fmt.Printf("  - Average score: %.3f\n", avgScore)
+		} else {
+			fmt.Printf("  - Average score: N/A (compilation failed)\n")
+		}
+		if compTime, exists := gepaResults["compilation_time"]; exists && compTime != nil {
+			fmt.Printf("  - Compilation time: %.2fs\n", compTime)
+		} else {
+			fmt.Printf("  - Compilation time: N/A\n")
+		}
+		if popSize, exists := gepaResults["population_size"]; exists && popSize != nil {
+			fmt.Printf("  - Population size: %v\n", popSize)
+		}
+		if maxGen, exists := gepaResults["max_generations"]; exists && maxGen != nil {
+			fmt.Printf("  - Max generations: %v\n", maxGen)
+		}
+		if demos, exists := gepaResults["demonstrations"]; exists && demos != nil {
+			if demoSlice, ok := demos.([]map[string]interface{}); ok {
+				fmt.Printf("  - Demonstrations: %d\n", len(demoSlice))
+			} else {
+				fmt.Printf("  - Demonstrations: 0 (error extracting)\n")
+			}
+		} else {
+			fmt.Printf("  - Demonstrations: 0\n")
+		}
+		if err, exists := gepaResults["error"]; exists {
 			fmt.Printf("  - Error: %s\n", err)
 		}
 	}
