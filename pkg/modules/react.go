@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/tools"
@@ -485,7 +485,7 @@ func (r *ReAct) parseActionWithInterceptors(ctx context.Context, actionStr strin
 	return toolName, argsMap, nil
 }
 
-// extractXMLFromText extracts XML content from mixed text, similar to the interceptor logic
+// extractXMLFromText extracts XML content from mixed text, similar to the interceptor logic.
 func (r *ReAct) extractXMLFromText(text string) string {
 	// Look for XML tags
 	start := strings.Index(text, "<")

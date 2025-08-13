@@ -406,7 +406,7 @@ func TestCreateXMLInterceptorChain(t *testing.T) {
 	}
 }
 
-// TestInterceptableModule is a test implementation of InterceptableModule
+// TestInterceptableModule is a test implementation of InterceptableModule.
 type TestInterceptableModule struct {
 	core.BaseModule
 }
@@ -437,7 +437,7 @@ func (m *TestInterceptableModule) ClearInterceptors() {
 	m.BaseModule.ClearInterceptors()
 }
 
-// Benchmark tests
+// Benchmark tests.
 func BenchmarkXMLParsing(b *testing.B) {
 	config := DefaultXMLConfig()
 	parser := &XMLParser{
