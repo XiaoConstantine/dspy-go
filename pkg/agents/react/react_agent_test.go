@@ -7,6 +7,8 @@ import (
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -406,4 +408,180 @@ result: Done
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestReActAgent_XMLParsing(t *testing.T) {
+	// Test XML parsing functionality in ReAct agent
+	agent := NewReActAgent("test", "Test Agent")
+
+	// Mock LLM
+	mockLLM := new(testutil.MockLLM)
+
+	// Mock tool
+	mockTool := testutil.NewMockTool("test_tool")
+	mockTool.On("Name").Return("test_tool")
+	mockTool.On("Description").Return("A test tool")
+	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "test_tool"})
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"param": {
+				Type:        "string",
+				Description: "Test parameter",
+				Required:    false,
+			},
+		},
+	})
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	mockTool.On("Execute", mock.Anything, mock.AnythingOfType("map[string]interface {}")).Return(
+		core.ToolResult{Data: "Test result"}, nil,
+	)
+
+	// Register tool
+	err := agent.RegisterTool(mockTool)
+	require.NoError(t, err)
+
+	// Create signature
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.NewField("result")}},
+	)
+
+	// Initialize agent
+	err = agent.Initialize(mockLLM, signature)
+	require.NoError(t, err)
+
+	// Test 1: Agent without XML parsing (should work normally)
+	t.Run("without_xml_parsing", func(t *testing.T) {
+		assert.False(t, agent.config.EnableXMLParsing)
+		assert.Nil(t, agent.config.XMLConfig)
+	})
+
+	// Test 2: Enable XML parsing after initialization
+	t.Run("enable_xml_parsing_after_init", func(t *testing.T) {
+		xmlConfig := interceptors.DefaultXMLConfig().
+			WithMaxSize(1024).
+			WithStrictParsing(true)
+
+		err := agent.EnableXMLParsing(xmlConfig)
+		assert.NoError(t, err)
+		assert.True(t, agent.config.EnableXMLParsing)
+		assert.NotNil(t, agent.config.XMLConfig)
+		assert.Equal(t, int64(1024), agent.config.XMLConfig.MaxSize)
+	})
+
+	// Test 3: Create agent with XML parsing from start
+	t.Run("with_xml_parsing_option", func(t *testing.T) {
+		xmlConfig := interceptors.FlexibleXMLConfig().
+			WithMaxSize(2048).
+			WithValidation(true)
+
+		xmlAgent := NewReActAgent("xml-test", "XML Test Agent",
+			WithXMLParsing(xmlConfig),
+		)
+
+		assert.True(t, xmlAgent.config.EnableXMLParsing)
+		assert.NotNil(t, xmlAgent.config.XMLConfig)
+		assert.Equal(t, int64(2048), xmlAgent.config.XMLConfig.MaxSize)
+		assert.True(t, xmlAgent.config.XMLConfig.ValidateXML)
+	})
+
+	// Test 4: Error when enabling XML parsing on uninitialized agent
+	t.Run("error_uninitialized", func(t *testing.T) {
+		uninitAgent := NewReActAgent("uninit", "Uninitialized Agent")
+		xmlConfig := interceptors.DefaultXMLConfig()
+
+		err := uninitAgent.EnableXMLParsing(xmlConfig)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "agent not initialized")
+	})
+}
+
+func TestReActAgent_XMLParsingIntegration(t *testing.T) {
+	// Integration test to ensure XML parsing works with the underlying ReAct module
+	agent := NewReActAgent("integration-test", "Integration Test Agent")
+
+	// Mock LLM with XML responses
+	mockLLM := new(testutil.MockLLM)
+
+	// First response: tool action
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to use the test tool
+
+action:
+<action><tool_name>test_tool</tool_name><arguments><arg key="param">test_value</arg></arguments></action>
+`}
+
+	// Second response: finish action
+	resp2 := &core.LLMResponse{Content: `
+thought:
+Task completed
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+result:
+Integration test successful
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	// Mock tool
+	mockTool := testutil.NewMockTool("test_tool")
+	mockTool.On("Name").Return("test_tool").Maybe()
+	mockTool.On("Description").Return("Integration test tool").Maybe()
+	mockTool.On("Metadata").Return(&core.ToolMetadata{Name: "test_tool"}).Maybe()
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"param": {
+				Type:        "string",
+				Description: "Test parameter",
+				Required:    true,
+			},
+		},
+	}).Maybe()
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil).Maybe()
+	expectedArgs := map[string]interface{}{"param": "test_value"}
+	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
+		core.ToolResult{Data: "Integration success"}, nil,
+	)
+
+	// Register tool
+	err := agent.RegisterTool(mockTool)
+	require.NoError(t, err)
+
+	// Create signature
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.NewField("result")}},
+	)
+
+	// Initialize agent with XML parsing
+	xmlConfig := interceptors.DefaultXMLConfig().
+		WithStrictParsing(true).
+		WithValidation(true)
+
+	agent.config.EnableXMLParsing = true
+	agent.config.XMLConfig = &xmlConfig
+
+	err = agent.Initialize(mockLLM, signature)
+	require.NoError(t, err)
+
+	// Execute task
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	input := map[string]interface{}{"task": "Test XML parsing integration"}
+	result, err := agent.Execute(ctx, input)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Contains(t, result["result"], "Integration test successful")
+
+	// Verify mocks
+	mockLLM.AssertExpectations(t)
+	mockTool.AssertExpectations(t)
 }

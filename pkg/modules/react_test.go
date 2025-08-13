@@ -7,6 +7,7 @@ import (
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/tools"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -497,4 +498,255 @@ func TestReAct_FormatToolResult(t *testing.T) {
 			assert.Equal(t, tc.expected, observation)
 		})
 	}
+}
+
+func TestReAct_WithXMLInterceptors(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	mockTool := testutil.NewMockTool("weather_tool")
+	mockTool.On("Name").Return("weather_tool")
+	mockTool.On("Description").Return("A weather tool with XML parsing")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"location": {
+				Type:        "string",
+				Description: "The location to check weather for",
+				Required:    true,
+			},
+		},
+	})
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	expectedArgs := map[string]interface{}{"location": "New York"}
+	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
+		core.ToolResult{Data: "Sunny, 75°F"}, nil,
+	)
+
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to check the weather
+
+action:
+<action><tool_name>weather_tool</tool_name><arguments><arg key="location">New York</arg></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought:
+I have the weather information
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+answer:
+The weather in New York is sunny, 75°F
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	// Create registry and add mock tool
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	// Create ReAct with XML interceptor configuration
+	react := NewReAct(signature, registry, 2)
+	xmlConfig := interceptors.DefaultXMLConfig().
+		WithMaxSize(1024).
+		WithStrictParsing(true).
+		WithFallback(true)
+	react.WithXMLParsing(xmlConfig)
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "What's the weather in New York?"}
+	outputs, err := react.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "sunny")
+	mockLLM.AssertExpectations(t)
+	mockTool.AssertExpectations(t)
+}
+
+func TestReAct_XMLInterceptors_InvalidAction(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+
+	// Response with malformed XML that should trigger interceptor error handling
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to do something
+
+action:
+<action><tool_name>some_tool</tool_name><arguments><arg key="param">value</arg></arguments>
+`} // Missing closing action tag
+	resp2 := &core.LLMResponse{Content: `
+thought:
+The previous action failed, I'll finish
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+answer:
+Failed due to malformed action
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	// Create empty registry
+	registry := tools.NewInMemoryToolRegistry()
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	// Create ReAct with XML interceptor configuration that has strict validation
+	react := NewReAct(signature, registry, 3)
+	xmlConfig := interceptors.DefaultXMLConfig().
+		WithStrictParsing(true).
+		WithFallback(false). // No fallback to test error handling
+		WithValidation(true)
+	react.WithXMLParsing(xmlConfig)
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "Test malformed XML handling"}
+	outputs, err := react.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "Failed")
+	mockLLM.AssertExpectations(t)
+}
+
+func TestReAct_XMLInterceptors_SizeLimit(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+
+	// Create a very large action string that exceeds size limit
+	largeAction := "<action><tool_name>test_tool</tool_name><arguments><arg key=\"data\">" +
+		string(make([]byte, 2000)) + // 2KB of data
+		"</arg></arguments></action>"
+
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to send large data
+
+action:
+` + largeAction}
+	resp2 := &core.LLMResponse{Content: `
+thought:
+The action was too large, I'll finish
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+answer:
+Action size exceeded limit
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	// Create empty registry
+	registry := tools.NewInMemoryToolRegistry()
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	// Create ReAct with small size limit
+	react := NewReAct(signature, registry, 3)
+	xmlConfig := interceptors.DefaultXMLConfig().
+		WithMaxSize(1024). // 1KB limit
+		WithStrictParsing(true)
+	react.WithXMLParsing(xmlConfig)
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "Test size limit"}
+	outputs, err := react.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "exceeded limit")
+	mockLLM.AssertExpectations(t)
+}
+
+func TestReAct_BackwardCompatibility(t *testing.T) {
+	// This test ensures that ReAct without XML interceptors still works exactly as before
+	mockLLM := new(testutil.MockLLM)
+	mockTool := testutil.NewMockTool("test_tool")
+	mockTool.On("Name").Return("test_tool")
+	mockTool.On("Description").Return("A test tool for backward compatibility")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"query": {
+				Type:        "string",
+				Description: "The query parameter",
+				Required:    true,
+			},
+		},
+	})
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	expectedArgs := map[string]interface{}{"query": "test query"}
+	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
+		core.ToolResult{Data: "Backward compatibility works"}, nil,
+	)
+
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I should use the tool
+
+action:
+<action><tool_name>test_tool</tool_name><arguments><arg key="query">test query</arg></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought:
+I have the result
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+answer:
+Success
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	// Create registry and add mock tool
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	// Create ReAct WITHOUT XML interceptors (should use hardcoded parsing)
+	react := NewReAct(signature, registry, 2)
+	// Intentionally NOT calling WithXMLParsing
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "Test backward compatibility"}
+	outputs, err := react.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Equal(t, "Success", outputs["answer"])
+	mockLLM.AssertExpectations(t)
+	mockTool.AssertExpectations(t)
 }

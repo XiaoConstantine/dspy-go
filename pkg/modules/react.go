@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
+	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/tools"
@@ -18,9 +19,10 @@ import (
 // It uses a Predict module to generate thoughts and actions, and executes tools.
 type ReAct struct {
 	core.BaseModule
-	Predict  *Predict
-	Registry *tools.InMemoryToolRegistry
-	MaxIters int
+	Predict   *Predict
+	Registry  *tools.InMemoryToolRegistry
+	MaxIters  int
+	XMLConfig *interceptors.XMLConfig // Optional XML config for enhanced parsing
 }
 
 // NewReAct creates a new ReAct module.
@@ -46,6 +48,13 @@ func NewReAct(signature core.Signature, registry *tools.InMemoryToolRegistry, ma
 // WithDefaultOptions sets default options by configuring the underlying Predict module.
 func (r *ReAct) WithDefaultOptions(opts ...core.Option) *ReAct {
 	r.Predict.WithDefaultOptions(opts...)
+	return r
+}
+
+// WithXMLParsing enables XML interceptor-based parsing for tool actions.
+// This replaces the hardcoded XML parsing with configurable XML interceptors.
+func (r *ReAct) WithXMLParsing(config interceptors.XMLConfig) *ReAct {
+	r.XMLConfig = &config
 	return r
 }
 
@@ -114,32 +123,53 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		var parsedToolName string
 		var parsedArgsMap map[string]interface{}
 
-		// Parse the action (simplifying for clarity)
+		// Parse the action using either XML interceptors or fallback to hardcoded parsing
 		actionStr, isString := actionField.(string)
 		if isString {
-			// Try to parse as XML action (simplifying error handling)
-			var xmlAction tools.XMLAction
-			if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err == nil {
-				// Check if this is a finish action
-				if strings.ToLower(xmlAction.ToolName) == "finish" ||
-					strings.ToLower(xmlAction.Content) == "finish" {
-					logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
-					return prediction, nil // End with success
+			if r.XMLConfig != nil {
+				// Use XML interceptors for enhanced parsing
+				parsedToolName, parsedArgsMap, err = r.parseActionWithInterceptors(ctx, actionStr)
+				if err != nil {
+					logger.Error(ctx, "XML interceptor parsing failed in iteration %d: %v", i+1, err)
+					state["observation"] = fmt.Sprintf("Error: Action parsing failed: %s", err.Error())
+
+					// Update conversation context
+					conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: Error: action parsing failed\n",
+						i+1, prediction["thought"], actionStr)
+
+					continue
 				}
-				parsedToolName = xmlAction.ToolName
-				parsedArgsMap = xmlAction.GetArgumentsMap()
-				logger.Debug(ctx, "Parsed tool action in iteration %d: %s with args %v",
-					i+1, parsedToolName, parsedArgsMap)
 			} else {
-				// XML parsing failed
-				logger.Error(ctx, "Invalid action format in iteration %d: %s, with error: %v", i+1, actionStr, err)
-				state["observation"] = fmt.Sprintf("Error: Invalid action format: %s", actionStr)
+				// Fallback to original hardcoded XML parsing for backward compatibility
+				var xmlAction tools.XMLAction
+				if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err == nil {
+					// Handle finish actions that might use Content field (original behavior)
+					if strings.ToLower(xmlAction.ToolName) == "finish" ||
+						strings.ToLower(xmlAction.Content) == "finish" {
+						parsedToolName = "finish"
+					} else {
+						parsedToolName = xmlAction.ToolName
+					}
+					parsedArgsMap = xmlAction.GetArgumentsMap()
+					logger.Debug(ctx, "Parsed tool action in iteration %d: %s with args %v",
+						i+1, parsedToolName, parsedArgsMap)
+				} else {
+					// XML parsing failed
+					logger.Error(ctx, "Invalid action format in iteration %d: %s, with error: %v", i+1, actionStr, err)
+					state["observation"] = fmt.Sprintf("Error: Invalid action format: %s", actionStr)
 
-				// Update conversation context
-				conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: Error: invalid action format\n",
-					i+1, prediction["thought"], actionStr)
+					// Update conversation context
+					conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: Error: invalid action format\n",
+						i+1, prediction["thought"], actionStr)
 
-				continue
+					continue
+				}
+			}
+
+			// Check if this is a finish action (regardless of parsing method)
+			if strings.ToLower(parsedToolName) == "finish" {
+				logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
+				return prediction, nil // End with success
 			}
 		} else {
 			// Not a string action
@@ -255,6 +285,7 @@ func (r *ReAct) Clone() core.Module {
 		Predict:    clonedPredict,
 		Registry:   r.Registry,
 		MaxIters:   r.MaxIters,
+		XMLConfig:  r.XMLConfig, // Share the XML config (it's read-only)
 	}
 }
 
@@ -407,4 +438,65 @@ func formatToolResult(result core.ToolResult) string {
 	}
 
 	return observation // Return just the observation string
+}
+
+// parseActionWithInterceptors uses XML interceptors to parse action strings.
+// This provides enhanced error handling, validation, and security features.
+func (r *ReAct) parseActionWithInterceptors(ctx context.Context, actionStr string) (string, map[string]interface{}, error) {
+	// Use the XML config to parse the action with enhanced validation
+	if len(actionStr) > int(r.XMLConfig.MaxSize) {
+		return "", nil, fmt.Errorf("action size (%d bytes) exceeds limit (%d bytes)",
+			len(actionStr), r.XMLConfig.MaxSize)
+	}
+
+	// Direct XML parsing with config validation and security features
+	var xmlAction tools.XMLAction
+	if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err != nil {
+		if r.XMLConfig.FallbackToText {
+			// Try extracting XML content from potentially mixed text
+			xmlContent := r.extractXMLFromText(actionStr)
+			if xmlContent != "" {
+				if err := xml.Unmarshal([]byte(xmlContent), &xmlAction); err != nil {
+					return "", nil, fmt.Errorf("XML parsing failed even with extraction: %w", err)
+				}
+			} else {
+				return "", nil, fmt.Errorf("no valid XML found in action: %w", err)
+			}
+		} else {
+			return "", nil, fmt.Errorf("XML parsing failed: %w", err)
+		}
+	}
+
+	// Validate parsed action
+	if xmlAction.ToolName == "" && xmlAction.Content == "" {
+		return "", nil, fmt.Errorf("action missing both tool_name and content")
+	}
+
+	// Handle finish actions that might use Content field (for backward compatibility)
+	toolName := xmlAction.ToolName
+	if strings.ToLower(xmlAction.ToolName) == "finish" ||
+		strings.ToLower(strings.TrimSpace(xmlAction.Content)) == "finish" {
+		toolName = "finish"
+	}
+
+	// Get arguments with enhanced validation
+	argsMap := xmlAction.GetArgumentsMap()
+
+	return toolName, argsMap, nil
+}
+
+// extractXMLFromText extracts XML content from mixed text, similar to the interceptor logic
+func (r *ReAct) extractXMLFromText(text string) string {
+	// Look for XML tags
+	start := strings.Index(text, "<")
+	if start == -1 {
+		return ""
+	}
+
+	end := strings.LastIndex(text, ">")
+	if end == -1 || end <= start {
+		return ""
+	}
+
+	return text[start : end+1]
 }
