@@ -7,6 +7,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -452,7 +453,7 @@ func TestPredictTypedWithMapInputs(t *testing.T) {
 			{Field: core.NewTextField("confidence", core.WithCustomPrefix("Confidence:"))},
 		},
 	)
-	predict := NewPredict(signature)
+	predict := NewPredict(signature).WithTextOutput() // These tests expect prefix-based parsing
 	predict.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -498,7 +499,7 @@ func TestPredictTypedWithMapOutputs(t *testing.T) {
 			{Field: core.NewTextField("confidence", core.WithCustomPrefix("Confidence:"))},
 		},
 	)
-	predict := NewPredict(signature)
+	predict := NewPredict(signature).WithTextOutput() // These tests expect prefix-based parsing
 	predict.SetLLM(mockLLM)
 
 	ctx := context.Background()
@@ -612,4 +613,195 @@ func BenchmarkPredictLegacy(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestPredict_WithXMLOutput(t *testing.T) {
+	// Test XML output functionality in Predict module
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	predict := NewPredict(signature)
+
+	// Mock LLM
+	mockLLM := new(testutil.MockLLM)
+	predict.SetLLM(mockLLM)
+
+	// Test 1: Predict without XML output (default behavior)
+	t.Run("without_xml_output", func(t *testing.T) {
+		assert.False(t, predict.IsXMLModeEnabled())
+		assert.Nil(t, predict.GetXMLConfig())
+	})
+
+	// Test 2: Enable XML output
+	t.Run("enable_xml_output", func(t *testing.T) {
+		xmlConfig := interceptors.DefaultXMLConfig().
+			WithMaxSize(1024).
+			WithStrictParsing(true)
+
+		predict.WithXMLOutput(xmlConfig)
+
+		assert.True(t, predict.IsXMLModeEnabled())
+		assert.NotNil(t, predict.GetXMLConfig())
+		assert.Equal(t, int64(1024), predict.GetXMLConfig().MaxSize)
+		assert.True(t, predict.GetXMLConfig().StrictParsing)
+	})
+
+	// Test 3: XML config with flexible parsing
+	t.Run("flexible_xml_config", func(t *testing.T) {
+		xmlConfig := interceptors.FlexibleXMLConfig().
+			WithMaxSize(2048).
+			WithValidation(true)
+
+		flexiblePredict := NewPredict(signature).WithXMLOutput(xmlConfig)
+
+		assert.True(t, flexiblePredict.IsXMLModeEnabled())
+		assert.NotNil(t, flexiblePredict.GetXMLConfig())
+		assert.Equal(t, int64(2048), flexiblePredict.GetXMLConfig().MaxSize)
+		assert.True(t, flexiblePredict.GetXMLConfig().ValidateXML)
+		assert.False(t, flexiblePredict.GetXMLConfig().StrictParsing)
+	})
+
+	// Test 4: Chain multiple configuration methods
+	t.Run("chained_configuration", func(t *testing.T) {
+		xmlConfig := interceptors.SecureXMLConfig()
+
+		chainedPredict := NewPredict(signature).
+			WithName("XMLPredict").
+			WithXMLOutput(xmlConfig)
+
+		assert.Equal(t, "XMLPredict", chainedPredict.GetDisplayName())
+		assert.True(t, chainedPredict.IsXMLModeEnabled())
+		assert.NotNil(t, chainedPredict.GetXMLConfig())
+	})
+}
+
+func TestPredict_XMLOutputIntegration(t *testing.T) {
+	// Integration test to ensure XML output works with the underlying module processing
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.NewField("result")}},
+	)
+
+	// Mock LLM with XML responses
+	mockLLM := new(testutil.MockLLM)
+
+	// Mock LLM response that would be formatted by XML interceptors
+	resp := &core.LLMResponse{Content: `<response><result>Integration test successful</result></response>`}
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp, nil)
+
+	// Create Predict with XML output enabled
+	xmlConfig := interceptors.DefaultXMLConfig().
+		WithStrictParsing(true).
+		WithValidation(true)
+
+	predict := NewPredict(signature).WithXMLOutput(xmlConfig)
+	predict.SetLLM(mockLLM)
+
+	// Execute
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	input := map[string]interface{}{"task": "Test XML output integration"}
+	result, err := predict.Process(ctx, input)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Contains(t, result["result"], "Integration test successful")
+
+	// Verify mocks
+	mockLLM.AssertExpectations(t)
+}
+
+func TestPredict_XMLOutputClone(t *testing.T) {
+	// Test that XML configuration is properly cloned
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.OutputField{{Field: core.NewField("output")}},
+	)
+
+	xmlConfig := interceptors.DefaultXMLConfig().WithMaxSize(512)
+	original := NewPredict(signature).WithXMLOutput(xmlConfig)
+
+	// Clone the module
+	cloned := original.Clone().(*Predict)
+
+	// Verify XML configuration is preserved
+	assert.True(t, cloned.IsXMLModeEnabled())
+	assert.NotNil(t, cloned.GetXMLConfig())
+	assert.Equal(t, int64(512), cloned.GetXMLConfig().MaxSize)
+
+	// Verify they are separate instances (deep copy)
+	assert.NotSame(t, original.GetXMLConfig(), cloned.GetXMLConfig())
+
+	// Modify original config to verify independence
+	original.xmlConfig.MaxSize = 1024
+	assert.Equal(t, int64(1024), original.GetXMLConfig().MaxSize)
+	assert.Equal(t, int64(512), cloned.GetXMLConfig().MaxSize) // Should remain unchanged
+}
+
+func TestPredict_XMLOutputBackwardCompatibility(t *testing.T) {
+	// Test that existing Predict usage continues to work unchanged
+	mockLLM := new(testutil.MockLLM)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: `answer: 42`,
+	}, nil)
+
+	// Create a standard Predict module (no XML)
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	predict := NewPredict(signature)
+	predict.SetLLM(mockLLM)
+
+	// Test that it works exactly as before
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	inputs := map[string]any{"question": "What is the meaning of life?"}
+	outputs, err := predict.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "42", outputs["answer"])
+	assert.False(t, predict.IsXMLModeEnabled())
+	assert.Nil(t, predict.GetXMLConfig())
+
+	mockLLM.AssertExpectations(t)
+}
+
+func TestPredict_XMLModeBypassesParsing(t *testing.T) {
+	// Test that XML mode bypasses traditional parsing logic for better performance
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.OutputField{{Field: core.NewField("output")}},
+	)
+
+	mockLLM := new(testutil.MockLLM)
+	// XML interceptors will handle this response
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(&core.LLMResponse{
+		Content: `output: XML interceptor processed result`,
+	}, nil)
+
+	// Create Predict with XML output enabled - this uses interceptors instead of traditional parsing
+	xmlConfig := interceptors.DefaultXMLConfig()
+	predict := NewPredict(signature).WithXMLOutput(xmlConfig)
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	inputs := map[string]any{"input": "test input"}
+	outputs, err := predict.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, outputs)
+
+	// The key point is that XML mode enabled interceptors, which bypass traditional parsing
+	// This test verifies the flow works (the exact output format depends on interceptor implementation)
+	assert.True(t, predict.IsXMLModeEnabled(), "XML mode should be enabled")
+	assert.NotNil(t, predict.GetXMLConfig(), "XML config should be present")
+	assert.Greater(t, len(predict.GetInterceptors()), 0, "Interceptors should be configured")
+
+	mockLLM.AssertExpectations(t)
 }

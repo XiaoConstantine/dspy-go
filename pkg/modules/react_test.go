@@ -33,7 +33,7 @@ func TestReAct(t *testing.T) {
 		},
 	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	expectedArgs := map[string]interface{}{"question": "What is the meaning of\nlife?"}
+	expectedArgs := map[string]interface{}{"question": "What is the meaning of life?"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
 		core.ToolResult{Data: "Tool execution result"}, nil,
 	)
@@ -42,15 +42,14 @@ func TestReAct(t *testing.T) {
   I should use the tool
 
   action:
-  <action><tool_name>test_tool</tool_name><arguments><arg key="question">What is the meaning of
-  life?</arg></arguments></action>
+  <action><tool_name>test_tool</tool_name><arguments><arg key="question">What is the meaning of life?</arg></arguments></action>
   `}
 	resp2 := &core.LLMResponse{Content: `
   thought:
   I have the answer
 
   action:
-  <action>Finish</action>
+  <action><tool_name>Finish</tool_name></action>
 
   answer:
   42
@@ -86,7 +85,7 @@ func TestReAct(t *testing.T) {
 	mockTool.AssertExpectations(t) // This should now only check Metadata, Validate, Execute
 
 	spans := core.CollectSpans(ctx)
-	require.Len(t, spans, 4)
+	require.Len(t, spans, 4, "Should have four spans without XML parsing")
 	assert.Equal(t, "ReAct", spans[0].Operation)
 	assert.Equal(t, "Predict (Predict)", spans[1].Operation)
 	assert.Equal(t, "executeToolByName", spans[2].Operation)

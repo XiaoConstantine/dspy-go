@@ -51,11 +51,8 @@ func TestMultiChainComparison_Process_Success(t *testing.T) {
 
 	// Set up the expected behavior
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
-		Content: `Accurate Reasoning: Thank you everyone. Let's now holistically
-After analyzing all attempts, the correct answer is 42
-
-answer:
-42`,
+		Content: `<response><rationale>Accurate Reasoning: Thank you everyone. Let's now holistically
+After analyzing all attempts, the correct answer is 42</rationale><answer>42</answer></response>`,
 	}, nil)
 
 	// Create a basic signature

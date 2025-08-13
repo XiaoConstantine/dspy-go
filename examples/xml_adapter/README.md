@@ -38,9 +38,33 @@ Demonstrates various XML configuration options:
 cd custom_config && go run custom_config.go
 ```
 
-### 4. ReAct with XML Interceptors (`react_xml/`)
+### 4. Predict with XML Output (`predict_xml/`)
 
-**NEW**: Demonstrates enhanced ReAct module with XML interceptor integration:
+**NEW**: Demonstrates enhanced Predict module with XML output formatting:
+- Traditional Predict with prefix-based output (backward compatibility)
+- Predict with XML structured output (multi-field responses)
+- Performance-optimized XML configuration
+- Secure XML configuration with enhanced security features
+
+**Requirements:**
+- Set `GEMINI_API_KEY` environment variable
+- Valid Gemini API access
+
+```bash
+export GEMINI_API_KEY="your-api-key-here"
+cd predict_xml && go run predict_xml_example.go
+```
+
+**Key Features Demonstrated:**
+- ✅ **Structured Multi-field Output**: Generate multiple output fields in structured XML format
+- ✅ **Enhanced Security**: Size limits, depth limits, timeout protection
+- ✅ **Performance Optimization**: Custom XML tags and performance-tuned configurations
+- ✅ **Backward Compatibility**: Existing Predict code works unchanged
+- ✅ **Real LLM Integration**: Works with actual Gemini responses
+
+### 5. ReAct with XML Interceptors (`react_xml/`)
+
+Demonstrates enhanced ReAct module with XML interceptor integration:
 - Traditional ReAct with hardcoded XML parsing (backward compatibility)
 - ReAct with XML interceptors (enhanced parsing with security features)
 - Real-world usage with Gemini LLM and actual tool execution
@@ -52,7 +76,7 @@ cd custom_config && go run custom_config.go
 
 ```bash
 export GEMINI_API_KEY="your-api-key-here"
-cd react_xml && go run react_xml_example.go
+cd ../react_xml && go run react_xml_example.go
 ```
 
 **Key Features Demonstrated:**
@@ -133,6 +157,7 @@ chain := interceptors.CreateXMLInterceptorChain(config,
    cd basic_usage && go run basic_usage.go
    cd ../composable && go run composable.go
    cd ../custom_config && go run custom_config.go
+   cd ../predict_xml && go run predict_xml_example.go
    cd ../react_xml && go run react_xml_example.go
    ```
 

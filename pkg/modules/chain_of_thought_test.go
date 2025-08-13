@@ -18,13 +18,7 @@ func TestChainOfThought(t *testing.T) {
 
 	// Set up the expected behavior
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
-		Content: `
-rationale:
-Step 1, Step 2, Step 3
-
-answer:
-42
-`,
+		Content: `<response><rationale>Step 1, Step 2, Step 3</rationale><answer>42</answer></response>`,
 	}, nil)
 
 	// Create a ChainOfThought module
@@ -48,7 +42,7 @@ answer:
 
 	// Verify traces
 	spans := core.CollectSpans(ctx)
-	require.Len(t, spans, 2, "Should have two spans")
+	require.Len(t, spans, 3, "Should have three spans with XML parsing")
 
 	assert.Equal(t, "ChainOfThought (ChainOfThought)", spans[0].Operation)
 	assert.Equal(t, "Predict (Predict)", spans[1].Operation)

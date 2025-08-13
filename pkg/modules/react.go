@@ -37,7 +37,7 @@ func NewReAct(signature core.Signature, registry *tools.InMemoryToolRegistry, ma
 	// Now modify the signature using the instance method
 	modifiedSignature := react.appendReActFields(signature)
 
-	predict := NewPredict(modifiedSignature)
+	predict := NewPredict(modifiedSignature).WithTextOutput() // Explicitly use text output for ReAct
 
 	react.BaseModule = *core.NewModule(modifiedSignature)
 	react.Predict = predict
@@ -119,68 +119,27 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 			continue
 		}
 
-		// Process action based on type
+		// Process action based on type - handle both structured and string formats
 		var parsedToolName string
 		var parsedArgsMap map[string]interface{}
 
-		// Parse the action using either XML interceptors or fallback to hardcoded parsing
-		actionStr, isString := actionField.(string)
-		if isString {
-			if r.XMLConfig != nil {
-				// Use XML interceptors for enhanced parsing
-				parsedToolName, parsedArgsMap, err = r.parseActionWithInterceptors(ctx, actionStr)
-				if err != nil {
-					logger.Error(ctx, "XML interceptor parsing failed in iteration %d: %v", i+1, err)
-					state["observation"] = fmt.Sprintf("Error: Action parsing failed: %s", err.Error())
-
-					// Update conversation context
-					conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: Error: action parsing failed\n",
-						i+1, prediction["thought"], actionStr)
-
-					continue
-				}
-			} else {
-				// Fallback to original hardcoded XML parsing for backward compatibility
-				var xmlAction tools.XMLAction
-				if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err == nil {
-					// Handle finish actions that might use Content field (original behavior)
-					if strings.ToLower(xmlAction.ToolName) == "finish" ||
-						strings.ToLower(xmlAction.Content) == "finish" {
-						parsedToolName = "finish"
-					} else {
-						parsedToolName = xmlAction.ToolName
-					}
-					parsedArgsMap = xmlAction.GetArgumentsMap()
-					logger.Debug(ctx, "Parsed tool action in iteration %d: %s with args %v",
-						i+1, parsedToolName, parsedArgsMap)
-				} else {
-					// XML parsing failed
-					logger.Error(ctx, "Invalid action format in iteration %d: %s, with error: %v", i+1, actionStr, err)
-					state["observation"] = fmt.Sprintf("Error: Invalid action format: %s", actionStr)
-
-					// Update conversation context
-					conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: Error: invalid action format\n",
-						i+1, prediction["thought"], actionStr)
-
-					continue
-				}
-			}
-
-			// Check if this is a finish action (regardless of parsing method)
-			if strings.ToLower(parsedToolName) == "finish" {
-				logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
-				return prediction, nil // End with success
-			}
-		} else {
-			// Not a string action
-			logger.Error(ctx, "Action has invalid type in iteration %d: %T", i+1, actionField)
-			state["observation"] = fmt.Sprintf("Error: Action has invalid type: %T", actionField)
+		// With XML-by-default, action field can be structured or string
+		parsedToolName, parsedArgsMap, err = r.parseActionField(ctx, actionField)
+		if err != nil {
+			logger.Error(ctx, "Action parsing failed in iteration %d: %v", i+1, err)
+			state["observation"] = fmt.Sprintf("Error: Action parsing failed: %s", err.Error())
 
 			// Update conversation context
-			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: [invalid type %T]\nObservation: Error: invalid action type\n",
+			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %v\nObservation: Error: action parsing failed\n",
 				i+1, prediction["thought"], actionField)
 
 			continue
+		}
+
+		// Check if this is a finish action
+		if strings.ToLower(parsedToolName) == "finish" {
+			logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
+			return prediction, nil // End with success
 		}
 
 		// Execute the tool
@@ -192,8 +151,8 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 			state["observation"] = errorObservation
 
 			// Update conversation context
-			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: %s\n",
-				i+1, prediction["thought"], actionStr, errorObservation)
+			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %v\nObservation: %s\n",
+				i+1, prediction["thought"], actionField, errorObservation)
 
 			continue
 		}
@@ -204,8 +163,8 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		logger.Info(ctx, "Tool executed successfully in iteration %d, observation set", i+1)
 
 		// Update conversation context for next iteration
-		conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %s\nObservation: %s\n",
-			i+1, prediction["thought"], actionStr, observation)
+		conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %v\nObservation: %s\n",
+			i+1, prediction["thought"], actionField, observation)
 	}
 
 	// If we get here, we've hit max iterations without finishing
@@ -293,14 +252,12 @@ func (r *ReAct) Clone() core.Module {
 // to the beginning of a signature's output fields.
 func (r *ReAct) appendReActFields(signature core.Signature) core.Signature {
 	const reactFormattingInstructions = `
-  CRITICAL FORMATTING RULES:
-  1. Format your response with these EXACT field headers, each on a new line:
-     thought: [your reasoning]
-     action: [your action]
-     observation: [result from previous action, if any]
-     answer: [your final answer when complete]
-
-  2. ALWAYS include both 'thought' and EXACTLY ONE valid 'action' field (formatted as an XML block described in the action field description) in EVERY response. Do NOT output multiple <action> blocks.
+  CRITICAL REASONING RULES:
+  1. Provide your reasoning in the 'thought' field
+  2. Specify exactly ONE action in the 'action' field (formatted as described in the action field description)
+  3. The 'observation' field contains results from previous actions (leave empty on first step)
+  4. Use 'answer' field for your final response when complete
+  5. ALWAYS include both 'thought' and 'action' fields in every response
   `
 	newSignature := signature
 
@@ -438,6 +395,117 @@ func formatToolResult(result core.ToolResult) string {
 	}
 
 	return observation // Return just the observation string
+}
+
+// parseActionField handles action parsing for both structured XML data and string data.
+// This supports XML-by-default parsing where the action field might be structured.
+func (r *ReAct) parseActionField(ctx context.Context, actionField interface{}) (string, map[string]interface{}, error) {
+	// Handle different action field types based on XML parsing results
+	switch action := actionField.(type) {
+	case string:
+		// String format - parse as XML string (legacy format)
+		return r.parseActionString(ctx, action)
+
+	case map[string]interface{}:
+		// Structured format from XML parsing - extract tool info directly
+		return r.parseActionStruct(ctx, action)
+
+	default:
+		return "", nil, fmt.Errorf("unsupported action field type: %T", actionField)
+	}
+}
+
+// parseActionString handles string-based action parsing (legacy format).
+func (r *ReAct) parseActionString(ctx context.Context, actionStr string) (string, map[string]interface{}, error) {
+	// Check for simple finish command first (XML-by-default case)
+	actionStr = strings.TrimSpace(actionStr)
+	if strings.ToLower(actionStr) == "finish" {
+		return "finish", make(map[string]interface{}), nil
+	}
+
+	if r.XMLConfig != nil {
+		// Use XML interceptors for enhanced parsing
+		return r.parseActionWithInterceptors(ctx, actionStr)
+	}
+
+	// Fallback to original hardcoded XML parsing for backward compatibility
+	var xmlAction tools.XMLAction
+	if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err != nil {
+		return "", nil, fmt.Errorf("XML parsing failed: %w", err)
+	}
+
+	// Handle finish actions that might use Content field (original behavior)
+	toolName := xmlAction.ToolName
+	if strings.ToLower(xmlAction.ToolName) == "finish" ||
+		strings.ToLower(strings.TrimSpace(xmlAction.Content)) == "finish" {
+		toolName = "finish"
+	}
+
+	argsMap := xmlAction.GetArgumentsMap()
+	return toolName, argsMap, nil
+}
+
+// parseActionStruct handles structured action parsing from XML-by-default parsing.
+func (r *ReAct) parseActionStruct(ctx context.Context, actionStruct map[string]interface{}) (string, map[string]interface{}, error) {
+	// Look for tool_name field in the structured data
+	toolNameRaw, hasToolName := actionStruct["tool_name"]
+	if hasToolName {
+		toolName, ok := toolNameRaw.(string)
+		if !ok {
+			return "", nil, fmt.Errorf("tool_name field is not a string: %T", toolNameRaw)
+		}
+
+		// Extract arguments if present
+		argsMap := make(map[string]interface{})
+		if argsRaw, hasArgs := actionStruct["arguments"]; hasArgs {
+			if argsStruct, ok := argsRaw.(map[string]interface{}); ok {
+				// Handle nested argument structure
+				if argsList, hasArg := argsStruct["arg"]; hasArg {
+					// Handle both single arg and multiple args
+					switch args := argsList.(type) {
+					case map[string]interface{}:
+						// Single argument
+						if key, hasKey := args["key"]; hasKey {
+							if keyStr, ok := key.(string); ok {
+								if content, hasContent := args["content"]; hasContent {
+									argsMap[keyStr] = content
+								}
+							}
+						}
+					case []interface{}:
+						// Multiple arguments
+						for _, argItem := range args {
+							if argMap, ok := argItem.(map[string]interface{}); ok {
+								if key, hasKey := argMap["key"]; hasKey {
+									if keyStr, ok := key.(string); ok {
+										if content, hasContent := argMap["content"]; hasContent {
+											argsMap[keyStr] = content
+										}
+									}
+								}
+							}
+						}
+					}
+				} else {
+					// Direct argument mapping
+					argsMap = argsStruct
+				}
+			}
+		}
+
+		return toolName, argsMap, nil
+	}
+
+	// Check if this is a simple finish action or direct tool name
+	if content, hasContent := actionStruct["content"]; hasContent {
+		if contentStr, ok := content.(string); ok {
+			if strings.ToLower(strings.TrimSpace(contentStr)) == "finish" {
+				return "finish", make(map[string]interface{}), nil
+			}
+		}
+	}
+
+	return "", nil, fmt.Errorf("unable to extract tool information from structured action: %+v", actionStruct)
 }
 
 // parseActionWithInterceptors uses XML interceptors to parse action strings.

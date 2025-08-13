@@ -104,15 +104,17 @@ func TestFlexibleOrchestrator(t *testing.T) {
 		}
 
 		analyzerResp := &core.LLMResponse{
-			Content: `analysis:Task has been analyzed and broken down into atomic units
-tasks:<tasks>
+			Content: `<response>
+<analysis>Task has been analyzed and broken down into atomic units</analysis>
+<tasks><tasks>
      <task id="task1" type="test" processor="test" priority="1">
          <description>Test task 1</description>
          <metadata>
              <item key="key">value</item>
          </metadata>
      </task>
-`,
+</tasks></tasks>
+</response>`,
 			Usage: &core.TokenInfo{
 				PromptTokens:     100,
 				CompletionTokens: 50,
@@ -154,9 +156,9 @@ tasks:<tasks>
 
 		// Mock the analyzer response in the format expected by Predict module
 		analyzerResp := &core.LLMResponse{
-			Content: `analysis: Task has been analyzed and decomposed for parallel execution
-
- tasks: <tasks>
+			Content: `<response>
+<analysis>Task has been analyzed and decomposed for parallel execution</analysis>
+<tasks><tasks>
      <task id="task1" type="test" processor="test" priority="1">
          <description>Parallel task 1</description>
          <metadata>
@@ -169,8 +171,8 @@ tasks:<tasks>
              <item key="key">value</item>
          </metadata>
      </task>
- </tasks>
-`,
+</tasks></tasks>
+</response>`,
 			Usage: &core.TokenInfo{
 				PromptTokens:     100,
 				CompletionTokens: 50,
@@ -205,17 +207,17 @@ tasks:<tasks>
 		tasks := []Task{task}
 
 		analyzerResp := &core.LLMResponse{
-			Content: `analysis: Task has been analyzed for retry testing
-
- tasks: <tasks>
+			Content: `<response>
+<analysis>Task has been analyzed for retry testing</analysis>
+<tasks><tasks>
      <task id="retry-task" type="test" processor="test" priority="1">
          <description>Retry task</description>
          <metadata>
              <item key="key">value</item>
          </metadata>
      </task>
- </tasks>
-`,
+</tasks></tasks>
+</response>`,
 			Usage: &core.TokenInfo{},
 		}
 
@@ -266,7 +268,7 @@ tasks:<tasks>
 				name: "Parser Error",
 				setupMocks: func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
 					mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
-						Return(&core.LLMResponse{Content: `{"analysis": "Task analyzed"}`, Usage: &core.TokenInfo{}}, nil)
+						Return(&core.LLMResponse{Content: `<response><analysis>Task analyzed</analysis><tasks>tasks content</tasks></response>`, Usage: &core.TokenInfo{}}, nil)
 					mockParser.On("Parse", mock.Anything).
 						Return([]Task{}, errors.New("parser error"))
 				},
@@ -279,7 +281,7 @@ tasks:<tasks>
 				setupMocks: func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
 					// Set up a valid analyzer response
 					resp := &core.LLMResponse{
-						Content: "analysis: Task analyzed\ntasks: <tasks><task>test task</task></tasks>",
+						Content: "<response><analysis>Task analyzed</analysis><tasks><tasks><task>test task</task></tasks></tasks></response>",
 						Usage:   &core.TokenInfo{},
 					}
 					mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
@@ -340,7 +342,7 @@ tasks:<tasks>
 
 		// Setup expectations
 		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
-			Return(&core.LLMResponse{Content: "analysis: Task analyzed\ntasks: <tasks><task>test task</task></tasks>", Usage: &core.TokenInfo{}}, nil)
+			Return(&core.LLMResponse{Content: "<response><analysis>Task analyzed</analysis><tasks><tasks><task>test task</task></tasks></tasks></response>", Usage: &core.TokenInfo{}}, nil)
 		mockParser.On("Parse", mock.Anything).Return(tasks, nil)
 		mockPlanner.On("CreatePlan", tasks).Return([][]Task{tasks}, nil)
 

@@ -369,7 +369,7 @@ func TestOfferFeedbackProcess(t *testing.T) {
 	mockLLM := &testutil.MockLLM{}
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
 		&core.LLMResponse{
-			Content: "discussion: The performance needs improvement\nadvice: Try increasing temperature",
+			Content: "<response><discussion>The performance needs improvement</discussion><advice>Try increasing temperature</advice></response>",
 		}, nil,
 	)
 

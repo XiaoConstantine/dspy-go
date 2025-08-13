@@ -137,11 +137,9 @@ func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *Flexibl
 	if config.AnalyzerConfig.BaseInstruction == "" {
 		config.AnalyzerConfig.BaseInstruction = `Analyze the given task and break it down into well-defined subtasks.
 
-	IMPORTANT FORMAT RULES:
-	1. Start fields exactly with 'analysis:' or 'tasks:' (no markdown formatting)
-	2. Provide raw XML directly after 'tasks:' without any wrapping
-	3. Keep the exact field prefix format - no decorations or modifications
-	4. Ensure proper indentation and structure in the XML.`
+	Provide:
+	1. analysis: A detailed breakdown explaining your reasoning
+	2. tasks: The specific subtasks identified`
 	}
 	instruction := config.AnalyzerConfig.BaseInstruction
 	if config.AnalyzerConfig.FormatInstructions != "" {

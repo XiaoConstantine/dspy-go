@@ -32,7 +32,8 @@ func XMLFormatModuleInterceptor(config XMLConfig) core.ModuleInterceptor {
 		}
 
 		// Call the next handler with modified inputs
-		return handler(ctx, modifiedInputs, opts...)
+		results, err := handler(ctx, modifiedInputs, opts...)
+		return results, err
 	}
 }
 
@@ -137,7 +138,17 @@ func (p *XMLParser) findResponseText(outputs map[string]any) string {
 		}
 	}
 
-	// Fallback: use first string value
+	// Fallback: look for any string value that contains XML content
+	for _, value := range outputs {
+		if textStr, ok := value.(string); ok && textStr != "" {
+			// Check if this string contains XML-like content
+			if strings.Contains(textStr, "<") && strings.Contains(textStr, ">") {
+				return textStr
+			}
+		}
+	}
+
+	// Final fallback: use first non-empty string value
 	for _, value := range outputs {
 		if textStr, ok := value.(string); ok && textStr != "" {
 			return textStr
@@ -185,7 +196,7 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 	// Extract XML content (handle cases where XML is embedded in text)
 	xmlContent := p.extractXMLContent(responseText)
 	if xmlContent == "" {
-		return nil, fmt.Errorf("no XML content found in response")
+		return nil, fmt.Errorf("no XML content found in response. Raw response: %s", responseText)
 	}
 
 	// Parse XML using Go's encoding/xml
@@ -211,11 +222,19 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 			if depth > p.config.MaxDepth {
 				return nil, fmt.Errorf("XML depth limit exceeded: %d", depth)
 			}
-			currentTag = t.Name.Local
+			switch depth {
+			case 1:
+				// Skip root tag (typically <response>)
+				currentTag = ""
+			case 2:
+				currentTag = t.Name.Local
+			}
 
 		case xml.EndElement:
 			depth--
-			currentTag = ""
+			if depth == 1 {
+				currentTag = ""
+			}
 
 		case xml.CharData:
 			if currentTag != "" {
@@ -271,6 +290,8 @@ func (p *XMLParser) getSignatureInfo(signature core.Signature) *ParsedSignature 
 		tagName := p.config.GetTagName(output.Name)
 		sigInfo.TagMap[tagName] = output.Name
 		sigInfo.RequiredSet[output.Name] = true // Consider all outputs required for now
+		// Debug: show tag mapping
+		// fmt.Printf("DEBUG: Field '%s' -> Tag '%s' (CustomTags: %v)\n", output.Name, tagName, p.config.CustomTags)
 	}
 
 	// Cache the result
@@ -310,6 +331,22 @@ func (p *XMLParser) validateXMLSyntax(xmlText string) error {
 
 // extractXMLContent extracts XML from potentially mixed content.
 func (p *XMLParser) extractXMLContent(text string) string {
+	// First, strip markdown code blocks if present
+	text = strings.TrimSpace(text)
+
+	// Handle markdown code blocks (```xml ... ``` or ``` ... ```)
+	if strings.HasPrefix(text, "```") {
+		// Find the end of the opening fence
+		startIdx := strings.Index(text, "\n")
+		if startIdx != -1 {
+			// Find the closing fence
+			endIdx := strings.LastIndex(text, "```")
+			if endIdx > startIdx {
+				text = text[startIdx+1 : endIdx]
+			}
+		}
+	}
+
 	// Look for XML tags
 	start := strings.Index(text, "<")
 	if start == -1 {
@@ -321,7 +358,7 @@ func (p *XMLParser) extractXMLContent(text string) string {
 		return ""
 	}
 
-	return text[start : end+1]
+	return strings.TrimSpace(text[start : end+1])
 }
 
 // convertFieldValue converts string content to the appropriate type.
@@ -402,7 +439,11 @@ func generateXMLInstructions(signature core.Signature, config XMLConfig) string 
 			typeHint := getTypeHint(output.Type)
 			sb.WriteString(fmt.Sprintf("  <%s>%s</%s>\n", tagName, typeHint, tagName))
 		} else {
-			sb.WriteString(fmt.Sprintf("  <%s>[your %s here]</%s>\n", tagName, output.Description, tagName))
+			description := output.Description
+			if description == "" {
+				description = output.Name // Use field name as fallback
+			}
+			sb.WriteString(fmt.Sprintf("  <%s>[your %s here]</%s>\n", tagName, description, tagName))
 		}
 	}
 	sb.WriteString("</response>\n\n")

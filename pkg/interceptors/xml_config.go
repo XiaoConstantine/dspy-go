@@ -135,9 +135,9 @@ func FlexibleXMLConfig() XMLConfig {
 // PerformantXMLConfig creates a configuration optimized for performance.
 func PerformantXMLConfig() XMLConfig {
 	return DefaultXMLConfig().
-		WithValidation(false). // Skip validation for speed
-		WithMaxDepth(5).       // Limit depth for performance
-		WithMaxSize(512 * 1024) // Limit size to 512KB
+		WithValidation(false).   // Skip validation for speed
+		WithMaxDepth(5).         // Limit depth for performance
+		WithMaxSize(32 * 1024)   // Limit size to 32KB for better performance while allowing typical LLM responses
 }
 
 // SecureXMLConfig creates a configuration with enhanced security settings.
