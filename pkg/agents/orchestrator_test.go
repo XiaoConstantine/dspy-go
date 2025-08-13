@@ -106,14 +106,14 @@ func TestFlexibleOrchestrator(t *testing.T) {
 		analyzerResp := &core.LLMResponse{
 			Content: `<response>
 <analysis>Task has been analyzed and broken down into atomic units</analysis>
-<tasks><tasks>
+<tasks>
      <task id="task1" type="test" processor="test" priority="1">
          <description>Test task 1</description>
          <metadata>
              <item key="key">value</item>
          </metadata>
      </task>
-</tasks></tasks>
+</tasks>
 </response>`,
 			Usage: &core.TokenInfo{
 				PromptTokens:     100,

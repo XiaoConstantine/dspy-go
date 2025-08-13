@@ -94,14 +94,14 @@ func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
 
 // WithTextOutput disables XML output and uses traditional text-based parsing.
 // This is an escape hatch for users who prefer the original behavior.
+// Note: Currently clears all interceptors when switching to text mode.
+// Future enhancement: Could preserve non-XML interceptors with proper interceptor tagging.
 func (p *Predict) WithTextOutput() *Predict {
 	p.enableXMLMode = false
 	p.xmlConfig = nil
 
-	// Remove XML interceptors, keeping only non-XML interceptors
-	// For now, we clear all interceptors when switching to text mode.
-	// In a more robust implementation, we might need to tag interceptors
-	// or use a different identification method to preserve non-XML interceptors.
+	// For now, clear all interceptors when switching to text mode
+	// This ensures clean text-based behavior but removes other interceptors too
 	p.SetInterceptors([]core.ModuleInterceptor{})
 
 	return p

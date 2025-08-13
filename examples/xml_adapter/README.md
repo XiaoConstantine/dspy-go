@@ -154,11 +154,11 @@ chain := interceptors.CreateXMLInterceptorChain(config,
 1. Ensure you have Go 1.21+ installed
 2. From this directory, run any example:
    ```bash
-   cd basic_usage && go run basic_usage.go
-   cd ../composable && go run composable.go
-   cd ../custom_config && go run custom_config.go
-   cd ../predict_xml && go run predict_xml_example.go
-   cd ../react_xml && go run react_xml_example.go
+   (cd basic_usage && go run basic_usage.go)
+   (cd composable && go run composable.go)
+   (cd custom_config && go run custom_config.go)
+   (cd predict_xml && go run predict_xml_example.go)
+   (cd react_xml && go run react_xml_example.go)
    ```
 
 ## Real-World Usage
