@@ -244,6 +244,10 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 						content = strings.TrimSpace(content)
 					}
 
+					// Strip field name prefix if present (e.g., "answer: 366" -> "366")
+					// This is needed because LLM includes both XML structure and text prefixes for stability
+					content = p.stripFieldPrefix(content, fieldName)
+
 					// Type conversion based on field type
 					if field, exists := sigInfo.FieldMap[fieldName]; exists {
 						typedValue, err := p.convertFieldValue(content, field)
@@ -412,6 +416,23 @@ func (p *XMLParser) validateRequiredFields(fields map[string]any, sigInfo *Parse
 		}
 	}
 	return nil
+}
+
+// stripFieldPrefix removes field name prefixes from content for XML parsing.
+// e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking..."
+func (p *XMLParser) stripFieldPrefix(content, fieldName string) string {
+	// Check if content starts with "fieldname:" pattern
+	prefix := fieldName + ":"
+	if strings.HasPrefix(strings.ToLower(content), strings.ToLower(prefix)) {
+		// Remove the prefix and any following whitespace/newlines
+		stripped := strings.TrimPrefix(content, prefix)
+		if !strings.HasPrefix(stripped, " ") && !strings.HasPrefix(stripped, "\n") {
+			// Try case-insensitive removal
+			stripped = content[len(prefix):]
+		}
+		return strings.TrimLeft(stripped, " \n\t")
+	}
+	return content
 }
 
 // charsetReader handles charset encoding for XML decoder.

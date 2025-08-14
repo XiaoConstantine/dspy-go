@@ -49,6 +49,15 @@ func computeF1(prediction, ground_truth string) float64 {
 	return 2 * precision * recall / (precision + recall)
 }
 
+// Helper function to get map keys for debugging
+func keys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func evaluateModel(ctx context.Context, program core.Program, examples []datasets.HotPotQAExample) (float64, float64) {
 	logger := logging.GetLogger()
 	var totalF1, exactMatch float64
@@ -94,7 +103,12 @@ func evaluateModel(ctx context.Context, program core.Program, examples []dataset
 
 			predictedAnswer, ok := result["answer"].(string)
 			if !ok {
-				logger.Error(ctx, "Error: Could not find answer in result: %v", result)
+				// Check if we have rationale field (indicates parsing worked partially)
+				if _, hasRationale := result["rationale"]; hasRationale {
+					logger.Error(ctx, "Error: XML parsed rationale but missing answer field. Result: %v", result)
+				} else {
+					logger.Error(ctx, "Error: XML parsing failed, falling back to text. Keys: %v", keys(result))
+				}
 				return
 			}
 
@@ -173,7 +187,8 @@ func RunHotPotQAExample(apiKey string) {
 	cot := modules.NewChainOfThought(signature)
 
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-		return cot.Process(ctx, inputs)
+		// Use ProcessWithInterceptors to enable XML-by-default functionality
+		return cot.ProcessWithInterceptors(ctx, inputs, nil)
 	})
 
 	metric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
