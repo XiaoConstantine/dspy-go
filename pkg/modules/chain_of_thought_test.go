@@ -16,10 +16,10 @@ func TestChainOfThought(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
-	// Set up the expected behavior
+	// Set up the expected behavior - allow multiple calls for XML interceptors
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
 		Content: `<response><rationale>Step 1, Step 2, Step 3</rationale><answer>42</answer></response>`,
-	}, nil)
+	}, nil).Maybe()
 
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
@@ -42,7 +42,7 @@ func TestChainOfThought(t *testing.T) {
 
 	// Verify traces
 	spans := core.CollectSpans(ctx)
-	require.Len(t, spans, 3, "Should have three spans with XML parsing")
+	require.Len(t, spans, 2, "Should have ChainOfThought and Predict spans with auto-XML delegation")
 
 	assert.Equal(t, "ChainOfThought (ChainOfThought)", spans[0].Operation)
 	assert.Equal(t, "Predict (Predict)", spans[1].Operation)
@@ -95,12 +95,19 @@ func TestChainOfThought_WithMissingInput(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
 
+	// Allow any LLM calls that might happen during XML processing
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: `<response><rationale>Step 1, Step 2, Step 3</rationale><answer>42</answer></response>`,
+	}, nil).Maybe()
+
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
+	// Disable XML for this validation test to ensure proper error handling
+	cot.Predict.WithTextOutput()
 	cot.SetLLM(mockLLM)
 
 	// Test the Process method with missing input

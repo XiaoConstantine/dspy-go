@@ -57,6 +57,15 @@ func XMLParseModuleInterceptor(config XMLConfig) core.ModuleInterceptor {
 		parsedOutputs, err := parser.ParseXMLOutputs(ctx, outputs, info.Signature)
 		if err != nil {
 			if config.FallbackToText {
+				// Debug: Log parsing failure details
+				if responseText := parser.findResponseText(outputs); responseText != "" {
+					maxLen := len(responseText)
+					if maxLen > 200 {
+						maxLen = 200
+					}
+					fmt.Printf("DEBUG XML PARSE FAILED for %s:\nRAW: %s\nERROR: %v\n=== END DEBUG ===\n",
+						info.ModuleName, responseText[:maxLen], err)
+				}
 				// Return original outputs if parsing fails and fallback is enabled
 				return outputs, nil
 			}
@@ -198,6 +207,9 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 	if xmlContent == "" {
 		return nil, fmt.Errorf("no XML content found in response. Raw response: %s", responseText)
 	}
+
+	// Pre-process XML to escape common unescaped entities from LLM output
+	xmlContent = p.escapeXMLEntities(xmlContent)
 
 	// Parse XML using Go's encoding/xml
 	decoder := xml.NewDecoder(strings.NewReader(xmlContent))
@@ -416,6 +428,31 @@ func (p *XMLParser) validateRequiredFields(fields map[string]any, sigInfo *Parse
 		}
 	}
 	return nil
+}
+
+// escapeXMLEntities escapes common unescaped entities in LLM-generated XML.
+func (p *XMLParser) escapeXMLEntities(xmlContent string) string {
+	// Use a more comprehensive approach: escape all & that aren't already valid entities
+	// First, temporarily mark valid entities to protect them
+	validEntities := []string{"&amp;", "&lt;", "&gt;", "&quot;", "&apos;"}
+	placeholders := make(map[string]string)
+
+	// Protect existing valid entities
+	for i, entity := range validEntities {
+		placeholder := fmt.Sprintf("__ENTITY_%d__", i)
+		placeholders[placeholder] = entity
+		xmlContent = strings.ReplaceAll(xmlContent, entity, placeholder)
+	}
+
+	// Now escape all remaining & characters
+	xmlContent = strings.ReplaceAll(xmlContent, "&", "&amp;")
+
+	// Restore the protected entities
+	for placeholder, entity := range placeholders {
+		xmlContent = strings.ReplaceAll(xmlContent, placeholder, entity)
+	}
+
+	return xmlContent
 }
 
 // stripFieldPrefix removes field name prefixes from content for XML parsing.

@@ -75,6 +75,11 @@ func (p *Predict) WithDefaultOptions(opts ...core.Option) *Predict {
 	return p
 }
 
+// IsXMLModeEnabled returns true if XML mode is enabled for this module.
+func (p *Predict) IsXMLModeEnabled() bool {
+	return p.enableXMLMode
+}
+
 // WithXMLOutput enables XML interceptor-based output formatting.
 // This provides structured XML output with validation, security features, and error handling.
 func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
@@ -108,6 +113,11 @@ func (p *Predict) WithTextOutput() *Predict {
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+	// If XML mode is enabled, automatically use ProcessWithInterceptors for proper XML handling
+	if p.enableXMLMode {
+		return p.ProcessWithInterceptors(ctx, inputs, nil, opts...)
+	}
+
 	logger := logging.GetLogger()
 	callOptions := &core.ModuleOptions{}
 	for _, opt := range opts {
@@ -405,10 +415,6 @@ func (p *Predict) GetDemos() []core.Example {
 	return p.Demos
 }
 
-// IsXMLModeEnabled returns whether XML output mode is enabled.
-func (p *Predict) IsXMLModeEnabled() bool {
-	return p.enableXMLMode
-}
 
 // GetXMLConfig returns the XML configuration if XML mode is enabled.
 func (p *Predict) GetXMLConfig() *interceptors.XMLConfig {

@@ -37,9 +37,9 @@ type XMLConfig struct {
 // DefaultXMLConfig returns XMLConfig with sensible defaults.
 func DefaultXMLConfig() XMLConfig {
 	return XMLConfig{
-		StrictParsing:      true,
+		StrictParsing:      false,  // Allow missing fields for robustness
 		FallbackToText:     true,
-		ValidateXML:        true,
+		ValidateXML:        false,  // Disable validation to handle unescaped entities
 		MaxDepth:           10,
 		MaxSize:            1024 * 1024, // 1MB
 		ParseTimeout:       30 * time.Second,

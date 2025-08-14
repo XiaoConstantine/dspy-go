@@ -49,7 +49,7 @@ func computeF1(prediction, ground_truth string) float64 {
 	return 2 * precision * recall / (precision + recall)
 }
 
-// Helper function to get map keys for debugging
+// Helper function to get map keys for debugging.
 func keys(m map[string]interface{}) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -187,8 +187,8 @@ func RunHotPotQAExample(apiKey string) {
 	cot := modules.NewChainOfThought(signature)
 
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-		// Use ProcessWithInterceptors to enable XML-by-default functionality
-		return cot.ProcessWithInterceptors(ctx, inputs, nil)
+		// Process() now automatically uses interceptors when XML mode is enabled
+		return cot.Process(ctx, inputs)
 	})
 
 	metric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
