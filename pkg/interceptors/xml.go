@@ -455,8 +455,7 @@ func (p *XMLParser) escapeXMLEntities(xmlContent string) string {
 	return xmlContent
 }
 
-// stripFieldPrefix removes field name prefixes from content for XML parsing.
-// e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking..."
+// e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking...".
 func (p *XMLParser) stripFieldPrefix(content, fieldName string) string {
 	// Check if content starts with "fieldname:" pattern
 	prefix := fieldName + ":"
