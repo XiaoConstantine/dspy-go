@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 
-	workflows "github.com/XiaoConstantine/dspy-go/pkg/agents/workflows"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
@@ -74,13 +74,18 @@ func RunParallelExample(ctx context.Context, logger *logging.Logger) {
 	if err != nil {
 		logger.Error(ctx, "Workflow execution failed: %v", err)
 	}
-	// Print results
-	for i := range stakeholders {
-		analysisKey := fmt.Sprintf("analyze_stakeholder_%d_analysis", i)
-		if analysis, ok := results[analysisKey]; ok {
-			fmt.Printf("\n=== Stakeholder Analysis %d ===\n", i+1)
-			fmt.Println(analysis)
-		}
+	// Print results - XML mode uses 'response' field name
+	if response, ok := results["response"]; ok {
+		fmt.Printf("\n=== Stakeholder Analysis Results ===\n")
+		fmt.Println(response)
+	} else {
+		logger.Info(ctx, "No 'response' field found. Available keys: %v", func() []string {
+			keys := make([]string, 0, len(results))
+			for k := range results {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
 	}
 	logger.Info(ctx, "=================================================")
 }
@@ -146,6 +151,7 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
 	}
 	router := CreateRouterWorkflow()
 
+	// Add routes to the router workflow
 	for routeType, prompt := range supportRoutes {
 		routeStep := CreateHandlerStep(routeType, prompt)
 		if err := router.AddStep(routeStep); err != nil {
@@ -154,7 +160,9 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
 		}
 		if err := router.AddRoute(routeType, []*workflows.Step{routeStep}); err != nil {
 			logger.Error(ctx, "Failed to add route %s: %v", routeType, err)
+			continue
 		}
+		logger.Info(ctx, "Added route for: %s", routeType)
 	}
 	logger.Info(ctx, "Processing support tickets...\n")
 	for i, ticket := range tickets {
@@ -312,7 +320,13 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 		PlanCreator: planner,
 		// Add your custom processors
 		CustomProcessors: map[string]agents.TaskProcessor{
-			"general": &ExampleProcessor{},
+			"general":      &ExampleProcessor{},
+			"file_reader":  &ExampleProcessor{},
+			"data_cleaner": &ExampleProcessor{},
+			"data_analyzer": &ExampleProcessor{},
+			"file_writer":  &ExampleProcessor{},
+			"human":        &ExampleProcessor{},
+			"example":      &ExampleProcessor{},
 		},
 		AnalyzerConfig: agents.AnalyzerConfig{
 			FormatInstructions: xmlFormat,
@@ -346,10 +360,13 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 	result, err := orchestrator.Process(ctx, task, context)
 	if err != nil {
 		logger.Error(ctx, "Orchestration failed: %v", err)
-		// Log more details about failed tasks
-		for taskID, taskErr := range result.FailedTasks {
-			logger.Error(ctx, "Task %s failed: %v", taskID, taskErr)
+		if result != nil {
+			// Log more details about failed tasks
+			for taskID, taskErr := range result.FailedTasks {
+				logger.Error(ctx, "Task %s failed: %v", taskID, taskErr)
+			}
 		}
+		return
 	}
 	// Log successful tasks with details
 	for taskID, taskResult := range result.CompletedTasks {
@@ -360,6 +377,12 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 	logger.Info(ctx, "Orchestration completed with %d successful tasks and %d failures\n",
 		len(result.CompletedTasks), len(result.FailedTasks))
 }
+
+
+
+
+
+
 
 func main() {
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))

@@ -87,7 +87,7 @@ func NewStakeholderAnalysis(index int) core.Module {
 			{Field: core.Field{Name: fmt.Sprintf("analyze_stakeholder_%d_stakeholder_info", index)}},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "analysis", Prefix: "analysis"}},
+			{Field: core.Field{Name: "response"}},
 		},
 	).WithInstruction(`Analyze how market changes will impact this stakeholder group.
         Provide specific impacts and recommended actions.

@@ -105,7 +105,8 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		interceptors.TracingModuleInterceptor(),
 
 		// Input validation interceptor - validates inputs for safety
-		interceptors.ValidationModuleInterceptor(interceptors.DefaultValidationConfig()),
+		// Note: Disabled for XML mode since XML formatting instructions contain XML tags
+		// interceptors.ValidationModuleInterceptor(interceptors.DefaultValidationConfig()),
 
 		// Caching interceptor - caches results for identical inputs (5 minute TTL)
 		interceptors.CachingModuleInterceptor(cache, 5*time.Minute),
@@ -123,8 +124,11 @@ func RunGSM8KExample(configPath string, apiKey string) {
 
 	// Set interceptors on the module
 	// ChainOfThought implements InterceptableModule interface
-	cot.SetInterceptors(moduleInterceptors)
-	logger.Info(ctx, "Successfully configured %d interceptors for ChainOfThought module", len(moduleInterceptors))
+	// Note: Append to existing interceptors to preserve XML-by-default functionality
+	existingInterceptors := cot.GetInterceptors()
+	allInterceptors := append(existingInterceptors, moduleInterceptors...)
+	cot.SetInterceptors(allInterceptors)
+	logger.Info(ctx, "Successfully configured %d total interceptors for ChainOfThought module (including XML interceptors)", len(allInterceptors))
 
 	// Create program with generation options from configuration
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {

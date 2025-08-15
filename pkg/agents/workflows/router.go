@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 
@@ -58,13 +59,23 @@ func (w *RouterWorkflow) Execute(ctx context.Context, inputs map[string]interfac
 	}
 
 	// Get classification from result
-	classification, ok := result.Outputs["classification"].(string)
+	classificationRaw, ok := result.Outputs["classification"].(string)
 	if !ok {
 		return nil, errors.WithFields(
 			errors.New(errors.InvalidResponse, "classifier did not return a string classification"),
 			errors.Fields{
 				"actual_type": fmt.Sprintf("%T", result.Outputs["classification"]),
 			})
+	}
+
+	// Clean up classification - remove field prefix and whitespace (case-insensitive)
+	classification := strings.TrimSpace(classificationRaw)
+	const prefix = "classification"
+	if len(classification) > len(prefix) && strings.EqualFold(classification[:len(prefix)], prefix) {
+		// Remove the prefix case-insensitively, then clean up separators
+		classification = strings.TrimSpace(classification[len(prefix):])
+		classification = strings.TrimPrefix(classification, ":")
+		classification = strings.TrimSpace(classification)
 	}
 
 	// Get route for this classification

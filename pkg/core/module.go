@@ -192,14 +192,16 @@ func (bm *BaseModule) ProcessWithInterceptorsImpl(ctx context.Context, inputs ma
 
 	// Create the base handler that calls the provided process function
 	handler := func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
-		return processFunc(ctx, inputs, opts...)
+		result, err := processFunc(ctx, inputs, opts...)
+		return result, err
 	}
 
 	// Chain the interceptors
 	chainedInterceptor := ChainModuleInterceptors(interceptors...)
 
 	// Execute with interceptors
-	return chainedInterceptor(ctx, inputs, info, handler, opts...)
+	result, err := chainedInterceptor(ctx, inputs, info, handler, opts...)
+	return result, err
 }
 
 // SetInterceptors sets the default interceptors for this module instance.
