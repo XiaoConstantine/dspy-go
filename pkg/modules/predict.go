@@ -197,12 +197,6 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	prompt := formatPrompt(signature, p.Demos, inputs)
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
-	// When XML mode is enabled, use interceptors for processing (which handle parsing automatically)
-	if p.enableXMLMode && len(p.GetInterceptors()) > 0 {
-		logger.Debug(ctx, "Using XML interceptors for processing")
-		return p.ProcessWithInterceptors(ctx, inputs, p.GetInterceptors(), opts...)
-	}
-
 	resp, err := p.LLM.Generate(ctx, prompt, finalOptions.GenerateOptions...)
 	if err != nil {
 		span.WithError(err)
@@ -225,16 +219,6 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 			})
 		}
 		logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d", resp.Usage.TotalTokens, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-	}
-
-	// For XML mode, return raw LLM content so XML interceptor can parse it
-	// For non-XML mode, use traditional parsing
-	if p.enableXMLMode {
-		// Return raw LLM response for XML interceptor to parse
-		rawOutputs := map[string]interface{}{
-			"response": resp.Content, // Use standard field name that XML parser looks for
-		}
-		return rawOutputs, nil
 	}
 
 	// Traditional parsing for non-XML mode

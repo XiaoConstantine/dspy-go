@@ -57,15 +57,6 @@ func XMLParseModuleInterceptor(config XMLConfig) core.ModuleInterceptor {
 		parsedOutputs, err := parser.ParseXMLOutputs(ctx, outputs, info.Signature)
 		if err != nil {
 			if config.FallbackToText {
-				// Debug: Log parsing failure details
-				if responseText := parser.findResponseText(outputs); responseText != "" {
-					maxLen := len(responseText)
-					if maxLen > 200 {
-						maxLen = 200
-					}
-					fmt.Printf("DEBUG XML PARSE FAILED for %s:\nRAW: %s\nERROR: %v\n=== END DEBUG ===\n",
-						info.ModuleName, responseText[:maxLen], err)
-				}
 				// Return original outputs if parsing fails and fallback is enabled
 				return outputs, nil
 			}

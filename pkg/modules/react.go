@@ -408,6 +408,8 @@ func (r *ReAct) parseActionField(ctx context.Context, actionField interface{}) (
 
 	case map[string]interface{}:
 		// Structured format from XML parsing - extract tool info directly
+		// Note: This case is currently not reached in default usage since ReAct uses WithTextOutput().
+		// It's preserved for future extensibility when users might enable XML output after initialization.
 		return r.parseActionStruct(ctx, action)
 
 	default:

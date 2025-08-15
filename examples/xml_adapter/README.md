@@ -76,7 +76,7 @@ Demonstrates enhanced ReAct module with XML interceptor integration:
 
 ```bash
 export GEMINI_API_KEY="your-api-key-here"
-cd ../react_xml && go run react_xml_example.go
+cd react_xml && go run react_xml_example.go
 ```
 
 **Key Features Demonstrated:**
