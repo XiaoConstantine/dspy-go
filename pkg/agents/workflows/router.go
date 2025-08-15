@@ -68,13 +68,14 @@ func (w *RouterWorkflow) Execute(ctx context.Context, inputs map[string]interfac
 			})
 	}
 
-	// Clean up classification - remove field prefix and whitespace
+	// Clean up classification - remove field prefix and whitespace (case-insensitive)
 	classification := strings.TrimSpace(classificationRaw)
-	if strings.HasPrefix(classification, "classification") {
-		// Remove "classification" prefix and any following whitespace/newlines
-		classification = strings.TrimSpace(strings.TrimPrefix(classification, "classification"))
-		// Remove any remaining colons or newlines
-		classification = strings.TrimSpace(strings.TrimLeft(classification, ":\n"))
+	const prefix = "classification"
+	if len(classification) > len(prefix) && strings.EqualFold(classification[:len(prefix)], prefix) {
+		// Remove the prefix case-insensitively, then clean up separators
+		classification = strings.TrimSpace(classification[len(prefix):])
+		classification = strings.TrimPrefix(classification, ":")
+		classification = strings.TrimSpace(classification)
 	}
 
 	// Get route for this classification

@@ -448,16 +448,12 @@ func (p *XMLParser) escapeXMLEntities(xmlContent string) string {
 
 // e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking...".
 func (p *XMLParser) stripFieldPrefix(content, fieldName string) string {
-	// Check if content starts with "fieldname:" pattern
+	// Check if content starts with "fieldname:" pattern (case-insensitive)
 	prefix := fieldName + ":"
 	if strings.HasPrefix(strings.ToLower(content), strings.ToLower(prefix)) {
-		// Remove the prefix and any following whitespace/newlines
-		stripped := strings.TrimPrefix(content, prefix)
-		if !strings.HasPrefix(stripped, " ") && !strings.HasPrefix(stripped, "\n") {
-			// Try case-insensitive removal
-			stripped = content[len(prefix):]
-		}
-		return strings.TrimLeft(stripped, " \n\t")
+		// Slice the string after the prefix (works regardless of casing)
+		// then trim any whitespace/newlines
+		return strings.TrimLeft(content[len(prefix):], " \n\t")
 	}
 	return content
 }
