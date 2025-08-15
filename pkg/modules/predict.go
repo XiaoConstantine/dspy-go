@@ -100,19 +100,31 @@ func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
 // WithTextOutput disables XML output and uses traditional text-based parsing.
 // This is an escape hatch for users who prefer the original behavior.
 //
-// WARNING: Currently clears ALL interceptors when switching to text mode,
-// including any custom logging, caching, or other interceptors you may have configured.
+// IMPORTANT: This method currently removes ALL interceptors from the module,
+// not just XML-related ones. This means any custom interceptors you've configured
+// (such as logging, caching, or metrics) will also be removed.
 //
-// TODO: Implement selective removal of only XML-related interceptors by:
-//   - Adding interceptor tagging/identification mechanism
-//   - Filtering interceptors by type rather than clearing all
-//   - Preserving non-XML interceptors (logging, caching, etc.)
+// TODO(#interceptor-preservation): Implement selective removal of only XML interceptors.
+// This requires an interceptor identification mechanism since interceptors are function types.
+// Possible solutions:
+//   1. Wrap interceptors in a struct with metadata
+//   2. Maintain a separate list of XML interceptor indices
+//   3. Use a registry pattern for interceptor management
+//
+// Until this is fixed, if you need to preserve custom interceptors:
+//   1. Save your interceptors before calling WithTextOutput()
+//   2. Re-add them after calling WithTextOutput()
+//
+// Example workaround:
+//   customInterceptors := predict.GetInterceptors()[:2] // Save first 2 custom interceptors
+//   predict.WithTextOutput()
+//   predict.SetInterceptors(customInterceptors) // Re-add them
 func (p *Predict) WithTextOutput() *Predict {
 	p.enableXMLMode = false
 	p.xmlConfig = nil
 
-	// For now, clear all interceptors when switching to text mode
-	// This ensures clean text-based behavior but removes other interceptors too
+	// WARNING: This clears ALL interceptors, not just XML ones
+	// See TODO above for future improvement
 	p.SetInterceptors([]core.ModuleInterceptor{})
 
 	return p

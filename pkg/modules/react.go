@@ -510,63 +510,11 @@ func (r *ReAct) parseActionStruct(ctx context.Context, actionStruct map[string]i
 	return "", nil, fmt.Errorf("unable to extract tool information from structured action: %+v", actionStruct)
 }
 
-// parseActionWithInterceptors uses XML interceptors to parse action strings.
-// This provides enhanced error handling, validation, and security features.
+// parseActionWithInterceptors uses the centralized XML parser to parse action strings.
+// This provides enhanced error handling, validation, security features, and consistency
+// with the main XML interceptor implementation.
 func (r *ReAct) parseActionWithInterceptors(ctx context.Context, actionStr string) (string, map[string]interface{}, error) {
-	// Use the XML config to parse the action with enhanced validation
-	if len(actionStr) > int(r.XMLConfig.MaxSize) {
-		return "", nil, fmt.Errorf("action size (%d bytes) exceeds limit (%d bytes)",
-			len(actionStr), r.XMLConfig.MaxSize)
-	}
-
-	// Direct XML parsing with config validation and security features
-	var xmlAction tools.XMLAction
-	if err := xml.Unmarshal([]byte(actionStr), &xmlAction); err != nil {
-		if r.XMLConfig.FallbackToText {
-			// Try extracting XML content from potentially mixed text
-			xmlContent := r.extractXMLFromText(actionStr)
-			if xmlContent != "" {
-				if err := xml.Unmarshal([]byte(xmlContent), &xmlAction); err != nil {
-					return "", nil, fmt.Errorf("XML parsing failed even with extraction: %w", err)
-				}
-			} else {
-				return "", nil, fmt.Errorf("no valid XML found in action: %w", err)
-			}
-		} else {
-			return "", nil, fmt.Errorf("XML parsing failed: %w", err)
-		}
-	}
-
-	// Validate parsed action
-	if xmlAction.ToolName == "" && xmlAction.Content == "" {
-		return "", nil, fmt.Errorf("action missing both tool_name and content")
-	}
-
-	// Handle finish actions that might use Content field (for backward compatibility)
-	toolName := xmlAction.ToolName
-	if strings.ToLower(xmlAction.ToolName) == "finish" ||
-		strings.ToLower(strings.TrimSpace(xmlAction.Content)) == "finish" {
-		toolName = "finish"
-	}
-
-	// Get arguments with enhanced validation
-	argsMap := xmlAction.GetArgumentsMap()
-
-	return toolName, argsMap, nil
-}
-
-// extractXMLFromText extracts XML content from mixed text, similar to the interceptor logic.
-func (r *ReAct) extractXMLFromText(text string) string {
-	// Look for XML tags
-	start := strings.Index(text, "<")
-	if start == -1 {
-		return ""
-	}
-
-	end := strings.LastIndex(text, ">")
-	if end == -1 || end <= start {
-		return ""
-	}
-
-	return text[start : end+1]
+	// Use the centralized ParseXMLAction function from the interceptors package
+	// This ensures consistency with the main XML parsing logic and avoids duplication
+	return interceptors.ParseXMLAction(actionStr, *r.XMLConfig)
 }

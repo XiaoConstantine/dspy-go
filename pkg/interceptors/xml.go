@@ -603,3 +603,81 @@ func CreateXMLInterceptorChain(config XMLConfig, additionalInterceptors ...core.
 
 	return chain
 }
+
+// ParseXMLAction parses an action string from ReAct module into tool name and arguments.
+// This provides a centralized, robust XML parsing implementation for action strings.
+// It handles security limits, entity escaping, and fallback logic.
+func ParseXMLAction(actionStr string, config XMLConfig) (toolName string, arguments map[string]interface{}, err error) {
+	// Check size limits
+	if len(actionStr) > int(config.MaxSize) {
+		return "", nil, fmt.Errorf("action size (%d bytes) exceeds limit (%d bytes)",
+			len(actionStr), config.MaxSize)
+	}
+
+	// Create a parser instance
+	parser := &XMLParser{
+		config: config,
+		cache:  make(map[string]*ParsedSignature),
+	}
+
+	// Extract XML content from potentially mixed text
+	xmlContent := parser.extractXMLContent(actionStr)
+	if xmlContent == "" && config.FallbackToText {
+		// Try to find XML in the raw string
+		xmlContent = actionStr
+	}
+	if xmlContent == "" {
+		return "", nil, fmt.Errorf("no valid XML found in action")
+	}
+
+	// Pre-process XML to escape common unescaped entities
+	xmlContent = parser.escapeXMLEntities(xmlContent)
+
+	// Parse the XML
+	type XMLAction struct {
+		XMLName   xml.Name `xml:"action"`
+		ToolName  string   `xml:"tool_name"`
+		Arguments struct {
+			Args []struct {
+				Key     string `xml:"key,attr"`
+				Content string `xml:",chardata"`
+			} `xml:"arg"`
+		} `xml:"arguments"`
+		Content string `xml:",chardata"` // For backward compatibility with simpler format
+	}
+
+	var xmlAction XMLAction
+	if err := xml.Unmarshal([]byte(xmlContent), &xmlAction); err != nil {
+		if config.FallbackToText {
+			// Try a simpler format for backward compatibility
+			// Check if it's just "finish" or similar
+			actionStr = strings.TrimSpace(actionStr)
+			if strings.ToLower(actionStr) == "finish" {
+				return "finish", make(map[string]interface{}), nil
+			}
+		}
+		return "", nil, fmt.Errorf("XML parsing failed: %w", err)
+	}
+
+	// Extract tool name
+	toolName = xmlAction.ToolName
+	if toolName == "" && xmlAction.Content != "" {
+		// Backward compatibility: check content field
+		toolName = strings.TrimSpace(xmlAction.Content)
+	}
+
+	// Handle finish action
+	if strings.ToLower(toolName) == "finish" {
+		return "finish", make(map[string]interface{}), nil
+	}
+
+	// Extract arguments
+	arguments = make(map[string]interface{})
+	for _, arg := range xmlAction.Arguments.Args {
+		if arg.Key != "" {
+			arguments[arg.Key] = arg.Content
+		}
+	}
+
+	return toolName, arguments, nil
+}
