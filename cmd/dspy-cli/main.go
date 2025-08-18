@@ -26,6 +26,7 @@ func init() {
 	rootCmd.AddCommand(commands.NewListCommand())
 	rootCmd.AddCommand(commands.NewDescribeCommand())
 	rootCmd.AddCommand(commands.NewRecommendCommand())
+	rootCmd.AddCommand(commands.NewTryCommand())
 }
 
 func main() {

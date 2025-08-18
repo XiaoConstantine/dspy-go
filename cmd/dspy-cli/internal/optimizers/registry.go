@@ -15,7 +15,7 @@ type OptimizerInfo struct {
 
 var Registry = map[string]OptimizerInfo{
 	"bootstrap": {
-		Name:        "BootstrapFewShot",
+		Name:        "BootstrapFewShot ✅",
 		Description: "Automatically selects high-quality examples for few-shot learning",
 		UseCase:     "Quick improvements with minimal computational cost",
 		Complexity:  "Low",
@@ -30,7 +30,7 @@ var Registry = map[string]OptimizerInfo{
 		Example: "Simple Q&A tasks, basic classification",
 	},
 	"mipro": {
-		Name:        "MIPRO",
+		Name:        "MIPRO ✅",
 		Description: "Multi-step Interactive Prompt Optimization using Tree-structured Parzen Estimator",
 		UseCase:     "Systematic optimization with good balance of cost and performance",
 		Complexity:  "Medium",
@@ -45,7 +45,7 @@ var Registry = map[string]OptimizerInfo{
 		Example: "Math problem solving, multi-hop reasoning",
 	},
 	"simba": {
-		Name:        "SIMBA",
+		Name:        "SIMBA ✅",
 		Description: "Stochastic Introspective Mini-Batch Ascent with self-improving capabilities",
 		UseCase:     "Advanced optimization with introspective learning",
 		Complexity:  "High",
@@ -60,7 +60,7 @@ var Registry = map[string]OptimizerInfo{
 		Example: "Complex reasoning, adaptive problem solving",
 	},
 	"gepa": {
-		Name:        "GEPA",
+		Name:        "GEPA ✅",
 		Description: "Generative Evolutionary Prompt Adaptation with multi-objective Pareto optimization",
 		UseCase:     "State-of-the-art optimization for the most demanding tasks",
 		Complexity:  "Very High",
@@ -70,12 +70,12 @@ var Registry = map[string]OptimizerInfo{
 			"Cutting-edge performance requirements",
 			"Multi-objective optimization",
 			"Complex semantic understanding",
-			"When computational cost is not a constraint",
+			"Research and experimentation",
 		},
 		Example: "Advanced NLP tasks, research-grade optimization",
 	},
 	"copro": {
-		Name:        "COPRO",
+		Name:        "COPRO ✅",
 		Description: "Collaborative Prompt Optimization for multi-module scenarios",
 		UseCase:     "Optimizing multiple modules working together",
 		Complexity:  "Medium-High",
@@ -88,21 +88,6 @@ var Registry = map[string]OptimizerInfo{
 			"Coordinated reasoning tasks",
 		},
 		Example: "Multi-step workflows, complex pipelines",
-	},
-	"tpe": {
-		Name:        "TPE",
-		Description: "Tree-structured Parzen Estimator for Bayesian hyperparameter optimization",
-		UseCase:     "Systematic hyperparameter tuning with Bayesian optimization",
-		Complexity:  "Medium",
-		ComputeCost: "Medium (Bayesian search)",
-		Convergence: "Systematic",
-		BestFor: []string{
-			"Hyperparameter optimization",
-			"Systematic parameter search",
-			"When you need explainable optimization",
-			"Configuration tuning",
-		},
-		Example: "Model configuration, parameter tuning",
 	},
 }
 
@@ -128,13 +113,13 @@ func GetRecommendation(useCase string) []string {
 	case "beginner", "simple", "quick":
 		recommendations = append(recommendations, "bootstrap")
 	case "balanced", "moderate", "systematic":
-		recommendations = append(recommendations, "mipro", "tpe")
+		recommendations = append(recommendations, "bootstrap", "simba")
 	case "advanced", "complex", "research":
-		recommendations = append(recommendations, "simba", "gepa")
+		recommendations = append(recommendations, "simba", "copro")
 	case "multi-module", "pipeline", "collaborative":
 		recommendations = append(recommendations, "copro")
 	default:
-		recommendations = append(recommendations, "bootstrap", "mipro")
+		recommendations = append(recommendations, "bootstrap", "simba")
 	}
 
 	return recommendations

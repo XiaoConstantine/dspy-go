@@ -33,7 +33,28 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 go get github.com/XiaoConstantine/dspy-go
 ```
 
-## Quick Start
+## 🚀 Quick Start with CLI (Recommended)
+
+**New to DSPy-Go?** Try our interactive CLI tool to explore optimizers instantly:
+
+```bash
+# Build and try the CLI
+cd cmd/dspy-cli
+go build -o dspy-cli
+
+# Set your API key
+export GEMINI_API_KEY="your-api-key-here"
+
+# Explore optimizers without writing any code
+./dspy-cli list                                    # See all optimizers
+./dspy-cli try bootstrap --dataset gsm8k          # Test Bootstrap with math problems
+./dspy-cli try mipro --dataset gsm8k --verbose    # Advanced systematic optimization
+./dspy-cli recommend balanced                      # Get optimizer recommendations
+```
+
+The CLI eliminates 60+ lines of boilerplate code and lets you test all optimizers (Bootstrap, MIPRO, SIMBA, GEPA, COPRO) with sample datasets instantly. **[→ Full CLI Documentation](cmd/dspy-cli/README.md)**
+
+## Programming Quick Start
 
 Here's a simple example to get you started with DSPy-Go:
 
@@ -983,6 +1004,17 @@ The framework tests:
 Results are saved as JSON files with detailed compatibility analysis and recommendations.
 
 ## Examples
+
+### 🎯 CLI Tool (Zero Code Required)
+
+**[DSPy-CLI](cmd/dspy-cli/README.md)**: Interactive command-line tool for exploring optimizers without writing code. Perfect for getting started, testing optimizers, and rapid experimentation.
+
+```bash
+cd cmd/dspy-cli && go build -o dspy-cli
+./dspy-cli try mipro --dataset gsm8k --max-examples 5 --verbose
+```
+
+### 📚 Code Examples
 
 Check the examples directory for complete implementations:
 
