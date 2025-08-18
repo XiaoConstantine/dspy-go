@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/commands"
 )
 
 var rootCmd = &cobra.Command{
@@ -19,6 +20,12 @@ The CLI provides:
 - Guided optimization workflows
 - Results visualization and export`,
 	Version: "0.1.0",
+}
+
+func init() {
+	rootCmd.AddCommand(commands.NewListCommand())
+	rootCmd.AddCommand(commands.NewDescribeCommand())
+	rootCmd.AddCommand(commands.NewRecommendCommand())
 }
 
 func main() {
