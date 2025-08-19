@@ -141,7 +141,11 @@ func GetSampleDataset(name string) (SampleDataset, bool) {
 	}
 }
 
-// ListAvailableDatasets returns all available sample datasets
+// ListAvailableDatasets returns all available sample datasets with descriptions
 func ListAvailableDatasets() []string {
-	return []string{"gsm8k", "hotpotqa", "qa"}
+	return []string{
+		"gsm8k (Grade School Math 8K)",
+		"hotpotqa (HotPotQA)",
+		"qa (Simple Q&A)",
+	}
 }

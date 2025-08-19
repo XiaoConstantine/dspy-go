@@ -21,6 +21,7 @@ type OptimizerConfig struct {
 	APIKey        string
 	MaxExamples   int
 	Verbose       bool
+	SuppressLogs  bool // Suppress console output for TUI mode
 }
 
 // RunResult holds the results of an optimizer run
@@ -46,7 +47,7 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 	}
 
 	// Setup logging
-	setupLogging(config.Verbose)
+	setupLogging(config.Verbose, config.SuppressLogs)
 
 	// Create context
 	ctx := core.WithExecutionState(context.Background())
@@ -192,10 +193,20 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 	return result, nil
 }
 
-func setupLogging(verbose bool) {
+func setupLogging(verbose bool, suppressLogs bool) {
 	severity := logging.INFO
 	if verbose {
 		severity = logging.DEBUG
+	}
+
+	// If suppressing logs (TUI mode), use a no-op logger
+	if suppressLogs {
+		logger := logging.NewLogger(logging.Config{
+			Severity: logging.ERROR, // Only show critical errors
+			Outputs:  []logging.Output{}, // No outputs
+		})
+		logging.SetLogger(logger)
+		return
 	}
 
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))

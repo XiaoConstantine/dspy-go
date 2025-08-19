@@ -31,6 +31,8 @@ type TaskOption struct {
 func NewWelcomeModel() WelcomeModel {
 	return WelcomeModel{
 		selectedOption: 0,
+		width:          80,  // Default width to prevent loading screen
+		height:         24,  // Default height to prevent loading screen
 		options: []TaskOption{
 			{
 				Icon:        "🧮",
@@ -168,7 +170,7 @@ func (m WelcomeModel) View() string {
 	var content []string
 
 	// Hero section
-	hero := styles.HeroStyle.Render("🚀 Welcome to DSPy-Go Optimizer Explorer v2.0")
+	hero := styles.HeroStyle.Render("🚀 Welcome to DSPy-Go Optimizer Explorer")
 	content = append(content, hero)
 	content = append(content, "")
 
@@ -249,4 +251,9 @@ func (m WelcomeModel) GetRecommendation() string {
 // GetNextScreen returns the next screen to navigate to
 func (m WelcomeModel) GetNextScreen() string {
 	return m.nextScreen
+}
+
+// ResetNavigation clears the next screen state
+func (m *WelcomeModel) ResetNavigation() {
+	m.nextScreen = ""
 }

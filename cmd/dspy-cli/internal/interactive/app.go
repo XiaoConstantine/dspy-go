@@ -1,7 +1,7 @@
 package interactive
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/models"
@@ -11,6 +11,7 @@ import (
 const (
 	ScreenWelcome          = "welcome"
 	ScreenOptimizerDetail  = "optimizer_detail"
+	ScreenConfig           = "config"
 	ScreenComparisonStudio = "comparison_studio"
 	ScreenWizard          = "recommendation_wizard"
 	ScreenLiveOptimization = "live_optimization"
@@ -19,11 +20,14 @@ const (
 
 // AppModel is the main application model that manages all screens
 type AppModel struct {
-	currentScreen string
-	welcome       models.WelcomeModel
-	width         int
-	height        int
-	quitting      bool
+	currentScreen    string
+	welcome          models.WelcomeModel
+	optimizerDetail  models.OptimizerDetailModel
+	config           models.ConfigModel
+	comparison       models.ComparisonModel
+	width            int
+	height           int
+	quitting         bool
 }
 
 // NewApp creates a new interactive application
@@ -51,6 +55,25 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update all models with new size
 		welcomeModel, _ := m.welcome.Update(msg)
 		m.welcome = welcomeModel.(models.WelcomeModel)
+
+		// Update optimizer detail model if it exists
+		if m.currentScreen == ScreenOptimizerDetail {
+			optimizerModel, _ := m.optimizerDetail.Update(msg)
+			m.optimizerDetail = optimizerModel.(models.OptimizerDetailModel)
+		}
+
+		// Update config model if it exists
+		if m.currentScreen == ScreenConfig {
+			configModel, _ := m.config.Update(msg)
+			m.config = configModel.(models.ConfigModel)
+		}
+
+		// Update comparison model if it exists
+		if m.currentScreen == ScreenComparisonStudio {
+			comparisonModel, _ := m.comparison.Update(msg)
+			m.comparison = comparisonModel.(models.ComparisonModel)
+		}
+
 		return m, nil
 
 	case tea.KeyMsg:
@@ -69,29 +92,116 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check if we need to transition to a new screen
 		if nextScreen := m.welcome.GetNextScreen(); nextScreen != "" {
-			m.currentScreen = nextScreen
+			if nextScreen == "optimizer_detail" {
+				// Extract optimizer name from welcome screen selection
+				optimizer := m.extractOptimizerFromSelection()
+				m.optimizerDetail = models.NewOptimizerDetailModel(optimizer)
+				// Ensure the new model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.optimizerDetail.Update(windowMsg)
+					m.optimizerDetail = newModel.(models.OptimizerDetailModel)
+				}
+				m.currentScreen = ScreenOptimizerDetail
+			} else if nextScreen == "comparison_studio" {
+				m.comparison = models.NewComparisonModel()
+				// Ensure the new model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.comparison.Update(windowMsg)
+					m.comparison = newModel.(models.ComparisonModel)
+				}
+				m.currentScreen = ScreenComparisonStudio
+			} else {
+				m.currentScreen = nextScreen
+			}
+			// Reset navigation state to prevent infinite loops
+			m.welcome.ResetNavigation()
 		}
 
 		return m, cmd
 
 	case ScreenOptimizerDetail:
-		// Handle navigation in optimizer detail screen
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			switch keyMsg.String() {
-			case "b", "esc":
-				// Go back to welcome
+		newModel, cmd := m.optimizerDetail.Update(msg)
+		m.optimizerDetail = newModel.(models.OptimizerDetailModel)
+
+		// Check for navigation
+		if nextScreen := m.optimizerDetail.GetNextScreen(); nextScreen != "" {
+			if nextScreen == "back" {
 				m.currentScreen = ScreenWelcome
 				m.welcome = models.NewWelcomeModel()
-			case "q":
-				return m, tea.Quit
-			case "enter":
-				// TODO: Launch optimizer
-				return m, nil
-			case "c":
+				// Ensure the new welcome model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.welcome.Update(windowMsg)
+					m.welcome = newModel.(models.WelcomeModel)
+				}
+			} else if nextScreen == "config" {
+				m.config = models.NewConfigModel(m.optimizerDetail.GetOptimizer())
+				// Ensure the new model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.config.Update(windowMsg)
+					m.config = newModel.(models.ConfigModel)
+				}
+				m.currentScreen = ScreenConfig
+			} else if nextScreen == "comparison_studio" {
+				m.comparison = models.NewComparisonModel()
+				// Ensure the new model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.comparison.Update(windowMsg)
+					m.comparison = newModel.(models.ComparisonModel)
+				}
 				m.currentScreen = ScreenComparisonStudio
+			} else {
+				m.currentScreen = nextScreen
 			}
+			// Reset navigation state to prevent infinite loops
+			m.optimizerDetail.ResetNavigation()
 		}
-		return m, nil
+
+		return m, cmd
+
+	case ScreenConfig:
+		newModel, cmd := m.config.Update(msg)
+		m.config = newModel.(models.ConfigModel)
+
+		// Check for navigation
+		if nextScreen := m.config.GetNextScreen(); nextScreen != "" {
+			if nextScreen == "back" {
+				m.currentScreen = ScreenOptimizerDetail
+			} else if nextScreen == "run" {
+				// TODO: Run with custom config
+				m.currentScreen = ScreenOptimizerDetail
+			}
+			// Reset navigation state to prevent infinite loops
+			m.config.ResetNavigation()
+		}
+
+		return m, cmd
+
+	case ScreenComparisonStudio:
+		newModel, cmd := m.comparison.Update(msg)
+		m.comparison = newModel.(models.ComparisonModel)
+
+		// Check for navigation
+		if nextScreen := m.comparison.GetNextScreen(); nextScreen != "" {
+			if nextScreen == "back" {
+				m.currentScreen = ScreenWelcome
+				m.welcome = models.NewWelcomeModel()
+				// Ensure the new welcome model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.welcome.Update(windowMsg)
+					m.welcome = newModel.(models.WelcomeModel)
+				}
+			}
+			// Reset navigation state to prevent infinite loops
+			m.comparison.ResetNavigation()
+		}
+
+		return m, cmd
 
 	// Add more screens as we implement them
 	default:
@@ -109,11 +219,13 @@ func (m AppModel) View() string {
 	case ScreenWelcome:
 		return m.welcome.View()
 
-	// Placeholder for other screens
+	// Actual screens
 	case ScreenOptimizerDetail:
-		return m.renderOptimizerDetail()
+		return m.optimizerDetail.View()
+	case ScreenConfig:
+		return m.config.View()
 	case ScreenComparisonStudio:
-		return m.renderComparisonStudio()
+		return m.comparison.View()
 	case ScreenWizard:
 		return m.renderWizard()
 	default:
@@ -121,43 +233,26 @@ func (m AppModel) View() string {
 	}
 }
 
-// Placeholder methods for other screens (to be implemented)
-func (m AppModel) renderOptimizerDetail() string {
+// extractOptimizerFromSelection extracts the optimizer name from the current welcome selection
+func (m AppModel) extractOptimizerFromSelection() string {
+	// Get the recommendation and extract optimizer name
 	recommendation := m.welcome.GetRecommendation()
-
-	// For now, return a better formatted detail view
-	return fmt.Sprintf(`
-┌─ DSPy-CLI Optimizer Detail ─────────────────────────────────────────┐
-│                                                                     │
-│ 🎯 Recommended Optimizer                                            │
-│                                                                     │
-│ %s                                                                  │
-│                                                                     │
-│ 📊 Quick Actions:                                                  │
-│ • Press [Enter] to try this optimizer with sample data             │
-│ • Press [c] to compare with other optimizers                       │
-│ • Press [d] for detailed documentation                             │
-│ • Press [b] to go back                                             │
-│ • Press [q] to quit                                                │
-│                                                                     │
-│ Coming soon: Live optimization visualization!                       │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-`, recommendation)
+	// Parse the recommendation to get optimizer name
+	if strings.Contains(recommendation, "MIPRO") {
+		return "mipro"
+	} else if strings.Contains(recommendation, "SIMBA") {
+		return "simba"
+	} else if strings.Contains(recommendation, "Bootstrap") {
+		return "bootstrap"
+	} else if strings.Contains(recommendation, "COPRO") {
+		return "copro"
+	} else if strings.Contains(recommendation, "GEPA") {
+		return "gepa"
+	}
+	// Default fallback
+	return "bootstrap"
 }
 
-func (m AppModel) renderComparisonStudio() string {
-	return `
-⚔️ Comparison Studio
-
-Compare all optimizers side-by-side!
-
-Coming soon...
-
-[Press q to go back]
-`
-}
 
 func (m AppModel) renderWizard() string {
 	return `
