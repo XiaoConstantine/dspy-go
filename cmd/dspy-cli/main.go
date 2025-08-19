@@ -27,6 +27,17 @@ func init() {
 	rootCmd.AddCommand(commands.NewDescribeCommand())
 	rootCmd.AddCommand(commands.NewRecommendCommand())
 	rootCmd.AddCommand(commands.NewTryCommand())
+	rootCmd.AddCommand(commands.NewInteractiveCommand())
+
+	// Make interactive mode the default when no command is specified
+	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			// Run interactive mode by default
+			interactiveCmd := commands.NewInteractiveCommand()
+			return interactiveCmd.RunE(cmd, args)
+		}
+		return cmd.Help()
+	}
 }
 
 func main() {
