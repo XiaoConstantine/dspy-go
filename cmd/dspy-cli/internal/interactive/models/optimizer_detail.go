@@ -320,20 +320,3 @@ type runCompleteMsg struct {
 type runProgressMsg struct {
 	message string
 }
-
-type spinnerTickMsg struct{}
-
-// extractDatasetKey extracts the dataset key from display string
-// e.g., "gsm8k (Grade School Math 8K)" → "gsm8k"
-func extractDatasetKey(display string) string {
-	if idx := strings.Index(display, " ("); idx != -1 {
-		return display[:idx]
-	}
-	return display
-}
-
-// getSpinnerFrame returns the spinner character for the given frame
-func getSpinnerFrame(frame int) string {
-	spinnerChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	return spinnerChars[frame%len(spinnerChars)]
-}

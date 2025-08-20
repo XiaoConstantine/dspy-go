@@ -116,8 +116,7 @@ func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedOption = 0
 			}
 		case "enter", " ":
-			// TODO(human): Implement handleSelection method here
-			// This should process the user's selection and prepare for the next screen
+			// Process the user's selection and set up the next screen
 			m.handleSelection()
 			return m, nil
 		case "q", "ctrl+c":
@@ -212,6 +211,7 @@ func (m WelcomeModel) View() string {
 		"[↑↓/jk] Navigate",
 		"[Enter] Select",
 		"[Tab] Advanced",
+		"[?] Help",
 		"[q] Quit",
 	}
 	footer := styles.FooterStyle.Render(strings.Join(shortcuts, "  "))

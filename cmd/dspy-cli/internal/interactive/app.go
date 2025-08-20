@@ -16,6 +16,7 @@ const (
 	ScreenWizard          = "recommendation_wizard"
 	ScreenLiveOptimization = "live_optimization"
 	ScreenResults         = "results"
+	ScreenHelp            = "help"
 )
 
 // AppModel is the main application model that manages all screens
@@ -25,9 +26,14 @@ type AppModel struct {
 	optimizerDetail  models.OptimizerDetailModel
 	config           models.ConfigModel
 	comparison       models.ComparisonModel
+	wizard           models.WizardModel
+	liveOptimization models.LiveOptimizationModel
+	results          models.ResultsModel
+	help             models.HelpModel
 	width            int
 	height           int
 	quitting         bool
+	previousScreen   string // For help navigation
 }
 
 // NewApp creates a new interactive application
@@ -82,6 +88,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+
+		// Global help command
+		if msg.String() == "?" || msg.String() == "F1" {
+			m.previousScreen = m.currentScreen
+			m.help = models.NewHelpModel()
+			// Update help model with current window size
+			if m.width > 0 && m.height > 0 {
+				windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+				newModel, _ := m.help.Update(windowMsg)
+				m.help = newModel.(models.HelpModel)
+			}
+			m.currentScreen = ScreenHelp
+			return m, nil
+		}
 	}
 
 	// Route update to current screen
@@ -112,6 +132,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.comparison = newModel.(models.ComparisonModel)
 				}
 				m.currentScreen = ScreenComparisonStudio
+			} else if nextScreen == "recommendation_wizard" {
+				m.wizard = models.NewWizardModel()
+				// Ensure the new model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.wizard.Update(windowMsg)
+					m.wizard = newModel.(models.WizardModel)
+				}
+				m.currentScreen = ScreenWizard
 			} else {
 				m.currentScreen = nextScreen
 			}
@@ -203,6 +232,54 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
+	case ScreenWizard:
+		newModel, cmd := m.wizard.Update(msg)
+		m.wizard = newModel.(models.WizardModel)
+
+		// Check for navigation
+		if nextScreen := m.wizard.GetNextScreen(); nextScreen != "" {
+			if nextScreen == "welcome" {
+				m.currentScreen = ScreenWelcome
+				m.welcome = models.NewWelcomeModel()
+				// Ensure the new welcome model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.welcome.Update(windowMsg)
+					m.welcome = newModel.(models.WelcomeModel)
+				}
+			} else if nextScreen == "config" {
+				// Get recommended optimizer from wizard
+				if rec := m.wizard.GetRecommendation(); rec != nil {
+					m.config = models.NewConfigModel(rec.Optimizer)
+					// Ensure the new model gets the current window size
+					if m.width > 0 && m.height > 0 {
+						windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+						newModel, _ := m.config.Update(windowMsg)
+						m.config = newModel.(models.ConfigModel)
+					}
+					m.currentScreen = ScreenConfig
+				}
+			}
+			// Reset navigation state to prevent infinite loops
+			m.wizard.ResetNavigation()
+		}
+
+		return m, cmd
+
+	case ScreenHelp:
+		newModel, cmd := m.help.Update(msg)
+		m.help = newModel.(models.HelpModel)
+
+		// Check for navigation back
+		if nextScreen := m.help.GetNextScreen(); nextScreen != "" {
+			if nextScreen == "back" {
+				m.currentScreen = m.previousScreen
+				m.help.ResetNavigation()
+			}
+		}
+
+		return m, cmd
+
 	// Add more screens as we implement them
 	default:
 		return m, nil
@@ -227,7 +304,9 @@ func (m AppModel) View() string {
 	case ScreenComparisonStudio:
 		return m.comparison.View()
 	case ScreenWizard:
-		return m.renderWizard()
+		return m.wizard.View()
+	case ScreenHelp:
+		return m.help.View()
 	default:
 		return "Loading..."
 	}

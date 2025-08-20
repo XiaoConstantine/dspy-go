@@ -7,48 +7,68 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Brand Colors
+// Ghost in the Shell + gh-dash Inspired Cyberpunk Theme
 const (
-	DSPyBlue   = "#4A90E2"
-	DSPyGreen  = "#7ED321"
-	DSPyOrange = "#F5A623"
-	DSPyRed    = "#D0021B"
-	DSPyPurple = "#9013FE"
-	DarkBlue   = "#2C3E50"
-	MediumGray = "#9B9B9B"
-	LightGray  = "#F8F9FA"
-	White      = "#FFFFFF"
+	// Primary Cyberpunk Palette
+	CyberCyan     = "#00F5FF"  // Neon cyan - primary accent
+	CyberPurple   = "#6B46C1"  // Deep purple - secondary
+	CyberViolet   = "#A855F7"  // Bright violet - highlights
+	CyberPink     = "#FF006E"  // Magenta - warnings/alerts
+	CyberGreen    = "#00FF88"  // Matrix green - success
+	CyberOrange   = "#FF8500"  // Neon orange - warnings
 
-	// Semantic Colors
-	OptimizedGreen = "#00D09C"
-	ProcessingBlue = "#007AFF"
-	WarningAmber   = "#FF9500"
-	ErrorCrimson   = "#FF3B30"
+	// Background & Structure
+	TerminalBlack = "#0F0F0F"  // Deep black background
+	MatrixDark    = "#1A1B26"  // Tokyo Night inspired dark
+	BorderGray    = "#2D3748"  // Subtle borders
+	TextPrimary   = "#E2E8F0"  // High contrast text
+	TextSecondary = "#94A3B8"  // Muted text
+	TextTertiary  = "#64748B"  // Subtle text
+
+	// Legacy compatibility (mapped to new colors)
+	DSPyBlue   = CyberCyan
+	DSPyGreen  = CyberGreen
+	DSPyPurple = CyberViolet
+	DarkBlue   = MatrixDark
+	White      = TextPrimary
+
+	// Status Colors (GitS inspired)
+	StatusSuccess = "#00FF88"  // Bright green
+	StatusError   = "#FF006E"  // Bright magenta
+	StatusWarning = "#FF8500"  // Neon orange
+	StatusInfo    = "#00F5FF"  // Cyber cyan
+	StatusPending = "#A855F7"  // Violet
 )
 
-// Typography Styles
+// Cyberpunk Typography Styles
 var (
-	// Hierarchy
-	HeroStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(DSPyBlue)).MarginBottom(1)
-	TitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(DarkBlue))
-	HeadingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(DarkBlue))
-	SubheadStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(MediumGray))
-	BodyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(DarkBlue))
-	CaptionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(MediumGray)).Italic(true)
+	// Primary Hierarchy (Ghost in the Shell inspired)
+	HeroStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(CyberCyan)).MarginBottom(1).Underline(true)
+	TitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(CyberViolet)).Background(lipgloss.Color(MatrixDark))
+	HeadingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(TextPrimary))
+	SubheadStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(CyberPurple))
+	BodyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(TextPrimary))
+	CaptionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(TextSecondary)).Italic(true)
 
-	// Semantic
-	SuccessStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color(DSPyGreen)).Bold(true)
-	WarningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color(DSPyOrange)).Bold(true)
-	ErrorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(DSPyRed)).Bold(true)
-	InfoStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(DSPyBlue))
-	MutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(MediumGray))
-	HighlightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(DSPyPurple)).Bold(true)
+	// Enhanced Semantic Styles
+	SuccessStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(StatusSuccess)).Bold(true)
+	WarningStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(StatusWarning)).Bold(true)
+	ErrorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(StatusError)).Bold(true)
+	InfoStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color(StatusInfo))
+	MutedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(TextTertiary))
+	HighlightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberViolet)).Bold(true)
 
-	// Interactive Elements
-	SelectedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(DSPyGreen)).Bold(true)
-	UnselectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(MediumGray))
-	FocusedStyle    = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(DSPyBlue))
-	BlurredStyle    = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(MediumGray))
+	// Cyberpunk Interactive Elements
+	SelectedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberCyan)).Bold(true).Background(lipgloss.Color(CyberPurple))
+	UnselectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(TextSecondary))
+	FocusedStyle    = lipgloss.NewStyle().BorderStyle(lipgloss.ThickBorder()).BorderForeground(lipgloss.Color(CyberCyan))
+	BlurredStyle    = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(BorderGray))
+
+	// New Cyberpunk Specific Styles
+	GlitchStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberPink)).Bold(true).Strikethrough(true)
+	MatrixStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberGreen)).Background(lipgloss.Color(TerminalBlack))
+	NeonStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberCyan)).Bold(true).Underline(true)
+	TerminalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberGreen)).Background(lipgloss.Color(TerminalBlack)).Padding(0, 1)
 
 	// Layout Components
 	BoxStyle = lipgloss.NewStyle().
