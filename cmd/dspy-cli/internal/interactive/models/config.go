@@ -60,6 +60,7 @@ func NewConfigModel(optimizerName string) ConfigModel {
 		MaxExamples:   5,
 		Verbose:       false,
 		SuppressLogs:  true,
+		Parameters:    make(map[string]interface{}),
 	}
 
 	fields := getFieldsForOptimizer(optimizerName)
@@ -463,14 +464,42 @@ func (m *ConfigModel) startEditing() {
 func (m *ConfigModel) updateFieldValue() {
 	field := &m.fields[m.selectedField]
 
-	if field.Type == "int" {
+	switch field.Type {
+	case "int":
 		if val, err := strconv.Atoi(m.editValue); err == nil {
 			if val >= field.Min && val <= field.Max {
 				field.Value = val
 			}
 		}
-	} else if field.Type == "string" {
+	case "slider":
+		// Handle both integer and float sliders
+		if field.Step < 1 {
+			// Float slider
+			if val, err := strconv.ParseFloat(m.editValue, 64); err == nil {
+				minFloat := float64(field.Min)
+				maxFloat := float64(field.Max)
+				if val >= minFloat && val <= maxFloat {
+					field.Value = val
+				}
+			}
+		} else {
+			// Integer slider
+			if val, err := strconv.Atoi(m.editValue); err == nil {
+				if val >= field.Min && val <= field.Max {
+					field.Value = val
+				}
+			}
+		}
+	case "string":
 		field.Value = m.editValue
+	case "float":
+		if val, err := strconv.ParseFloat(m.editValue, 64); err == nil {
+			minFloat := float64(field.Min)
+			maxFloat := float64(field.Max)
+			if val >= minFloat && val <= maxFloat {
+				field.Value = val
+			}
+		}
 	}
 
 	m.editValue = ""
@@ -479,6 +508,11 @@ func (m *ConfigModel) updateFieldValue() {
 
 // updateConfig updates the internal config based on field values
 func (m *ConfigModel) updateConfig() {
+	// Initialize parameters map if not exists
+	if m.config.Parameters == nil {
+		m.config.Parameters = make(map[string]interface{})
+	}
+
 	for _, field := range m.fields {
 		switch field.Name {
 		case "Dataset":
@@ -488,7 +522,45 @@ func (m *ConfigModel) updateConfig() {
 			m.config.MaxExamples = field.Value.(int)
 		case "Verbose Logging":
 			m.config.Verbose = field.Value.(bool)
+		default:
+			// Store all other parameters in the Parameters map
+			// Convert field name to snake_case parameter name
+			paramName := fieldNameToParameterName(field.Name)
+			m.config.Parameters[paramName] = field.Value
 		}
+	}
+}
+
+// fieldNameToParameterName converts display field names to parameter names
+func fieldNameToParameterName(fieldName string) string {
+	switch fieldName {
+	case "Number of Trials":
+		return "num_trials"
+	case "Mini Batch Size":
+		return "mini_batch_size"
+	case "Learning Rate":
+		return "learning_rate"
+	case "Batch Size":
+		return "batch_size"
+	case "Exploration Rate":
+		return "exploration_rate"
+	case "Population Size":
+		return "population_size"
+	case "Max Generations":
+		return "max_generations"
+	case "Mutation Rate":
+		return "mutation_rate"
+	case "Crossover Rate":
+		return "crossover_rate"
+	case "Temperature":
+		return "temperature"
+	case "API Timeout":
+		return "api_timeout"
+	case "Cache Results":
+		return "cache_results"
+	default:
+		// Default: convert to lowercase and replace spaces with underscores
+		return strings.ToLower(strings.ReplaceAll(fieldName, " ", "_"))
 	}
 }
 

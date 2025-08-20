@@ -22,6 +22,7 @@ type OptimizerConfig struct {
 	MaxExamples   int
 	Verbose       bool
 	SuppressLogs  bool // Suppress console output for TUI mode
+	Parameters    map[string]interface{} // Optimizer-specific parameters
 }
 
 // RunResult holds the results of an optimizer run
