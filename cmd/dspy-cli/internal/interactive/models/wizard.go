@@ -166,17 +166,37 @@ func (m WizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter", " ":
-			// TODO(human): Implement answer selection logic
-			// This function should handle the user's selection and advance to next question
-			// When all questions are answered, call m.generateRecommendation()
-			//
-			// Guidance: Track selected option index, store answer in m.answers map,
-			// increment m.currentQuestion, and check if we're done
+			// Store the selected answer
+			question := m.questions[m.currentQuestion]
+			selectedAnswer := question.Options[m.selectedOption]
+			m.answers[question.ID] = selectedAnswer
+
+			// Move to next question
+			m.currentQuestion++
+			m.selectedOption = 0 // Reset selection for next question
+
+			// Check if we've completed all questions
+			if m.currentQuestion >= len(m.questions) {
+				m.generateRecommendation()
+				m.completed = true
+			}
 			return m, nil
 		case "up", "k":
-			// Handle option selection (implement selection state)
+			// Move selection up
+			if m.selectedOption > 0 {
+				m.selectedOption--
+			} else {
+				// Wrap to bottom
+				m.selectedOption = len(m.questions[m.currentQuestion].Options) - 1
+			}
 		case "down", "j":
-			// Handle option selection (implement selection state)
+			// Move selection down
+			if m.selectedOption < len(m.questions[m.currentQuestion].Options)-1 {
+				m.selectedOption++
+			} else {
+				// Wrap to top
+				m.selectedOption = 0
+			}
 		}
 	}
 
@@ -221,17 +241,21 @@ func (m WizardModel) renderQuestion() string {
 
 	// Options
 	for i, option := range question.Options {
-		optionStyle := styles.BodyStyle
-		cursor := "  "
+		var optionStyle lipgloss.Style
+		var cursor string
 
-		// TODO(human): Add selection highlighting
-		// Implement selectedOption tracking and highlight the current selection
-		// Use styles.SelectedStyle for selected option and cursor "> " for selected
+		// Highlight selected option
+		if i == m.selectedOption {
+			optionStyle = styles.SelectedStyle
+			cursor = styles.IconSelected + " "
+		} else {
+			optionStyle = styles.UnselectedStyle
+			cursor = styles.IconUnselected + " "
+		}
 
 		line := fmt.Sprintf("%s%s", cursor, option)
 		b.WriteString(optionStyle.Render(line))
 		b.WriteString("\n")
-		_ = i // TODO(human): Use this for selection highlighting
 	}
 
 	// Help text
@@ -304,21 +328,157 @@ func (m WizardModel) renderRecommendation() string {
 
 // generateRecommendation creates a recommendation based on answers
 func (m *WizardModel) generateRecommendation() {
-	// TODO(human): Implement recommendation algorithm
-	// This should analyze the answers map and determine the best optimizer
-	//
-	// Guidance: Create decision tree based on task_type, expertise, priority, etc.
-	// Return Recommendation struct with optimizer, confidence, reasoning, and alternatives
-	// Consider combinations like: math+speed=bootstrap, reasoning+accuracy=simba, etc.
+	// Extract answers for decision making
+	taskType := m.answers["task_type"].(string)
+	expertise := m.answers["expertise"].(string)
+	priority := m.answers["priority"].(string)
+	dataSize := m.answers["data_size"].(string)
+	timeBudget := m.answers["time_budget"].(string)
 
-	// Placeholder implementation
-	m.recommendation = &Recommendation{
-		Optimizer:     "MIPRO",
-		Confidence:    85,
-		Reasoning:     "Based on your answers, MIPRO offers the best balance of performance and ease of use for your needs.",
-		Alternatives:  []string{"Bootstrap (faster setup)", "SIMBA (higher accuracy)"},
-		Configuration: make(map[string]interface{}),
+	// Decision tree algorithm
+	var optimizer string
+	var confidence int
+	var reasoning string
+	var alternatives []string
+
+	// Primary decision based on task type and priority
+	switch {
+	case strings.Contains(taskType, "Math") && strings.Contains(priority, "Speed"):
+		optimizer = "Bootstrap"
+		confidence = 90
+		reasoning = "Bootstrap is perfect for mathematical tasks when speed is critical. Its fast convergence makes it ideal for quick optimization cycles."
+		alternatives = []string{"MIPRO (more robust)", "COPRO (collaborative approach)"}
+
+	case strings.Contains(taskType, "Complex reasoning") && strings.Contains(priority, "Accuracy"):
+		optimizer = "SIMBA"
+		confidence = 95
+		reasoning = "SIMBA excels at complex reasoning tasks with its introspective approach, delivering highest accuracy for challenging problems."
+		alternatives = []string{"MIPRO (balanced approach)", "GEPA (experimental features)"}
+
+	case strings.Contains(taskType, "Question answering") && strings.Contains(dataSize, "Large"):
+		optimizer = "MIPRO"
+		confidence = 88
+		reasoning = "MIPRO is optimized for question-answering with large datasets, providing systematic optimization with proven results."
+		alternatives = []string{"COPRO (multi-module)", "Bootstrap (faster iteration)"}
+
+	case strings.Contains(taskType, "Creative writing") || strings.Contains(taskType, "Code generation"):
+		optimizer = "COPRO"
+		confidence = 85
+		reasoning = "COPRO's collaborative multi-module approach excels at creative and generative tasks requiring diverse optimization strategies."
+		alternatives = []string{"SIMBA (deeper reasoning)", "GEPA (cutting-edge methods)"}
+
+	case strings.Contains(priority, "Research") || strings.Contains(expertise, "Expert"):
+		optimizer = "GEPA"
+		confidence = 80
+		reasoning = "GEPA offers cutting-edge evolutionary optimization perfect for research applications and expert users seeking latest methodologies."
+		alternatives = []string{"SIMBA (proven accuracy)", "MIPRO (production-ready)"}
+
+	case strings.Contains(timeBudget, "Quick") || strings.Contains(expertise, "Beginner"):
+		optimizer = "Bootstrap"
+		confidence = 92
+		reasoning = "Bootstrap provides the fastest path to results with minimal complexity, perfect for quick experiments and learning."
+		alternatives = []string{"MIPRO (more features)", "COPRO (scalable approach)"}
+
+	default:
+		// Balanced recommendation for mixed requirements
+		optimizer = "MIPRO"
+		confidence = 85
+		reasoning = "MIPRO provides the best balance of performance, reliability, and ease of use for your varied requirements."
+		alternatives = []string{"Bootstrap (faster)", "SIMBA (more accurate)", "COPRO (collaborative)"}
 	}
+
+	// Adjust confidence based on additional factors
+	if strings.Contains(expertise, "Expert") {
+		confidence += 5 // Expert users can maximize any optimizer
+	}
+	if strings.Contains(dataSize, "Very large") && optimizer != "MIPRO" {
+		confidence -= 10 // Large datasets favor MIPRO
+	}
+	if strings.Contains(timeBudget, "Research") && optimizer == "Bootstrap" {
+		confidence -= 15 // Research time allows for more sophisticated methods
+	}
+
+	// Ensure confidence stays in reasonable range
+	if confidence > 95 {
+		confidence = 95
+	}
+	if confidence < 70 {
+		confidence = 70
+	}
+
+	m.recommendation = &Recommendation{
+		Optimizer:     optimizer,
+		Confidence:    confidence,
+		Reasoning:     reasoning,
+		Alternatives:  alternatives,
+		Configuration: m.generateOptimalConfig(optimizer, expertise, priority),
+	}
+}
+
+// generateOptimalConfig creates optimized configuration based on user profile
+func (m *WizardModel) generateOptimalConfig(optimizer, expertise, priority string) map[string]interface{} {
+	config := make(map[string]interface{})
+
+	// Base configuration based on optimizer
+	switch optimizer {
+	case "Bootstrap":
+		config["max_bootstrapped_demos"] = 4
+		config["max_labeled_demos"] = 16
+	case "MIPRO":
+		config["num_candidates"] = 50
+		config["init_temperature"] = 1.0
+	case "SIMBA":
+		config["num_threads"] = 8
+		config["max_examples"] = 20
+	case "COPRO":
+		config["breadth"] = 10
+		config["depth"] = 3
+	case "GEPA":
+		config["population_size"] = 50
+		config["generations"] = 20
+	}
+
+	// Adjust based on expertise level
+	if strings.Contains(expertise, "Beginner") {
+		// Simpler, more conservative settings
+		if optimizer == "MIPRO" {
+			config["num_candidates"] = 20
+		}
+		if optimizer == "GEPA" {
+			config["population_size"] = 25
+			config["generations"] = 10
+		}
+	} else if strings.Contains(expertise, "Expert") {
+		// More aggressive settings for experts
+		if optimizer == "MIPRO" {
+			config["num_candidates"] = 100
+		}
+		if optimizer == "GEPA" {
+			config["population_size"] = 100
+			config["generations"] = 50
+		}
+	}
+
+	// Adjust based on priority
+	if strings.Contains(priority, "Speed") {
+		// Reduce iteration counts for faster results
+		if optimizer == "MIPRO" {
+			config["num_candidates"] = int(config["num_candidates"].(int) / 2)
+		}
+		if optimizer == "GEPA" {
+			config["generations"] = int(config["generations"].(int) / 2)
+		}
+	} else if strings.Contains(priority, "Accuracy") {
+		// Increase iterations for better results
+		if optimizer == "MIPRO" {
+			config["num_candidates"] = int(config["num_candidates"].(int) * 2)
+		}
+		if optimizer == "GEPA" {
+			config["generations"] = int(config["generations"].(int) * 2)
+		}
+	}
+
+	return config
 }
 
 // getOptimizerIcon returns an appropriate icon for the optimizer

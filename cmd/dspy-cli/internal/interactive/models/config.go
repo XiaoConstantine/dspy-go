@@ -163,7 +163,7 @@ func getFieldsForOptimizer(optimizer string) []ConfigField {
 			Value:       5,
 			Type:        "slider",
 			Min:         1,
-			Max:         20,
+			Max:         1000,
 			Step:        1,
 			Category:    "Basic",
 		},
@@ -498,43 +498,53 @@ func (m ConfigModel) View() string {
 		return "Loading..."
 	}
 
-	var content []string
+	// Calculate column widths
+	leftWidth := (m.width * 2) / 3  // 66% for main content
+	rightWidth := m.width - leftWidth - 2  // 33% for info panel
+
+	// Build left column (main content)
+	var leftContent []string
 
 	// Header with mode toggle
 	header := m.renderHeader()
-	content = append(content, header)
-	content = append(content, "")
+	leftContent = append(leftContent, header)
+	leftContent = append(leftContent, "")
 
 	// Show presets if enabled
 	if m.showPresets {
 		presetView := m.renderPresets()
-		content = append(content, presetView)
+		leftContent = append(leftContent, presetView)
 	} else {
 		// Show configuration fields
 		fieldsView := m.renderFields()
-		content = append(content, fieldsView)
+		leftContent = append(leftContent, fieldsView)
 	}
 
 	// Footer with controls
 	footer := m.renderFooter()
-	content = append(content, footer)
+	leftContent = append(leftContent, footer)
 
-	// Join all content
-	fullContent := lipgloss.JoinVertical(lipgloss.Left, content...)
+	// Join left content
+	leftPanel := lipgloss.JoinVertical(lipgloss.Left, leftContent...)
 
-	// Apply box styling and center
-	boxed := styles.BoxStyle.Copy().
-		Width(min(m.width-4, 120)).
-		Render(fullContent)
+	// Build right column (info panel)
+	rightPanel := m.renderInfoPanel()
 
-	// Center the box
-	return lipgloss.Place(
-		m.width,
-		m.height,
-		lipgloss.Center,
-		lipgloss.Center,
-		boxed,
-	)
+	// Create two-column layout
+	leftBox := styles.BoxStyle.Copy().
+		Width(leftWidth).
+		Height(m.height - 4).
+		Render(leftPanel)
+
+	rightBox := styles.PanelStyle.Copy().
+		Width(rightWidth).
+		Height(m.height - 4).
+		Render(rightPanel)
+
+	// Join horizontally
+	fullView := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
+
+	return fullView
 }
 
 // renderHeader renders the configuration header
@@ -794,6 +804,136 @@ func (m ConfigModel) groupFieldsByCategory() map[string][]int {
 		categories[category] = append(categories[category], i)
 	}
 	return categories
+}
+
+// renderInfoPanel renders the right-side information panel
+func (m ConfigModel) renderInfoPanel() string {
+	var sections []string
+
+	// Show optimizer info
+	sections = append(sections, m.renderOptimizerInfo())
+	sections = append(sections, "")
+
+	// Show current field details if not editing presets
+	if !m.showPresets && m.selectedField < len(m.fields) {
+		fieldInfo := m.renderCurrentFieldInfo()
+		sections = append(sections, fieldInfo)
+		sections = append(sections, "")
+	}
+
+	// Show performance tips
+	performanceTips := m.renderPerformanceTips()
+	sections = append(sections, performanceTips)
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// renderOptimizerInfo shows information about the current optimizer
+func (m ConfigModel) renderOptimizerInfo() string {
+	var info []string
+
+	title := styles.NeonStyle.Render("🤖 " + strings.ToUpper(m.optimizer))
+	info = append(info, title)
+	info = append(info, "")
+
+	switch m.optimizer {
+	case "bootstrap":
+		info = append(info, styles.BodyStyle.Render("⚡ Fast & Simple"))
+		info = append(info, styles.CaptionStyle.Render("• Quick few-shot optimization"))
+		info = append(info, styles.CaptionStyle.Render("• Best for initial testing"))
+		info = append(info, styles.CaptionStyle.Render("• Low resource usage"))
+	case "mipro":
+		info = append(info, styles.BodyStyle.Render("🎯 Balanced & Reliable"))
+		info = append(info, styles.CaptionStyle.Render("• Systematic optimization"))
+		info = append(info, styles.CaptionStyle.Render("• Good for production"))
+		info = append(info, styles.CaptionStyle.Render("• Proven performance"))
+	case "simba":
+		info = append(info, styles.BodyStyle.Render("🧠 Advanced Reasoning"))
+		info = append(info, styles.CaptionStyle.Render("• Introspective approach"))
+		info = append(info, styles.CaptionStyle.Render("• Complex problem solving"))
+		info = append(info, styles.CaptionStyle.Render("• High accuracy potential"))
+	case "gepa":
+		info = append(info, styles.BodyStyle.Render("🧬 Evolutionary Search"))
+		info = append(info, styles.CaptionStyle.Render("• Population-based optimization"))
+		info = append(info, styles.CaptionStyle.Render("• Research-grade results"))
+		info = append(info, styles.CaptionStyle.Render("• Experimental features"))
+	case "copro":
+		info = append(info, styles.BodyStyle.Render("🤝 Collaborative Multi-Module"))
+		info = append(info, styles.CaptionStyle.Render("• Multi-strategy approach"))
+		info = append(info, styles.CaptionStyle.Render("• Good for complex tasks"))
+		info = append(info, styles.CaptionStyle.Render("• Scalable architecture"))
+	default:
+		info = append(info, styles.CaptionStyle.Render("Advanced optimization engine"))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, info...)
+}
+
+// renderCurrentFieldInfo shows details about the currently selected field
+func (m ConfigModel) renderCurrentFieldInfo() string {
+	if m.selectedField >= len(m.fields) {
+		return ""
+	}
+
+	field := m.fields[m.selectedField]
+	var info []string
+
+	title := styles.HighlightStyle.Render("💡 " + field.Name)
+	info = append(info, title)
+	info = append(info, "")
+
+	// Description
+	info = append(info, styles.BodyStyle.Render(field.Description))
+	info = append(info, "")
+
+	// Field-specific tips
+	switch field.Name {
+	case "Max Examples":
+		info = append(info, styles.CaptionStyle.Render("💡 Tips:"))
+		info = append(info, styles.CaptionStyle.Render("• Start with 5-20 for testing"))
+		info = append(info, styles.CaptionStyle.Render("• Use 50+ for production"))
+		info = append(info, styles.CaptionStyle.Render("• Higher = more accurate but slower"))
+		info = append(info, styles.CaptionStyle.Render("• Consider API costs"))
+	case "Temperature":
+		info = append(info, styles.CaptionStyle.Render("💡 Tips:"))
+		info = append(info, styles.CaptionStyle.Render("• 0.0 = deterministic"))
+		info = append(info, styles.CaptionStyle.Render("• 0.7 = balanced"))
+		info = append(info, styles.CaptionStyle.Render("• 1.0 = creative"))
+		info = append(info, styles.CaptionStyle.Render("• Lower for consistent results"))
+	case "Dataset":
+		info = append(info, styles.CaptionStyle.Render("💡 Available:"))
+		info = append(info, styles.CaptionStyle.Render("• gsm8k: Math problems"))
+		info = append(info, styles.CaptionStyle.Render("• hotpotqa: Multi-hop reasoning"))
+		info = append(info, styles.CaptionStyle.Render("• simple: Basic Q&A"))
+	default:
+		if field.Type == "slider" {
+			info = append(info, styles.CaptionStyle.Render(fmt.Sprintf("Range: %d - %d", field.Min, field.Max)))
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, info...)
+}
+
+// renderPerformanceTips shows general performance guidance
+func (m ConfigModel) renderPerformanceTips() string {
+	var tips []string
+
+	title := styles.MatrixStyle.Render("⚡ Performance Tips")
+	tips = append(tips, title)
+	tips = append(tips, "")
+
+	tips = append(tips, styles.CaptionStyle.Render("🚀 For Speed:"))
+	tips = append(tips, styles.CaptionStyle.Render("• Use Bootstrap optimizer"))
+	tips = append(tips, styles.CaptionStyle.Render("• Lower max examples (5-10)"))
+	tips = append(tips, styles.CaptionStyle.Render("• Enable result caching"))
+	tips = append(tips, "")
+
+	tips = append(tips, styles.CaptionStyle.Render("🎯 For Accuracy:"))
+	tips = append(tips, styles.CaptionStyle.Render("• Use MIPRO or SIMBA"))
+	tips = append(tips, styles.CaptionStyle.Render("• Higher max examples (50+)"))
+	tips = append(tips, styles.CaptionStyle.Render("• Lower temperature (0.3)"))
+
+	return lipgloss.JoinVertical(lipgloss.Left, tips...)
 }
 
 // GetNextScreen returns the next screen to navigate to
