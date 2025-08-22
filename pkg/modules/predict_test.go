@@ -807,7 +807,7 @@ func TestPredict_XMLModeBypassesParsing(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
-// TestPredict_XMLMode_RawResponseFix tests the fix for XML interceptor raw response handling
+// TestPredict_XMLMode_RawResponseFix tests the fix for XML interceptor raw response handling.
 func TestPredict_XMLMode_RawResponseFix(t *testing.T) {
 	// Create a mock LLM that returns markdown-wrapped XML
 	mockLLM := new(testutil.MockLLM)
@@ -857,8 +857,7 @@ func TestPredict_XMLMode_RawResponseFix(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
-
-// TestPredict_TextMode_NoRawResponse verifies text mode doesn't include raw response
+// TestPredict_TextMode_NoRawResponse verifies text mode doesn't include raw response.
 func TestPredict_TextMode_NoRawResponse(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
 
@@ -889,7 +888,7 @@ func TestPredict_TextMode_NoRawResponse(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
-// TestPredict_XMLMode_ToggleMode tests switching between XML and text modes
+// TestPredict_XMLMode_ToggleMode tests switching between XML and text modes.
 func TestPredict_XMLMode_ToggleMode(t *testing.T) {
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "input"}}},
