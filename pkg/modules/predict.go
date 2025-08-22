@@ -247,6 +247,11 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 	formattedOutputs := p.FormatOutputs(outputs)
 	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 
+	// Include raw response for XML interceptor processing
+	if p.IsXMLModeEnabled() {
+		formattedOutputs["__raw_response"] = resp.Content
+	}
+
 	span.WithAnnotation("outputs", formattedOutputs)
 
 	return formattedOutputs, nil
@@ -390,6 +395,11 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 	formattedOutputs := p.FormatOutputs(outputs)
 	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 
+	// Include raw response for XML interceptor processing
+	if p.IsXMLModeEnabled() {
+		formattedOutputs["__raw_response"] = resp.Content
+	}
+
 	span.WithAnnotation("outputs", formattedOutputs)
 
 	return formattedOutputs, nil
@@ -520,6 +530,11 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 	cleaned := stripMarkdown(content, p.GetSignature())
 	outputs := parseCompletion(cleaned, signature)
 	formattedOutputs := p.FormatOutputs(outputs)
+
+	// Include raw response for XML interceptor processing
+	if p.IsXMLModeEnabled() {
+		formattedOutputs["__raw_response"] = content
+	}
 
 	// Update execution state with token usage
 	if state := core.GetExecutionState(ctx); state != nil {

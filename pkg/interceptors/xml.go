@@ -127,6 +127,13 @@ func (p *XMLParser) ParseXMLOutputs(ctx context.Context, outputs map[string]any,
 
 // findResponseText locates the text content to parse from outputs.
 func (p *XMLParser) findResponseText(outputs map[string]any) string {
+	// First check for raw response preserved by Predict module in XML mode
+	if rawResp, exists := outputs["__raw_response"]; exists {
+		if textStr, ok := rawResp.(string); ok && textStr != "" {
+			return textStr
+		}
+	}
+
 	// Priority order for finding response text
 	candidates := []string{"response", "output", "result", "answer", "text"}
 

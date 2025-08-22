@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -804,4 +805,111 @@ func TestPredict_XMLModeBypassesParsing(t *testing.T) {
 	assert.Greater(t, len(predict.GetInterceptors()), 0, "Interceptors should be configured")
 
 	mockLLM.AssertExpectations(t)
+}
+
+// TestPredict_XMLMode_RawResponseFix tests the fix for XML interceptor raw response handling
+func TestPredict_XMLMode_RawResponseFix(t *testing.T) {
+	// Create a mock LLM that returns markdown-wrapped XML
+	mockLLM := new(testutil.MockLLM)
+
+	xmlResponse := "```xml\n<response>\n  <answer>Fixed XML parsing</answer>\n  <confidence>High</confidence>\n</response>\n```"
+
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: xmlResponse,
+	}, nil)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{
+			{Field: core.Field{Name: "answer"}},
+			{Field: core.Field{Name: "confidence"}},
+		},
+	)
+
+	predict := NewPredict(signature).
+		WithName("XMLFixTest").
+		WithXMLOutput(interceptors.XMLConfig{
+			StrictParsing:      false,
+			FallbackToText:     true,
+			ValidateXML:        false,
+			MaxDepth:           10,
+			MaxSize:            10000,
+			ParseTimeout:       10 * time.Second,
+			CustomTags:         make(map[string]string),
+			IncludeTypeHints:   false,
+			PreserveWhitespace: false,
+		})
+
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	inputs := map[string]any{"question": "Test question"}
+	outputs, err := predict.Process(ctx, inputs)
+
+	// Verify the fix works - XML should be parsed correctly
+	assert.NoError(t, err)
+	assert.Equal(t, "Fixed XML parsing", outputs["answer"])
+	assert.Equal(t, "High", outputs["confidence"])
+
+	// Verify raw response is cleaned up (not in final output)
+	assert.NotContains(t, outputs, "__raw_response", "Raw response should be cleaned up")
+
+	mockLLM.AssertExpectations(t)
+}
+
+
+// TestPredict_TextMode_NoRawResponse verifies text mode doesn't include raw response
+func TestPredict_TextMode_NoRawResponse(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+
+	textResponse := "answer: Traditional text answer"
+
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: textResponse,
+	}, nil)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}}, // Use NewField like other tests
+	)
+
+	predict := NewPredict(signature) // Text mode (default, no XML)
+	predict.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx) // Add execution state like other tests
+	inputs := map[string]any{"question": "test"}
+	outputs, err := predict.Process(ctx, inputs)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "Traditional text answer", outputs["answer"])
+	assert.NotContains(t, outputs, "__raw_response", "Text mode should not include raw response")
+	assert.False(t, predict.IsXMLModeEnabled(), "Should not be in XML mode")
+
+	mockLLM.AssertExpectations(t)
+}
+
+// TestPredict_XMLMode_ToggleMode tests switching between XML and text modes
+func TestPredict_XMLMode_ToggleMode(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.OutputField{{Field: core.Field{Name: "output"}}},
+	)
+
+	predict := NewPredict(signature)
+
+	// Initially text mode
+	assert.False(t, predict.IsXMLModeEnabled())
+	assert.Nil(t, predict.GetXMLConfig())
+
+	// Switch to XML mode
+	predict.WithXMLOutput(interceptors.DefaultXMLConfig())
+	assert.True(t, predict.IsXMLModeEnabled())
+	assert.NotNil(t, predict.GetXMLConfig())
+	assert.Greater(t, len(predict.GetInterceptors()), 0, "Should have XML interceptors")
+
+	// Switch back to text mode
+	predict.WithTextOutput()
+	assert.False(t, predict.IsXMLModeEnabled())
+	assert.Nil(t, predict.GetXMLConfig())
 }
