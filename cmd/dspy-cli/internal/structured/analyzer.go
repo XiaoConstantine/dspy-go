@@ -792,3 +792,140 @@ func truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen]
 }
+
+// OptimizerRecommendation represents a recommended optimizer with reasoning
+type OptimizerRecommendation struct {
+	Name        string
+	Confidence  float64
+	Reasoning   string
+	BestFor     []string
+	Complexity  string
+	Cost        string
+}
+
+// RecommendOptimizers suggests optimizers based on prompt structure analysis
+func (pa *PromptAnalyzer) RecommendOptimizers(components []PromptComponent) []OptimizerRecommendation {
+	componentTypes := make(map[string]bool)
+	for _, comp := range components {
+		componentTypes[comp.Type] = true
+	}
+
+	foundCount := len(componentTypes)
+	completeness := float64(foundCount) / 10.0 * 100
+
+	var recommendations []OptimizerRecommendation
+
+	// Bootstrap - Great for simple prompts or getting started
+	if completeness < 40 || foundCount <= 4 {
+		recommendations = append(recommendations, OptimizerRecommendation{
+			Name:       "Bootstrap",
+			Confidence: 0.9,
+			Reasoning:  fmt.Sprintf("Your prompt has %.0f%% structural completeness (%d/10 components). Bootstrap is ideal for simple prompts and provides quick improvements with minimal computational cost.", completeness, foundCount),
+			BestFor:    []string{"Simple prompts", "Getting started", "Limited budget", "Fast results"},
+			Complexity: "Low",
+			Cost:       "Low",
+		})
+	}
+
+	// MIPRO - Good for moderate complexity with systematic optimization
+	if completeness >= 30 && completeness <= 80 {
+		confidence := 0.8
+		if foundCount >= 5 && foundCount <= 7 {
+			confidence = 0.95 // Sweet spot for MIPRO
+		}
+		recommendations = append(recommendations, OptimizerRecommendation{
+			Name:       "MIPRO",
+			Confidence: confidence,
+			Reasoning:  fmt.Sprintf("Your prompt shows moderate complexity (%.0f%% complete). MIPRO excels at systematic optimization of prompts with established structure, providing balanced cost/performance.", completeness),
+			BestFor:    []string{"Structured prompts", "Systematic optimization", "Balanced cost/performance"},
+			Complexity: "Medium",
+			Cost:       "Medium",
+		})
+	}
+
+	// SIMBA - For prompts that could benefit from introspective learning
+	if hasIntrospectiveComponents(componentTypes) || completeness >= 60 {
+		confidence := 0.7
+		if componentTypes["Thinking Steps"] || componentTypes["Examples"] {
+			confidence = 0.85
+		}
+		recommendations = append(recommendations, OptimizerRecommendation{
+			Name:       "SIMBA",
+			Confidence: confidence,
+			Reasoning:  "Your prompt has reasoning components that could benefit from SIMBA's introspective learning approach. It's excellent for prompts requiring self-reflection and adaptive learning.",
+			BestFor:    []string{"Self-reflection tasks", "Adaptive learning", "Advanced reasoning"},
+			Complexity: "High",
+			Cost:       "Medium-High",
+		})
+	}
+
+	// GEPA - For well-structured prompts needing cutting-edge optimization
+	if completeness >= 70 {
+		confidence := 0.6 + (completeness-70)/30*0.3 // Scale confidence with completeness
+		recommendations = append(recommendations, OptimizerRecommendation{
+			Name:       "GEPA",
+			Confidence: confidence,
+			Reasoning:  fmt.Sprintf("Your prompt has high structural completeness (%.0f%%). GEPA's evolutionary approach with Pareto optimization can achieve state-of-the-art performance for well-defined prompts.", completeness),
+			BestFor:    []string{"Cutting-edge performance", "Multi-objective optimization", "Research use"},
+			Complexity: "Very High",
+			Cost:       "High",
+		})
+	}
+
+	// COPRO - For multi-component prompts that suggest modular systems
+	if hasModularComponents(componentTypes) || foundCount >= 6 {
+		confidence := 0.7
+		if foundCount >= 8 {
+			confidence = 0.85
+		}
+		recommendations = append(recommendations, OptimizerRecommendation{
+			Name:       "COPRO",
+			Confidence: confidence,
+			Reasoning:  fmt.Sprintf("Your prompt has multiple components (%d found) suggesting a complex system. COPRO's collaborative approach excels at optimizing multi-module systems working together.", foundCount),
+			BestFor:    []string{"Multi-module systems", "Collaborative optimization", "Complex pipelines"},
+			Complexity: "Medium-High",
+			Cost:       "Medium",
+		})
+	}
+
+	// Sort recommendations by confidence (highest first)
+	for i := 0; i < len(recommendations); i++ {
+		for j := i + 1; j < len(recommendations); j++ {
+			if recommendations[j].Confidence > recommendations[i].Confidence {
+				recommendations[i], recommendations[j] = recommendations[j], recommendations[i]
+			}
+		}
+	}
+
+	return recommendations
+}
+
+// hasIntrospectiveComponents checks if prompt has components that benefit from introspection
+func hasIntrospectiveComponents(componentTypes map[string]bool) bool {
+	introspectiveComponents := []string{
+		"Thinking Steps", "Examples", "Conversation History",
+	}
+
+	for _, comp := range introspectiveComponents {
+		if componentTypes[comp] {
+			return true
+		}
+	}
+	return false
+}
+
+// hasModularComponents checks if prompt suggests a modular system
+func hasModularComponents(componentTypes map[string]bool) bool {
+	modularIndicators := []string{
+		"Background Data", "Task Rules", "Examples", "Output Format",
+	}
+
+	count := 0
+	for _, comp := range modularIndicators {
+		if componentTypes[comp] {
+			count++
+		}
+	}
+
+	return count >= 3 // Multiple structured components suggest modularity
+}

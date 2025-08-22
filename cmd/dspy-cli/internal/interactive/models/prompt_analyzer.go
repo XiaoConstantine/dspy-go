@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/structured"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // PromptAnalyzerModel represents the prompt analyzer screen
@@ -18,12 +20,15 @@ type PromptAnalyzerModel struct {
 	analyzer       *structured.PromptAnalyzer
 	currentPrompt  string
 	analysis       []structured.PromptComponent
+	recommendations []structured.OptimizerRecommendation
 	showResults    bool
-	mode           string // "input" or "results"
+	mode           string // "input", "results", "signature", "optimized"
 	inputCursor    int
 	inputLines     []string
 	scrollOffset   int
 	lastInputLen   int // Track input length to detect paste operations
+	signature      interface{} // Store the DSPy signature
+	optimizedSig   interface{} // Store the optimized signature
 }
 
 // NewPromptAnalyzerModel creates a new prompt analyzer model
@@ -64,6 +69,10 @@ func (m PromptAnalyzerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateInput(msg)
 		case "results":
 			return m.updateResults(msg)
+		case "signature":
+			return m.updateSignatureView(msg)
+		case "optimized":
+			return m.updateOptimizedView(msg)
 		}
 	}
 	return m, nil
@@ -124,6 +133,7 @@ func (m PromptAnalyzerModel) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentPrompt = strings.Join(m.inputLines, "\n")
 		if strings.TrimSpace(m.currentPrompt) != "" {
 			m.analysis = m.analyzer.AnalyzePrompt(m.currentPrompt)
+			m.recommendations = m.analyzer.RecommendOptimizers(m.analysis)
 			m.mode = "results"
 			m.showResults = true
 		}
@@ -171,7 +181,7 @@ func (m PromptAnalyzerModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	case "ctrl+c", "esc", "q":
 		m.nextScreen = "back"
 		return m, nil
-	case "n", "enter":
+	case "n":
 		// New analysis
 		m.mode = "input"
 		m.showResults = false
@@ -179,7 +189,24 @@ func (m PromptAnalyzerModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		m.inputCursor = 0
 		m.currentPrompt = ""
 		m.analysis = nil
+		m.signature = nil
+		m.optimizedSig = nil
 		m.scrollOffset = 0 // Reset scroll
+	case "s":
+		// Show DSPy signature
+		if m.signature == nil && len(m.analysis) > 0 {
+			m.signature = m.analyzer.ConvertToSignature(m.analysis)
+		}
+		m.mode = "signature"
+		m.scrollOffset = 0
+	case "o":
+		// Show optimized signature
+		if m.optimizedSig == nil && len(m.analysis) > 0 {
+			originalSig := m.analyzer.ConvertToSignature(m.analysis)
+			m.optimizedSig = m.analyzer.OptimizeToFullStructure(context.Background(), originalSig)
+		}
+		m.mode = "optimized"
+		m.scrollOffset = 0
 	case "up", "k":
 		if m.scrollOffset > 0 {
 			m.scrollOffset--
@@ -206,6 +233,10 @@ func (m PromptAnalyzerModel) View() string {
 		return m.renderInputView()
 	case "results":
 		return m.renderResultsView()
+	case "signature":
+		return m.renderSignatureView()
+	case "optimized":
+		return m.renderOptimizedView()
 	default:
 		return "Unknown mode"
 	}
@@ -411,9 +442,53 @@ func (m PromptAnalyzerModel) renderResultsView() string {
 		content = append(content, "")
 	}
 
+	// Add optimizer recommendations
+	if len(m.recommendations) > 0 {
+		content = append(content, styles.HeadingStyle.Render("🚀 Optimizer Recommendations"))
+
+		for i, rec := range m.recommendations {
+			// Confidence indicator with color
+			confidenceIcon := "⚠️"
+			confidenceColor := "#FFB6C1" // Light pink for low confidence
+			if rec.Confidence >= 0.8 {
+				confidenceIcon = "✅"
+				confidenceColor = "#90EE90" // Light green for high confidence
+			} else if rec.Confidence >= 0.6 {
+				confidenceIcon = "⭐"
+				confidenceColor = "#F0E68C" // Khaki for medium confidence
+			}
+
+			// Header with optimizer name and confidence
+			confidenceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(confidenceColor)).Bold(true)
+			header := fmt.Sprintf("%d. %s %s (%.0f%% confidence)",
+				i+1, rec.Name, confidenceIcon, rec.Confidence*100)
+			content = append(content, confidenceStyle.Render(header))
+
+			// Reasoning (truncated for space)
+			reasoning := truncateString(rec.Reasoning, 65)
+			content = append(content, fmt.Sprintf("   %s", reasoning))
+
+			// Details
+			details := fmt.Sprintf("   Complexity: %s | Cost: %s", rec.Complexity, rec.Cost)
+			content = append(content, styles.InfoStyle.Render(details))
+
+			if i < len(m.recommendations)-1 {
+				content = append(content, "")
+			}
+		}
+
+		// Try command tip
+		content = append(content, "")
+		tryTip := styles.InfoStyle.Render("💡 Try: dspy-cli try <optimizer> --dataset gsm8k --max-examples 5")
+		content = append(content, tryTip)
+		content = append(content, "")
+	}
+
 	// Footer instructions
 	instructions := []string{
 		"[N] New Analysis",
+		"[S] DSPy Signature",
+		"[O] Optimize",
 		"[↑↓] Scroll",
 		"[Q] Back to Menu",
 	}
@@ -428,6 +503,250 @@ func (m PromptAnalyzerModel) renderResultsView() string {
 	safeHeight := max(20, m.height-4)
 	boxWidth := min(safeWidth-4, 80)
 	boxHeight := safeHeight - 4
+
+	// Apply scrolling if content is too long
+	lines := strings.Split(fullContent, "\n")
+	maxLines := boxHeight - 2 // Account for padding
+
+	var scrolledContent string
+	if len(lines) > maxLines {
+		// Ensure scroll offset is within bounds
+		maxScroll := max(0, len(lines)-maxLines)
+		if m.scrollOffset > maxScroll {
+			m.scrollOffset = maxScroll
+		}
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
+		}
+
+		start := m.scrollOffset
+		end := start + maxLines
+		if end > len(lines) {
+			end = len(lines)
+		}
+		scrolledContent = strings.Join(lines[start:end], "\n")
+
+		// Add scroll indicator
+		scrollInfo := fmt.Sprintf(" [%d-%d of %d lines]", start+1, end, len(lines))
+		scrolledContent += "\n" + styles.InfoStyle.Render(scrollInfo)
+	} else {
+		scrolledContent = fullContent
+		m.scrollOffset = 0 // Reset if not needed
+	}
+
+	// Apply fixed-size box
+	boxed := styles.BoxStyle.Copy().
+		Width(boxWidth).
+		Height(boxHeight).
+		Render(scrolledContent)
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		boxed,
+	)
+}
+
+// renderSignatureView renders the DSPy signature
+func (m PromptAnalyzerModel) renderSignatureView() string {
+	var content []string
+
+	// Header
+	header := styles.HeroStyle.Render("📄 DSPy Signature")
+	content = append(content, header)
+	content = append(content, "")
+
+	if m.signature == nil {
+		content = append(content, styles.InfoStyle.Render("No signature available. Press 'Q' to go back."))
+	} else {
+		sig := m.signature.(core.Signature)
+
+		// Inputs section
+		content = append(content, styles.HeadingStyle.Render("📥 Inputs:"))
+		for _, input := range sig.Inputs {
+			inputLine := fmt.Sprintf("  • %s (%s)", input.Name, input.Type)
+			if input.Description != "" {
+				inputLine += fmt.Sprintf("\n    %s", truncateString(input.Description, 60))
+			}
+			content = append(content, inputLine)
+		}
+		content = append(content, "")
+
+		// Outputs section
+		content = append(content, styles.HeadingStyle.Render("📤 Outputs:"))
+		for _, output := range sig.Outputs {
+			outputLine := fmt.Sprintf("  • %s (%s)", output.Name, output.Type)
+			if output.Prefix != "" {
+				outputLine += fmt.Sprintf(" [%s]", output.Prefix)
+			}
+			content = append(content, outputLine)
+		}
+		content = append(content, "")
+
+		// Instruction section
+		if sig.Instruction != "" {
+			content = append(content, styles.HeadingStyle.Render("📝 Instruction:"))
+			lines := strings.Split(sig.Instruction, "\n")
+			for i, line := range lines {
+				if i < 5 && strings.TrimSpace(line) != "" {
+					content = append(content, fmt.Sprintf("  %s", truncateString(line, 70)))
+				}
+			}
+			if len(lines) > 5 {
+				content = append(content, fmt.Sprintf("  ... (%d more lines)", len(lines)-5))
+			}
+			content = append(content, "")
+		}
+
+		// Usage example
+		content = append(content, styles.HeadingStyle.Render("💡 Usage Example:"))
+		content = append(content, "```go")
+		content = append(content, "// Use this signature in your DSPy code:")
+		content = append(content, "module := modules.NewPredict(signature)")
+		content = append(content, "module.SetLLM(llm)")
+		content = append(content, "")
+		content = append(content, "// Process with the structured prompt:")
+		content = append(content, "result, err := module.Process(ctx, inputs)")
+		content = append(content, "```")
+	}
+
+	// Footer instructions
+	instructions := []string{
+		"[O] Optimize",
+		"[N] New Analysis",
+		"[↑↓] Scroll",
+		"[Q] Back to Results",
+	}
+	footer := styles.FooterStyle.Render(strings.Join(instructions, "  "))
+	content = append(content, "")
+	content = append(content, footer)
+
+	return m.renderScrollableContent(content)
+}
+
+// renderOptimizedView renders the optimized signature
+func (m PromptAnalyzerModel) renderOptimizedView() string {
+	var content []string
+
+	// Header
+	header := styles.HeroStyle.Render("⚡ Optimized DSPy Signature")
+	content = append(content, header)
+	content = append(content, "")
+
+	if m.optimizedSig == nil {
+		content = append(content, styles.InfoStyle.Render("No optimized signature available. Press 'Q' to go back."))
+	} else {
+		sig := m.optimizedSig.(core.Signature)
+
+		content = append(content, styles.HeadingStyle.Render("🚀 Full 10-Component Structure"))
+		content = append(content, "This signature includes all essential components for optimal LLM performance:")
+		content = append(content, "")
+
+		// Inputs section with color coding
+		content = append(content, styles.HeadingStyle.Render("📥 Optimized Inputs:"))
+		for _, input := range sig.Inputs {
+			// Determine component type from field name
+			componentType := getComponentTypeFromField(input.Name)
+			componentColor := getComponentColor(componentType)
+			componentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(componentColor)).Bold(true)
+
+			coloredName := componentStyle.Render(input.Name)
+			inputLine := fmt.Sprintf("  • %s (%s)", coloredName, input.Type)
+			if input.Description != "" {
+				inputLine += fmt.Sprintf("\n    %s", truncateString(input.Description, 60))
+			}
+			content = append(content, inputLine)
+		}
+		content = append(content, "")
+
+		// Outputs section
+		content = append(content, styles.HeadingStyle.Render("📤 Outputs:"))
+		for _, output := range sig.Outputs {
+			outputLine := fmt.Sprintf("  • %s (%s)", output.Name, output.Type)
+			if output.Prefix != "" {
+				outputLine += fmt.Sprintf(" [%s]", output.Prefix)
+			}
+			content = append(content, outputLine)
+		}
+		content = append(content, "")
+
+		// Instruction section
+		if sig.Instruction != "" {
+			content = append(content, styles.HeadingStyle.Render("📝 Optimized Instruction:"))
+			lines := strings.Split(sig.Instruction, "\n")
+			for i, line := range lines {
+				if i < 5 && strings.TrimSpace(line) != "" {
+					content = append(content, fmt.Sprintf("  %s", truncateString(line, 70)))
+				}
+			}
+			if len(lines) > 5 {
+				content = append(content, fmt.Sprintf("  ... (%d more lines)", len(lines)-5))
+			}
+			content = append(content, "")
+		}
+
+		// Benefits section
+		content = append(content, styles.HeadingStyle.Render("✨ Optimization Benefits:"))
+		content = append(content, "• Performance improvement: +40-60%")
+		content = append(content, "• Better context awareness")
+		content = append(content, "• More consistent outputs")
+		content = append(content, "• Professional prompt structure")
+		content = append(content, "• Optimized for LLM reasoning")
+		content = append(content, "")
+	}
+
+	// Footer instructions
+	instructions := []string{
+		"[S] Original Signature",
+		"[N] New Analysis",
+		"[↑↓] Scroll",
+		"[Q] Back to Results",
+	}
+	footer := styles.FooterStyle.Render(strings.Join(instructions, "  "))
+	content = append(content, footer)
+
+	return m.renderScrollableContent(content)
+}
+
+// Helper to map field names to component types
+func getComponentTypeFromField(fieldName string) string {
+	fieldToComponent := map[string]string{
+		"task_context":         "Task Context",
+		"tone_context":         "Tone Context",
+		"background_data":      "Background Data",
+		"task_rules":          "Task Rules",
+		"examples":            "Examples",
+		"conversation_history": "Conversation History",
+		"user_request":        "User Request",
+		"thinking_steps":      "Thinking Steps",
+		"role_context":        "Task Context",
+		"tone_guidelines":     "Tone Context",
+		"background_info":     "Background Data",
+		"constraints":         "Task Rules",
+		"demonstrations":      "Examples",
+		"chat_history":        "Conversation History",
+		"user_query":          "User Request",
+		"reasoning_steps":     "Thinking Steps",
+	}
+
+	if component, exists := fieldToComponent[fieldName]; exists {
+		return component
+	}
+	return "User Request" // Default
+}
+
+// renderScrollableContent handles scrolling for signature views
+func (m PromptAnalyzerModel) renderScrollableContent(content []string) string {
+	// Calculate safe dimensions for consistent box size
+	safeWidth := max(40, m.width-4)
+	safeHeight := max(20, m.height-4)
+	boxWidth := min(safeWidth-4, 80)
+	boxHeight := safeHeight - 4
+
+	// Join content
+	fullContent := lipgloss.JoinVertical(lipgloss.Left, content...)
 
 	// Apply scrolling if content is too long
 	lines := strings.Split(fullContent, "\n")
@@ -519,4 +838,93 @@ func (m PromptAnalyzerModel) GetNextScreen() string {
 // ResetNavigation clears the navigation state
 func (m *PromptAnalyzerModel) ResetNavigation() {
 	m.nextScreen = ""
+}
+
+// updateSignatureView handles signature view key presses
+func (m PromptAnalyzerModel) updateSignatureView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "Q":
+		// Return to results view
+		m.mode = "results"
+		m.scrollOffset = 0
+		return m, nil
+	case "o", "O":
+		// Switch to optimized view and generate optimized signature if needed
+		if m.optimizedSig == nil {
+			// Generate optimized signature
+			analyzer := structured.NewPromptAnalyzer()
+			ctx := context.Background()
+			optimizedSig := analyzer.OptimizeToFullStructure(ctx, m.signature.(core.Signature))
+			m.optimizedSig = optimizedSig
+		}
+		m.mode = "optimized"
+		m.scrollOffset = 0
+		return m, nil
+	case "n", "N":
+		// Start new analysis
+		m.mode = "input"
+		m.currentPrompt = ""
+		m.inputLines = []string{""}
+		m.inputCursor = 0
+		m.analysis = nil
+		m.recommendations = nil
+		m.signature = nil
+		m.optimizedSig = nil
+		m.scrollOffset = 0
+		m.showResults = false
+		return m, nil
+	case "up":
+		// Scroll up
+		m.scrollOffset--
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
+		}
+		return m, nil
+	case "down":
+		// Scroll down
+		m.scrollOffset++
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateOptimizedView handles optimized view key presses
+func (m PromptAnalyzerModel) updateOptimizedView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "Q":
+		// Return to results view
+		m.mode = "results"
+		m.scrollOffset = 0
+		return m, nil
+	case "s", "S":
+		// Switch back to original signature view
+		m.mode = "signature"
+		m.scrollOffset = 0
+		return m, nil
+	case "n", "N":
+		// Start new analysis
+		m.mode = "input"
+		m.currentPrompt = ""
+		m.inputLines = []string{""}
+		m.inputCursor = 0
+		m.analysis = nil
+		m.recommendations = nil
+		m.signature = nil
+		m.optimizedSig = nil
+		m.scrollOffset = 0
+		m.showResults = false
+		return m, nil
+	case "up":
+		// Scroll up
+		m.scrollOffset--
+		if m.scrollOffset < 0 {
+			m.scrollOffset = 0
+		}
+		return m, nil
+	case "down":
+		// Scroll down
+		m.scrollOffset++
+		return m, nil
+	}
+	return m, nil
 }

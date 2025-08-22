@@ -119,6 +119,10 @@ func runAnalysis(prompt string, optimize bool, exportPath string) error {
 	// Display analysis using the display package
 	fmt.Print(display.FormatPromptAnalysis(prompt, components))
 
+	// Generate optimizer recommendations
+	recommendations := analyzer.RecommendOptimizers(components)
+	fmt.Print(display.FormatOptimizerRecommendations(recommendations))
+
 	// Convert to signature
 	signature := analyzer.ConvertToSignature(components)
 

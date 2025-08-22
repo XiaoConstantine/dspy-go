@@ -158,6 +158,59 @@ func formatRecommendations(components []structured.PromptComponent) string {
 	return output.String()
 }
 
+// FormatOptimizerRecommendations formats optimizer recommendations based on prompt analysis
+func FormatOptimizerRecommendations(recommendations []structured.OptimizerRecommendation) string {
+	var output strings.Builder
+
+	output.WriteString(fmt.Sprintf("%s%s🚀 Optimizer Recommendations%s\n", ColorBold, ColorGreen, ColorReset))
+	output.WriteString(strings.Repeat("=", 40) + "\n\n")
+
+	if len(recommendations) == 0 {
+		output.WriteString("No specific recommendations available for this prompt structure.\n")
+		return output.String()
+	}
+
+	for i, rec := range recommendations {
+		// Confidence indicator
+		confidenceColor := ColorRed
+		confidenceIcon := "⚠️"
+		if rec.Confidence >= 0.8 {
+			confidenceColor = ColorGreen
+			confidenceIcon = "✅"
+		} else if rec.Confidence >= 0.6 {
+			confidenceColor = ColorYellow
+			confidenceIcon = "⭐"
+		}
+
+		// Header with optimizer name and confidence
+		output.WriteString(fmt.Sprintf("%s%d. %s%s %s%s (%.0f%% confidence)%s\n",
+			ColorBold, i+1, ColorCyan, rec.Name, confidenceIcon, confidenceColor,
+			rec.Confidence*100, ColorReset))
+
+		// Reasoning
+		output.WriteString(fmt.Sprintf("   %s\n", rec.Reasoning))
+
+		// Details
+		output.WriteString(fmt.Sprintf("   %sComplexity:%s %s | %sCost:%s %s\n",
+			ColorPurple, ColorReset, rec.Complexity, ColorPurple, ColorReset, rec.Cost))
+
+		// Best for
+		if len(rec.BestFor) > 0 {
+			output.WriteString(fmt.Sprintf("   %sBest for:%s %s\n",
+				ColorBlue, ColorReset, strings.Join(rec.BestFor, ", ")))
+		}
+
+		if i < len(recommendations)-1 {
+			output.WriteString("\n")
+		}
+	}
+
+	output.WriteString(fmt.Sprintf("\n%s💡 Try:%s dspy-cli try <optimizer> --dataset gsm8k --max-examples 5\n",
+		ColorPurple, ColorReset))
+
+	return output.String()
+}
+
 // FormatSignatureDetails formats DSPy signature information
 func FormatSignatureDetails(sig Signature) string {
 	var output strings.Builder
