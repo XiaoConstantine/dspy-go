@@ -28,6 +28,7 @@ func init() {
 	rootCmd.AddCommand(commands.NewRecommendCommand())
 	rootCmd.AddCommand(commands.NewTryCommand())
 	rootCmd.AddCommand(commands.NewInteractiveCommand())
+	rootCmd.AddCommand(commands.NewAnalyzeCommand())
 
 	// Make interactive mode the default when no command is specified
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {

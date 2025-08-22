@@ -17,6 +17,7 @@ const (
 	ScreenLiveOptimization = "live_optimization"
 	ScreenResults         = "results"
 	ScreenHelp            = "help"
+	ScreenPromptAnalyzer  = "prompt_analyzer"
 )
 
 // AppModel is the main application model that manages all screens
@@ -30,6 +31,7 @@ type AppModel struct {
 	liveOptimization models.LiveOptimizationModel
 	results          models.ResultsModel
 	help             models.HelpModel
+	promptAnalyzer   models.PromptAnalyzerModel
 	width            int
 	height           int
 	quitting         bool
@@ -141,6 +143,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.wizard = newModel.(models.WizardModel)
 				}
 				m.currentScreen = ScreenWizard
+			} else if nextScreen == "prompt_analyzer" {
+				m.promptAnalyzer = models.NewPromptAnalyzerModel()
+				// Ensure the new model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.promptAnalyzer.Update(windowMsg)
+					m.promptAnalyzer = newModel.(models.PromptAnalyzerModel)
+				}
+				m.currentScreen = ScreenPromptAnalyzer
 			} else {
 				m.currentScreen = nextScreen
 			}
@@ -280,6 +291,28 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
+	case ScreenPromptAnalyzer:
+		newModel, cmd := m.promptAnalyzer.Update(msg)
+		m.promptAnalyzer = newModel.(models.PromptAnalyzerModel)
+
+		// Check for navigation back
+		if nextScreen := m.promptAnalyzer.GetNextScreen(); nextScreen != "" {
+			if nextScreen == "back" {
+				m.currentScreen = ScreenWelcome
+				m.welcome = models.NewWelcomeModel()
+				// Ensure the new welcome model gets the current window size
+				if m.width > 0 && m.height > 0 {
+					windowMsg := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+					newModel, _ := m.welcome.Update(windowMsg)
+					m.welcome = newModel.(models.WelcomeModel)
+				}
+			}
+			// Reset navigation state to prevent infinite loops
+			m.promptAnalyzer.ResetNavigation()
+		}
+
+		return m, cmd
+
 	// Add more screens as we implement them
 	default:
 		return m, nil
@@ -307,6 +340,8 @@ func (m AppModel) View() string {
 		return m.wizard.View()
 	case ScreenHelp:
 		return m.help.View()
+	case ScreenPromptAnalyzer:
+		return m.promptAnalyzer.View()
 	default:
 		return "Loading..."
 	}

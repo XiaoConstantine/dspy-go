@@ -77,6 +77,12 @@ func NewWelcomeModel() WelcomeModel {
 				Optimizer:   "comparison",
 			},
 			{
+				Icon:        "🔍",
+				Title:       "Analyze prompt structure",
+				Description: "Visualize and optimize existing prompts",
+				Optimizer:   "analyze",
+			},
+			{
 				Icon:        "❓",
 				Title:       "Help me decide",
 				Description: "Get personalized recommendations",
@@ -153,6 +159,9 @@ func (m *WelcomeModel) handleSelection() {
 	case "wizard":
 		m.recommendation = "Let me ask you a few more questions to find the perfect fit"
 		m.nextScreen = "recommendation_wizard"
+	case "analyze":
+		m.recommendation = "Analyze and optimize your prompt structure"
+		m.nextScreen = "prompt_analyzer"
 	default:
 		m.recommendation = selected.Optimizer
 		m.nextScreen = "optimizer_detail"
