@@ -311,3 +311,17 @@ func (of *OfferFeedback) Clone() core.Module {
 		predict:    of.predict.Clone().(*Predict),
 	}
 }
+
+// NewTypedRefine creates a new type-safe Refine module from a typed signature.
+// Typed modules use text-based parsing by default since they typically rely on prefixes.
+func NewTypedRefine[TInput, TOutput any](module core.Module, config RefineConfig) *Refine {
+	// Note: We don't need to convert to legacy signature since NewRefine takes a Module directly
+
+	refine := NewRefine(module, config)
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	refine.DisplayName = fmt.Sprintf("TypedRefine[%T,%T]", i, o)
+
+	return refine
+}

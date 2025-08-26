@@ -315,6 +315,66 @@ func TestNewTypedSignatureCached(t *testing.T) {
 	assert.Equal(t, nonCachedSig.GetOutputType(), cachedSig.GetOutputType())
 }
 
+func TestZeroConfigStructs(t *testing.T) {
+	// Test Oracle's recommendation: plain structs without tags
+	type PlainInput struct {
+		Question string
+		Context  string
+	}
+
+	type PlainOutput struct {
+		Answer     string
+		Confidence int
+	}
+
+	sig := NewTypedSignature[PlainInput, PlainOutput]()
+	metadata := sig.GetFieldMetadata()
+
+	// Verify field name mapping (Question → question)
+	assert.Equal(t, "question", metadata.Inputs[0].Name)
+	assert.Equal(t, "context", metadata.Inputs[1].Name)
+	assert.Equal(t, "answer", metadata.Outputs[0].Name)
+	assert.Equal(t, "confidence", metadata.Outputs[1].Name)
+
+	// Verify all fields are optional by default
+	assert.False(t, metadata.Inputs[0].Required)
+	assert.False(t, metadata.Inputs[1].Required)
+
+	// Verify auto-generated descriptions
+	assert.Equal(t, "Question", metadata.Inputs[0].Description)
+	assert.Equal(t, "Context", metadata.Inputs[1].Description)
+	assert.Equal(t, "Answer", metadata.Outputs[0].Description)
+	assert.Equal(t, "Confidence", metadata.Outputs[1].Description)
+
+	// Verify Go field names preserved for lookups
+	assert.Equal(t, "Question", metadata.Inputs[0].GoFieldName)
+	assert.Equal(t, "Context", metadata.Inputs[1].GoFieldName)
+}
+
+func TestZeroConfigWithMinimalOverrides(t *testing.T) {
+	// Test Level 1: minimal overrides when needed
+	type InputWithOverrides struct {
+		Question string `dspy:",required"`     // Just mark as required
+		Context  string                       // Uses zero-config defaults
+	}
+
+	type OutputWithOverrides struct {
+		Answer string `dspy:"final_answer"`   // Custom field name only
+	}
+
+	sig := NewTypedSignature[InputWithOverrides, OutputWithOverrides]()
+	metadata := sig.GetFieldMetadata()
+
+	// Verify required override works
+	assert.True(t, metadata.Inputs[0].Required)   // Question is required
+	assert.False(t, metadata.Inputs[1].Required)  // Context uses default (optional)
+
+	// Verify field name override works
+	assert.Equal(t, "question", metadata.Inputs[0].Name)      // Uses lowercase default
+	assert.Equal(t, "context", metadata.Inputs[1].Name)       // Uses lowercase default
+	assert.Equal(t, "final_answer", metadata.Outputs[0].Name) // Uses override
+}
+
 func BenchmarkNewTypedSignature(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = NewTypedSignature[TestInputs, TestOutputs]()

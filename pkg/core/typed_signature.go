@@ -237,17 +237,19 @@ func parseStructFields(t reflect.Type, isInput bool) []FieldMetadata {
 // parseFieldMetadata parses struct tag information for a single field.
 func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 	metadata := FieldMetadata{
-		Name:        field.Name,
-		GoFieldName: field.Name, // Cache the Go field name for efficient lookup
+		Name:        strings.ToLower(field.Name),
+		GoFieldName: field.Name,                 // Cache the Go field name for efficient lookup
 		GoType:      field.Type,
 		Type:        FieldTypeText, // Default to text
+		Required:    false,         // Default to optional
+		Description: field.Name,    // Auto-generate description from field name
 	}
 
-	// Parse dspy struct tag: `dspy:"fieldname,required"`
+	// Parse dspy struct tag: `dspy:"fieldname,required"` (optional overrides)
 	if dspyTag := field.Tag.Get("dspy"); dspyTag != "" {
 		parts := strings.Split(dspyTag, ",")
 		if len(parts) > 0 && parts[0] != "" {
-			metadata.Name = parts[0]
+			metadata.Name = parts[0] // Override the lowercase default
 		}
 
 		// Check for required flag
@@ -259,19 +261,19 @@ func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 		}
 	}
 
-	// Parse description tag
+	// Parse description tag (overrides auto-generated description)
 	if desc := field.Tag.Get("description"); desc != "" {
 		metadata.Description = desc
 	}
 
-	// Set default prefix (field name with colon)
+	// Set default prefix (field name with colon for outputs)
 	if isInput {
 		metadata.Prefix = ""
 	} else {
 		metadata.Prefix = metadata.Name + ":"
 	}
 
-	// Parse prefix tag for outputs
+	// Parse prefix tag for outputs (optional override)
 	if prefix := field.Tag.Get("prefix"); prefix != "" {
 		metadata.Prefix = prefix
 	}

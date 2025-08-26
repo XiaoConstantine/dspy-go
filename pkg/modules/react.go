@@ -518,3 +518,18 @@ func (r *ReAct) parseActionWithInterceptors(ctx context.Context, actionStr strin
 	// This ensures consistency with the main XML parsing logic and avoids duplication
 	return interceptors.ParseXMLAction(actionStr, *r.XMLConfig)
 }
+
+// NewTypedReAct creates a new type-safe ReAct module from a typed signature.
+// Typed modules use text-based parsing by default since they typically rely on prefixes.
+func NewTypedReAct[TInput, TOutput any](registry *tools.InMemoryToolRegistry, maxIters int) *ReAct {
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
+	legacySig := typedSig.ToLegacySignature()
+
+	react := NewReAct(legacySig, registry, maxIters)
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	react.DisplayName = fmt.Sprintf("TypedReAct[%T,%T]", i, o)
+
+	return react
+}

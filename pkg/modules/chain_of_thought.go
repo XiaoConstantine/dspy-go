@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -147,6 +148,21 @@ func (c *ChainOfThought) GetInterceptors() []core.ModuleInterceptor {
 // ClearInterceptors removes all interceptors from this module.
 func (c *ChainOfThought) ClearInterceptors() {
 	c.Predict.ClearInterceptors()
+}
+
+// NewTypedChainOfThought creates a new type-safe ChainOfThought module from a typed signature.
+// Typed modules use text-based parsing by default since they typically rely on prefixes.
+func NewTypedChainOfThought[TInput, TOutput any]() *ChainOfThought {
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
+	legacySig := typedSig.ToLegacySignature()
+
+	cot := NewChainOfThought(legacySig)
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	cot.Predict.DisplayName = fmt.Sprintf("TypedChainOfThought[%T,%T]", i, o)
+
+	return cot
 }
 
 func appendRationaleField(signature core.Signature) core.Signature {

@@ -202,3 +202,18 @@ func (m *MultiChainComparison) SetLLM(llm core.LLM) {
 func (m *MultiChainComparison) GetSignature() core.Signature {
 	return m.BaseModule.GetSignature()
 }
+
+// NewTypedMultiChainComparison creates a new type-safe MultiChainComparison module from a typed signature.
+// Typed modules use text-based parsing by default since they typically rely on prefixes.
+func NewTypedMultiChainComparison[TInput, TOutput any](M int, temperature float64, opts ...core.Option) *MultiChainComparison {
+	typedSig := core.NewTypedSignatureCached[TInput, TOutput]()
+	legacySig := typedSig.ToLegacySignature()
+
+	multiChain := NewMultiChainComparison(legacySig, M, temperature, opts...)
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	multiChain.DisplayName = fmt.Sprintf("TypedMultiChainComparison[%T,%T]", i, o)
+
+	return multiChain
+}

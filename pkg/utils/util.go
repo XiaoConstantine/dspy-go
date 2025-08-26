@@ -91,12 +91,11 @@ func ConvertTypedInputsToLegacy(inputs any) (map[string]any, error) {
 			continue
 		}
 
-		// Get field name from dspy tag or use struct field name
-		fieldName := field.Name
+		fieldName := strings.ToLower(field.Name) // Question → question
 		if dspyTag := field.Tag.Get("dspy"); dspyTag != "" {
 			parts := strings.Split(dspyTag, ",")
 			if len(parts) > 0 && parts[0] != "" {
-				fieldName = parts[0]
+				fieldName = parts[0] // Override lowercase default if specified
 			}
 		}
 

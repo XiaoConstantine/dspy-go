@@ -28,6 +28,7 @@ package modules
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
 
@@ -348,4 +349,18 @@ func (p *Parallel) GetInnerModule() core.Module {
 func (p *Parallel) SetLLM(llm core.LLM) {
 	p.BaseModule.SetLLM(llm)
 	p.innerModule.SetLLM(llm)
+}
+
+// NewTypedParallel creates a new type-safe Parallel module from a typed signature.
+// Typed modules use text-based parsing by default since they typically rely on prefixes.
+func NewTypedParallel[TInput, TOutput any](innerModule core.Module, opts ...ParallelOption) *Parallel {
+	// Note: We don't need to convert to legacy signature since NewParallel takes a Module directly
+
+	parallel := NewParallel(innerModule, opts...)
+	// Use clearer variable names for type display
+	var i TInput
+	var o TOutput
+	parallel.DisplayName = fmt.Sprintf("TypedParallel[%T,%T]", i, o)
+
+	return parallel
 }
