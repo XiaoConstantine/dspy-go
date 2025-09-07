@@ -2,11 +2,11 @@ package tools
 
 import (
 	"context"
-	"math"
-	"strings"
-
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"math"
+	"slices"
+	"strings"
 )
 
 // BayesianToolSelector implements intelligent tool selection using Bayesian scoring.
@@ -223,12 +223,7 @@ func (s *BayesianToolSelector) fuzzyMatch(token1, token2 string) bool {
 
 // contains checks if a slice contains a string.
 func (s *BayesianToolSelector) contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 // tokenizeIntent breaks down the intent into meaningful tokens.

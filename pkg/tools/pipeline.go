@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,9 +42,9 @@ type PipelineOptions struct {
 type FailureStrategy int
 
 const (
-	FailFast FailureStrategy = iota // Stop on first failure
-	ContinueOnError                 // Continue with remaining steps
-	Retry                           // Retry failed steps
+	FailFast        FailureStrategy = iota // Stop on first failure
+	ContinueOnError                        // Continue with remaining steps
+	Retry                                  // Retry failed steps
 )
 
 // PipelineResult contains the results of pipeline execution.
@@ -237,10 +238,10 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 	// In a more sophisticated implementation, we would analyze dependencies
 
 	type stepResult struct {
-		index   int
-		result  core.ToolResult
-		error   error
-		stepID  string
+		index    int
+		result   core.ToolResult
+		error    error
+		stepID   string
 		metadata StepMetadata
 	}
 
@@ -258,10 +259,10 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 					// Send panic as error result
 					stepID := fmt.Sprintf("step_%d_%s", idx, s.ToolName)
 					resultChan <- stepResult{
-						index:   idx,
-						result:  core.ToolResult{},
-						error:   fmt.Errorf("pipeline step %s panicked: %v", stepID, r),
-						stepID:  stepID,
+						index:  idx,
+						result: core.ToolResult{},
+						error:  fmt.Errorf("pipeline step %s panicked: %v", stepID, r),
+						stepID: stepID,
 						metadata: StepMetadata{
 							ToolName: s.ToolName,
 							Success:  false,
@@ -275,10 +276,10 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 			case <-ctx.Done():
 				stepID := fmt.Sprintf("step_%d_%s", idx, s.ToolName)
 				resultChan <- stepResult{
-					index:   idx,
-					result:  core.ToolResult{},
-					error:   ctx.Err(),
-					stepID:  stepID,
+					index:  idx,
+					result: core.ToolResult{},
+					error:  ctx.Err(),
+					stepID: stepID,
 					metadata: StepMetadata{
 						ToolName: s.ToolName,
 						Success:  false,
@@ -296,10 +297,10 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 			// Send result without blocking if context is cancelled
 			select {
 			case resultChan <- stepResult{
-				index:   idx,
-				result:  stepRes,
-				error:   err,
-				stepID:  stepID,
+				index:  idx,
+				result: stepRes,
+				error:  err,
+				stepID: stepID,
 				metadata: StepMetadata{
 					ToolName: s.ToolName,
 					Duration: time.Since(stepStart),
@@ -493,17 +494,4 @@ func (tp *ToolPipeline) ClearCache() {
 }
 
 // Helper function for string contains check.
-func contains(s, substr string) bool {
-	return len(substr) == 0 || len(s) >= len(substr) &&
-		(s == substr || s[0:len(substr)] == substr ||
-		 s[len(s)-len(substr):] == substr ||
-		 (len(s) > len(substr) &&
-		  func() bool {
-			  for i := 1; i <= len(s)-len(substr); i++ {
-				  if s[i:i+len(substr)] == substr {
-					  return true
-				  }
-			  }
-			  return false
-		  }()))
-}
+func contains(s, substr string) bool { return strings.Contains(s, substr) }

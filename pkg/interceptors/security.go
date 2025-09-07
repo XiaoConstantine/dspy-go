@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"html"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // RateLimiter tracks request rates per key (agent, tool, etc.).
@@ -73,11 +73,11 @@ func (rl *RateLimiter) Allow(key string) bool {
 
 // ValidationConfig holds configuration for input validation.
 type ValidationConfig struct {
-	MaxInputSize     int      // Maximum size of input data in bytes
-	MaxStringLength  int      // Maximum length of string values
+	MaxInputSize      int      // Maximum size of input data in bytes
+	MaxStringLength   int      // Maximum length of string values
 	ForbiddenPatterns []string // Regex patterns that should not be present
-	RequiredFields   []string // Fields that must be present
-	AllowHTML        bool     // Whether HTML is allowed in strings
+	RequiredFields    []string // Fields that must be present
+	AllowHTML         bool     // Whether HTML is allowed in strings
 }
 
 // DefaultValidationConfig returns a secure default validation configuration.
@@ -86,32 +86,32 @@ func DefaultValidationConfig() ValidationConfig {
 		MaxInputSize:    10 * 1024 * 1024, // 10MB
 		MaxStringLength: 100000,           // 100KB per string
 		ForbiddenPatterns: []string{
-			`(?i)<script[^>]*>.*?</script>`,          // Script tags (case insensitive)
-			`(?i)javascript:`,                        // JavaScript URLs
-			`(?i)data:text/html`,                     // HTML data URLs
-			`(?i)on\w+\s*=`,                         // Event handlers
-			`(?i)eval\s*\(`,                         // eval() calls
-			`(?i)exec\s*\(`,                         // exec() calls
-			`(?i)system\s*\(`,                       // system() calls
-			`(?i)cmd\s*\(`,                          // cmd() calls
-			`(?i)shell_exec\s*\(`,                   // shell_exec() calls
-			`\$\{.*\}`,                              // Template injection
-			`<%.*%>`,                                // Template tags
-			`\{\{.*\}\}`,                            // Mustache/Handlebars templates
-			`(?i)<iframe[^>]*>`,                     // iframes
-			`(?i)<object[^>]*>`,                     // object tags
-			`(?i)<embed[^>]*>`,                      // embed tags
-			`(?i)<form[^>]*>`,                       // form tags
-			`(?i)vbscript:`,                         // VBScript URLs
-			`(?i)expression\s*\(`,                   // CSS expressions
-			`(?i)import\s+['\"]`,                    // Import statements
-			`\.\.\/`,                                // Path traversal
-			`\\\\`,                                  // Windows path traversal
-			`(?i)union\s+select`,                    // SQL injection
-			`(?i)drop\s+table`,                      // SQL injection
-			`(?i)delete\s+from`,                     // SQL injection
-			`--\s*$`,                                // SQL comments
-			`(?i)/\*.*\*/`,                          // SQL block comments
+			`(?i)<script[^>]*>.*?</script>`, // Script tags (case insensitive)
+			`(?i)javascript:`,               // JavaScript URLs
+			`(?i)data:text/html`,            // HTML data URLs
+			`(?i)on\w+\s*=`,                 // Event handlers
+			`(?i)eval\s*\(`,                 // eval() calls
+			`(?i)exec\s*\(`,                 // exec() calls
+			`(?i)system\s*\(`,               // system() calls
+			`(?i)cmd\s*\(`,                  // cmd() calls
+			`(?i)shell_exec\s*\(`,           // shell_exec() calls
+			`\$\{.*\}`,                      // Template injection
+			`<%.*%>`,                        // Template tags
+			`\{\{.*\}\}`,                    // Mustache/Handlebars templates
+			`(?i)<iframe[^>]*>`,             // iframes
+			`(?i)<object[^>]*>`,             // object tags
+			`(?i)<embed[^>]*>`,              // embed tags
+			`(?i)<form[^>]*>`,               // form tags
+			`(?i)vbscript:`,                 // VBScript URLs
+			`(?i)expression\s*\(`,           // CSS expressions
+			`(?i)import\s+['\"]`,            // Import statements
+			`\.\.\/`,                        // Path traversal
+			`\\\\`,                          // Windows path traversal
+			`(?i)union\s+select`,            // SQL injection
+			`(?i)drop\s+table`,              // SQL injection
+			`(?i)delete\s+from`,             // SQL injection
+			`--\s*$`,                        // SQL comments
+			`(?i)/\*.*\*/`,                  // SQL block comments
 		},
 		RequiredFields: []string{},
 		AllowHTML:      false,
@@ -431,7 +431,7 @@ func sanitizeValue(value interface{}) interface{} {
 		sanitized = html.EscapeString(sanitized)
 
 		// Remove or replace dangerous characters
-		sanitized = strings.ReplaceAll(sanitized, "\x00", "") // Remove null bytes
+		sanitized = strings.ReplaceAll(sanitized, "\x00", "")  // Remove null bytes
 		sanitized = strings.ReplaceAll(sanitized, "\r\n", " ") // Normalize line endings
 		sanitized = strings.ReplaceAll(sanitized, "\n", " ")
 		sanitized = strings.ReplaceAll(sanitized, "\r", " ")
@@ -646,12 +646,7 @@ func matchesPermission(userPerm, requiredPerm string) bool {
 
 // contains checks if a slice contains a specific string.
 func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 // containsHTML checks if a string contains HTML-like content.

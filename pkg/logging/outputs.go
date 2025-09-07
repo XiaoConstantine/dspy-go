@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -554,12 +555,7 @@ func extractModelName(modelID string) string {
 
 // contains is a helper function to check if a string slice contains a specific string.
 func contains(slice []string, str string) bool {
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, str)
 }
 
 func formatLLMInfo(modelID string, tokenInfo *core.TokenInfo) string {
