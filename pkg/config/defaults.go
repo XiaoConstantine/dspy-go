@@ -117,7 +117,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 		},
 		"google": {
 			Provider: "google",
-			ModelID:  "gemini-2.0-flash",
+			ModelID:  "gemini-2.5-flash",
 			APIKey:   "",
 			Endpoint: EndpointConfig{
 				BaseURL: "https://generativelanguage.googleapis.com",

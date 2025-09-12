@@ -327,7 +327,7 @@ func (r *DefaultLLMRegistry) inferProviderFromModelID(modelID ModelID) string {
 
 	// Google models
 	if modelID == ModelGoogleGeminiFlash || modelID == ModelGoogleGeminiPro ||
-		modelID == ModelGoogleGeminiFlashThinking || modelID == ModelGoogleGeminiFlashLite {
+		modelID == ModelGoogleGeminiFlashLite {
 		return "google"
 	}
 

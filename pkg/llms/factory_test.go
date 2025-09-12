@@ -181,7 +181,6 @@ func TestNewLLMForAllModels(t *testing.T) {
 		geminiModels := []core.ModelID{
 			core.ModelGoogleGeminiFlash,
 			core.ModelGoogleGeminiPro,
-			core.ModelGoogleGeminiFlashThinking,
 			core.ModelGoogleGeminiFlashLite,
 		}
 
@@ -347,12 +346,6 @@ func TestCreateLLMFallback(t *testing.T) {
 			name:      "Gemini Pro fallback",
 			apiKey:    "test-key",
 			modelID:   core.ModelGoogleGeminiPro,
-			expectErr: false,
-		},
-		{
-			name:      "Gemini Flash Thinking fallback",
-			apiKey:    "test-key",
-			modelID:   core.ModelGoogleGeminiFlashThinking,
 			expectErr: false,
 		},
 		{

@@ -500,10 +500,9 @@ const (
 	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelSonnet)
 	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelOpus)
 	// Google models.
-	ModelGoogleGeminiFlash         ModelID = "gemini-2.0-flash"
-	ModelGoogleGeminiPro           ModelID = "gemini-2.5-pro-exp-03-25"
-	ModelGoogleGeminiFlashThinking ModelID = "gemini-2.0-flash-thinking-exp"
-	ModelGoogleGeminiFlashLite     ModelID = "gemini-2.0-flash-lite"
+	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"
+	ModelGoogleGeminiPro       ModelID = "gemini-2.5-pro"
+	ModelGoogleGeminiFlashLite ModelID = "gemini-2.5-flash-lite"
 	// OpenAI models.
 	ModelOpenAIGPT4       ModelID = "gpt-4"
 	ModelOpenAIGPT4Turbo  ModelID = "gpt-4-turbo"
@@ -557,7 +556,7 @@ const (
 
 var ProviderModels = map[string][]ModelID{
 	"anthropic": {ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus},
-	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashThinking, ModelGoogleGeminiFlashLite},
+	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite},
 	"openai":    {ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini},
 	"ollama": {
 		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,

@@ -20,7 +20,7 @@ func TestGetDefaultLLMProviderConfig(t *testing.T) {
 	googleConfig := GetDefaultLLMProviderConfig("google")
 	require.NotNil(t, googleConfig)
 	assert.Equal(t, "google", googleConfig.Provider)
-	assert.Equal(t, "gemini-2.0-flash", googleConfig.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", googleConfig.ModelID)
 	assert.Equal(t, "https://generativelanguage.googleapis.com", googleConfig.Endpoint.BaseURL)
 
 	// Test getting ollama config

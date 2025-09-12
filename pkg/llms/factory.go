@@ -126,11 +126,6 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) {
 					Name:         "Gemini 2.5 Pro",
 					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
 				},
-				string(core.ModelGoogleGeminiFlashThinking): {
-					ID:           string(core.ModelGoogleGeminiFlashThinking),
-					Name:         "Gemini 2.0 Flash Thinking",
-					Capabilities: []string{"completion", "chat", "json", "streaming"},
-				},
 				string(core.ModelGoogleGeminiFlashLite): {
 					ID:           string(core.ModelGoogleGeminiFlashLite),
 					Name:         "Gemini 2.0 Flash Lite",
@@ -289,7 +284,7 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	switch {
 	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus:
 		llm, err = NewAnthropicLLM(apiKey, anthropic.ModelID(modelID))
-	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashThinking || modelID == core.ModelGoogleGeminiFlashLite:
+	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashLite:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo || modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini:
 		llm, err = NewOpenAI(modelID, apiKey)
