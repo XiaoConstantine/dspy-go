@@ -166,8 +166,8 @@ func (mo *MemoryOptimizer) Store(ctx context.Context, input map[string]interface
 
 // Retrieve gets relevant information from memory.
 func (mo *MemoryOptimizer) Retrieve(ctx context.Context, query map[string]interface{}) (interface{}, error) {
-	mo.mu.RLock()
-	defer mo.mu.RUnlock()
+	mo.mu.Lock()
+	defer mo.mu.Unlock()
 
 	logger := logging.GetLogger()
 	logger.Debug(ctx, "Retrieving from optimized memory")
