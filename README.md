@@ -69,7 +69,6 @@ import (
     "github.com/XiaoConstantine/dspy-go/pkg/core"
     "github.com/XiaoConstantine/dspy-go/pkg/llms"
     "github.com/XiaoConstantine/dspy-go/pkg/modules"
-    "github.com/XiaoConstantine/dspy-go/pkg/config"
 )
 
 func main() {
@@ -169,8 +168,13 @@ Implements the Reasoning and Acting paradigm, allowing LLMs to use tools to solv
 calculator := tools.NewCalculatorTool()
 searchTool := tools.NewSearchTool()
 
-// Create ReAct module with tools
-react := modules.NewReAct(signature, []core.Tool{calculator, searchTool})
+// Create tool registry and register tools
+registry := tools.NewInMemoryToolRegistry()
+registry.Register(calculator)
+registry.Register(searchTool)
+
+// Create ReAct module with registry
+react := modules.NewReAct(signature, registry, 5) // 5 max iterations
 result, err := react.Process(ctx, map[string]interface{}{
     "question": "What is the population of France divided by 1000?",
 })
@@ -550,13 +554,13 @@ llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
     llms.WithOpenAITimeout(30*time.Second))
 
 // Using Ollama (local)
-llm, err := llms.NewOllamaLLM("http://localhost:11434", "ollama:llama2")
+llm, err := llms.NewOllamaLLM("ollama:llama2")
 
 // Using LlamaCPP (local)
 llm, err := llms.NewLlamacppLLM("http://localhost:8080")
 
 // Set as default LLM
-llms.SetDefaultLLM(llm)
+core.SetDefaultLLM(llm)
 
 // Or use with a specific module
 myModule.SetLLM(llm)
@@ -686,7 +690,9 @@ func (t *WeatherTool) Execute(ctx context.Context, action string) (string, error
 }
 
 // Use the custom tool with ReAct
-react := modules.NewReAct(signature, []core.Tool{&WeatherTool{}})
+registry := tools.NewInMemoryToolRegistry()
+registry.Register(&WeatherTool{})
+react := modules.NewReAct(signature, registry, 5)
 ```
 
 ### Smart Tool Registry
@@ -910,18 +916,23 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Create MCP tools from server capabilities
-mcpTools, err := tools.CreateMCPToolsFromServer(mcpClient)
+// Example 1: Use MCP tools with ReAct (requires InMemoryToolRegistry)
+registry := tools.NewInMemoryToolRegistry()
+err = tools.RegisterMCPTools(registry, mcpClient)
 if err != nil {
     log.Fatal(err)
 }
+react := modules.NewReAct(signature, registry, 5)
 
-// Use MCP tools with ReAct
-react := modules.NewReAct(signature, mcpTools)
-
-// Or use with Smart Tool Registry for intelligent selection
-registry.Register(mcpTools...)
-selectedTool, err := registry.SelectBest(ctx, "analyze financial data")
+// Example 2: Use Smart Tool Registry for intelligent tool selection
+smartRegistry := tools.NewSmartToolRegistry(&tools.SmartToolRegistryConfig{
+    PerformanceTrackingEnabled: true,
+})
+err = tools.RegisterMCPTools(smartRegistry, mcpClient)
+if err != nil {
+    log.Fatal(err)
+}
+selectedTool, err := smartRegistry.SelectBest(ctx, "analyze financial data")
 ```
 
 ### Streaming Support
