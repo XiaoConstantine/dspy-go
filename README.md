@@ -916,18 +916,23 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Create tool registry and register MCP tools
+// Example 1: Use MCP tools with ReAct (requires InMemoryToolRegistry)
 registry := tools.NewInMemoryToolRegistry()
 err = tools.RegisterMCPTools(registry, mcpClient)
 if err != nil {
     log.Fatal(err)
 }
-
-// Use MCP tools with ReAct
 react := modules.NewReAct(signature, registry, 5)
 
-// Or use with Smart Tool Registry for intelligent selection
-selectedTool, err := registry.SelectBest(ctx, "analyze financial data")
+// Example 2: Use Smart Tool Registry for intelligent tool selection
+smartRegistry := tools.NewSmartToolRegistry(&tools.SmartToolRegistryConfig{
+    PerformanceTrackingEnabled: true,
+})
+err = tools.RegisterMCPTools(smartRegistry, mcpClient)
+if err != nil {
+    log.Fatal(err)
+}
+selectedTool, err := smartRegistry.SelectBest(ctx, "analyze financial data")
 ```
 
 ### Streaming Support
