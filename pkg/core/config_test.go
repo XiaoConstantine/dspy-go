@@ -520,6 +520,47 @@ func TestCreateLLMWithTimeout(t *testing.T) {
 	})
 }
 
+// TestSetDefaultLLM verifies that SetDefaultLLM correctly sets GlobalConfig.DefaultLLM
+// This test ensures the fix for issue #145 works correctly.
+func TestSetDefaultLLM(t *testing.T) {
+	// Save original state
+	originalDefaultLLM := GlobalConfig.DefaultLLM
+	defer func() {
+		GlobalConfig.DefaultLLM = originalDefaultLLM
+	}()
+
+	t.Run("SetDefaultLLM_SetsGlobalConfig", func(t *testing.T) {
+		// Create a mock LLM
+		mockLLM := &MockLLM{}
+
+		// Call SetDefaultLLM
+		SetDefaultLLM(mockLLM)
+
+		// Verify it was set in GlobalConfig.DefaultLLM
+		if GlobalConfig.DefaultLLM != mockLLM {
+			t.Error("SetDefaultLLM should set GlobalConfig.DefaultLLM")
+		}
+
+		// Verify GetDefaultLLM returns the same instance
+		if GetDefaultLLM() != mockLLM {
+			t.Error("GetDefaultLLM should return the LLM set by SetDefaultLLM")
+		}
+	})
+
+	t.Run("SetDefaultLLM_NilValue", func(t *testing.T) {
+		// Should be able to set nil (clearing the default)
+		SetDefaultLLM(nil)
+
+		if GlobalConfig.DefaultLLM != nil {
+			t.Error("SetDefaultLLM should be able to set nil")
+		}
+
+		if GetDefaultLLM() != nil {
+			t.Error("GetDefaultLLM should return nil when default is nil")
+		}
+	})
+}
+
 // MockLLMFactory is a mock factory for testing.
 type MockLLMFactory struct {
 	ShouldError bool
