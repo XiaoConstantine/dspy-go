@@ -506,6 +506,9 @@ const (
 	ModelOpenAIGPT35Turbo ModelID = "gpt-3.5-turbo"
 	ModelOpenAIGPT4o      ModelID = "gpt-4o"
 	ModelOpenAIGPT4oMini  ModelID = "gpt-4o-mini"
+	ModelOpenAIGPT5       ModelID = "gpt-5"
+	ModelOpenAIGPT5Mini   ModelID = "gpt-5-mini"
+	ModelOpenAIGPT5Nano   ModelID = "gpt-5-nano"
 
 	// LiteLLM models (can proxy to any provider).
 	ModelLiteLLMGPT4    ModelID = "gpt-4"
@@ -554,7 +557,7 @@ const (
 var ProviderModels = map[string][]ModelID{
 	"anthropic": {ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus},
 	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite},
-	"openai":    {ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini},
+	"openai":    {ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini, ModelOpenAIGPT5, ModelOpenAIGPT5Mini, ModelOpenAIGPT5Nano},
 	"ollama": {
 		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,
 		ModelOllamaLlama3_2_3B, ModelOllamaCodeLlama13B, ModelOllamaCodeLlama34B, ModelOllamaMistral7B,

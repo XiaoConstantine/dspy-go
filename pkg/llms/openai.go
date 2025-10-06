@@ -195,6 +195,9 @@ func isValidOpenAIModel(modelID core.ModelID) bool {
 		core.ModelOpenAIGPT35Turbo,
 		core.ModelOpenAIGPT4o,
 		core.ModelOpenAIGPT4oMini,
+		core.ModelOpenAIGPT5,
+		core.ModelOpenAIGPT5Mini,
+		core.ModelOpenAIGPT5Nano,
 	}
 
 	for _, validModel := range validModels {
