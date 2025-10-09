@@ -290,12 +290,12 @@ func (s *Server) cleanupLoop(ctx context.Context) {
 }
 
 func (s *Server) cleanupOldTasks() {
-	s.tasks.mu.Lock()
-	defer s.tasks.mu.Unlock()
-
 	maxAge := time.Duration(s.config.MaxTaskAge)
 	now := time.Now()
 
+	// First pass: collect IDs of tasks to delete (with read lock)
+	tasksToDelete := make([]string, 0)
+	s.tasks.mu.RLock()
 	for id, task := range s.tasks.tasks {
 		status := task.GetStatus()
 		if !status.State.IsTerminal() {
@@ -309,19 +309,140 @@ func (s *Server) cleanupOldTasks() {
 		}
 
 		if now.Sub(ts) > maxAge {
-			delete(s.tasks.tasks, id)
-			// Clean up subscribers for the deleted task to prevent memory leaks.
-			s.subscribers.mu.Lock()
-			// Close all subscriber channels before deleting to prevent goroutine leaks
-			if subs, exists := s.subscribers.subscribers[id]; exists {
-				for _, sub := range subs {
-					close(sub.channel)
-				}
-			}
-			delete(s.subscribers.subscribers, id)
-			s.subscribers.mu.Unlock()
+			tasksToDelete = append(tasksToDelete, id)
 		}
 	}
+	s.tasks.mu.RUnlock()
+
+	if len(tasksToDelete) == 0 {
+		return
+	}
+
+	// Second pass: delete tasks (with write lock, minimized duration)
+	s.tasks.mu.Lock()
+	for _, id := range tasksToDelete {
+		delete(s.tasks.tasks, id)
+	}
+	s.tasks.mu.Unlock()
+
+	// Third pass: clean up subscribers (separate lock)
+	s.subscribers.mu.Lock()
+	defer s.subscribers.mu.Unlock()
+	for _, id := range tasksToDelete {
+		if subs, exists := s.subscribers.subscribers[id]; exists {
+			for _, sub := range subs {
+				close(sub.channel)
+			}
+			delete(s.subscribers.subscribers, id)
+		}
+	}
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// decodeMessageFromMap efficiently converts a map to a Message struct without JSON roundtrip.
+// This is more performant than marshal/unmarshal for server request handling.
+func decodeMessageFromMap(data interface{}) (*Message, error) {
+	msgMap, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("message must be an object")
+	}
+
+	msg := &Message{}
+
+	// Extract messageId (optional - will generate if missing)
+	if msgID, ok := msgMap["messageId"].(string); ok {
+		msg.MessageID = msgID
+	} else {
+		msg.MessageID = generateID()
+	}
+
+	// Extract role (required)
+	roleStr, ok := msgMap["role"].(string)
+	if !ok {
+		return nil, fmt.Errorf("missing or invalid 'role' field")
+	}
+	msg.Role = Role(roleStr)
+
+	// Extract parts (required)
+	partsData, ok := msgMap["parts"]
+	if !ok {
+		return nil, fmt.Errorf("missing 'parts' field")
+	}
+
+	partsSlice, ok := partsData.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("'parts' must be an array")
+	}
+
+	msg.Parts = make([]Part, len(partsSlice))
+	for i, partData := range partsSlice {
+		partMap, ok := partData.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("part[%d] must be an object", i)
+		}
+
+		part, err := decodePartFromMap(partMap)
+		if err != nil {
+			return nil, fmt.Errorf("part[%d]: %w", i, err)
+		}
+		msg.Parts[i] = part
+	}
+
+	// Extract contextId (optional)
+	if contextID, ok := msgMap["contextId"].(string); ok {
+		msg.ContextID = contextID
+	}
+
+	// Extract metadata (optional)
+	if metadata, ok := msgMap["metadata"].(map[string]interface{}); ok {
+		msg.Metadata = metadata
+	}
+
+	return msg, nil
+}
+
+// decodePartFromMap converts a map to a Part struct.
+func decodePartFromMap(partMap map[string]interface{}) (Part, error) {
+	part := Part{}
+
+	// Extract type (required)
+	partType, ok := partMap["type"].(string)
+	if !ok {
+		return part, fmt.Errorf("missing or invalid 'type' field")
+	}
+	part.Type = partType
+
+	// Extract fields based on type
+	if text, ok := partMap["text"].(string); ok {
+		part.Text = text
+	}
+
+	if fileData, ok := partMap["file"].(map[string]interface{}); ok {
+		filePart := &FilePart{}
+		if uri, ok := fileData["uri"].(string); ok {
+			filePart.URI = uri
+		}
+		if bytes, ok := fileData["bytes"].(string); ok {
+			filePart.Bytes = bytes
+		}
+		if mimeType, ok := fileData["mimeType"].(string); ok {
+			filePart.MimeType = mimeType
+		}
+		part.File = filePart
+	}
+
+	if data, ok := partMap["data"].(map[string]interface{}); ok {
+		part.Data = data
+	}
+
+	if metadata, ok := partMap["metadata"].(map[string]interface{}); ok {
+		part.Metadata = metadata
+	}
+
+	return part, nil
 }
 
 // ============================================================================
@@ -405,17 +526,10 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Missing 'message' parameter")
 	}
 
-	// Parse message
-	// NOTE: This could be optimized using a library like mapstructure to avoid
-	// the marshal/unmarshal round-trip, but the current approach is simple and
-	// works correctly. Consider optimization if this becomes a bottleneck.
-	msgBytes, err := json.Marshal(msgData)
+	// Parse message using direct map decoding (more efficient than JSON roundtrip)
+	msg, err := decodeMessageFromMap(msgData)
 	if err != nil {
-		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Failed to encode message data")
-	}
-	var msg Message
-	if err := json.Unmarshal(msgBytes, &msg); err != nil {
-		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Invalid message format")
+		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, fmt.Sprintf("Invalid message format: %v", err))
 	}
 
 	// Create task
@@ -423,7 +537,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 	task.ContextID = msg.ContextID
 
 	// Process asynchronously
-	go s.processTask(ctx, task, &msg)
+	go s.processTask(ctx, task, msg)
 
 	// Return task info immediately
 	return NewJSONRPCResponse(req.ID, map[string]interface{}{
@@ -572,8 +686,10 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// If task already completed, send all artifacts and final status before closing
 	if status.State.IsTerminal() {
 		// Stream all artifacts to the new subscriber for completed tasks
-		for _, artifact := range task.GetArtifacts() {
-			s.sendSSEEvent(w, flusher, "artifact", NewTaskArtifactUpdateEvent(task.ID, artifact, false))
+		artifacts := task.GetArtifacts()
+		for i, artifact := range artifacts {
+			isLast := i == len(artifacts)-1
+			s.sendSSEEvent(w, flusher, "artifact", NewTaskArtifactUpdateEvent(task.ID, artifact, isLast))
 		}
 		// Send final status
 		s.sendSSEEvent(w, flusher, "status", NewTaskStatusUpdateEvent(task.ID, status, true))

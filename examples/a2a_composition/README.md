@@ -1,200 +1,428 @@
-# A2A Agent Composition Example
+# A2A Deep Research Agent Example
 
-This example demonstrates Google's **Agent-to-Agent (a2a) protocol** implementation in dspy-go, focusing on **in-process agent composition** where parent agents can have sub-agents that communicate via the a2a message protocol.
+This example demonstrates Google's **Agent-to-Agent (A2A) protocol** implementation in dspy-go with a real-world **deep research system** using actual LLMs and multi-agent composition.
 
-## What This Demonstrates
+## Overview
 
-### Core Features
+Unlike simple demonstration agents, this example features a sophisticated research system with **three specialized LLM-powered agents** coordinated by a parent orchestrator, showcasing the full power of A2A agent composition.
 
-1. **Agent Composition** - Creating hierarchical agent structures
-2. **In-Process Communication** - Agents communicate via a2a protocol without HTTP
-3. **Multi-Level Hierarchies** - Orchestrator → Specialized Agents → Leaf Agents
-4. **Message Protocol** - Standardized a2a messages, tasks, and artifacts
-5. **Capability Discovery** - Agent cards and capability exposure
+### What This Demonstrates
 
-### Architecture
+✅ **Multi-agent hierarchical composition** using A2A protocol
+✅ **Real LLM-powered agents** using dspy-go modules and signatures
+✅ **Complex multi-step workflows** (search → analyze → synthesize)
+✅ **In-process agent communication** (no HTTP overhead)
+✅ **Agent capability discovery** and registration
+✅ **Production-ready patterns** for agent systems
+
+## Architecture
 
 ```
-OrchestratorAgent (Parent)
-├── CalculatorAgent (Sub-agent)
-│   └── Handles arithmetic operations
-├── SearchAgent (Sub-agent)
-│   └── Handles information search
-└── ReasoningAgent (Sub-agent)
-    └── Provides logical reasoning
+ResearchOrchestrator (Parent)
+├── SearchAgent (LLM-powered)
+│   └── Generates search queries & gathers information
+├── AnalysisAgent (LLM-powered)
+│   └── Extracts insights, patterns, contradictions
+└── SynthesisAgent (LLM-powered)
+    └── Creates comprehensive research reports
 ```
+
+### Agent Specifications
+
+#### 1. SearchAgent
+- **Purpose**: Information gathering and query formulation
+- **Input**: Research topic
+- **Output**: Targeted search queries + simulated search results
+- **LLM Module**: `modules.NewPredict` with search signature
+- **Prompting**: Generates 3-5 specific queries with diverse perspectives
+
+#### 2. AnalysisAgent
+- **Purpose**: Deep analysis of gathered information
+- **Input**: Topic + search results
+- **Output**: Key findings, patterns, contradictions, gaps
+- **LLM Module**: `modules.NewPredict` with analytical signature
+- **Prompting**: Critical, evidence-based analysis
+
+#### 3. SynthesisAgent
+- **Purpose**: Report generation and knowledge synthesis
+- **Input**: Topic + analysis results
+- **Output**: Executive summary, detailed report, conclusions, recommendations
+- **LLM Module**: `modules.NewPredict` with synthesis signature
+- **Prompting**: Professional, structured reporting
+
+#### 4. ResearchOrchestrator
+- **Purpose**: Workflow coordination
+- **Behavior**: Manages 3-step pipeline (search → analysis → synthesis)
+- **A2A Role**: Parent agent coordinating sub-agents via A2A messages
+- **Output**: Complete research report with all sections
 
 ## Running the Example
 
+### Prerequisites
+
+- Go 1.21 or later
+- Google Gemini API key ([Get one here](https://aistudio.google.com/app/apikey))
+
+### Basic Usage
+
 ```bash
-cd examples/a2a_composition
-go run main.go
+# With default model (Gemini 2.0 Flash)
+go run main.go --api-key YOUR_GEMINI_API_KEY
+
+# With Gemini Pro
+go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-pro
+
+# With Gemini Flash
+go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-flash
 ```
 
-## What Happens
+### Command-Line Flags
 
-The example demonstrates:
+- `--api-key` (required): Your Google Gemini API key
+- `--model` (optional): Gemini model to use (default: `gemini-2.0-flash-exp`)
 
-1. **Basic Agent Testing** - Tests individual agents with a2a messages
-2. **Multi-Level Hierarchy** - Creates an orchestrator with multiple sub-agents
-3. **Agent Orchestration** - Orchestrator intelligently delegates to sub-agents
-4. **Direct Sub-Agent Calls** - Parent calls specific sub-agents via a2a protocol
-5. **Capability Discovery** - Lists available sub-agents and their capabilities
+### Supported Gemini Models
+
+```go
+// Recommended models
+"gemini-2.0-flash-exp"  // Default - Fast and cost-effective
+"gemini-pro"            // More capable, higher quality
+"gemini-flash"          // Fast responses
+
+// Experimental models
+"gemini-exp-1206"       // Latest experimental features
+```
+
+> **Note**: This example is optimized for Google Gemini models. While dspy-go supports other providers (Claude, OpenAI), the example uses Gemini-specific model IDs.
 
 ## Sample Output
 
 ```
 ╔════════════════════════════════════════════════════════════════╗
-║          A2A Agent Composition Example - dspy-go               ║
+║       A2A Deep Research Agent - Multi-Agent Composition        ║
 ╚════════════════════════════════════════════════════════════════╝
 
-================================================================
-Example 1: Basic Agent-to-Agent Communication
-================================================================
+⚙️  Configuring LLM: gemini-2.0-flash-exp
+🔧 Initializing research agents...
+✓ Research system ready with 3 specialized agents
 
-📊 Testing Calculator Agent:
-   Result: The answer is 4
+████████████████████████████████████████████████████████████████
+RESEARCH PROJECT 1/2
+████████████████████████████████████████████████████████████████
 
-🔍 Testing Search Agent:
-   Result: Current weather: Sunny, 72°F
+🎯 Research Orchestrator: Starting deep research on:
+   What are the latest advancements in quantum computing...
+================================================================================
 
-================================================================
-Example 2: Multi-Level Agent Hierarchy
-================================================================
-[Creates orchestrator with 3 sub-agents]
+Step 1/3: Information Gathering
+--------------------------------------------------------------------------------
+🔍 SearchAgent: Gathering information...
+✓ Search completed. Found 2 result sets.
 
-================================================================
-Example 3: Agent Orchestration in Action
-================================================================
+Step 2/3: Information Analysis
+--------------------------------------------------------------------------------
+📊 AnalysisAgent: Analyzing search results...
+✓ Analysis completed. Identified key findings and patterns.
 
-[Question 1] Can you calculate 2+2 for me?
-────────────────────────────────────────────────────────────────
+Step 3/3: Report Synthesis
+--------------------------------------------------------------------------------
+📝 SynthesisAgent: Creating research report...
+✓ Report synthesis completed.
 
-🎯 Orchestrator analyzing: Can you calculate 2+2 for me?
-   → Delegating to Calculator agent
+╔════════════════════════════════════════════════════════════════╗
+║                    RESEARCH REPORT                             ║
+╚════════════════════════════════════════════════════════════════╝
 
-🤖 Orchestrator Response:
+📌 Topic: What are the latest advancements in quantum computing...
 
-I delegated to the calculator agent:
-The answer is 4
+📋 EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+[2-3 paragraph summary of key findings...]
+
+📄 DETAILED REPORT
+--------------------------------------------------------------------------------
+[Comprehensive research report with sections...]
+
+💡 CONCLUSIONS
+--------------------------------------------------------------------------------
+[Evidence-based conclusions...]
+
+🎯 RECOMMENDATIONS
+--------------------------------------------------------------------------------
+[Actionable recommendations...]
 ```
 
 ## Key Code Patterns
 
-### Creating an A2A Agent Executor
+### 1. Creating LLM-Powered Agents
 
 ```go
-// Wrap your agent with A2AExecutor
-executor := a2a.NewExecutorWithConfig(myAgent, a2a.ExecutorConfig{
-    Name:        "MyAgent",
-    Description: "Does something useful",
-})
-```
+func NewSearchAgent() (*SearchAgent, error) {
+    // Define input/output schema with descriptions
+    signature := core.NewSignature(
+        []core.InputField{
+            {Field: core.Field{
+                Name: "topic",
+                Description: "The research topic or question",
+            }},
+        },
+        []core.OutputField{
+            {Field: core.Field{
+                Name: "search_queries",
+                Description: "List of 3-5 specific search queries",
+                Prefix: "search queries:",
+            }},
+        },
+    ).WithInstruction("You are a skilled research assistant...")
 
-### Composing Agents
-
-```go
-// Parent agent with sub-agents
-parent := a2a.NewExecutor(parentAgent).
-    WithSubAgent("calculator", calcExecutor).
-    WithSubAgent("search", searchExecutor)
-```
-
-### Calling Sub-Agents
-
-```go
-// Method 1: Simple text call
-result, err := parent.CallSubAgentSimple(ctx, "calculator", "What is 2+2?")
-
-// Method 2: Full a2a message
-msg := a2a.NewUserMessage("What is 2+2?")
-artifact, err := parent.CallSubAgent(ctx, "calculator", msg)
-text := a2a.ExtractTextFromArtifact(artifact)
-```
-
-### Listing Sub-Agents
-
-```go
-// Get all sub-agent names
-subAgents := executor.ListSubAgents()
-for _, name := range subAgents {
-    fmt.Println(name)
+    return &SearchAgent{
+        searchModule: modules.NewPredict(signature),
+    }, nil
 }
 ```
 
-### Getting Agent Card
+### 2. Agent Execution with LLM
 
 ```go
-// Retrieve agent metadata and capabilities
-card := executor.GetAgentCard()
-fmt.Printf("Name: %s\n", card.Name)
-fmt.Printf("Capabilities: %d\n", len(card.Capabilities))
+func (s *SearchAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+    logger := logging.GetLogger()
+    logger.Info(ctx, "🔍 SearchAgent: Gathering information...")
+
+    // LLM call happens here via the module
+    result, err := s.searchModule.Process(ctx, input)
+    if err != nil {
+        return nil, fmt.Errorf("search failed: %w", err)
+    }
+
+    return result, nil
+}
+```
+
+### 3. A2A Agent Composition
+
+```go
+// Create LLM-powered agents
+searchAgent, _ := NewSearchAgent()
+analysisAgent, _ := NewAnalysisAgent()
+synthesisAgent, _ := NewSynthesisAgent()
+
+// Wrap with A2A executors
+searchExec := a2a.NewExecutorWithConfig(searchAgent, a2a.ExecutorConfig{
+    Name: "SearchAgent",
+})
+
+// Create orchestrator and compose
+_, orchestratorExec := NewResearchOrchestrator()
+orchestratorExec.WithSubAgent("search", searchExec).
+                WithSubAgent("analysis", analysisExec).
+                WithSubAgent("synthesis", synthesisExec)
+```
+
+### 4. Multi-Step Workflow Coordination
+
+```go
+func (r *ResearchOrchestrator) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+    // Step 1: Search
+    searchResult, err := r.executor.CallSubAgent(ctx, "search",
+        a2a.NewUserMessage(topic))
+
+    // Step 2: Analyze
+    analysisInput := a2a.NewMessage(a2a.RoleUser,
+        a2a.NewTextPartWithMetadata(topic, map[string]interface{}{"field": "topic"}),
+        a2a.NewTextPartWithMetadata(searchResults, map[string]interface{}{"field": "search_results"}),
+    )
+    analysisResult, err := r.executor.CallSubAgent(ctx, "analysis", analysisInput)
+
+    // Step 3: Synthesize
+    synthesisResult, err := r.executor.CallSubAgent(ctx, "synthesis", synthesisInput)
+
+    return compiledOutput, nil
+}
+```
+
+## A2A Message Flow
+
+```
+User Request (topic: "quantum computing advancements")
+    ↓
+ResearchOrchestrator.Execute()
+    │
+    ├─→ CallSubAgent("search", topic)
+    │   └─→ SearchAgent processes with LLM
+    │       └─→ Returns Artifact(search_queries, search_results)
+    │
+    ├─→ CallSubAgent("analysis", topic + search_results)
+    │   └─→ AnalysisAgent analyzes with LLM
+    │       └─→ Returns Artifact(key_findings, patterns, contradictions, gaps)
+    │
+    └─→ CallSubAgent("synthesis", topic + analysis_results)
+        └─→ SynthesisAgent synthesizes with LLM
+            └─→ Returns Artifact(executive_summary, detailed_report, conclusions, recommendations)
 ```
 
 ## Understanding the A2A Protocol
 
-### Message Flow
+### Message Format
 
-1. **User Message** → Parent Agent
-2. Parent Agent → **Decision Logic** (which sub-agent to call?)
-3. Parent → **A2A Message** → Sub-Agent
-4. Sub-Agent → **A2A Artifact** → Parent
-5. Parent → **Final Response** → User
-
-### Key A2A Types
-
-- **Message** - Communication unit with parts (text, files, data)
-- **Task** - Execution tracking with status and artifacts
-- **Artifact** - Output from agent execution
-- **AgentCard** - Agent metadata and capabilities
-
-## Advanced Usage
-
-### Multi-Level Hierarchies
+Messages contain typed parts with metadata:
 
 ```go
-// Create 3-level hierarchy
-leaf := a2a.NewExecutor(leafAgent)
-middle := a2a.NewExecutor(middleAgent).WithSubAgent("leaf", leaf)
-top := a2a.NewExecutor(topAgent).WithSubAgent("middle", middle)
-
-// Top can call middle, which can call leaf
-result, _ := top.CallSubAgentSimple(ctx, "middle", "question")
+msg := a2a.NewMessage(a2a.RoleUser,
+    a2a.NewTextPartWithMetadata(content, map[string]interface{}{
+        "field": "fieldname",
+    }),
+)
 ```
 
-### Context Propagation
+### Artifact Format
+
+Agents return artifacts with structured parts:
 
 ```go
-// Context flows through all sub-agent calls
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-defer cancel()
-
-artifact, err := orchestrator.Execute(ctx, msg)
-// Timeout applies to all sub-agent calls
+artifact := Artifact{
+    Parts: []Part{
+        {Type: "text", Text: "...", Metadata: {"field": "summary"}},
+        {Type: "text", Text: "...", Metadata: {"field": "details"}},
+    },
+}
 ```
 
-## Design Principles
+### Key Benefits
 
-1. **Composability** - Agents can be freely composed without modification
-2. **Protocol-First** - All communication uses a2a message format
-3. **Type-Safety** - Go interfaces ensure compile-time correctness
-4. **Interoperability** - Compatible with Google's ADK Python agents (via HTTP)
+1. **Type Safety**: All communication uses structured messages
+2. **Metadata**: Parts carry semantic meaning via metadata
+3. **Composability**: Agents work together without tight coupling
+4. **Discoverability**: Agent capabilities are self-describing
+5. **Interoperability**: Compatible with Python ADK agents
+
+## Advanced Patterns
+
+### Add New Specialized Agents
+
+```go
+// Create a fact-checking agent
+type FactCheckerAgent struct {
+    module core.Module
+}
+
+func NewFactCheckerAgent() (*FactCheckerAgent, error) {
+    signature := core.NewSignature(
+        []core.InputField{
+            {Field: core.Field{Name: "claims"}},
+        },
+        []core.OutputField{
+            {Field: core.Field{Name: "verified_facts", Prefix: "verified:"}},
+            {Field: core.Field{Name: "unverified_claims", Prefix: "unverified:"}},
+        },
+    ).WithInstruction("Verify the accuracy of claims using reliable sources...")
+
+    return &FactCheckerAgent{
+        module: modules.NewPredict(signature),
+    }, nil
+}
+
+// Add to orchestrator
+factCheckerExec := a2a.NewExecutorWithConfig(factChecker, a2a.ExecutorConfig{
+    Name: "FactCheckerAgent",
+})
+orchestratorExec.WithSubAgent("factchecker", factCheckerExec)
+```
+
+### Multi-Round Research
+
+```go
+// Implement iterative refinement
+func (r *ResearchOrchestrator) DeepResearch(ctx context.Context, topic string, maxRounds int) {
+    for round := 0; round < maxRounds; round++ {
+        searchResult := r.executor.CallSubAgent(ctx, "search", ...)
+        analysisResult := r.executor.CallSubAgent(ctx, "analysis", ...)
+
+        // Check if we need more information
+        gaps := extractGaps(analysisResult)
+        if len(gaps) == 0 {
+            break // Research complete
+        }
+
+        // Refine search based on gaps
+        topic = refineTopicBasedOnGaps(topic, gaps)
+    }
+}
+```
+
+### Add Real Tools
+
+```go
+// Integrate WebSearch tool
+import "github.com/XiaoConstantine/dspy-go/pkg/tools"
+
+func (s *SearchAgent) GetCapabilities() []core.Tool {
+    return []core.Tool{
+        tools.NewWebSearchTool(apiKey),
+    }
+}
+```
+
+## Performance Considerations
+
+- **API Costs**: Each agent makes Gemini API calls; consider using `gemini-flash` for cost optimization
+- **Model Selection**:
+  - `gemini-2.0-flash-exp`: Best balance of speed and quality (recommended)
+  - `gemini-pro`: Higher quality for complex analysis
+  - `gemini-flash`: Fastest responses, lower cost
+- **Caching**: Enable with `ctx = core.WithExecutionState(ctx)` to cache LLM responses
+- **In-Process**: Sub-agent calls have zero serialization overhead
+- **Parallelization**: Independent agents can be called concurrently (future enhancement)
+
+## Comparison with Python ADK
+
+This dspy-go implementation is equivalent to Python ADK:
+
+```python
+# Python ADK
+from google.generativeai import adk
+
+search_agent = LLMAgent(model=llm, instruction="...")
+analysis_agent = LLMAgent(model=llm, instruction="...")
+synthesis_agent = LLMAgent(model=llm, instruction="...")
+
+orchestrator = LLMAgent(
+    model=llm,
+    sub_agents=[search_agent, analysis_agent, synthesis_agent]
+)
+```
+
+```go
+// dspy-go A2A
+searchExec := a2a.NewExecutorWithConfig(searchAgent, ...)
+analysisExec := a2a.NewExecutorWithConfig(analysisAgent, ...)
+synthesisExec := a2a.NewExecutorWithConfig(synthesisAgent, ...)
+
+orchestratorExec.WithSubAgent("search", searchExec).
+                WithSubAgent("analysis", analysisExec).
+                WithSubAgent("synthesis", synthesisExec)
+```
 
 ## Related Examples
 
-- **HTTP Server** - See `examples/a2a_server/` for remote agent access via JSON-RPC
-- **SSE Streaming** - See `examples/a2a_streaming/` for real-time task updates
+- `examples/agents/` - Advanced agent workflows and orchestration
+- `examples/react_agent/` - ReAct agent with tool usage
+- `examples/tool_composition/` - Tool chaining patterns
+- `pkg/agents/communication/README.md` - A2A protocol documentation
 
 ## Next Steps
 
-1. Try creating your own custom agents
-2. Build deeper hierarchies (3+ levels)
-3. Add actual LLM-powered agents using dspy-go modules
-4. Experiment with agent collaboration patterns
-5. Deploy agents as HTTP services for cross-language interop
+1. **Experiment with Gemini models** (`gemini-flash` vs `gemini-pro`) to find the best performance/cost tradeoff
+2. **Add your own specialized agents** for domain-specific research
+3. **Integrate real tools** like WebSearch, databases, APIs
+4. **Implement multi-round refinement** for deeper research
+5. **Deploy as HTTP service** for cross-language agent interop
+6. **Try Gemini's multimodal capabilities** by adding image/document analysis agents
 
 ## References
 
-- [Google Agent Developer Kit (ADK)](https://github.com/google/adk-python)
-- [A2A Protocol Specification](https://developers.google.com/agent-developer-kit/docs)
-- [dspy-go Documentation](../../README.md)
+- [Google Gemini API](https://ai.google.dev/gemini-api/docs) - Official Gemini documentation
+- [Get Gemini API Key](https://aistudio.google.com/app/apikey) - Free API key
+- [Google Agent Developer Kit (ADK)](https://github.com/google/adk-python) - Python agent framework
+- [A2A Protocol Specification](https://developers.google.com/agent-developer-kit/docs) - Agent-to-Agent protocol
+- [dspy-go Documentation](../../README.md) - Main dspy-go docs
+- [dspy-go Modules & Signatures](../../pkg/modules/README.md) - Module system guide
