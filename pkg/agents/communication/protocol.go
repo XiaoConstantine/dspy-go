@@ -4,7 +4,6 @@
 package communication
 
 import (
-	"encoding/json"
 	"sync"
 	"time"
 
@@ -432,14 +431,4 @@ func (e *RPCError) Error() string {
 // across service restarts and distributed environments.
 func generateID() string {
 	return uuid.New().String()
-}
-
-// MarshalJSON provides custom JSON marshaling for Part to ensure proper structure.
-func (p Part) MarshalJSON() ([]byte, error) {
-	type Alias Part
-	return json.Marshal(&struct {
-		*Alias
-	}{
-		Alias: (*Alias)(&p),
-	})
 }

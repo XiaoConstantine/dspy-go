@@ -312,6 +312,12 @@ func (s *Server) cleanupOldTasks() {
 			delete(s.tasks.tasks, id)
 			// Clean up subscribers for the deleted task to prevent memory leaks.
 			s.subscribers.mu.Lock()
+			// Close all subscriber channels before deleting to prevent goroutine leaks
+			if subs, exists := s.subscribers.subscribers[id]; exists {
+				for _, sub := range subs {
+					close(sub.channel)
+				}
+			}
 			delete(s.subscribers.subscribers, id)
 			s.subscribers.mu.Unlock()
 		}
