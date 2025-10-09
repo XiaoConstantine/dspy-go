@@ -310,6 +310,10 @@ func (s *Server) cleanupOldTasks() {
 
 		if now.Sub(ts) > maxAge {
 			delete(s.tasks.tasks, id)
+			// Clean up subscribers for the deleted task to prevent memory leaks.
+			s.subscribers.mu.Lock()
+			delete(s.subscribers.subscribers, id)
+			s.subscribers.mu.Unlock()
 		}
 	}
 }
@@ -558,12 +562,20 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	// Send initial task state
 	status := task.GetStatus()
-	s.sendSSEEvent(w, flusher, "status", status)
 
-	// If task already completed, close immediately
+	// If task already completed, send all artifacts and final status before closing
 	if status.State.IsTerminal() {
+		// Stream all artifacts to the new subscriber for completed tasks
+		for _, artifact := range task.GetArtifacts() {
+			s.sendSSEEvent(w, flusher, "artifact", NewTaskArtifactUpdateEvent(task.ID, artifact, false))
+		}
+		// Send final status
+		s.sendSSEEvent(w, flusher, "status", NewTaskStatusUpdateEvent(task.ID, status, true))
 		return
 	}
+
+	// Send current status for in-progress tasks
+	s.sendSSEEvent(w, flusher, "status", status)
 
 	// Stream updates
 	for {

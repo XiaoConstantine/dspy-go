@@ -14,7 +14,7 @@ This package implements Google's Agent-to-Agent (a2a) protocol for dspy-go, enab
 ## Package Structure
 
 ```
-pkg/a2a/
+pkg/agents/communication/
 ├── protocol.go           # Core types (Message, Task, Part, AgentCard)
 ├── converters.go         # Bidirectional message conversion
 ├── agent_executor.go     # In-process agent composition ⭐
@@ -30,7 +30,7 @@ pkg/a2a/
 Compose agents hierarchically, similar to ADK Python's `sub_agents`:
 
 ```go
-import "github.com/XiaoConstantine/dspy-go/pkg/a2a"
+import a2a "github.com/XiaoConstantine/dspy-go/pkg/agents/communication"
 
 // Create sub-agents
 searchAgent := // ... your search agent
@@ -111,13 +111,13 @@ server.Start(ctx)
 
 ```bash
 # Run tests
-go test ./pkg/a2a/...
+go test ./pkg/agents/communication/...
 
 # Run with coverage
-go test -cover ./pkg/a2a/...
+go test -cover ./pkg/agents/communication/...
 
 # Build examples
-go build ./examples/a2a/...
+go build ./examples/a2a_composition/...
 ```
 
 ## References

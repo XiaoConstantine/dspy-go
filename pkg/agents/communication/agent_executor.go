@@ -151,7 +151,8 @@ func (e *A2AExecutor) Execute(ctx context.Context, msg *Message) (Artifact, erro
 
 	if task.Status.State == TaskStateFailed {
 		if task.Status.Message != nil {
-			return Artifact{}, fmt.Errorf("task failed: %s", ExtractTextFromMessage(task.Status.Message))
+			errMsg := fmt.Sprintf("task failed: %s", ExtractTextFromMessage(task.Status.Message))
+			return Artifact{}, fmt.Errorf("%s", errMsg)
 		}
 		return Artifact{}, fmt.Errorf("task failed")
 	}

@@ -1,6 +1,7 @@
 package communication
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -224,14 +225,16 @@ func ToolsToCapabilities(tools []core.Tool) []Capability {
 			Type:        "function",
 		}
 
-		// InputSchema from MCP is already compatible with JSON Schema format
-		// For now, store it as-is; the schema field is map[string]interface{}
-		// In the future, we might need to convert InputSchema to map explicitly
-		cap.Schema = map[string]interface{}{
-			"type": "object",
-			// Note: Detailed schema conversion from models.InputSchema to map
-			// would go here. For now, we provide a minimal schema.
+		// Convert tool's InputSchema to JSON schema map for full discoverability
+		var schemaMap map[string]interface{}
+		schema := tool.InputSchema()
+		// Attempt to convert the tool's input schema to a map.
+		if schemaBytes, err := json.Marshal(schema); err == nil {
+			// This error is ignored as a schema is not critical for basic functionality,
+			// but should be logged in a real application.
+			_ = json.Unmarshal(schemaBytes, &schemaMap)
 		}
+		cap.Schema = schemaMap
 
 		capabilities = append(capabilities, cap)
 	}
@@ -261,10 +264,15 @@ func CapabilitiesToToolMetadata(capabilities []Capability) []*core.ToolMetadata 
 			Description: cap.Description,
 		}
 
-		// Note: cap.Schema is map[string]interface{} (JSON Schema)
-		// but ToolMetadata.InputSchema is models.InputSchema from MCP-Go
-		// For now, we leave InputSchema nil. A full implementation would
-		// need to convert JSON Schema to models.InputSchema format.
+		// Convert schema map back to InputSchema struct for full round-trip support
+		if cap.Schema != nil {
+			// Attempt to convert schema map back to InputSchema struct.
+			if schemaBytes, err := json.Marshal(cap.Schema); err == nil {
+				// This error is ignored as a schema is not critical for basic functionality,
+				// but should be logged in a real application.
+				_ = json.Unmarshal(schemaBytes, &meta.InputSchema)
+			}
+		}
 
 		metadata = append(metadata, meta)
 	}

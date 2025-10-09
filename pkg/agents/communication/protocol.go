@@ -5,10 +5,10 @@ package communication
 
 import (
 	"encoding/json"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ============================================================================
@@ -428,12 +428,10 @@ func (e *RPCError) Error() string {
 // ============================================================================
 
 // generateID generates a unique ID for messages, tasks, and artifacts.
-// Uses atomic counter for thread-safety - in production, use UUID or similar.
-var idCounter atomic.Int64
-
+// Uses Google's UUID library for production-ready unique IDs that work
+// across service restarts and distributed environments.
 func generateID() string {
-	count := idCounter.Add(1)
-	return time.Now().Format("20060102150405") + "-" + strconv.FormatInt(count, 10)
+	return uuid.New().String()
 }
 
 // MarshalJSON provides custom JSON marshaling for Part to ensure proper structure.
