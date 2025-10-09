@@ -1,11 +1,13 @@
 package communication
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
 // ============================================================================
@@ -230,9 +232,11 @@ func ToolsToCapabilities(tools []core.Tool) []Capability {
 		schema := tool.InputSchema()
 		// Attempt to convert the tool's input schema to a map.
 		if schemaBytes, err := json.Marshal(schema); err == nil {
-			// This error is ignored as a schema is not critical for basic functionality,
-			// but should be logged in a real application.
-			_ = json.Unmarshal(schemaBytes, &schemaMap)
+			if err := json.Unmarshal(schemaBytes, &schemaMap); err != nil {
+				// Log schema conversion failures to help identify malformed tool schemas
+				logger := logging.GetLogger()
+				logger.Error(context.Background(), "Failed to unmarshal tool schema for %s: %v", metadata.Name, err)
+			}
 		}
 		cap.Schema = schemaMap
 
@@ -268,9 +272,11 @@ func CapabilitiesToToolMetadata(capabilities []Capability) []*core.ToolMetadata 
 		if cap.Schema != nil {
 			// Attempt to convert schema map back to InputSchema struct.
 			if schemaBytes, err := json.Marshal(cap.Schema); err == nil {
-				// This error is ignored as a schema is not critical for basic functionality,
-				// but should be logged in a real application.
-				_ = json.Unmarshal(schemaBytes, &meta.InputSchema)
+				if err := json.Unmarshal(schemaBytes, &meta.InputSchema); err != nil {
+					// Log schema conversion failures to help identify malformed capability schemas
+					logger := logging.GetLogger()
+					logger.Error(context.Background(), "Failed to unmarshal capability schema for %s: %v", cap.Name, err)
+				}
 			}
 		}
 

@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	a2a "github.com/XiaoConstantine/dspy-go/pkg/agents/communication"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
 // ============================================================================
@@ -16,9 +16,7 @@ import (
 // ============================================================================
 
 // CalculatorAgent performs basic arithmetic operations.
-type CalculatorAgent struct {
-	name string
-}
+type CalculatorAgent struct {}
 
 func (c *CalculatorAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
 	question, ok := input["question"].(string)
@@ -50,9 +48,7 @@ func (c *CalculatorAgent) GetMemory() agents.Memory {
 }
 
 // SearchAgent simulates web search capabilities.
-type SearchAgent struct {
-	name string
-}
+type SearchAgent struct {}
 
 func (s *SearchAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
 	question, ok := input["question"].(string)
@@ -84,9 +80,7 @@ func (s *SearchAgent) GetMemory() agents.Memory {
 }
 
 // ReasoningAgent provides logical reasoning capabilities.
-type ReasoningAgent struct {
-	name string
-}
+type ReasoningAgent struct {}
 
 func (r *ReasoningAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
 	question, ok := input["question"].(string)
@@ -116,7 +110,6 @@ func (r *ReasoningAgent) GetMemory() agents.Memory {
 
 // OrchestratorAgent coordinates multiple sub-agents.
 type OrchestratorAgent struct {
-	name     string
 	executor *a2a.A2AExecutor
 }
 
@@ -124,7 +117,7 @@ type OrchestratorAgent struct {
 // This factory function ensures the agent and executor are always in a valid state,
 // preventing nil pointer dereferences from the circular dependency.
 func NewOrchestratorWithExecutor(name string) (*OrchestratorAgent, *a2a.A2AExecutor) {
-	agent := &OrchestratorAgent{name: name}
+	agent := &OrchestratorAgent{}
 	executor := a2a.NewExecutorWithConfig(agent, a2a.ExecutorConfig{
 		Name: name + "Agent",
 	})
@@ -195,6 +188,16 @@ func containsAny(s string, substrs []string) bool {
 func main() {
 	ctx := context.Background()
 
+	// Set up logger
+	logger := logging.NewLogger(logging.Config{
+		Severity: logging.INFO,
+		Outputs: []logging.Output{
+			logging.NewConsoleOutput(false),
+		},
+	})
+	logging.SetLogger(logger)
+	log := logging.GetLogger()
+
 	fmt.Println("╔════════════════════════════════════════════════════════════════╗")
 	fmt.Println("║          A2A Agent Composition Example - dspy-go               ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
@@ -208,8 +211,8 @@ func main() {
 	fmt.Println(strings.Repeat("=", 64))
 
 	// Create leaf agents
-	calculator := &CalculatorAgent{name: "Calculator"}
-	search := &SearchAgent{name: "Search"}
+	calculator := &CalculatorAgent{}
+	search := &SearchAgent{}
 
 	// Wrap agents with A2AExecutor for composition
 	calcExec := a2a.NewExecutorWithConfig(calculator, a2a.ExecutorConfig{
@@ -225,17 +228,19 @@ func main() {
 	msg := a2a.NewUserMessage("What is 2+2?")
 	artifact, err := calcExec.Execute(ctx, msg)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(ctx, "Error testing calculator agent: %v", err)
+	} else {
+		fmt.Printf("   Result: %s\n", a2a.ExtractTextFromArtifact(artifact))
 	}
-	fmt.Printf("   Result: %s\n", a2a.ExtractTextFromArtifact(artifact))
 
 	fmt.Println("\n🔍 Testing Search Agent:")
 	msg = a2a.NewUserMessage("What's the weather?")
 	artifact, err = searchExec.Execute(ctx, msg)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(ctx, "Error testing search agent: %v", err)
+	} else {
+		fmt.Printf("   Result: %s\n", a2a.ExtractTextFromArtifact(artifact))
 	}
-	fmt.Printf("   Result: %s\n", a2a.ExtractTextFromArtifact(artifact))
 
 	// ========================================================================
 	// Example 2: Multi-Level Agent Hierarchy
@@ -246,7 +251,7 @@ func main() {
 	fmt.Println(strings.Repeat("=", 64))
 
 	// Create reasoning agent
-	reasoning := &ReasoningAgent{name: "Reasoning"}
+	reasoning := &ReasoningAgent{}
 	reasoningExec := a2a.NewExecutorWithConfig(reasoning, a2a.ExecutorConfig{
 		Name: "ReasoningAgent",
 	})
@@ -281,7 +286,7 @@ func main() {
 		msg := a2a.NewUserMessage(question)
 		artifact, err := orchestratorExec.Execute(ctx, msg)
 		if err != nil {
-			log.Printf("Error: %v", err)
+			log.Error(ctx, "Error: %v", err)
 			continue
 		}
 
@@ -300,16 +305,18 @@ func main() {
 	fmt.Println("\n📞 Calling calculator sub-agent directly:")
 	result, err := orchestratorExec.CallSubAgentSimple(ctx, "calculator", "What is 5*3?")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(ctx, "Error calling calculator sub-agent: %v", err)
+	} else {
+		fmt.Printf("   Result: %s\n", result)
 	}
-	fmt.Printf("   Result: %s\n", result)
 
 	fmt.Println("\n📞 Calling search sub-agent directly:")
 	result, err = orchestratorExec.CallSubAgentSimple(ctx, "search", "What is the capital of France?")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(ctx, "Error calling search sub-agent: %v", err)
+	} else {
+		fmt.Printf("   Result: %s\n", result)
 	}
-	fmt.Printf("   Result: %s\n", result)
 
 	// ========================================================================
 	// Example 5: Agent Capabilities Discovery
