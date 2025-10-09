@@ -1,10 +1,11 @@
 // Package a2a implements Google's Agent-to-Agent (a2a) protocol for dspy-go.
 // This package provides JSON-RPC over HTTP transport for interoperability with
 // Python ADK agents and other a2a-compatible agents.
-package a2a
+package communication
 
 import (
 	"encoding/json"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -432,7 +433,7 @@ var idCounter atomic.Int64
 
 func generateID() string {
 	count := idCounter.Add(1)
-	return time.Now().Format("20060102150405") + "-" + string(rune('0'+count%10))
+	return time.Now().Format("20060102150405") + "-" + strconv.FormatInt(count, 10)
 }
 
 // MarshalJSON provides custom JSON marshaling for Part to ensure proper structure.

@@ -1,7 +1,8 @@
-package a2a
+package communication
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -300,17 +301,14 @@ func ExtractTextFromMessage(msg *Message) string {
 		return ""
 	}
 
-	var text string
-	for i, part := range msg.Parts {
+	var texts []string
+	for _, part := range msg.Parts {
 		if part.Type == "text" && part.Text != "" {
-			if i > 0 && text != "" {
-				text += "\n"
-			}
-			text += part.Text
+			texts = append(texts, part.Text)
 		}
 	}
 
-	return text
+	return strings.Join(texts, "\n")
 }
 
 // ExtractTextFromArtifact extracts all text content from an artifact.
@@ -319,17 +317,14 @@ func ExtractTextFromArtifact(artifact Artifact) string {
 		return ""
 	}
 
-	var text string
-	for i, part := range artifact.Parts {
+	var texts []string
+	for _, part := range artifact.Parts {
 		if part.Type == "text" && part.Text != "" {
-			if i > 0 && text != "" {
-				text += "\n"
-			}
-			text += part.Text
+			texts = append(texts, part.Text)
 		}
 	}
 
-	return text
+	return strings.Join(texts, "\n")
 }
 
 // CreateSimpleInput creates agent input from a simple text question.

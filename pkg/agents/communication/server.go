@@ -1,10 +1,11 @@
-package a2a
+package communication
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -395,7 +396,13 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 	}
 
 	// Parse message
-	msgBytes, _ := json.Marshal(msgData)
+	// NOTE: This could be optimized using a library like mapstructure to avoid
+	// the marshal/unmarshal round-trip, but the current approach is simple and
+	// works correctly. Consider optimization if this becomes a bottleneck.
+	msgBytes, err := json.Marshal(msgData)
+	if err != nil {
+		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Failed to encode message data")
+	}
 	var msg Message
 	if err := json.Unmarshal(msgBytes, &msg); err != nil {
 		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Invalid message format")
@@ -515,14 +522,15 @@ func (s *Server) failTask(task *Task, err error) {
 
 // URL format: /stream/{taskId}.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	// Extract task ID from path
-	path := r.URL.Path
+	// Extract task ID from path - robust against trailing slashes
 	prefix := s.config.PathPrefix + "/stream/"
-	if len(path) <= len(prefix) {
+	taskID := strings.TrimPrefix(r.URL.Path, prefix)
+	taskID = strings.Trim(taskID, "/")
+
+	if taskID == "" {
 		http.Error(w, "Task ID required", http.StatusBadRequest)
 		return
 	}
-	taskID := path[len(prefix):]
 
 	// Verify task exists
 	task, ok := s.tasks.get(taskID)

@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/a2a"
+	a2a "github.com/XiaoConstantine/dspy-go/pkg/agents/communication"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -21,7 +21,10 @@ type CalculatorAgent struct {
 }
 
 func (c *CalculatorAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	question := input["question"].(string)
+	question, ok := input["question"].(string)
+	if !ok {
+		return nil, fmt.Errorf("input 'question' is not a string or is missing")
+	}
 
 	// Simulate calculation
 	var result string
@@ -52,7 +55,10 @@ type SearchAgent struct {
 }
 
 func (s *SearchAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	question := input["question"].(string)
+	question, ok := input["question"].(string)
+	if !ok {
+		return nil, fmt.Errorf("input 'question' is not a string or is missing")
+	}
 
 	// Simulate search results
 	var result string
@@ -83,7 +89,10 @@ type ReasoningAgent struct {
 }
 
 func (r *ReasoningAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	question := input["question"].(string)
+	question, ok := input["question"].(string)
+	if !ok {
+		return nil, fmt.Errorf("input 'question' is not a string or is missing")
+	}
 
 	// Simulate reasoning
 	result := fmt.Sprintf("Let me think about '%s'...\n", question)
@@ -111,8 +120,23 @@ type OrchestratorAgent struct {
 	executor *a2a.A2AExecutor
 }
 
+// NewOrchestratorWithExecutor creates an OrchestratorAgent with its A2AExecutor properly initialized.
+// This factory function ensures the agent and executor are always in a valid state,
+// preventing nil pointer dereferences from the circular dependency.
+func NewOrchestratorWithExecutor(name string) (*OrchestratorAgent, *a2a.A2AExecutor) {
+	agent := &OrchestratorAgent{name: name}
+	executor := a2a.NewExecutorWithConfig(agent, a2a.ExecutorConfig{
+		Name: name + "Agent",
+	})
+	agent.executor = executor
+	return agent, executor
+}
+
 func (o *OrchestratorAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	question := input["question"].(string)
+	question, ok := input["question"].(string)
+	if !ok {
+		return nil, fmt.Errorf("input 'question' is not a string or is missing")
+	}
 
 	fmt.Printf("\n🎯 Orchestrator analyzing: %s\n", question)
 
@@ -157,21 +181,7 @@ func (o *OrchestratorAgent) GetMemory() agents.Memory {
 
 func containsAny(s string, substrs []string) bool {
 	for _, substr := range substrs {
-		if contains(s, substr) {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		(len(s) > len(substr) && containsSubstring(s, substr)))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+		if strings.Contains(s, substr) {
 			return true
 		}
 	}
@@ -241,19 +251,14 @@ func main() {
 		Name: "ReasoningAgent",
 	})
 
-	// Create orchestrator with sub-agents
-	orchestrator := &OrchestratorAgent{name: "Orchestrator"}
-	orchestratorExec := a2a.NewExecutorWithConfig(orchestrator, a2a.ExecutorConfig{
-		Name: "OrchestratorAgent",
-	})
+	// Create orchestrator with sub-agents using factory function
+	// This ensures the agent and executor are always in a valid state
+	_, orchestratorExec := NewOrchestratorWithExecutor("Orchestrator")
 
 	// Register sub-agents (this is the key a2a composition feature!)
 	orchestratorExec.WithSubAgent("calculator", calcExec).
 		WithSubAgent("search", searchExec).
 		WithSubAgent("reasoning", reasoningExec)
-
-	// Set executor reference so orchestrator can call sub-agents
-	orchestrator.executor = orchestratorExec
 
 	// ========================================================================
 	// Example 3: Agent Orchestration in Action
@@ -271,7 +276,7 @@ func main() {
 
 	for i, question := range questions {
 		fmt.Printf("\n[Question %d] %s\n", i+1, question)
-		fmt.Println(string(make([]byte, 64)))
+		fmt.Println(strings.Repeat("─", 64))
 
 		msg := a2a.NewUserMessage(question)
 		artifact, err := orchestratorExec.Execute(ctx, msg)
@@ -338,7 +343,7 @@ func main() {
 	fmt.Println("\n" + strings.Repeat("=", 64))
 	fmt.Println("Summary: Key A2A Features Demonstrated")
 	fmt.Println(strings.Repeat("=", 64))
-	fmt.Println(`
+	fmt.Print(`
 ✅ Agent Composition - Parent agents can have sub-agents
 ✅ In-Process Communication - Agents communicate via a2a protocol (no HTTP)
 ✅ Hierarchy Support - Multi-level agent hierarchies (orchestrator → tools)
@@ -349,6 +354,7 @@ func main() {
 🎯 This demonstrates Google's a2a protocol for agent interoperability!
    Agents from different sources can work together seamlessly.
 `)
+	fmt.Println()
 
 	fmt.Println(strings.Repeat("=", 64))
 }
