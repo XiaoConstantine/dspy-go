@@ -1,13 +1,13 @@
 # Hugo
-title = "My Docs"
-description = "Congrats on setting up a new Doks project!"
+title = "dspy-go Documentation"
+description = "Build reliable LLM applications with dspy-go, the Go implementation of DSPy"
 images = ["cover.png"]
 
 # mainSections
 mainSections = ["docs"]
 
 [social]
-  twitter = "getdoks"
+  twitter = ""
 
 # Doks (@thulite/doks-core)
 [doks]
@@ -63,7 +63,7 @@ mainSections = ["docs"]
   backgroundDots = true # true (default) or false
 
   # Homepage
-  sectionFooter = false # false (default) or true
+  sectionFooter = true # false (default) or true
 
   # Blog
   relatedPosts = false # false (default) or true
@@ -74,7 +74,7 @@ mainSections = ["docs"]
   editPage = false # false (default) or true
   lastMod = false # false (default) or true
   repoHost = "GitHub" # GitHub (default), Gitea, GitLab, Bitbucket, or BitbucketServer
-  docsRepo = "https://github.com/h-enk/doks"
+  docsRepo = "https://github.com/XiaoConstantine/dspy-go"
   docsRepoBranch = "main" # main (default), master, or <branch name>
   docsRepoSubPath = "" # "" (none, default) or <sub path>
 
@@ -131,8 +131,8 @@ mainSections = ["docs"]
   [seo.schemas]
     type = "Organization" # Organization (default) or Person
     logo = "favicon-512x512.png" # Logo of Organization — favicon-512x512.png (default)
-    name = "Thulite" # Name of Organization or Person
-    sameAs = [] # E.g. ["https://github.com/thuliteio/thulite", "https://fosstodon.org/@thulite"]
+    name = "dspy-go" # Name of Organization or Person
+    sameAs = ["https://github.com/XiaoConstantine/dspy-go"] # E.g. ["https://github.com/thuliteio/thulite", "https://fosstodon.org/@thulite"]
     images = ["cover.png"] # ["cover.png"] (default)
     article = [] # Article sections
     newsArticle = [] # NewsArticle sections

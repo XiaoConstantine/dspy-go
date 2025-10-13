@@ -530,7 +530,7 @@ DSPy-Go supports multiple LLM providers with flexible configuration options:
 llm, err := llms.NewAnthropicLLM("api-key", core.ModelAnthropicSonnet)
 
 // Using Google Gemini
-llm, err := llms.NewGeminiLLM("api-key", "gemini-pro")
+llm, err := llms.NewGeminiLLM("api-key", core.ModelGoogleGeminiPro)
 
 // Using OpenAI (standard)
 llm, err := llms.NewOpenAI(core.ModelOpenAIGPT4, "api-key")
@@ -554,7 +554,7 @@ llm, err := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
     llms.WithOpenAITimeout(30*time.Second))
 
 // Using Ollama (local)
-llm, err := llms.NewOllamaLLM("ollama:llama2")
+llm, err := llms.NewOllamaLLM(core.ModelOllamaLlama3_8B)
 
 // Using LlamaCPP (local)
 llm, err := llms.NewLlamacppLLM("http://localhost:8080")
