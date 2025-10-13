@@ -1,0 +1,16 @@
+baseURL = "https://xiaoconstantine.github.io/dspy-go/"
+languageCode = "en-us"
+title = "dspy-go Documentation"
+theme = "doks"
+
+# Doks theme configuration
+[params]
+  BookTheme = "dark" # Set default to dark mode
+  BookRepo = "https://github.com/XiaoConstantine/dspy-go"
+  BookBranch = "main"
+  BookSection = "docs"
+
+[module]
+[[module.imports]]
+  path = "github.com/h-enk/doks"
+  disable = false

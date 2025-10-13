@@ -1,0 +1,32 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for Hugo's GitInfo
+
+      - name: Set up Hugo
+        uses: peaceiris/actions-hugo@v2
+        with:
+          hugo-version: '0.124.1' # Use a specific version for reproducibility
+          extended: true
+
+      - name: Build Documentation Site
+        run: hugo --minify --source docs
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/public
+          publish_branch: gh-pages
+          force_orphan: true
