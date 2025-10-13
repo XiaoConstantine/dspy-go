@@ -1,16 +1,10 @@
 version: 2
-
 updates:
   - package-ecosystem: gomod
     directory: "/"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-minor
-          - version-update:semver-major
+      interval: daily
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: daily
