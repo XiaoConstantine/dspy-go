@@ -21,7 +21,10 @@ jobs:
           extended: true
 
       - name: Build Documentation Site
-        run: hugo --minify --source docs
+        run: |
+          cd docs
+          hugo mod get -u
+          hugo --minify
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v3
