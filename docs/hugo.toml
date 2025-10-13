@@ -1,6 +1,7 @@
 baseURL = "https://xiaoconstantine.github.io/dspy-go/"
 languageCode = "en-us"
 title = "dspy-go Documentation"
+relativeURLs = true
 
 # Doks theme configuration
 [params]
