@@ -1,0 +1,34 @@
+**/.claude/settings.local.json
+
+# Test coverage
+coverage.out
+*.out
+
+# Compiled binaries
+/context_demo
+/getting_started
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Agent memory directories (runtime artifacts)
+agent_memory/
+**/agent_memory/
+
+# Test artifacts
+*.test
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Worktrees
+.worktrees/
+
+# Docs node modules and build artifacts
+docs/node_modules/
+docs/public/
+docs/resources/
+docs/.hugo_build.lock

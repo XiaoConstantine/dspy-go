@@ -17,14 +17,23 @@ jobs:
       - name: Set up Hugo
         uses: peaceiris/actions-hugo@v2
         with:
-          hugo-version: '0.124.1' # Use a specific version for reproducibility
+          hugo-version: '0.151.0'
           extended: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./docs
+        run: npm ci
+
       - name: Build Documentation Site
-        run: |
-          cd docs
-          hugo mod get -u
-          hugo --minify
+        working-directory: ./docs
+        run: npm run build
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v3
