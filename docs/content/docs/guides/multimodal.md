@@ -116,44 +116,36 @@ import (
     "github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
-// Define a comprehensive vision analysis signature
-type VisionAnalysisSignature struct {
-    core.Signature
-}
-
-func (s VisionAnalysisSignature) Inputs() []core.InputField {
-    return []core.InputField{
-        {Field: core.NewField("image",
-            core.WithDescription("The image to analyze in detail"))},
-        {Field: core.NewField("focus",
-            core.WithDescription("Specific aspect to focus on"))},
-    }
-}
-
-func (s VisionAnalysisSignature) Outputs() []core.OutputField {
-    return []core.OutputField{
-        {Field: core.NewField("description",
-            core.WithDescription("Detailed description of the image"))},
-        {Field: core.NewField("objects",
-            core.WithDescription("List of objects identified"))},
-        {Field: core.NewField("colors",
-            core.WithDescription("Dominant colors in the image"))},
-        {Field: core.NewField("mood",
-            core.WithDescription("Overall mood or atmosphere"))},
-    }
-}
-
-func (s VisionAnalysisSignature) Instruction() string {
-    return "Analyze the image thoroughly and provide detailed observations."
-}
-
 func main() {
     // Configure LLM with vision support
-    llm, _ := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro) // Will use GEMINI_API_KEY
+    llm, err := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro) // Will use GEMINI_API_KEY
+    if err != nil {
+        log.Fatal(err)
+    }
     core.SetDefaultLLM(llm)
 
+    // Define a comprehensive vision analysis signature
+    signature := core.NewSignature(
+        []core.InputField{
+            {Field: core.NewImageField("image",
+                core.WithDescription("The image to analyze in detail"))},
+            {Field: core.NewField("focus",
+                core.WithDescription("Specific aspect to focus on"))},
+        },
+        []core.OutputField{
+            {Field: core.NewField("description",
+                core.WithDescription("Detailed description of the image"))},
+            {Field: core.NewField("objects",
+                core.WithDescription("List of objects identified"))},
+            {Field: core.NewField("colors",
+                core.WithDescription("Dominant colors in the image"))},
+            {Field: core.NewField("mood",
+                core.WithDescription("Overall mood or atmosphere"))},
+        },
+    ).WithInstruction("Analyze the image thoroughly and provide detailed observations.")
+
     // Create ChainOfThought for detailed analysis
-    analyzer := modules.NewChainOfThought(VisionAnalysisSignature{})
+    analyzer := modules.NewChainOfThought(signature)
 
     // Load image
     imageData, _ := os.ReadFile("photo.jpg")

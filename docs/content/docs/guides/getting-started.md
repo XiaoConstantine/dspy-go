@@ -133,30 +133,8 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
-// 1. Define a Signature
-// A signature describes the task you want the LLM to perform.
-type SentimentSignature struct {
-	core.Signature
-}
-
-func (s SentimentSignature) Inputs() []core.InputField {
-	return []core.InputField{
-		{Field: core.NewField("sentence", core.WithDescription("The sentence to classify."))},
-	}
-}
-
-func (s SentimentSignature) Outputs() []core.OutputField {
-	return []core.OutputField{
-		{Field: core.NewField("sentiment", core.WithDescription("The sentiment (Positive, Negative, Neutral)."))},
-	}
-}
-
-func (s SentimentSignature) Instruction() string {
-	return "You are a helpful sentiment analysis expert. Classify the sentiment of the given sentence."
-}
-
 func main() {
-	// 2. Zero-Config Setup
+	// 1. Zero-Config Setup
 	// Pass empty string - automatically uses API key from environment variable
 	llm, err := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
 	if err != nil {
@@ -164,8 +142,19 @@ func main() {
 	}
 	core.SetDefaultLLM(llm)
 
+	// 2. Define a Signature
+	// A signature describes the task inputs, outputs, and instructions
+	signature := core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewField("sentence", core.WithDescription("The sentence to classify."))},
+		},
+		[]core.OutputField{
+			{Field: core.NewField("sentiment", core.WithDescription("The sentiment (Positive, Negative, Neutral)."))},
+		},
+	).WithInstruction("You are a helpful sentiment analysis expert. Classify the sentiment of the given sentence.")
+
 	// 3. Create a Predict Module
-	predictor := modules.NewPredict(SentimentSignature{})
+	predictor := modules.NewPredict(signature)
 
 	// 4. Execute the Predictor
 	ctx := context.Background()

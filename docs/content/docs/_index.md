@@ -56,6 +56,24 @@ Native support for:
 - Streaming multimodal content
 - Content block system for flexible media handling
 
+### 🤖 **Intelligent Agents**
+Build production-ready agents with reasoning, tool use, and memory:
+- **ReAct Pattern**: Reasoning + Acting with iterative tool execution
+- **Memory Management**: Buffer and summary memory for conversation context
+- **Orchestration**: Task decomposition and multi-agent coordination
+- **Custom Tools**: Easy integration with APIs, databases, and external systems
+- **Reflection**: Self-improving agents that learn from their actions
+
+```go
+// Create an agent with tools and memory
+agent := NewProductionAgent()
+response, _ := agent.Chat(ctx, "What's the population of Tokyo divided by 1000?")
+// Agent automatically:
+// 1. Searches for Tokyo population
+// 2. Uses calculator tool
+// 3. Provides the answer with reasoning
+```
+
 ## What Can You Build?
 
 - **Question Answering Systems**: RAG pipelines with retrieval and generation
@@ -71,6 +89,7 @@ Native support for:
 |---------|-------------|
 | **Modular Design** | Compose simple, reusable components into complex applications |
 | **Multiple LLMs** | Anthropic, OpenAI, Google Gemini, Ollama, LlamaCPP, and more |
+| **Intelligent Agents** | ReAct patterns, memory management, orchestration, and custom tools |
 | **Tool Chaining** | Sequential pipelines with data transformation and conditional logic |
 | **Dependency Resolution** | Automatic execution planning with parallel optimization |
 | **CLI Tool** | Explore optimizers without writing code |
@@ -81,6 +100,7 @@ Native support for:
 
 - **[Getting Started →](guides/getting-started/)** - Install and run your first program
 - **[Core Concepts →](guides/core-concepts/)** - Understand Signatures, Modules, and Programs
+- **[Building Agents →](guides/agents/)** - ReAct patterns, orchestration, and memory
 - **[Optimizers →](guides/optimizers/)** - Master GEPA, MIPRO, SIMBA and more
 - **[Tool Management →](guides/tools/)** - Smart Registry, MCP, and tool chaining
 - **[Examples →](https://github.com/XiaoConstantine/dspy-go/tree/main/examples)** - Real-world implementations

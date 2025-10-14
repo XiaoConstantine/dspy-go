@@ -32,43 +32,26 @@ Instead of crafting prompts manually, signatures let you:
 
 ### Creating a Signature
 
-There are two ways to create signatures in dspy-go:
-
-#### Method 1: Struct-based Signatures (Type-Safe)
-
-Perfect for production code with compile-time safety:
+Signatures are created using the `core.NewSignature()` function:
 
 ```go
-type QuestionAnswerSignature struct {
-    core.Signature
-}
-
-func (s QuestionAnswerSignature) Inputs() []core.InputField {
-    return []core.InputField{
+signature := core.NewSignature(
+    []core.InputField{
         {Field: core.NewField("question",
             core.WithDescription("The question to answer"))},
         {Field: core.NewField("context",
             core.WithDescription("Background information"))},
-    }
-}
-
-func (s QuestionAnswerSignature) Outputs() []core.OutputField {
-    return []core.OutputField{
+    },
+    []core.OutputField{
         {Field: core.NewField("answer",
             core.WithDescription("A concise, accurate answer"))},
         {Field: core.NewField("confidence",
             core.WithDescription("Confidence level: high/medium/low"))},
-    }
-}
-
-func (s QuestionAnswerSignature) Instruction() string {
-    return "You are a helpful assistant. Answer the question accurately using the provided context."
-}
+    },
+).WithInstruction("You are a helpful assistant. Answer the question accurately using the provided context.")
 ```
 
-#### Method 2: Functional Signatures (Quick & Flexible)
-
-Perfect for prototyping and simple use cases:
+You can also create simple signatures without descriptions:
 
 ```go
 signature := core.NewSignature(
@@ -392,43 +375,36 @@ import (
     "log"
 
     "github.com/XiaoConstantine/dspy-go/pkg/core"
+    "github.com/XiaoConstantine/dspy-go/pkg/llms"
     "github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
-// 1. Define Signature
-type AnalysisSignature struct {
-    core.Signature
-}
-
-func (s AnalysisSignature) Inputs() []core.InputField {
-    return []core.InputField{
-        {Field: core.NewField("text",
-            core.WithDescription("The text to analyze"))},
-    }
-}
-
-func (s AnalysisSignature) Outputs() []core.OutputField {
-    return []core.OutputField{
-        {Field: core.NewField("summary",
-            core.WithDescription("A concise summary"))},
-        {Field: core.NewField("sentiment",
-            core.WithDescription("Overall sentiment: Positive/Negative/Neutral"))},
-        {Field: core.NewField("key_points",
-            core.WithDescription("Main takeaways as bullet points"))},
-    }
-}
-
-func (s AnalysisSignature) Instruction() string {
-    return "Analyze the provided text thoroughly and extract key insights."
-}
-
 func main() {
-    // 2. Configure LLM
-    llm, _ := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
+    // 1. Configure LLM
+    llm, err := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
+    if err != nil {
+        log.Fatal(err)
+    }
     core.SetDefaultLLM(llm)
 
+    // 2. Define Signature
+    signature := core.NewSignature(
+        []core.InputField{
+            {Field: core.NewField("text",
+                core.WithDescription("The text to analyze"))},
+        },
+        []core.OutputField{
+            {Field: core.NewField("summary",
+                core.WithDescription("A concise summary"))},
+            {Field: core.NewField("sentiment",
+                core.WithDescription("Overall sentiment: Positive/Negative/Neutral"))},
+            {Field: core.NewField("key_points",
+                core.WithDescription("Main takeaways as bullet points"))},
+        },
+    ).WithInstruction("Analyze the provided text thoroughly and extract key insights.")
+
     // 3. Create Modules
-    analyzer := modules.NewChainOfThought(AnalysisSignature{})
+    analyzer := modules.NewChainOfThought(signature)
 
     // 4. Create Program
     program := core.NewProgram(
