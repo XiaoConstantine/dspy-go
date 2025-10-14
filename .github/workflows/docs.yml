@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0 # Fetch all history for Hugo's GitInfo
 
       - name: Set up Hugo
-        uses: peaceiris/actions-hugo@v2
+        uses: peaceiris/actions-hugo@v3
         with:
           hugo-version: '0.151.0'
           extended: true
