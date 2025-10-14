@@ -1,2 +1,3 @@
 # Overrides for production environment
-baseurl = "/"
+# Use the correct GitHub Pages URL with repository name
+baseurl = "https://xiaoconstantine.github.io/dspy-go/"

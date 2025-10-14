@@ -1,5 +1,5 @@
 title = "dspy-go"
-baseurl = "https://xiaoconstantine.github.io/dspy-go/"
+baseurl = "/dspy-go/"
 disableAliases = true
 disableHugoGeneratorInject = true
 # disableKinds = ["taxonomy", "term"]
