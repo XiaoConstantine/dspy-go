@@ -20,7 +20,7 @@ jobs:
       - name: Check documentation syntax
         run: go doc . > /dev/null
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           args: --timeout=5m --enable=godot
       - name: Generate documentation
