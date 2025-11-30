@@ -75,6 +75,18 @@ func WithExecutionState(ctx context.Context) context.Context {
 	})
 }
 
+// WithFreshExecutionState creates a new context with a fresh ExecutionState,
+// even if the parent context already has one. This is useful for parallel workers
+// that need isolated execution state to avoid mutex contention while still
+// inheriting other context values (deadlines, trace IDs, etc.) from the parent.
+func WithFreshExecutionState(ctx context.Context) context.Context {
+	return context.WithValue(ctx, stateKey, &ExecutionState{
+		traceID:     generateTraceID(),
+		annotations: make(map[string]interface{}),
+		spans:       make([]*Span, 0),
+	})
+}
+
 // GetExecutionState retrieves the execution state from a context.
 func GetExecutionState(ctx context.Context) *ExecutionState {
 	if state, ok := ctx.Value(stateKey).(*ExecutionState); ok {
