@@ -276,23 +276,13 @@ func (p *Parallel) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan j
 
 			// Create a fresh execution context for this job to avoid mutex contention.
 			// All workers previously shared the same ExecutionState, causing lock contention
-			// in StartSpan/EndSpan calls. Each job now gets its own ExecutionState.
-			jobCtx := core.WithExecutionState(context.Background())
-
-			// Preserve cancellation from parent context by monitoring it
-			jobCtx, cancel := context.WithCancel(jobCtx)
-			go func() {
-				select {
-				case <-ctx.Done():
-					cancel()
-				case <-jobCtx.Done():
-				}
-			}()
+			// in StartSpan/EndSpan calls. Each job now gets its own ExecutionState while
+			// still inheriting other context values (deadlines, trace IDs, etc.) from parent.
+			jobCtx := core.WithFreshExecutionState(ctx)
 
 			// Process the job with isolated execution context
 			logger.Debug(jobCtx, "Worker processing job %d", job.index)
 			output, err := p.innerModule.Process(jobCtx, job.inputs, opts...)
-			cancel() // Clean up the goroutine
 
 			result := ParallelResult{
 				Index:   job.index,
