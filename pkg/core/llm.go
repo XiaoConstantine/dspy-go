@@ -260,6 +260,64 @@ type EndpointConfig struct {
 	TimeoutSec int               // Request timeout in seconds
 }
 
+// TransportConfig configures HTTP connection pooling behavior for LLM requests.
+// Tuning these values can significantly improve performance for parallel workloads.
+type TransportConfig struct {
+	MaxIdleConns        int           // Total idle connections across all hosts (default: 100)
+	MaxIdleConnsPerHost int           // Idle connections per host (default: 100)
+	MaxConnsPerHost     int           // Max concurrent connections per host (default: 100)
+	IdleConnTimeout     time.Duration // How long idle connections stay open (default: 90s)
+	TLSHandshakeTimeout time.Duration // TLS handshake timeout (default: 10s)
+}
+
+// DefaultTransportConfig returns optimized defaults for parallel LLM workloads.
+// These values support up to 100 concurrent requests to the same API endpoint.
+func DefaultTransportConfig() TransportConfig {
+	return TransportConfig{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		MaxConnsPerHost:     100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+}
+
+// ToTransport converts the config to an http.Transport.
+func (tc TransportConfig) ToTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:        tc.MaxIdleConns,
+		MaxIdleConnsPerHost: tc.MaxIdleConnsPerHost,
+		MaxConnsPerHost:     tc.MaxConnsPerHost,
+		IdleConnTimeout:     tc.IdleConnTimeout,
+		TLSHandshakeTimeout: tc.TLSHandshakeTimeout,
+	}
+}
+
+// WorkloadType indicates whether LLM calls are I/O-bound or CPU-bound.
+// This affects the optimal number of parallel workers.
+type WorkloadType int
+
+const (
+	// WorkloadIOBound indicates remote API calls (Gemini, OpenAI, Anthropic).
+	// I/O-bound workloads benefit from many concurrent workers (default: 100).
+	WorkloadIOBound WorkloadType = iota
+
+	// WorkloadCPUBound indicates local model inference (Ollama, llama.cpp).
+	// CPU-bound workloads should use NumCPU() workers to avoid thrashing.
+	WorkloadCPUBound
+)
+
+// BaseLLMOption configures BaseLLM behavior.
+type BaseLLMOption func(*BaseLLM)
+
+// WithTransportConfig sets custom HTTP transport configuration.
+// Use this for high-throughput scenarios that need more concurrent connections.
+func WithTransportConfig(config TransportConfig) BaseLLMOption {
+	return func(b *BaseLLM) {
+		b.client.Transport = config.ToTransport()
+	}
+}
+
 // BaseLLM provides a base implementation of the LLM interface.
 type BaseLLM struct {
 	providerName string
@@ -285,7 +343,26 @@ func (b *BaseLLM) Capabilities() []Capability {
 	return b.capabilities
 }
 
-func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability, endpoint *EndpointConfig) *BaseLLM {
+// IsLocal returns true if this LLM runs locally (CPU-bound inference).
+func (b *BaseLLM) IsLocal() bool {
+	switch b.providerName {
+	case "ollama", "llamacpp":
+		return true
+	default:
+		return false
+	}
+}
+
+// WorkloadType returns the workload classification based on provider.
+// Remote APIs are I/O-bound (network latency), local models are CPU-bound.
+func (b *BaseLLM) WorkloadType() WorkloadType {
+	if b.IsLocal() {
+		return WorkloadCPUBound
+	}
+	return WorkloadIOBound
+}
+
+func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability, endpoint *EndpointConfig, opts ...BaseLLMOption) *BaseLLM {
 	var timeout time.Duration
 	if endpoint != nil && endpoint.TimeoutSec >= 0 {
 		timeout = time.Duration(endpoint.TimeoutSec) * time.Second
@@ -293,16 +370,26 @@ func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability,
 		timeout = 30 * time.Second
 	}
 
+	// Use default transport config optimized for parallel LLM workloads
 	client := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: DefaultTransportConfig().ToTransport(),
 	}
-	return &BaseLLM{
+
+	llm := &BaseLLM{
 		providerName: providerName,
 		modelID:      modelID,
 		capabilities: capabilities,
 		endpoint:     endpoint,
 		client:       client,
 	}
+
+	// Apply custom options (e.g., WithTransportConfig)
+	for _, opt := range opts {
+		opt(llm)
+	}
+
+	return llm
 }
 
 func ValidateEndpointConfig(cfg *EndpointConfig) error {

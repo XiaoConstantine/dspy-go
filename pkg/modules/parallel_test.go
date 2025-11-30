@@ -469,3 +469,20 @@ func TestParallelConcurrencyControl(t *testing.T) {
 	assert.GreaterOrEqual(t, duration, minExpectedDuration,
 		"Duration should respect worker limit: expected >= %v, got %v", minExpectedDuration, duration)
 }
+
+// TestEffectiveWorkers_ExplicitOverride tests that explicit MaxWorkers is respected.
+func TestEffectiveWorkers_ExplicitOverride(t *testing.T) {
+	mockModule := NewMockModule(false, 0)
+	parallel := NewParallel(mockModule, WithMaxWorkers(50))
+
+	assert.Equal(t, 50, parallel.effectiveWorkers())
+}
+
+// TestEffectiveWorkers_Default tests default workers (100 for I/O-bound workloads).
+func TestEffectiveWorkers_Default(t *testing.T) {
+	mockModule := NewMockModule(false, 0)
+	parallel := NewParallel(mockModule)
+
+	// Should default to 100 workers (optimized for I/O-bound workloads)
+	assert.Equal(t, 100, parallel.effectiveWorkers())
+}

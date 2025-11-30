@@ -29,7 +29,6 @@ package modules
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -39,7 +38,9 @@ import (
 
 // ParallelOptions configures parallel execution behavior.
 type ParallelOptions struct {
-	// MaxWorkers sets the maximum number of concurrent workers
+	// MaxWorkers sets the maximum number of concurrent workers.
+	// If 0, defaults to 100 workers (optimized for I/O-bound remote API calls).
+	// For local models (CPU-bound), set to runtime.NumCPU() for optimal performance.
 	MaxWorkers int
 	// ReturnFailures determines if failed results should be included in output
 	ReturnFailures bool
@@ -67,9 +68,9 @@ var _ core.Module = (*Parallel)(nil)
 
 // NewParallel creates a new parallel execution wrapper around a module.
 func NewParallel(module core.Module, opts ...ParallelOption) *Parallel {
-	// Default options
+	// Default options - MaxWorkers=0 means auto-detect from LLM provider
 	options := ParallelOptions{
-		MaxWorkers:       runtime.NumCPU(),
+		MaxWorkers:       0, // Auto-detect based on LLM workload type
 		ReturnFailures:   false,
 		StopOnFirstError: false,
 	}
@@ -97,6 +98,18 @@ func NewParallel(module core.Module, opts ...ParallelOption) *Parallel {
 func (p *Parallel) WithName(name string) *Parallel {
 	p.DisplayName = name
 	return p
+}
+
+// effectiveWorkers returns the actual worker count to use.
+// If MaxWorkers is explicitly set (> 0), it's used directly.
+// Otherwise, defaults to 100 workers (optimized for I/O-bound remote API calls).
+// For local models (CPU-bound), users should set WithMaxWorkers(runtime.NumCPU()).
+func (p *Parallel) effectiveWorkers() int {
+	if p.options.MaxWorkers > 0 {
+		return p.options.MaxWorkers
+	}
+	// Default to 100 workers for I/O-bound workloads (remote APIs)
+	return 100
 }
 
 // ParallelOption is a function that configures ParallelOptions.
@@ -143,10 +156,11 @@ func (p *Parallel) Process(ctx context.Context, inputs map[string]interface{}, o
 		return map[string]interface{}{"results": []map[string]interface{}{}}, nil
 	}
 
-	logger.Debug(ctx, "Processing %d inputs in parallel with %d workers", len(batchInputs), p.options.MaxWorkers)
+	effectiveWorkerCount := p.effectiveWorkers()
+	logger.Debug(ctx, "Processing %d inputs in parallel with %d workers", len(batchInputs), effectiveWorkerCount)
 
 	// Create worker pool
-	workers := p.options.MaxWorkers
+	workers := effectiveWorkerCount
 	if workers > len(batchInputs) {
 		workers = len(batchInputs)
 	}
@@ -260,9 +274,25 @@ func (p *Parallel) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan j
 				return // Channel closed, worker done
 			}
 
-			// Process the job
-			logger.Debug(ctx, "Worker processing job %d", job.index)
-			output, err := p.innerModule.Process(ctx, job.inputs, opts...)
+			// Create a fresh execution context for this job to avoid mutex contention.
+			// All workers previously shared the same ExecutionState, causing lock contention
+			// in StartSpan/EndSpan calls. Each job now gets its own ExecutionState.
+			jobCtx := core.WithExecutionState(context.Background())
+
+			// Preserve cancellation from parent context by monitoring it
+			jobCtx, cancel := context.WithCancel(jobCtx)
+			go func() {
+				select {
+				case <-ctx.Done():
+					cancel()
+				case <-jobCtx.Done():
+				}
+			}()
+
+			// Process the job with isolated execution context
+			logger.Debug(jobCtx, "Worker processing job %d", job.index)
+			output, err := p.innerModule.Process(jobCtx, job.inputs, opts...)
+			cancel() // Clean up the goroutine
 
 			result := ParallelResult{
 				Index:   job.index,
