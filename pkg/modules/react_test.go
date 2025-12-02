@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -180,10 +181,20 @@ func TestReAct_MaxIterations(t *testing.T) {
   action:
   <action><tool_name>user_profile</tool_name><arguments><arg key="user_id">123</arg></arguments></action>
   `}
+	// Fallback extraction response (when max iterations reached without Finish)
+	extractResp := &core.LLMResponse{Content: `
+  <response>
+    <rationale>Based on the trajectory, the database query returned results and the user profile was retrieved.</rationale>
+    <answer>Analysis complete: Database results and user profile data were retrieved successfully.</answer>
+  </response>
+  `}
 
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1,
 		nil).Once()
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2,
+		nil).Once()
+	// Third call is for fallback extraction
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(extractResp,
 		nil).Once()
 
 	dbTool := testutil.NewMockTool("database_query")
@@ -193,9 +204,9 @@ func TestReAct_MaxIterations(t *testing.T) {
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
 			"query": {
-				Type: "string",
+				Type:        "string",
 				Description: "SQL query to execute",
-				Required: true,
+				Required:    true,
 			},
 		},
 	})
@@ -210,9 +221,9 @@ func TestReAct_MaxIterations(t *testing.T) {
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
 			"user_id": {
-				Type: "string",
+				Type:        "string",
 				Description: "The user ID to look up",
-				Required: true,
+				Required:    true,
 			},
 		},
 	})
@@ -231,7 +242,6 @@ func TestReAct_MaxIterations(t *testing.T) {
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	// tools := []core.Tool{dbTool, profileTool} // Old way
 	react := NewReAct(signature, registry, 2)
 	react.SetLLM(mockLLM)
 
@@ -240,9 +250,11 @@ func TestReAct_MaxIterations(t *testing.T) {
 	inputs := map[string]any{"question": "Analyze this user data"}
 	outputs, err := react.Process(ctx, inputs)
 
-	assert.Error(t, err)
+	// With fallback extraction, max iterations no longer returns an error
+	// Instead, it extracts an answer from the accumulated trajectory
+	assert.NoError(t, err)
 	assert.NotNil(t, outputs)
-	assert.Contains(t, err.Error(), "max iterations reached")
+	assert.Contains(t, outputs["answer"], "Analysis complete")
 	mockLLM.AssertExpectations(t)
 	dbTool.AssertExpectations(t)
 	profileTool.AssertExpectations(t)
@@ -748,4 +760,147 @@ Success
 	assert.Equal(t, "Success", outputs["answer"])
 	mockLLM.AssertExpectations(t)
 	mockTool.AssertExpectations(t)
+}
+
+func TestReAct_MissingActionFallbackExtraction(t *testing.T) {
+	// This test covers the scenario where the LLM provides thought but no action
+	// on the final iteration, which previously would fail with "max iterations reached"
+	// but now uses fallback extraction to produce an answer from the trajectory.
+	mockLLM := new(testutil.MockLLM)
+
+	// Iteration 1: Valid thought + action
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to search for information about the topic.
+
+action:
+<action><tool_name>search_tool</tool_name><arguments><arg key="query">dspy-go optimization</arg></arguments></action>
+`}
+
+	// Iteration 2: LLM provides thought but MISSING action (the bug scenario)
+	resp2 := &core.LLMResponse{Content: `
+thought:
+The user is asking about prompt optimization using dspy-go.
+I have already found relevant information in the search results.
+To answer the question, I need to explain:
+1. How to instantiate an optimizer
+2. What parameters are important
+My next step would be to provide a detailed explanation...
+`} // Note: NO action field!
+
+	// Fallback extraction response
+	extractResp := &core.LLMResponse{Content: `
+<response>
+  <rationale>Based on the trajectory, I found information about dspy-go optimization from the search results.</rationale>
+  <answer>To implement prompt optimization with dspy-go, use the COPRO optimizer with your program and training data.</answer>
+</response>
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(extractResp, nil).Once()
+
+	searchTool := testutil.NewMockTool("search_tool")
+	searchTool.On("Name").Return("search_tool")
+	searchTool.On("Description").Return("A tool to search for information")
+	searchTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"query": {
+				Type:        "string",
+				Description: "The search query",
+				Required:    true,
+			},
+		},
+	})
+	searchTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	searchTool.On("Execute", mock.Anything, map[string]interface{}{"query": "dspy-go optimization"}).Return(
+		core.ToolResult{Data: "Found: COPRO optimizer documentation..."}, nil,
+	)
+
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(searchTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	react := NewReAct(signature, registry, 2) // MaxIters = 2
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "How do I implement prompt optimization with dspy-go?"}
+	outputs, err := react.Process(ctx, inputs)
+
+	// Previously this would fail with "max iterations reached"
+	// Now it should succeed via fallback extraction
+	assert.NoError(t, err)
+	require.NotNil(t, outputs)
+	assert.Contains(t, outputs["answer"], "COPRO optimizer")
+	mockLLM.AssertExpectations(t)
+	searchTool.AssertExpectations(t)
+}
+
+func TestReAct_FallbackExtractionFailure(t *testing.T) {
+	// Test that errors in fallback extraction are properly propagated
+	mockLLM := new(testutil.MockLLM)
+
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to check something.
+
+action:
+<action><tool_name>test_tool</tool_name><arguments><arg key="input">test</arg></arguments></action>
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	// Fallback extraction fails
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(
+		nil, fmt.Errorf("LLM service unavailable"),
+	).Once()
+
+	testTool := testutil.NewMockTool("test_tool")
+	testTool.On("Name").Return("test_tool")
+	testTool.On("Description").Return("A test tool")
+	testTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"input": {
+				Type:        "string",
+				Description: "Test input",
+				Required:    true,
+			},
+		},
+	})
+	testTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	testTool.On("Execute", mock.Anything, map[string]interface{}{"input": "test"}).Return(
+		core.ToolResult{Data: "Test result"}, nil,
+	)
+
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(testTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	react := NewReAct(signature, registry, 1) // MaxIters = 1, will trigger fallback
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "Test question"}
+	outputs, err := react.Process(ctx, inputs)
+
+	// Should return error from fallback extraction
+	assert.Error(t, err)
+	assert.Nil(t, outputs)
+	assert.Contains(t, err.Error(), "fallback extraction failed")
+	mockLLM.AssertExpectations(t)
+	testTool.AssertExpectations(t)
 }

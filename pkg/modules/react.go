@@ -17,9 +17,12 @@ import (
 
 // ReAct implements the ReAct agent loop (Reason, Action, Observation).
 // It uses a Predict module to generate thoughts and actions, and executes tools.
+// If the loop ends without a "Finish" action (e.g., max iterations reached),
+// a fallback Extract module attempts to produce an answer from the gathered trajectory.
 type ReAct struct {
 	core.BaseModule
 	Predict   *Predict
+	Extract   *ChainOfThought                // Fallback extraction module for when loop ends without Finish
 	Registry  *tools.InMemoryToolRegistry
 	MaxIters  int
 	XMLConfig *interceptors.XMLConfig // Optional XML config for enhanced parsing
@@ -39,10 +42,34 @@ func NewReAct(signature core.Signature, registry *tools.InMemoryToolRegistry, ma
 
 	predict := NewPredict(modifiedSignature).WithTextOutput() // Explicitly use text output for ReAct
 
+	// Create fallback extraction module
+	// This module takes the original inputs + trajectory and produces the original outputs
+	extractSignature := createExtractSignature(signature)
+	extract := NewChainOfThought(extractSignature)
+
 	react.BaseModule = *core.NewModule(modifiedSignature)
 	react.Predict = predict
+	react.Extract = extract
 
 	return react
+}
+
+// createExtractSignature builds a signature for the fallback extraction module.
+// It includes the original input fields plus a trajectory field, and produces the original outputs.
+func createExtractSignature(originalSignature core.Signature) core.Signature {
+	// Copy original inputs and add trajectory field
+	inputs := make([]core.InputField, len(originalSignature.Inputs)+1)
+	copy(inputs, originalSignature.Inputs)
+	inputs[len(originalSignature.Inputs)] = core.InputField{
+		Field: core.NewField("trajectory",
+			core.WithDescription("The complete history of thoughts, actions, and observations from the ReAct loop")),
+	}
+
+	// Use original outputs (without ReAct's thought/action/observation fields)
+	return core.NewSignature(inputs, originalSignature.Outputs).
+		WithInstruction("Based on the trajectory of thoughts, actions, and observations above, provide the final answer. " +
+			"The trajectory contains all the information gathered during the reasoning process. " +
+			"Synthesize this information to produce a complete and accurate response.")
 }
 
 // WithDefaultOptions sets default options by configuring the underlying Predict module.
@@ -58,10 +85,11 @@ func (r *ReAct) WithXMLParsing(config interceptors.XMLConfig) *ReAct {
 	return r
 }
 
-// SetLLM sets the language model for both the base module and the internal Predict module.
+// SetLLM sets the language model for the base module and all internal modules (Predict and Extract).
 func (r *ReAct) SetLLM(llm core.LLM) {
 	r.BaseModule.SetLLM(llm)
 	r.Predict.SetLLM(llm)
+	r.Extract.SetLLM(llm)
 }
 
 // Process executes the ReAct loop.
@@ -168,8 +196,40 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 	}
 
 	// If we get here, we've hit max iterations without finishing
-	logger.Warn(ctx, "Max iterations (%d) reached without 'Finish' action", r.MaxIters)
-	return state, fmt.Errorf("max iterations reached without 'Finish' action")
+	// Use fallback extraction to produce an answer from the gathered trajectory
+	logger.Warn(ctx, "Max iterations (%d) reached without 'Finish' action, using fallback extraction", r.MaxIters)
+
+	return r.extractFromTrajectory(ctx, inputs, conversationContext, opts...)
+}
+
+// extractFromTrajectory uses the Extract module to produce an answer from the accumulated trajectory.
+// This is called when the ReAct loop ends without a "Finish" action (e.g., max iterations reached).
+func (r *ReAct) extractFromTrajectory(ctx context.Context, originalInputs map[string]any, trajectory string, opts ...core.Option) (map[string]any, error) {
+	logger := logging.GetLogger()
+	ctx, span := core.StartSpan(ctx, "extractFromTrajectory")
+	defer core.EndSpan(ctx)
+
+	// Build extraction inputs: original inputs + trajectory
+	extractInputs := make(map[string]any)
+	for k, v := range originalInputs {
+		extractInputs[k] = v
+	}
+	extractInputs["trajectory"] = trajectory
+
+	logger.Debug(ctx, "Running fallback extraction with trajectory length: %d", len(trajectory))
+	span.WithAnnotation("trajectory_length", len(trajectory))
+
+	result, err := r.Extract.Process(ctx, extractInputs, opts...)
+	if err != nil {
+		span.WithError(err)
+		logger.Error(ctx, "Fallback extraction failed: %v", err)
+		return nil, fmt.Errorf("fallback extraction failed after max iterations: %w", err)
+	}
+
+	logger.Info(ctx, "Fallback extraction completed successfully")
+	span.WithAnnotation("extraction_result", result)
+
+	return result, nil
 }
 
 // executeToolByName finds a tool by its name and executes it.
@@ -229,7 +289,7 @@ func (r *ReAct) executeToolByName(ctx context.Context, toolName string, argument
 }
 
 // Clone creates a copy of the ReAct module.
-// Note: Predict module is cloned, but the LLM instance and ToolRegistry are shared.
+// Note: Predict and Extract modules are cloned, but the LLM instance and ToolRegistry are shared.
 // Cloning the registry itself might be complex and depends on the registry implementation.
 // Sharing the registry is usually acceptable.
 func (r *ReAct) Clone() core.Module {
@@ -239,9 +299,16 @@ func (r *ReAct) Clone() core.Module {
 		panic("Failed to clone Predict module")
 	}
 
+	// Ensure Extract module is cloned
+	clonedExtract, ok := r.Extract.Clone().(*ChainOfThought)
+	if !ok {
+		panic("Failed to clone Extract module")
+	}
+
 	return &ReAct{
 		BaseModule: *r.BaseModule.Clone().(*core.BaseModule),
 		Predict:    clonedPredict,
+		Extract:    clonedExtract,
 		Registry:   r.Registry,
 		MaxIters:   r.MaxIters,
 		XMLConfig:  r.XMLConfig, // Share the XML config (it's read-only)
