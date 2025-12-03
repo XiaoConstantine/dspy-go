@@ -207,6 +207,10 @@ func isValidOpenAIModel(modelID core.ModelID) bool {
 		// o3 reasoning models
 		core.ModelOpenAIO3,
 		core.ModelOpenAIO3Mini,
+		// GPT-5 series
+		core.ModelOpenAIGPT5,
+		core.ModelOpenAIGPT5Mini,
+		core.ModelOpenAIGPT5Nano,
 	}
 
 	for _, validModel := range validModels {

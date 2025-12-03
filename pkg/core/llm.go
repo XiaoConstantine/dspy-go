@@ -588,15 +588,15 @@ const (
 	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaude4Sonnet)
 	ModelAnthropicClaude45Sonnet ModelID = ModelID(anthropic.ModelClaude45Sonnet)
 
-	// Google Gemini models.
-	ModelGoogleGeminiFlash     ModelID = "gemini-2.0-flash"
+	// Google Gemini models (existing).
+	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"
 	ModelGoogleGeminiPro       ModelID = "gemini-2.5-pro"
-	ModelGoogleGeminiFlashLite ModelID = "gemini-2.0-flash-lite"
-	// Google Gemini 2.5 series.
-	ModelGoogleGemini25Pro   ModelID = "gemini-2.5-pro"
-	ModelGoogleGemini25Flash ModelID = "gemini-2.5-flash"
-	// Google Gemini 2.0 series.
-	ModelGoogleGemini20Flash ModelID = "gemini-2.0-flash"
+	ModelGoogleGeminiFlashLite ModelID = "gemini-2.5-flash-lite"
+	// Google Gemini 3 series (new).
+	ModelGoogleGemini3ProPreview ModelID = "gemini-3-pro-preview"
+	// Google Gemini 2.0 series (new).
+	ModelGoogleGemini20Flash     ModelID = "gemini-2.0-flash"
+	ModelGoogleGemini20FlashLite ModelID = "gemini-2.0-flash-lite"
 
 	// OpenAI models - GPT-4 series.
 	ModelOpenAIGPT4       ModelID = "gpt-4"
@@ -615,6 +615,10 @@ const (
 	// OpenAI models - o3 reasoning series.
 	ModelOpenAIO3     ModelID = "o3"
 	ModelOpenAIO3Mini ModelID = "o3-mini"
+	// OpenAI models - GPT-5 series.
+	ModelOpenAIGPT5     ModelID = "gpt-5"
+	ModelOpenAIGPT5Mini ModelID = "gpt-5-mini"
+	ModelOpenAIGPT5Nano ModelID = "gpt-5-nano"
 
 	// LiteLLM models (can proxy to any provider).
 	ModelLiteLLMGPT4    ModelID = "gpt-4"
@@ -667,13 +671,15 @@ var ProviderModels = map[string][]ModelID{
 	},
 	"google": {
 		ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite,
-		ModelGoogleGemini25Pro, ModelGoogleGemini25Flash, ModelGoogleGemini20Flash,
+		ModelGoogleGemini3ProPreview,
+		ModelGoogleGemini20Flash, ModelGoogleGemini20FlashLite,
 	},
 	"openai": {
 		ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini,
 		ModelOpenAIGPT41, ModelOpenAIGPT41Mini, ModelOpenAIGPT41Nano,
 		ModelOpenAIO1, ModelOpenAIO1Pro, ModelOpenAIO1Mini,
 		ModelOpenAIO3, ModelOpenAIO3Mini,
+		ModelOpenAIGPT5, ModelOpenAIGPT5Mini, ModelOpenAIGPT5Nano,
 	},
 	"ollama": {
 		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,

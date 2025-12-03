@@ -87,7 +87,7 @@ func TestNewGeminiLLM(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, llm)
 				if tt.model == "" {
-					assert.Equal(t, string(core.ModelGoogleGeminiFlash), llm.ModelID())
+					assert.Equal(t, "gemini-2.5-flash", llm.ModelID())
 				} else {
 					assert.Equal(t, tt.model, core.ModelID(llm.ModelID()))
 				}
