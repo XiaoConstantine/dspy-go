@@ -190,14 +190,23 @@ func OpenAIProviderFactory(ctx context.Context, config core.ProviderConfig, mode
 // isValidOpenAIModel checks if the model is a valid OpenAI model.
 func isValidOpenAIModel(modelID core.ModelID) bool {
 	validModels := []core.ModelID{
+		// GPT-4 series
 		core.ModelOpenAIGPT4,
 		core.ModelOpenAIGPT4Turbo,
 		core.ModelOpenAIGPT35Turbo,
 		core.ModelOpenAIGPT4o,
 		core.ModelOpenAIGPT4oMini,
-		core.ModelOpenAIGPT5,
-		core.ModelOpenAIGPT5Mini,
-		core.ModelOpenAIGPT5Nano,
+		// GPT-4.1 series
+		core.ModelOpenAIGPT41,
+		core.ModelOpenAIGPT41Mini,
+		core.ModelOpenAIGPT41Nano,
+		// o1 reasoning models
+		core.ModelOpenAIO1,
+		core.ModelOpenAIO1Pro,
+		core.ModelOpenAIO1Mini,
+		// o3 reasoning models
+		core.ModelOpenAIO3,
+		core.ModelOpenAIO3Mini,
 	}
 
 	for _, validModel := range validModels {

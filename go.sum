@@ -2,6 +2,8 @@ github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c h1:RGWPOewvK
 github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c/go.mod h1:X0CRv0ky0k6m906ixxpzmDRLvX58TFUKS2eePweuyxk=
 github.com/XiaoConstantine/anthropic-go v0.0.8 h1:10Z87ZuFhIdyHMsXu0B+7L+Ha7vwCQXYRgZ2fDVVQGk=
 github.com/XiaoConstantine/anthropic-go v0.0.8/go.mod h1:ARxRchhwI8HCfEFJtFCIRET3K2QqoyGyuvMra/6nfoI=
+github.com/XiaoConstantine/anthropic-go v0.0.9 h1:HM/rt2thx7QAWMsK+tZpJDbJPKRPerHAwVPYBRGgpyQ=
+github.com/XiaoConstantine/anthropic-go v0.0.9/go.mod h1:ARxRchhwI8HCfEFJtFCIRET3K2QqoyGyuvMra/6nfoI=
 github.com/XiaoConstantine/mcp-go v0.3.1 h1:5aSrqvvulbKI1hxN7Aj3iSotX0VRSpDShXIDls4ZC+U=
 github.com/XiaoConstantine/mcp-go v0.3.1/go.mod h1:qsY3Gm4CYMREmoLXEMwtf0Hdb5F957kgcpF6huoNHcY=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=

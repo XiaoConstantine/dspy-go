@@ -186,8 +186,10 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 		core.CapabilityAudio,
 	}
 	// Validate model ID
+	// Note: ModelGoogleGeminiPro = gemini-2.5-pro, ModelGoogleGeminiFlash = gemini-2.0-flash (legacy aliases)
 	switch model {
-	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashLite:
+	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashLite,
+		core.ModelGoogleGemini25Flash: // 25Pro and 20Flash are same as legacy aliases
 		break
 	default:
 		return nil, errors.WithFields(
@@ -294,10 +296,13 @@ func GeminiProviderFactory(ctx context.Context, config core.ProviderConfig, mode
 
 // isValidGeminiModel checks if the model is a valid Gemini model.
 func isValidGeminiModel(modelID core.ModelID) bool {
+	// Note: ModelGoogleGeminiPro = gemini-2.5-pro, ModelGoogleGeminiFlash = gemini-2.0-flash
+	// These legacy aliases already cover 25Pro and 20Flash, so only add 25Flash explicitly
 	validModels := []core.ModelID{
-		core.ModelGoogleGeminiPro,
-		core.ModelGoogleGeminiFlash,
-		core.ModelGoogleGeminiFlashLite,
+		core.ModelGoogleGeminiPro,       // gemini-2.5-pro
+		core.ModelGoogleGeminiFlash,     // gemini-2.0-flash
+		core.ModelGoogleGeminiFlashLite, // gemini-2.0-flash-lite
+		core.ModelGoogleGemini25Flash,   // gemini-2.5-flash (new, not covered by aliases)
 	}
 
 	for _, validModel := range validModels {
