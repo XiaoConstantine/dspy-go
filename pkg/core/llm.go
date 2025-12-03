@@ -579,23 +579,46 @@ func SetDefaultLLM(llm LLM) {
 type ModelID string
 
 const (
-	// Anthropic models.
+	// Anthropic models - Claude 3.x series.
 	ModelAnthropicHaiku  ModelID = ModelID(anthropic.ModelHaiku)
 	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelSonnet)
 	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelOpus)
-	// Google models.
+	// Anthropic models - Claude 4.x series.
+	ModelAnthropicClaude4Opus    ModelID = ModelID(anthropic.ModelClaude4Opus)
+	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaude4Sonnet)
+	ModelAnthropicClaude45Sonnet ModelID = ModelID(anthropic.ModelClaude45Sonnet)
+
+	// Google Gemini models (existing).
 	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"
 	ModelGoogleGeminiPro       ModelID = "gemini-2.5-pro"
 	ModelGoogleGeminiFlashLite ModelID = "gemini-2.5-flash-lite"
-	// OpenAI models.
+	// Google Gemini 3 series (new).
+	ModelGoogleGemini3ProPreview ModelID = "gemini-3-pro-preview"
+	// Google Gemini 2.0 series (new).
+	ModelGoogleGemini20Flash     ModelID = "gemini-2.0-flash"
+	ModelGoogleGemini20FlashLite ModelID = "gemini-2.0-flash-lite"
+
+	// OpenAI models - GPT-4 series.
 	ModelOpenAIGPT4       ModelID = "gpt-4"
 	ModelOpenAIGPT4Turbo  ModelID = "gpt-4-turbo"
 	ModelOpenAIGPT35Turbo ModelID = "gpt-3.5-turbo"
 	ModelOpenAIGPT4o      ModelID = "gpt-4o"
 	ModelOpenAIGPT4oMini  ModelID = "gpt-4o-mini"
-	ModelOpenAIGPT5       ModelID = "gpt-5"
-	ModelOpenAIGPT5Mini   ModelID = "gpt-5-mini"
-	ModelOpenAIGPT5Nano   ModelID = "gpt-5-nano"
+	// OpenAI models - GPT-4.1 series.
+	ModelOpenAIGPT41     ModelID = "gpt-4.1"
+	ModelOpenAIGPT41Mini ModelID = "gpt-4.1-mini"
+	ModelOpenAIGPT41Nano ModelID = "gpt-4.1-nano"
+	// OpenAI models - o1 reasoning series.
+	ModelOpenAIO1     ModelID = "o1"
+	ModelOpenAIO1Pro  ModelID = "o1-pro"
+	ModelOpenAIO1Mini ModelID = "o1-mini"
+	// OpenAI models - o3 reasoning series.
+	ModelOpenAIO3     ModelID = "o3"
+	ModelOpenAIO3Mini ModelID = "o3-mini"
+	// OpenAI models - GPT-5 series.
+	ModelOpenAIGPT5     ModelID = "gpt-5"
+	ModelOpenAIGPT5Mini ModelID = "gpt-5-mini"
+	ModelOpenAIGPT5Nano ModelID = "gpt-5-nano"
 
 	// LiteLLM models (can proxy to any provider).
 	ModelLiteLLMGPT4    ModelID = "gpt-4"
@@ -642,9 +665,22 @@ const (
 )
 
 var ProviderModels = map[string][]ModelID{
-	"anthropic": {ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus},
-	"google":    {ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite},
-	"openai":    {ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini, ModelOpenAIGPT5, ModelOpenAIGPT5Mini, ModelOpenAIGPT5Nano},
+	"anthropic": {
+		ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus,
+		ModelAnthropicClaude4Opus, ModelAnthropicClaude4Sonnet, ModelAnthropicClaude45Sonnet,
+	},
+	"google": {
+		ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite,
+		ModelGoogleGemini3ProPreview,
+		ModelGoogleGemini20Flash, ModelGoogleGemini20FlashLite,
+	},
+	"openai": {
+		ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini,
+		ModelOpenAIGPT41, ModelOpenAIGPT41Mini, ModelOpenAIGPT41Nano,
+		ModelOpenAIO1, ModelOpenAIO1Pro, ModelOpenAIO1Mini,
+		ModelOpenAIO3, ModelOpenAIO3Mini,
+		ModelOpenAIGPT5, ModelOpenAIGPT5Mini, ModelOpenAIGPT5Nano,
+	},
 	"ollama": {
 		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,
 		ModelOllamaLlama3_2_3B, ModelOllamaCodeLlama13B, ModelOllamaCodeLlama34B, ModelOllamaMistral7B,

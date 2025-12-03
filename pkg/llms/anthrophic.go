@@ -95,9 +95,14 @@ func AnthropicProviderFactory(ctx context.Context, config core.ProviderConfig, m
 // isValidAnthropicModel checks if the model is a valid Anthropic model.
 func isValidAnthropicModel(model anthropic.ModelID) bool {
 	validModels := []anthropic.ModelID{
+		// Claude 3.x series
 		anthropic.ModelHaiku,
 		anthropic.ModelSonnet,
 		anthropic.ModelOpus,
+		// Claude 4.x series
+		anthropic.ModelClaude4Opus,
+		anthropic.ModelClaude4Sonnet,
+		anthropic.ModelClaude45Sonnet,
 	}
 
 	for _, validModel := range validModels {

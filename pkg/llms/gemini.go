@@ -187,7 +187,9 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	}
 	// Validate model ID
 	switch model {
-	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashLite:
+	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashLite,
+		core.ModelGoogleGemini3ProPreview,
+		core.ModelGoogleGemini20Flash, core.ModelGoogleGemini20FlashLite:
 		break
 	default:
 		return nil, errors.WithFields(
@@ -295,9 +297,15 @@ func GeminiProviderFactory(ctx context.Context, config core.ProviderConfig, mode
 // isValidGeminiModel checks if the model is a valid Gemini model.
 func isValidGeminiModel(modelID core.ModelID) bool {
 	validModels := []core.ModelID{
-		core.ModelGoogleGeminiPro,
-		core.ModelGoogleGeminiFlash,
-		core.ModelGoogleGeminiFlashLite,
+		// Gemini 2.5 series (existing)
+		core.ModelGoogleGeminiFlash,     // gemini-2.5-flash
+		core.ModelGoogleGeminiPro,       // gemini-2.5-pro
+		core.ModelGoogleGeminiFlashLite, // gemini-2.5-flash-lite
+		// Gemini 3 series (new)
+		core.ModelGoogleGemini3ProPreview, // gemini-3-pro-preview
+		// Gemini 2.0 series (new)
+		core.ModelGoogleGemini20Flash,     // gemini-2.0-flash
+		core.ModelGoogleGemini20FlashLite, // gemini-2.0-flash-lite
 	}
 
 	for _, validModel := range validModels {
