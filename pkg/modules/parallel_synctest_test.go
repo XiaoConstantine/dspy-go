@@ -4,6 +4,7 @@ package modules
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -56,12 +57,14 @@ func TestParallelWithSynctest(t *testing.T) {
 	t.Run("Worker completion ordering with synctest.Wait", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			var completionOrder []int
-			var orderMu atomic.Int32
+			var orderCounter atomic.Int32
+			var mu sync.Mutex
 
 			// Create a custom module that tracks completion order
 			mockModule := &orderTrackingModule{
 				completionOrder: &completionOrder,
-				orderCounter:    &orderMu,
+				orderCounter:    &orderCounter,
+				mu:              &mu,
 			}
 
 			parallel := NewParallel(mockModule, WithMaxWorkers(2))
@@ -126,6 +129,7 @@ type orderTrackingModule struct {
 	core.BaseModule
 	completionOrder *[]int
 	orderCounter    *atomic.Int32
+	mu              *sync.Mutex
 }
 
 func (m *orderTrackingModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
@@ -136,9 +140,11 @@ func (m *orderTrackingModule) Process(ctx context.Context, inputs map[string]int
 	}
 	time.Sleep(delay)
 
-	// Record completion order
+	// Record completion order with mutex protection
 	order := m.orderCounter.Add(1)
+	m.mu.Lock()
 	*m.completionOrder = append(*m.completionOrder, int(order))
+	m.mu.Unlock()
 
 	input, _ := inputs["input"].(string)
 	return map[string]interface{}{
@@ -151,6 +157,7 @@ func (m *orderTrackingModule) Clone() core.Module {
 		BaseModule:      m.BaseModule,
 		completionOrder: m.completionOrder,
 		orderCounter:    m.orderCounter,
+		mu:              m.mu,
 	}
 }
 
