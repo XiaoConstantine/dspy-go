@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 )
 
 type ChainOfThought struct {
@@ -90,6 +91,29 @@ func (c *ChainOfThought) SetSubModules(modules []core.Module) {
 func (c *ChainOfThought) WithDefaultOptions(opts ...core.Option) *ChainOfThought {
 	// Simply delegate to the Predict module's WithDefaultOptions
 	c.Predict.WithDefaultOptions(opts...)
+	return c
+}
+
+// WithStructuredOutput enables native JSON structured output for ChainOfThought.
+// This uses the LLM's GenerateWithJSON capability to produce structured responses
+// that include both reasoning and output fields, eliminating parsing errors.
+//
+// The output will include a "reasoning" field containing the step-by-step thought process.
+//
+// Usage:
+//
+//	cot := modules.NewChainOfThought(signature).WithStructuredOutput()
+func (c *ChainOfThought) WithStructuredOutput() *ChainOfThought {
+	config := interceptors.DefaultChainOfThoughtStructuredConfig()
+	interceptor := interceptors.ChainOfThoughtStructuredInterceptor(config)
+	c.SetInterceptors([]core.ModuleInterceptor{interceptor})
+	return c
+}
+
+// WithStructuredOutputConfig enables structured output with custom CoT configuration.
+func (c *ChainOfThought) WithStructuredOutputConfig(config interceptors.ChainOfThoughtStructuredConfig) *ChainOfThought {
+	interceptor := interceptors.ChainOfThoughtStructuredInterceptor(config)
+	c.SetInterceptors([]core.ModuleInterceptor{interceptor})
 	return c
 }
 

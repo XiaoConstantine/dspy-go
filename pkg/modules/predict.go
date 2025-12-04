@@ -97,6 +97,37 @@ func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
 	return p
 }
 
+// WithStructuredOutput enables native JSON structured output instead of text parsing.
+// This uses the LLM's GenerateWithJSON capability to produce structured responses
+// that map directly to the signature's output fields, eliminating parsing errors.
+//
+// Benefits:
+//   - No parsing errors from malformed prefixes
+//   - Strongly typed output from the LLM
+//   - Works with any signature without custom prefix configuration
+//   - More reliable extraction of multiple output fields
+//
+// Requirements:
+//   - The LLM must support CapabilityJSON
+//   - Falls back to text-based parsing if not supported
+//
+// Usage:
+//
+//	predict := modules.NewPredict(signature).WithStructuredOutput()
+func (p *Predict) WithStructuredOutput() *Predict {
+	config := interceptors.DefaultStructuredOutputConfig()
+	interceptor := interceptors.StructuredOutputInterceptor(config)
+	p.SetInterceptors([]core.ModuleInterceptor{interceptor})
+	return p
+}
+
+// WithStructuredOutputConfig enables structured output with custom configuration.
+func (p *Predict) WithStructuredOutputConfig(config interceptors.StructuredOutputConfig) *Predict {
+	interceptor := interceptors.StructuredOutputInterceptor(config)
+	p.SetInterceptors([]core.ModuleInterceptor{interceptor})
+	return p
+}
+
 // WithTextOutput disables XML output and uses traditional text-based parsing.
 // This is an escape hatch for users who prefer the original behavior.
 //
