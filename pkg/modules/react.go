@@ -325,6 +325,10 @@ func (r *ReAct) appendReActFields(signature core.Signature) core.Signature {
   3. The 'observation' field contains results from previous actions (leave empty on first step)
   4. Use 'answer' field for your final response when complete
   5. ALWAYS include both 'thought' and 'action' fields in every response
+
+  IMPORTANT: Output ONE action at a time and STOP. Wait for the real observation before continuing.
+  Do NOT simulate, predict, or hallucinate observations - they will be provided to you after each action.
+  Do NOT output multiple thought/action cycles in a single response.
   `
 	newSignature := signature
 
@@ -492,6 +496,10 @@ func (r *ReAct) parseActionString(ctx context.Context, actionStr string) (string
 		return "finish", make(map[string]interface{}), nil
 	}
 
+	// Extract only the first action block to handle LLM "simulation" behavior
+	// where the model outputs multiple thought/action/observation cycles
+	actionStr = extractFirstActionBlock(actionStr)
+
 	if r.XMLConfig != nil {
 		// Use XML interceptors for enhanced parsing
 		return r.parseActionWithInterceptors(ctx, actionStr)
@@ -599,4 +607,55 @@ func NewTypedReAct[TInput, TOutput any](registry *tools.InMemoryToolRegistry, ma
 	react.DisplayName = fmt.Sprintf("TypedReAct[%T,%T]", i, o)
 
 	return react
+}
+
+// extractFirstActionBlock extracts only the first <action>...</action> block from a string.
+// This handles the case where LLMs "simulate" multiple thought/action/observation cycles
+// in a single response, including hallucinated observations.
+//
+// The function:
+// 1. Truncates at hallucinated observation markers (## observation, Observation:)
+// 2. Extracts only the first complete <action>...</action> block
+// 3. Returns the original string if no action block is found (for backward compatibility).
+func extractFirstActionBlock(input string) string {
+	// First, truncate at hallucinated observation markers
+	// These indicate the LLM is simulating the conversation
+	observationMarkers := []string{
+		"## observation",
+		"## Observation",
+		"Observation:",
+		"\nobservation:",
+		"\nObservation:",
+	}
+
+	truncated := input
+	for _, marker := range observationMarkers {
+		if idx := strings.Index(strings.ToLower(truncated), strings.ToLower(marker)); idx > 0 {
+			// Only truncate if marker appears after some content
+			truncated = truncated[:idx]
+		}
+	}
+
+	// Now extract just the first <action>...</action> block
+	actionStart := strings.Index(truncated, "<action")
+	if actionStart == -1 {
+		// No action tag found, return truncated string as-is
+		return strings.TrimSpace(truncated)
+	}
+
+	// Find the closing </action> tag
+	actionEnd := strings.Index(truncated[actionStart:], "</action>")
+	if actionEnd == -1 {
+		// No closing tag found, try to find a self-closing tag or return from start
+		selfClose := strings.Index(truncated[actionStart:], "/>")
+		if selfClose != -1 && selfClose < 100 { // Reasonable limit for self-closing tag
+			return strings.TrimSpace(truncated[actionStart : actionStart+selfClose+2])
+		}
+		// Return from action start to end of truncated string
+		return strings.TrimSpace(truncated[actionStart:])
+	}
+
+	// Extract the complete first action block
+	endPos := actionStart + actionEnd + len("</action>")
+	return strings.TrimSpace(truncated[actionStart:endPos])
 }

@@ -904,3 +904,210 @@ action:
 	mockLLM.AssertExpectations(t)
 	testTool.AssertExpectations(t)
 }
+
+// TestExtractFirstActionBlock tests the extraction of the first action block
+// from LLM responses that may contain multiple simulated thought/action/observation cycles.
+func TestExtractFirstActionBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Single action block",
+			input:    `<action><tool_name>search</tool_name><arguments><arg key="query">test</arg></arguments></action>`,
+			expected: `<action><tool_name>search</tool_name><arguments><arg key="query">test</arg></arguments></action>`,
+		},
+		{
+			name: "Multiple action blocks - extract first only",
+			input: `<action><tool_name>search</tool_name><arguments><arg key="query">test</arg></arguments></action>
+
+## observation:
+Some hallucinated result
+
+## thought:
+Let me try another action
+
+<action><tool_name>read_file</tool_name><arguments><arg key="path">main.go</arg></arguments></action>`,
+			expected: `<action><tool_name>search</tool_name><arguments><arg key="query">test</arg></arguments></action>`,
+		},
+		{
+			name: "Action followed by hallucinated Observation:",
+			input: `<action><tool_name>Finish</tool_name></action>
+
+Observation:
+The answer is 42`,
+			expected: `<action><tool_name>Finish</tool_name></action>`,
+		},
+		{
+			name: "Multiple actions with lowercase observation marker",
+			input: `<action><tool_name>tool1</tool_name></action>
+
+## observation:
+result1
+
+<action><tool_name>tool2</tool_name></action>
+
+## observation:
+result2
+
+<action><tool_name>Finish</tool_name></action>`,
+			expected: `<action><tool_name>tool1</tool_name></action>`,
+		},
+		{
+			name:     "Simple finish command",
+			input:    "finish",
+			expected: "finish",
+		},
+		{
+			name:     "No action tag - return as-is",
+			input:    "Just some text without action",
+			expected: "Just some text without action",
+		},
+		{
+			name: "Action with text before it",
+			input: `Some preamble text
+
+<action><tool_name>test</tool_name></action>
+
+More text after`,
+			expected: `<action><tool_name>test</tool_name></action>`,
+		},
+		{
+			name: "Simulated full ReAct cycle with multiple iterations",
+			input: `## thought:
+I need to find the main entry point of the application.
+
+## action:
+<action>
+<tool_name>search_files</tool_name>
+<arguments><arg key="pattern">*.go</arg></arguments>
+</action>
+
+## observation:
+cmd/app/main.go
+cmd/cli/main.go
+pkg/core/module.go
+
+## thought:
+I found several Go files. Let me read the main.go file.
+
+## action:
+<action>
+<tool_name>read_file</tool_name>
+<arguments><arg key="file_path">cmd/app/main.go</arg></arguments>
+</action>
+
+## observation:
+package main
+
+func main() {
+    // Application entry point
+}
+
+## action:
+<action>
+<tool_name>Finish</tool_name>
+</action>`,
+			expected: `<action>
+<tool_name>search_files</tool_name>
+<arguments><arg key="pattern">*.go</arg></arguments>
+</action>`,
+		},
+		{
+			name: "Action without closing tag - return from start",
+			input: `<action><tool_name>incomplete`,
+			expected: `<action><tool_name>incomplete`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := extractFirstActionBlock(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+// TestReAct_MultiActionSimulation tests that the ReAct module correctly handles
+// LLM responses containing multiple simulated thought/action/observation cycles.
+func TestReAct_MultiActionSimulation(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	mockTool := testutil.NewMockTool("search_tool")
+	mockTool.On("Name").Return("search_tool")
+	mockTool.On("Description").Return("A search tool")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"query": {
+				Type:        "string",
+				Description: "Search query",
+				Required:    true,
+			},
+		},
+	})
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	mockTool.On("Execute", mock.Anything, map[string]interface{}{"query": "main function"}).Return(
+		core.ToolResult{Data: "Found: cmd/main.go"}, nil,
+	)
+
+	// Simulate LLM outputting multiple cycles in one response
+	// The fix should extract only the FIRST action
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I need to search for the main function
+
+action:
+<action><tool_name>search_tool</tool_name><arguments><arg key="query">main function</arg></arguments></action>
+
+## observation:
+Found: cmd/main.go
+pkg/main.go
+
+## thought:
+I found the files, let me finish
+
+## action:
+<action><tool_name>Finish</tool_name></action>
+`}
+
+	// After real observation, LLM should finish
+	resp2 := &core.LLMResponse{Content: `
+thought:
+I found the main function location
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+answer:
+The main function is in cmd/main.go
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(resp2, nil).Once()
+
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	react := NewReAct(signature, registry, 5)
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	inputs := map[string]any{"question": "Where is the main function?"}
+	outputs, err := react.Process(ctx, inputs)
+
+	// Should succeed - the first action (search_tool) is extracted and executed,
+	// then the second response with Finish completes the loop
+	assert.NoError(t, err)
+	assert.NotNil(t, outputs)
+
+	mockLLM.AssertExpectations(t)
+	mockTool.AssertExpectations(t)
+}
