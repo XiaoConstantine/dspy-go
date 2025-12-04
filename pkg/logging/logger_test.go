@@ -124,12 +124,10 @@ func TestGlobalLogger(t *testing.T) {
 	// Test concurrent access to default logger (already initialized)
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			logger := GetLogger()
 			assert.Equal(t, customLogger, logger)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -146,13 +144,12 @@ func TestConcurrentLogging(t *testing.T) {
 	messagesPerGoroutine := 100
 
 	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func(routineID int) {
-			defer wg.Done()
+		routineID := i // Capture loop variable
+		wg.Go(func() {
 			for j := 0; j < messagesPerGoroutine; j++ {
 				logger.Info(context.Background(), "message from routine %d: %d", routineID, j)
 			}
-		}(i)
+		})
 	}
 
 	wg.Wait()

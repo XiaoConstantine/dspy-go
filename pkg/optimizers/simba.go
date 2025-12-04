@@ -1992,29 +1992,25 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 	pipelineCtx, pipelineCancel := context.WithCancel(ctx)
 	defer pipelineCancel()
 
-	// Start pipeline workers
+	// Start pipeline workers using Go 1.25's WaitGroup.Go() for cleaner goroutine management
 	var wg sync.WaitGroup
 
 	// Start candidate generation worker
-	wg.Add(1)
-	go s.candidateGenerationWorker(pipelineCtx, program, &wg)
+	wg.Go(func() { s.candidateGenerationWorker(pipelineCtx, program) })
 
 	// Start batch sampling worker
-	wg.Add(1)
-	go s.batchSamplingWorker(pipelineCtx, dataset, &wg)
+	wg.Go(func() { s.batchSamplingWorker(pipelineCtx, dataset) })
 
 	// Start candidate evaluation worker
-	wg.Add(1)
-	go s.candidateEvaluationWorker(pipelineCtx, &wg)
+	wg.Go(func() { s.candidateEvaluationWorker(pipelineCtx) })
 
 	// Start pipeline coordinator
 	return s.pipelineCoordinator(ctx, program, &wg, pipelineCancel)
 }
 
 // candidateGenerationWorker generates candidates in parallel for multiple steps.
-func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.Program, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+// Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
+func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.Program) {
 	currentProgram := baseProgram
 	stepIndex := 0
 
@@ -2072,9 +2068,8 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 }
 
 // batchSamplingWorker samples mini-batches in parallel.
-func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+// Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
+func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -2145,9 +2140,8 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset, w
 }
 
 // candidateEvaluationWorker evaluates candidates in parallel.
-func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+// Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
+func (s *SIMBA) candidateEvaluationWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():

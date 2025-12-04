@@ -1,6 +1,6 @@
 module github.com/XiaoConstantine/dspy-go/cmd/dspy-cli
 
-go 1.24.1
+go 1.25
 
 require (
 	github.com/XiaoConstantine/dspy-go v0.0.0

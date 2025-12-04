@@ -419,9 +419,8 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	semaphore := make(chan struct{}, 10) // Allow 10 concurrent evaluations per candidate
 
 	for i, example := range examples {
-		wg.Add(1)
-		go func(idx int, ex core.Example) {
-			defer wg.Done()
+		idx, ex := i, example // Capture loop variables for Go 1.25 closure
+		wg.Go(func() {
 			semaphore <- struct{}{}        // Acquire semaphore
 			defer func() { <-semaphore }() // Release semaphore
 
@@ -443,7 +442,7 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 			scores[idx] = score
 			valid[idx] = true
 			mu.Unlock()
-		}(i, example)
+		})
 	}
 
 	wg.Wait()
