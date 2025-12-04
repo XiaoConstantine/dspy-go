@@ -4,6 +4,8 @@ package logging
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"os"
 	"runtime/trace"
 	"sync"
@@ -24,7 +26,7 @@ import (
 //	fr.Snapshot("error_occurred.trace")
 type FlightRecorder struct {
 	recorder *trace.FlightRecorder
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	running  bool
 	config   trace.FlightRecorderConfig
 }
@@ -100,8 +102,8 @@ func (fr *FlightRecorder) Stop() {
 
 // Enabled returns true if the flight recorder is currently running.
 func (fr *FlightRecorder) Enabled() bool {
-	fr.mu.Lock()
-	defer fr.mu.Unlock()
+	fr.mu.RLock()
+	defer fr.mu.RUnlock()
 	return fr.running && fr.recorder.Enabled()
 }
 
@@ -109,8 +111,8 @@ func (fr *FlightRecorder) Enabled() bool {
 // Call this when an interesting event occurs (error, slow request, etc.)
 // to capture what happened leading up to that moment.
 func (fr *FlightRecorder) Snapshot(filename string) error {
-	fr.mu.Lock()
-	defer fr.mu.Unlock()
+	fr.mu.RLock()
+	defer fr.mu.RUnlock()
 
 	if !fr.running {
 		return nil
@@ -137,7 +139,9 @@ func (fr *FlightRecorder) Snapshot(filename string) error {
 //	}
 func (fr *FlightRecorder) SnapshotOnError(err error, filename string) error {
 	if err != nil {
-		_ = fr.Snapshot(filename)
+		if snapshotErr := fr.Snapshot(filename); snapshotErr != nil {
+			log.Printf("dspy-go: failed to write flight recorder snapshot to %s: %v", filename, snapshotErr)
+		}
 	}
 	return err
 }
@@ -154,10 +158,13 @@ func GlobalFlightRecorder() *FlightRecorder {
 
 // InitGlobalFlightRecorder initializes and starts the global FlightRecorder.
 // Safe to call multiple times; only the first call has effect.
+// Panics if the flight recorder fails to start.
 func InitGlobalFlightRecorder(opts ...FlightRecorderOption) {
 	globalRecorderOnce.Do(func() {
 		globalRecorder = NewFlightRecorder(opts...)
-		_ = globalRecorder.Start()
+		if err := globalRecorder.Start(); err != nil {
+			panic(fmt.Sprintf("failed to start global flight recorder: %v", err))
+		}
 	})
 }
 

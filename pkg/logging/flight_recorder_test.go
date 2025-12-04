@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,7 +59,7 @@ func TestFlightRecorder(t *testing.T) {
 		// Let some trace data accumulate
 		time.Sleep(10 * time.Millisecond)
 
-		tmpFile := t.TempDir() + "/test.trace"
+		tmpFile := filepath.Join(t.TempDir(), "test.trace")
 		err = fr.Snapshot(tmpFile)
 		require.NoError(t, err)
 
@@ -72,7 +73,7 @@ func TestFlightRecorder(t *testing.T) {
 		fr := NewFlightRecorder()
 		// Don't start the recorder
 
-		tmpFile := t.TempDir() + "/test.trace"
+		tmpFile := filepath.Join(t.TempDir(), "test.trace")
 		err := fr.Snapshot(tmpFile)
 		require.NoError(t, err)
 
@@ -90,7 +91,7 @@ func TestFlightRecorder(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Test with error
-		tmpFile := t.TempDir() + "/error.trace"
+		tmpFile := filepath.Join(t.TempDir(), "error.trace")
 		testErr := errors.New("test error")
 		returnedErr := fr.SnapshotOnError(testErr, tmpFile)
 
@@ -100,7 +101,7 @@ func TestFlightRecorder(t *testing.T) {
 		assert.Greater(t, info.Size(), int64(0))
 
 		// Test with nil error
-		tmpFile2 := t.TempDir() + "/no_error.trace"
+		tmpFile2 := filepath.Join(t.TempDir(), "no_error.trace")
 		returnedErr = fr.SnapshotOnError(nil, tmpFile2)
 
 		assert.Nil(t, returnedErr)

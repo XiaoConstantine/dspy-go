@@ -6,6 +6,7 @@ package core
 import (
 	"encoding/json"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -233,13 +234,16 @@ func BenchmarkGCPressure(b *testing.B) {
 	})
 
 	b.Run("StringConcatenation", func(b *testing.B) {
-		// Simulates prompt building allocations
+		// Simulates prompt building allocations using strings.Builder
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			var prompt string
+			var sb strings.Builder
 			for j := 0; j < 50; j++ {
-				prompt += "This is line " + string(rune('0'+j%10)) + " of the prompt.\n"
+				sb.WriteString("This is line ")
+				sb.WriteRune(rune('0' + j%10))
+				sb.WriteString(" of the prompt.\n")
 			}
+			prompt := sb.String()
 			runtime.KeepAlive(prompt)
 		}
 	})
@@ -271,20 +275,31 @@ func BenchmarkMixedWorkload(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			// Marshal signature (config serialization)
-			sigData, _ := json.Marshal(sig)
+			sigData, err := json.Marshal(sig)
+			if err != nil {
+				b.Fatal(err)
+			}
 
 			// Process examples
 			results := make([]map[string]interface{}, len(examples))
 			for j, ex := range examples {
 				// Simulate processing
-				exData, _ := json.Marshal(ex)
+				exData, err := json.Marshal(ex)
+				if err != nil {
+					b.Fatal(err)
+				}
 				var processed Example
-				_ = json.Unmarshal(exData, &processed)
+				if err := json.Unmarshal(exData, &processed); err != nil {
+					b.Fatal(err)
+				}
 				results[j] = processed.Outputs
 			}
 
 			// Marshal results
-			resultsData, _ := json.Marshal(results)
+			resultsData, err := json.Marshal(results)
+			if err != nil {
+				b.Fatal(err)
+			}
 
 			runtime.KeepAlive(sigData)
 			runtime.KeepAlive(resultsData)
