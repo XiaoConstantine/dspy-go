@@ -6,6 +6,7 @@ package core
 import (
 	"encoding/json"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -209,7 +210,7 @@ func BenchmarkGCPressure(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			results := make(map[string]interface{})
 			for j := 0; j < 100; j++ {
-				results["key"+string(rune(j))] = map[string]interface{}{
+				results["key"+strconv.Itoa(j)] = map[string]interface{}{
 					"value":  j,
 					"nested": []int{j, j + 1, j + 2},
 				}

@@ -4,7 +4,6 @@ package logging
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"runtime/trace"
@@ -158,12 +157,12 @@ func GlobalFlightRecorder() *FlightRecorder {
 
 // InitGlobalFlightRecorder initializes and starts the global FlightRecorder.
 // Safe to call multiple times; only the first call has effect.
-// Panics if the flight recorder fails to start.
+// If the flight recorder fails to start, it logs the error and continues without recording.
 func InitGlobalFlightRecorder(opts ...FlightRecorderOption) {
 	globalRecorderOnce.Do(func() {
 		globalRecorder = NewFlightRecorder(opts...)
 		if err := globalRecorder.Start(); err != nil {
-			panic(fmt.Sprintf("failed to start global flight recorder: %v", err))
+			log.Printf("dspy-go: failed to start global flight recorder: %v. Flight recording will be disabled.", err)
 		}
 	})
 }
