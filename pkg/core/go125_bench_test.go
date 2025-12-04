@@ -279,14 +279,15 @@ func BenchmarkMixedWorkload(b *testing.B) {
 				// Simulate processing
 				exData, _ := json.Marshal(ex)
 				var processed Example
-				json.Unmarshal(exData, &processed)
+				_ = json.Unmarshal(exData, &processed)
 				results[j] = processed.Outputs
 			}
 
 			// Marshal results
-			json.Marshal(results)
+			resultsData, _ := json.Marshal(results)
 
 			runtime.KeepAlive(sigData)
+			runtime.KeepAlive(resultsData)
 		}
 	})
 }

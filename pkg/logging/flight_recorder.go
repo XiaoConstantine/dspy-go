@@ -137,7 +137,7 @@ func (fr *FlightRecorder) Snapshot(filename string) error {
 //	}
 func (fr *FlightRecorder) SnapshotOnError(err error, filename string) error {
 	if err != nil {
-		fr.Snapshot(filename)
+		_ = fr.Snapshot(filename)
 	}
 	return err
 }
@@ -157,7 +157,7 @@ func GlobalFlightRecorder() *FlightRecorder {
 func InitGlobalFlightRecorder(opts ...FlightRecorderOption) {
 	globalRecorderOnce.Do(func() {
 		globalRecorder = NewFlightRecorder(opts...)
-		globalRecorder.Start()
+		_ = globalRecorder.Start()
 	})
 }
 
