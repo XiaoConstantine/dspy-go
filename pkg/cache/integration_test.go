@@ -554,17 +554,15 @@ func TestCachedLLM_WithCache_ConcurrentAccess(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(
 		&core.LLMResponse{Content: "response"}, nil)
 
-	// Test concurrent access
+	// Test concurrent access using Go 1.25's WaitGroup.Go()
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			ctx := context.Background()
 			result, err := cachedLLM.Generate(ctx, "test prompt")
 			assert.NoError(t, err)
 			assert.NotNil(t, result)
-		}(i)
+		})
 	}
 	wg.Wait()
 

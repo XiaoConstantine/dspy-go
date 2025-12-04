@@ -984,16 +984,14 @@ func TestOllamaLLM_ConcurrentStreaming(t *testing.T) {
 	llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(server.URL))
 	assert.NoError(t, err)
 
-	// Test concurrent streaming
+	// Test concurrent streaming using Go 1.25's WaitGroup.Go()
 	const numStreams = 3
 	var wg sync.WaitGroup
 	results := make([]string, numStreams)
 
 	for i := 0; i < numStreams; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-
+		idx := i // Capture loop variable
+		wg.Go(func() {
 			streamResp, err := llm.StreamGenerate(context.Background(), fmt.Sprintf("prompt_%d", idx))
 			assert.NoError(t, err)
 
@@ -1010,7 +1008,7 @@ func TestOllamaLLM_ConcurrentStreaming(t *testing.T) {
 			}
 
 			results[idx] = output.String()
-		}(i)
+		})
 	}
 
 	wg.Wait()
