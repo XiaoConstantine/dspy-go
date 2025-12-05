@@ -145,7 +145,7 @@ func NewManager(sessionID, agentID, baseDir string, config Config) (*Manager, er
 // to create highly optimized context for 10x cost reduction.
 func (m *Manager) BuildOptimizedContext(ctx context.Context, request ContextRequest) (*ContextResponse, error) {
 	if !m.isEnabled {
-		return m.buildBasicContext(request)
+		return m.buildBasicContext(ctx, request)
 	}
 
 	m.mu.Lock()
@@ -158,7 +158,7 @@ func (m *Manager) BuildOptimizedContext(ctx context.Context, request ContextRequ
 	m.contextVersion++
 
 	// Step 1: Build base context from inputs
-	baseContext := m.buildBaseContext(request)
+	baseContext := m.buildBaseContext(ctx, request)
 
 	// Step 2: Apply KV-cache optimization (CRITICAL for cost savings)
 	var optimizedContext string
@@ -431,7 +431,7 @@ func (m *Manager) SetEnabled(enabled bool) {
 
 // Private helper methods
 
-func (m *Manager) buildBaseContext(request ContextRequest) string {
+func (m *Manager) buildBaseContext(ctx context.Context, request ContextRequest) string {
 	var builder strings.Builder
 
 	// Add current task if provided
@@ -445,7 +445,7 @@ func (m *Manager) buildBaseContext(request ContextRequest) string {
 		for i, obs := range request.Observations {
 			// Store large observations in filesystem and use references
 			if m.config.EnableFileSystemMemory && len(obs) > int(m.config.CompressionThreshold) {
-				ref, err := m.memory.StoreLargeObservation(context.TODO(), fmt.Sprintf("obs_%d_%d", i, time.Now().UnixNano()), []byte(obs), map[string]interface{}{
+				ref, err := m.memory.StoreLargeObservation(ctx, fmt.Sprintf("obs_%d_%d", i, time.Now().UnixNano()), []byte(obs), map[string]interface{}{
 					"observation_index": i,
 					"size": len(obs),
 				})
@@ -474,9 +474,9 @@ func (m *Manager) buildBaseContext(request ContextRequest) string {
 	return builder.String()
 }
 
-func (m *Manager) buildBasicContext(request ContextRequest) (*ContextResponse, error) {
+func (m *Manager) buildBasicContext(ctx context.Context, request ContextRequest) (*ContextResponse, error) {
 	// Fallback for when context management is disabled
-	baseContext := m.buildBaseContext(request)
+	baseContext := m.buildBaseContext(ctx, request)
 	tokenCount := m.cacheOpt.EstimateTokens(baseContext)
 
 	return &ContextResponse{

@@ -494,9 +494,15 @@ func (c *Compressor) calculateChecksum(content string) string {
 }
 
 func (c *Compressor) createContentSummary(contentType, content string, result CompressionResult) string {
+	// Use rune-based slicing for UTF-8 safety to avoid splitting multi-byte characters
+	runes := []rune(content)
+	if len(runes) > 200 {
+		runes = runes[:200]
+	}
+	summaryText := string(runes)
 	return fmt.Sprintf("Content Summary (%s, %d->%d bytes, %.1f%% reduction):\n%s",
 		contentType, result.OriginalSize, result.CompressedSize,
-		(1.0-result.CompressionRatio)*100, content[:min(200, len(content))])
+		(1.0-result.CompressionRatio)*100, summaryText)
 }
 
 // Simple implementations of compression techniques

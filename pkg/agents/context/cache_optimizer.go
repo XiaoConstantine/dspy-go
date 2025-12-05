@@ -132,6 +132,7 @@ func (co *CacheOptimizer) EstimateTokens(content string) int {
 }
 
 // RecordCacheHit updates metrics when a cache hit is detected.
+// The promptSize parameter represents the size of the cached portion that was reused.
 func (co *CacheOptimizer) RecordCacheHit(promptSize int) {
 	if !co.enableMetrics {
 		return
@@ -141,7 +142,8 @@ func (co *CacheOptimizer) RecordCacheHit(promptSize int) {
 	defer co.mu.Unlock()
 
 	co.hits++
-	tokensSaved := co.EstimateTokens(co.stablePrefix)
+	// Use the actual prompt size for more accurate token savings calculation
+	tokensSaved := promptSize
 	co.tokensSaved += int64(tokensSaved)
 
 	// Estimate cost savings (Anthropic Claude pricing: $3/MTok uncached, $0.30/MTok cached)
