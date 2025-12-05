@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	contextmgmt "github.com/XiaoConstantine/dspy-go/pkg/agents/context"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -74,6 +75,16 @@ type ReActAgentConfig struct {
 	// Native function calling settings
 	EnableNativeFunctionCalling bool
 	FunctionCallingConfig       *interceptors.FunctionCallingConfig
+
+	// Context Engineering settings (Manus-inspired patterns)
+	EnableContextEngineering bool                             `json:"enable_context_engineering"`
+	ContextConfig           contextmgmt.Config               `json:"context_config,omitempty"`
+	ContextBaseDir          string                           `json:"context_base_dir"`
+	AutoTodoManagement      bool                             `json:"auto_todo_management"`
+	AutoErrorLearning       bool                             `json:"auto_error_learning"`
+	ContextOptLevel         contextmgmt.CompressionPriority  `json:"context_optimization_level"`
+	MaxContextTokens        int                              `json:"max_context_tokens"`
+	CacheEfficiencyTarget   float64                          `json:"cache_efficiency_target"`
 }
 
 // DefaultReActAgentConfig returns sensible defaults.
@@ -99,7 +110,29 @@ func DefaultReActAgentConfig() ReActAgentConfig {
 		XMLConfig:                   nil,
 		EnableNativeFunctionCalling: false, // Disabled by default for backward compatibility
 		FunctionCallingConfig:       nil,
+		// Context Engineering defaults
+		EnableContextEngineering: false, // Opt-in for backward compatibility
+		ContextBaseDir:          "./agent_memory",
+		AutoTodoManagement:      true,
+		AutoErrorLearning:       true,
+		ContextOptLevel:         contextmgmt.PriorityMedium,
+		MaxContextTokens:        8192,
+		CacheEfficiencyTarget:   0.85,
 	}
+}
+
+// ProductionReActAgentConfig returns a configuration optimized for production cost efficiency.
+func ProductionReActAgentConfig() ReActAgentConfig {
+	config := DefaultReActAgentConfig()
+
+	// Enable context engineering for maximum cost reduction
+	config.EnableContextEngineering = true
+	config.ContextConfig = contextmgmt.ProductionConfig()
+	config.CacheEfficiencyTarget = 0.95
+	config.ContextOptLevel = contextmgmt.PriorityHigh
+	config.MaxContextTokens = 16384
+
+	return config
 }
 
 // ReActAgent implements a generic ReAct-based agent with modern patterns.
@@ -117,6 +150,9 @@ type ReActAgent struct {
 	Planner   *TaskPlanner
 	Optimizer *MemoryOptimizer
 
+	// Context Engineering (Manus-inspired patterns)
+	contextManager *contextmgmt.Manager
+
 	// Configuration
 	config ReActAgentConfig
 
@@ -126,9 +162,16 @@ type ReActAgent struct {
 	// Capabilities
 	capabilities []core.Tool
 
-	// Execution state
+	// Execution state enhanced with context tracking
 	executionHistory []ExecutionRecord
 	currentPlan      *Plan
+	activeTaskID     string
+	contextVersion   int64
+
+	// Performance metrics
+	totalExecutions   int64
+	contextSavings    float64
+	avgProcessingTime time.Duration
 
 	// Synchronization
 	mu sync.RWMutex
@@ -143,6 +186,13 @@ type ExecutionRecord struct {
 	Success     bool
 	Error       error
 	Reflections []string
+
+	// Context Engineering metrics
+	ContextVersion      int64                        `json:"context_version,omitempty"`
+	ContextResponse     *contextmgmt.ContextResponse `json:"context_response,omitempty"`
+	OptimizationsApplied []string                    `json:"optimizations_applied,omitempty"`
+	CostSavings         float64                      `json:"cost_savings,omitempty"`
+	ProcessingTime      time.Duration                `json:"processing_time,omitempty"`
 }
 
 // ActionRecord tracks individual actions taken.
@@ -173,14 +223,37 @@ func NewReActAgent(id, name string, opts ...Option) *ReActAgent {
 
 	// Create the agent
 	agent := &ReActAgent{
-		id:           id,
-		name:         name,
-		toolRegistry: toolRegistry,
-		memory:       memory,
-		config:       config,
-		interceptors: make([]core.AgentInterceptor, 0),
-		capabilities: make([]core.Tool, 0),
+		id:               id,
+		name:             name,
+		toolRegistry:     toolRegistry,
+		memory:           memory,
+		config:           config,
+		interceptors:     make([]core.AgentInterceptor, 0),
+		capabilities:     make([]core.Tool, 0),
 		executionHistory: make([]ExecutionRecord, 0),
+		contextVersion:   1,
+	}
+
+	// Initialize context engineering if enabled
+	if config.EnableContextEngineering {
+		contextConfig := config.ContextConfig
+		if contextConfig.SessionID == "" {
+			contextConfig.SessionID = fmt.Sprintf("session_%s_%d", id, time.Now().Unix())
+		}
+
+		contextManager, err := contextmgmt.NewManager(
+			contextConfig.SessionID,
+			id,
+			config.ContextBaseDir,
+			contextConfig,
+		)
+		if err != nil {
+			// Log error but don't fail agent creation
+			logger := logging.GetLogger()
+			logger.Warn(context.Background(), "Failed to initialize context manager for agent %s: %v", id, err)
+		} else {
+			agent.contextManager = contextManager
+		}
 	}
 
 	// Initialize modern pattern components if enabled
@@ -268,6 +341,37 @@ func WithNativeFunctionCalling(config interceptors.FunctionCallingConfig) Option
 	return func(c *ReActAgentConfig) {
 		c.EnableNativeFunctionCalling = true
 		c.FunctionCallingConfig = &config
+	}
+}
+
+// WithContextEngineering enables Manus-inspired context engineering for 10x cost reduction.
+func WithContextEngineering(baseDir string, contextConfig contextmgmt.Config) Option {
+	return func(c *ReActAgentConfig) {
+		c.EnableContextEngineering = true
+		c.ContextBaseDir = baseDir
+		c.ContextConfig = contextConfig
+	}
+}
+
+// WithProductionContextOptimization enables production-grade context optimization.
+func WithProductionContextOptimization() Option {
+	return func(c *ReActAgentConfig) {
+		c.EnableContextEngineering = true
+		c.ContextConfig = contextmgmt.ProductionConfig()
+		c.CacheEfficiencyTarget = 0.95
+		c.ContextOptLevel = contextmgmt.PriorityHigh
+		c.MaxContextTokens = 16384
+		c.AutoTodoManagement = true
+		c.AutoErrorLearning = true
+	}
+}
+
+// WithContextOptimization configures context optimization level.
+func WithContextOptimization(level contextmgmt.CompressionPriority, maxTokens int, cacheTarget float64) Option {
+	return func(c *ReActAgentConfig) {
+		c.ContextOptLevel = level
+		c.MaxContextTokens = maxTokens
+		c.CacheEfficiencyTarget = cacheTarget
 	}
 }
 
@@ -363,13 +467,20 @@ func (r *ReActAgent) Execute(ctx context.Context, input map[string]interface{}) 
 	return r.executeInternal(ctx, input)
 }
 
-// executeInternal performs the actual execution logic.
+// executeInternal performs the actual execution logic with context engineering.
 func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	startTime := time.Now()
 	ctx, span := core.StartSpan(ctx, "ReActAgent.Execute")
 	defer core.EndSpan(ctx)
 
 	logger := logging.GetLogger()
 	logger.Info(ctx, "Starting ReAct agent execution for agent %s", r.id)
+
+	r.mu.Lock()
+	r.totalExecutions++
+	r.contextVersion++
+	executionID := fmt.Sprintf("exec_%d_%d", r.totalExecutions, time.Now().UnixNano())
+	r.mu.Unlock()
 
 	// Apply timeout
 	if r.config.Timeout > 0 {
@@ -378,45 +489,63 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		defer cancel()
 	}
 
-	// Load relevant memory context
+	// STEP 1: Build optimized context using Manus patterns (if enabled)
+	var contextResponse *contextmgmt.ContextResponse
+	var optimizedInput map[string]interface{}
+	if r.config.EnableContextEngineering && r.contextManager != nil {
+		var err error
+		optimizedInput, contextResponse, err = r.buildOptimizedContext(ctx, input, executionID)
+		if err != nil {
+			logger.Warn(ctx, "Context optimization failed, falling back to basic execution: %v", err)
+			optimizedInput = input
+		} else {
+			logger.Debug(ctx, "Context optimization achieved %.1f%% cost reduction",
+				(1.0-contextResponse.CompressionRatio)*100)
+		}
+	} else {
+		optimizedInput = input
+	}
+
+	// STEP 2: Load relevant memory context (legacy system)
 	if r.config.EnableMemoryOpt && r.Optimizer != nil {
-		memoryContext, err := r.loadMemoryContext(ctx, input)
+		memoryContext, err := r.loadMemoryContext(ctx, optimizedInput)
 		if err != nil {
 			logger.Warn(ctx, "Failed to load memory context: %v", err)
 		} else if memoryContext != nil {
-			input["memory_context"] = memoryContext
+			optimizedInput["memory_context"] = memoryContext
 		}
 	}
 
+	// STEP 3: Execute using standard ReAct flow but with optimized context
 	var result map[string]interface{}
 	var err error
 
-	// Choose execution mode
 	switch r.config.ExecutionMode {
 	case ModeReAct:
-		result, err = r.executeReAct(ctx, input)
+		result, err = r.executeReAct(ctx, optimizedInput)
 	case ModeReWOO:
-		result, err = r.executeReWOO(ctx, input)
+		result, err = r.executeReWOO(ctx, optimizedInput)
 	case ModeHybrid:
-		result, err = r.executeHybrid(ctx, input)
+		result, err = r.executeHybrid(ctx, optimizedInput)
 	default:
-		result, err = r.executeReAct(ctx, input)
+		result, err = r.executeReAct(ctx, optimizedInput)
 	}
 
-	// Record execution for reflection
-	record := ExecutionRecord{
-		Timestamp: time.Now(),
-		Input:     input,
-		Output:    result,
-		Success:   err == nil,
-		Error:     err,
-	}
+	// STEP 4: Create enhanced execution record
+	processingTime := time.Since(startTime)
+	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, processingTime)
 
 	r.mu.Lock()
 	r.executionHistory = append(r.executionHistory, record)
+	r.avgProcessingTime = r.updateAvgProcessingTime(processingTime)
 	r.mu.Unlock()
 
-	// Perform reflection if enabled
+	// STEP 5: Update context management systems with results
+	if r.config.EnableContextEngineering && r.contextManager != nil {
+		r.updateContextSystems(ctx, executionID, input, result, err)
+	}
+
+	// STEP 6: Perform reflection with context awareness
 	if r.config.EnableReflection && r.Reflector != nil {
 		reflections := r.Reflector.Reflect(ctx, record)
 		if len(reflections) > 0 {
@@ -424,13 +553,28 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		}
 	}
 
-	// Update memory with results
+	// STEP 7: Update legacy memory system
 	if r.config.EnableMemoryOpt && r.Optimizer != nil {
 		_ = r.Optimizer.Store(ctx, input, result, err == nil)
 	}
 
+	// STEP 8: Update performance metrics
+	if contextResponse != nil {
+		r.mu.Lock()
+		r.contextSavings += contextResponse.CostSavings
+		r.mu.Unlock()
+	}
+
 	span.WithAnnotation("execution_mode", r.config.ExecutionMode)
 	span.WithAnnotation("success", err == nil)
+	span.WithAnnotation("context_engineering", r.config.EnableContextEngineering)
+	if contextResponse != nil {
+		span.WithAnnotation("cache_hit_rate", contextResponse.CacheHitRate)
+		span.WithAnnotation("cost_savings", contextResponse.CostSavings)
+	}
+
+	logger.Info(ctx, "ReAct execution completed: %s (%.2fms, context savings: $%.6f)",
+		executionID, processingTime.Seconds()*1000, r.getContextSavingsOrDefault(contextResponse))
 
 	return result, err
 }
@@ -745,6 +889,301 @@ func (r *ReActAgent) GetExecutionHistory() []ExecutionRecord {
 	history := make([]ExecutionRecord, len(r.executionHistory))
 	copy(history, r.executionHistory)
 	return history
+}
+
+// Context Engineering helper methods
+
+// buildOptimizedContext creates highly optimized context using all Manus patterns.
+func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string]interface{}, executionID string) (map[string]interface{}, *contextmgmt.ContextResponse, error) {
+	logger := logging.GetLogger()
+
+	// Extract observations and task from input
+	observations := r.extractObservations(input)
+	currentTask := r.extractCurrentTask(input)
+
+	// Update active task tracking (thread-safe)
+	r.mu.Lock()
+	if currentTask != "" && r.activeTaskID != executionID {
+		r.activeTaskID = executionID
+		shouldAddTodo := r.config.AutoTodoManagement
+		r.mu.Unlock()
+
+		if shouldAddTodo {
+			if err := r.contextManager.AddTodo(ctx, currentTask, 7); err != nil {
+				logger.Warn(ctx, "Failed to add task to todo system: %v", err)
+			}
+		}
+	} else {
+		r.mu.Unlock()
+	}
+
+	// Build context request with optimization preferences
+	request := contextmgmt.ContextRequest{
+		Observations:         observations,
+		CurrentTask:          currentTask,
+		AdditionalData:       r.extractAdditionalData(input),
+		PrioritizeCache:      true, // CRITICAL for cost savings
+		CompressionPriority:  r.config.ContextOptLevel,
+		AllowDiversification: true,
+		IncludeErrors:        r.config.AutoErrorLearning,
+		IncludeTodos:         r.config.AutoTodoManagement,
+		MaxTokens:            r.config.MaxContextTokens,
+		MinCacheEfficiency:   r.config.CacheEfficiencyTarget,
+	}
+
+	// Get optimized context
+	contextResponse, err := r.contextManager.BuildOptimizedContext(ctx, request)
+	if err != nil {
+		return input, nil, fmt.Errorf("failed to build optimized context: %w", err)
+	}
+
+	// Create enhanced input with optimized context
+	optimizedInput := make(map[string]interface{})
+	for k, v := range input {
+		optimizedInput[k] = v
+	}
+
+	// Replace or enhance with optimized context
+	optimizedInput["optimized_context"] = contextResponse.Context
+	optimizedInput["context_metadata"] = map[string]interface{}{
+		"version":         contextResponse.ContextVersion,
+		"token_count":     contextResponse.TokenCount,
+		"cache_hit_rate":  contextResponse.CacheHitRate,
+		"cost_savings":    contextResponse.CostSavings,
+		"optimizations":   contextResponse.OptimizationsApplied,
+	}
+
+	logger.Debug(ctx, "Built optimized context: %d tokens (%.1f%% cache hit rate)",
+		contextResponse.TokenCount, contextResponse.CacheHitRate*100)
+
+	return optimizedInput, contextResponse, nil
+}
+
+// updateContextSystems updates context management systems based on execution results.
+func (r *ReActAgent) updateContextSystems(ctx context.Context, executionID string, input map[string]interface{}, result map[string]interface{}, err error) {
+	logger := logging.GetLogger()
+
+	// Update todo management (thread-safe)
+	r.mu.RLock()
+	activeTask := r.activeTaskID
+	shouldManageTodo := (activeTask == executionID && r.config.AutoTodoManagement)
+	r.mu.RUnlock()
+
+	if shouldManageTodo {
+		if err == nil {
+			// Mark task as completed
+			if todoErr := r.contextManager.CompleteTodo(ctx, activeTask); todoErr != nil {
+				logger.Warn(ctx, "Failed to complete todo: %v", todoErr)
+			}
+		} else {
+			// Keep task active for retry, but record the error
+			r.recordExecutionError(ctx, executionID, err)
+		}
+	}
+
+	// Record success/failure for learning
+	if r.config.AutoErrorLearning {
+		if err == nil {
+			r.contextManager.RecordSuccess(ctx, "agent_execution", "Successful task completion", map[string]interface{}{
+				"execution_id": executionID,
+				"input":        input,
+				"result":       result,
+			})
+		} else {
+			r.recordExecutionError(ctx, executionID, err)
+		}
+	}
+}
+
+// recordExecutionError records execution errors for learning.
+func (r *ReActAgent) recordExecutionError(ctx context.Context, executionID string, err error) {
+	// Classify error for better learning
+	errorType := r.classifyError(err)
+	severity := r.assessErrorSeverity(err)
+
+	r.contextManager.RecordError(ctx, errorType, err.Error(), severity, map[string]interface{}{
+		"execution_id": executionID,
+		"agent_id":     r.id,
+		"timestamp":    time.Now(),
+	})
+}
+
+// classifyError categorizes errors for pattern recognition.
+func (r *ReActAgent) classifyError(err error) string {
+	errStr := strings.ToLower(err.Error())
+
+	switch {
+	case strings.Contains(errStr, "timeout"):
+		return "execution_timeout"
+	case strings.Contains(errStr, "tool"):
+		return "tool_failure"
+	case strings.Contains(errStr, "llm") || strings.Contains(errStr, "model"):
+		return "llm_error"
+	case strings.Contains(errStr, "context"):
+		return "context_error"
+	case strings.Contains(errStr, "memory"):
+		return "memory_error"
+	default:
+		return "general_execution_error"
+	}
+}
+
+// assessErrorSeverity determines error severity for prioritized learning.
+func (r *ReActAgent) assessErrorSeverity(err error) contextmgmt.ErrorSeverity {
+	errStr := strings.ToLower(err.Error())
+
+	switch {
+	case strings.Contains(errStr, "critical") || strings.Contains(errStr, "fatal"):
+		return contextmgmt.SeverityCritical
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "fail"):
+		return contextmgmt.SeverityHigh
+	case strings.Contains(errStr, "warn") || strings.Contains(errStr, "retry"):
+		return contextmgmt.SeverityMedium
+	default:
+		return contextmgmt.SeverityLow
+	}
+}
+
+// createEnhancedExecutionRecord creates a comprehensive execution record.
+func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]interface{}, result map[string]interface{}, err error, contextResponse *contextmgmt.ContextResponse, processingTime time.Duration) ExecutionRecord {
+	// Thread-safe access to contextVersion
+	r.mu.RLock()
+	contextVersion := r.contextVersion
+	r.mu.RUnlock()
+
+	record := ExecutionRecord{
+		Timestamp: time.Now(),
+		Input:     input,
+		Output:    result,
+		Success:   err == nil,
+		Error:     err,
+		ContextVersion: contextVersion,
+		ProcessingTime: processingTime,
+	}
+
+	if contextResponse != nil {
+		record.ContextResponse = contextResponse
+		record.OptimizationsApplied = contextResponse.OptimizationsApplied
+		record.CostSavings = contextResponse.CostSavings
+	}
+
+	return record
+}
+
+// extractObservations extracts observations from input.
+func (r *ReActAgent) extractObservations(input map[string]interface{}) []string {
+	var observations []string
+
+	if obs, ok := input["observations"]; ok {
+		switch v := obs.(type) {
+		case []string:
+			observations = v
+		case []interface{}:
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					observations = append(observations, str)
+				}
+			}
+		case string:
+			observations = []string{v}
+		}
+	}
+
+	// Also check for memory context
+	if memCtx, ok := input["memory_context"]; ok {
+		if str, ok := memCtx.(string); ok {
+			observations = append(observations, str)
+		}
+	}
+
+	return observations
+}
+
+// extractCurrentTask extracts current task from input.
+func (r *ReActAgent) extractCurrentTask(input map[string]interface{}) string {
+	// Try multiple common keys for task description
+	taskKeys := []string{"task", "current_task", "objective", "goal", "instruction"}
+
+	for _, key := range taskKeys {
+		if task, ok := input[key].(string); ok && task != "" {
+			return task
+		}
+	}
+
+	return ""
+}
+
+// extractAdditionalData extracts additional context data.
+func (r *ReActAgent) extractAdditionalData(input map[string]interface{}) map[string]interface{} {
+	additional := make(map[string]interface{})
+
+	// Copy all non-standard keys as additional data
+	excludeKeys := map[string]bool{
+		"task": true, "current_task": true, "objective": true, "goal": true,
+		"observations": true, "memory_context": true, "optimized_context": true,
+		"context_metadata": true,
+	}
+
+	for k, v := range input {
+		if !excludeKeys[k] {
+			additional[k] = v
+		}
+	}
+
+	return additional
+}
+
+// updateAvgProcessingTime updates average processing time with exponential smoothing.
+func (r *ReActAgent) updateAvgProcessingTime(newTime time.Duration) time.Duration {
+	if r.totalExecutions == 1 {
+		return newTime
+	}
+
+	// Exponential moving average
+	alpha := 0.1
+	return time.Duration(float64(r.avgProcessingTime)*alpha + float64(newTime)*(1.0-alpha))
+}
+
+// getContextSavingsOrDefault returns context savings or default value.
+func (r *ReActAgent) getContextSavingsOrDefault(contextResponse *contextmgmt.ContextResponse) float64 {
+	if contextResponse != nil {
+		return contextResponse.CostSavings
+	}
+	return 0.0
+}
+
+// GetContextPerformanceMetrics returns comprehensive context management metrics.
+func (r *ReActAgent) GetContextPerformanceMetrics() map[string]interface{} {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	metrics := map[string]interface{}{
+		"total_executions":      r.totalExecutions,
+		"context_version":       r.contextVersion,
+		"context_savings":       r.contextSavings,
+		"avg_processing_time":   r.avgProcessingTime.Milliseconds(),
+		"context_mgmt_enabled":  r.config.EnableContextEngineering,
+	}
+
+	// Add context manager metrics if available
+	if r.config.EnableContextEngineering && r.contextManager != nil {
+		contextMetrics := r.contextManager.GetPerformanceMetrics()
+		metrics["context_manager"] = contextMetrics
+	}
+
+	return metrics
+}
+
+// GetContextHealthStatus returns health status of context management systems.
+func (r *ReActAgent) GetContextHealthStatus() map[string]interface{} {
+	if !r.config.EnableContextEngineering || r.contextManager == nil {
+		return map[string]interface{}{
+			"status": "disabled",
+			"message": "Context management is disabled",
+		}
+	}
+
+	return r.contextManager.GetHealthStatus()
 }
 
 // Utility functions

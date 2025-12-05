@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -42,6 +43,7 @@ type SelfReflector struct {
 	reflectionCache      []Reflection
 	patterns             map[string]*Pattern
 	metrics              *PerformanceMetrics
+	mu                   sync.RWMutex // Protects concurrent access to internal state
 }
 
 // Pattern represents a recurring pattern in agent behavior.
@@ -129,19 +131,25 @@ func (sr *SelfReflector) Reflect(ctx context.Context, record ExecutionRecord) []
 		}
 	}
 
-	// Identify patterns across multiple executions
-	if len(sr.reflectionCache) >= sr.depth {
+	// Identify patterns across multiple executions (thread-safe)
+	sr.mu.RLock()
+	cacheLen := len(sr.reflectionCache)
+	sr.mu.RUnlock()
+
+	if cacheLen >= sr.depth {
 		if patternReflection := sr.identifyPatterns(ctx); patternReflection != nil {
 			reflections = append(reflections, *patternReflection)
 		}
 	}
 
-	// Cache reflections for pattern analysis
+	// Cache reflections for pattern analysis (thread-safe)
+	sr.mu.Lock()
 	sr.reflectionCache = append(sr.reflectionCache, reflections...)
 	if len(sr.reflectionCache) > sr.depth*10 {
 		// Keep only recent reflections
 		sr.reflectionCache = sr.reflectionCache[len(sr.reflectionCache)-sr.depth*10:]
 	}
+	sr.mu.Unlock()
 
 	logger.Info(ctx, "Generated %d reflections", len(reflections))
 	return reflections
@@ -204,12 +212,20 @@ func (sr *SelfReflector) reflectOnStrategy(ctx context.Context, record Execution
 
 // reflectOnPerformance analyzes performance metrics.
 func (sr *SelfReflector) reflectOnPerformance(ctx context.Context, record ExecutionRecord) *Reflection {
-	if sr.metrics.TotalExecutions < 5 {
+	// Thread-safe access to metrics
+	sr.mu.RLock()
+	totalExecutions := sr.metrics.TotalExecutions
+	successfulRuns := sr.metrics.SuccessfulRuns
+	failedRuns := sr.metrics.FailedRuns
+	averageIterations := sr.metrics.AverageIterations
+	sr.mu.RUnlock()
+
+	if totalExecutions < 5 {
 		// Not enough data for performance reflection
 		return nil
 	}
 
-	successRate := float64(sr.metrics.SuccessfulRuns) / float64(sr.metrics.TotalExecutions)
+	successRate := float64(successfulRuns) / float64(totalExecutions)
 
 	// Check if performance is degrading
 	if successRate < sr.successRateThreshold {
@@ -220,21 +236,21 @@ func (sr *SelfReflector) reflectOnPerformance(ctx context.Context, record Execut
 			Recommendation: "increase_max_iterations",
 			Evidence: []string{
 				fmt.Sprintf("Success rate: %.2f%%", successRate*100),
-				fmt.Sprintf("Failed runs: %d/%d", sr.metrics.FailedRuns, sr.metrics.TotalExecutions),
+				fmt.Sprintf("Failed runs: %d/%d", failedRuns, totalExecutions),
 			},
 			Timestamp: time.Now(),
 		}
 	}
 
 	// Check iteration efficiency
-	if sr.metrics.AverageIterations > 7 {
+	if averageIterations > 7 {
 		return &Reflection{
 			Type:       ReflectionTypePerformance,
 			Insight:    "Average iteration count is high, suggesting complex problem solving",
 			Confidence: 0.75,
 			Recommendation: "use_rewoo_for_structured_tasks",
 			Evidence: []string{
-				fmt.Sprintf("Average iterations: %.2f", sr.metrics.AverageIterations),
+				fmt.Sprintf("Average iterations: %.2f", averageIterations),
 			},
 			Timestamp: time.Now(),
 		}
@@ -260,6 +276,8 @@ func (sr *SelfReflector) reflectOnLearning(ctx context.Context, record Execution
 	if len(successfulTools) > 0 {
 		patternKey := fmt.Sprintf("%v", successfulTools)
 
+		// Thread-safe access to patterns map
+		sr.mu.Lock()
 		if pattern, exists := sr.patterns[patternKey]; exists {
 			pattern.Occurrences++
 			pattern.LastSeen = time.Now()
@@ -274,7 +292,10 @@ func (sr *SelfReflector) reflectOnLearning(ctx context.Context, record Execution
 			}
 		}
 
-		if sr.patterns[patternKey].Occurrences > 2 {
+		occurrences := sr.patterns[patternKey].Occurrences
+		sr.mu.Unlock()
+
+		if occurrences > 2 {
 			return &Reflection{
 				Type:       ReflectionTypeLearning,
 				Insight:    fmt.Sprintf("Identified successful pattern: %s", patternKey),
@@ -299,10 +320,15 @@ func (sr *SelfReflector) reflectOnError(ctx context.Context, record ExecutionRec
 	}
 
 	errorStr := record.Error.Error()
+
+	// Thread-safe access to error patterns
+	sr.mu.Lock()
 	sr.metrics.ErrorPatterns[errorStr]++
+	errorCount := sr.metrics.ErrorPatterns[errorStr]
+	sr.mu.Unlock()
 
 	// Check if this is a recurring error
-	if sr.metrics.ErrorPatterns[errorStr] > 2 {
+	if errorCount > 2 {
 		return &Reflection{
 			Type:       ReflectionTypeError,
 			Insight:    fmt.Sprintf("Recurring error detected: %s", errorStr),
@@ -345,11 +371,14 @@ func (sr *SelfReflector) reflectOnError(ctx context.Context, record ExecutionRec
 func (sr *SelfReflector) identifyPatterns(ctx context.Context) *Reflection {
 	logger := logging.GetLogger()
 
-	// Analyze reflection cache for meta-patterns
+	// Analyze reflection cache for meta-patterns (thread-safe)
+	sr.mu.RLock()
 	typeCount := make(map[ReflectionType]int)
 	for _, ref := range sr.reflectionCache {
 		typeCount[ref.Type]++
 	}
+	cacheLen := len(sr.reflectionCache)
+	sr.mu.RUnlock()
 
 	// Find dominant reflection type
 	var dominantType ReflectionType
@@ -361,7 +390,7 @@ func (sr *SelfReflector) identifyPatterns(ctx context.Context) *Reflection {
 		}
 	}
 
-	if float64(maxCount) > float64(len(sr.reflectionCache))*0.5 {
+	if float64(maxCount) > float64(cacheLen)*0.5 {
 		logger.Debug(ctx, "Identified dominant reflection pattern: %v", dominantType)
 
 		insight := ""
@@ -387,7 +416,7 @@ func (sr *SelfReflector) identifyPatterns(ctx context.Context) *Reflection {
 				Recommendation: recommendation,
 				Evidence: []string{
 					fmt.Sprintf("Pattern type %v appeared %d times", dominantType, maxCount),
-					fmt.Sprintf("Total reflections analyzed: %d", len(sr.reflectionCache)),
+					fmt.Sprintf("Total reflections analyzed: %d", cacheLen),
 				},
 				Timestamp: time.Now(),
 			}
@@ -399,6 +428,9 @@ func (sr *SelfReflector) identifyPatterns(ctx context.Context) *Reflection {
 
 // updateMetrics updates performance metrics based on execution record.
 func (sr *SelfReflector) updateMetrics(record ExecutionRecord) {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+
 	sr.metrics.TotalExecutions++
 
 	if record.Success {
@@ -437,11 +469,13 @@ func (sr *SelfReflector) updateMetrics(record ExecutionRecord) {
 	}
 }
 
-// GetTopReflections returns the most confident reflections.
+// GetTopReflections returns the most confident reflections (thread-safe).
 func (sr *SelfReflector) GetTopReflections(n int) []Reflection {
+	sr.mu.RLock()
 	// Sort reflections by confidence
 	sorted := make([]Reflection, len(sr.reflectionCache))
 	copy(sorted, sr.reflectionCache)
+	sr.mu.RUnlock()
 
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Confidence > sorted[j].Confidence
@@ -459,13 +493,24 @@ func (sr *SelfReflector) GetMetrics() *PerformanceMetrics {
 	return sr.metrics
 }
 
-// GetPatterns returns identified patterns.
+// GetPatterns returns identified patterns (thread-safe).
 func (sr *SelfReflector) GetPatterns() map[string]*Pattern {
-	return sr.patterns
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+
+	// Return a copy of the patterns map to avoid concurrent access
+	patterns := make(map[string]*Pattern)
+	for k, v := range sr.patterns {
+		patterns[k] = v
+	}
+	return patterns
 }
 
-// Reset clears all reflection data.
+// Reset clears all reflection data (thread-safe).
 func (sr *SelfReflector) Reset() {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+
 	sr.reflectionCache = make([]Reflection, 0)
 	sr.patterns = make(map[string]*Pattern)
 	sr.metrics = &PerformanceMetrics{
@@ -474,8 +519,11 @@ func (sr *SelfReflector) Reset() {
 	}
 }
 
-// CalculateImprovement compares metrics over time windows.
+// CalculateImprovement compares metrics over time windows (thread-safe).
 func (sr *SelfReflector) CalculateImprovement(windowSize int) float64 {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+
 	if len(sr.reflectionCache) < windowSize*2 {
 		return 0.0
 	}
