@@ -13,8 +13,8 @@ import (
 
 // ParseJSONResponse attempts to parse a string response as JSON.
 // It handles common LLM response formats including:
-// - Raw JSON
-// - JSON wrapped in markdown code blocks (```json ... ```)
+// - Raw JSON.
+// - JSON wrapped in markdown code blocks (```json ... ```).
 func ParseJSONResponse(response string) (map[string]interface{}, error) {
 	// Strip markdown code blocks if present
 	cleanedResponse := stripMarkdownCodeBlock(response)
