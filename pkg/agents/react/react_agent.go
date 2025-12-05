@@ -70,6 +70,10 @@ type ReActAgentConfig struct {
 	// XML parsing settings
 	EnableXMLParsing bool
 	XMLConfig        *interceptors.XMLConfig
+
+	// Native function calling settings
+	EnableNativeFunctionCalling bool
+	FunctionCallingConfig       *interceptors.FunctionCallingConfig
 }
 
 // DefaultReActAgentConfig returns sensible defaults.
@@ -90,9 +94,11 @@ func DefaultReActAgentConfig() ReActAgentConfig {
 		ToolTimeout:        30 * time.Second,
 		ParallelTools:      true,
 		MaxToolRetries:     3,
-		EnableInterceptors: true,
-		EnableXMLParsing:   false, // Disabled by default for backward compatibility
-		XMLConfig:          nil,
+		EnableInterceptors:          true,
+		EnableXMLParsing:            false, // Disabled by default for backward compatibility
+		XMLConfig:                   nil,
+		EnableNativeFunctionCalling: false, // Disabled by default for backward compatibility
+		FunctionCallingConfig:       nil,
 	}
 }
 
@@ -255,6 +261,16 @@ func WithXMLParsing(config interceptors.XMLConfig) Option {
 	}
 }
 
+// WithNativeFunctionCalling enables native LLM function calling for tool selection.
+// This uses the provider's built-in tool calling API instead of text-based parsing,
+// which provides more reliable tool selection and eliminates parsing errors.
+func WithNativeFunctionCalling(config interceptors.FunctionCallingConfig) Option {
+	return func(c *ReActAgentConfig) {
+		c.EnableNativeFunctionCalling = true
+		c.FunctionCallingConfig = &config
+	}
+}
+
 // Initialize sets up the agent with an LLM and creates the ReAct module.
 func (r *ReActAgent) Initialize(llm core.LLM, signature core.Signature) error {
 	r.mu.Lock()
@@ -269,6 +285,15 @@ func (r *ReActAgent) Initialize(llm core.LLM, signature core.Signature) error {
 	// Enable XML parsing if configured
 	if r.config.EnableXMLParsing && r.config.XMLConfig != nil {
 		r.module.WithXMLParsing(*r.config.XMLConfig)
+	}
+
+	// Enable native function calling if configured
+	// Note: This takes precedence over XML parsing as they serve similar purposes
+	if r.config.EnableNativeFunctionCalling && r.config.FunctionCallingConfig != nil {
+		r.module.WithNativeFunctionCallingConfig(*r.config.FunctionCallingConfig)
+	} else if r.config.EnableNativeFunctionCalling {
+		// Use default config with the agent's tool registry
+		r.module.WithNativeFunctionCalling()
 	}
 
 	return nil
@@ -287,6 +312,29 @@ func (r *ReActAgent) EnableXMLParsing(config interceptors.XMLConfig) error {
 	r.config.EnableXMLParsing = true
 	r.config.XMLConfig = &config
 	r.module.WithXMLParsing(config)
+
+	return nil
+}
+
+// EnableNativeFunctionCalling enables native LLM function calling on an already initialized agent.
+// This allows enabling function calling after agent creation.
+// If config is nil, uses the default configuration with the agent's tool registry.
+func (r *ReActAgent) EnableNativeFunctionCalling(config *interceptors.FunctionCallingConfig) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.module == nil {
+		return fmt.Errorf("agent not initialized - call Initialize() first")
+	}
+
+	r.config.EnableNativeFunctionCalling = true
+	if config != nil {
+		r.config.FunctionCallingConfig = config
+		r.module.WithNativeFunctionCallingConfig(*config)
+	} else {
+		// Use default config - the module will set up with its own registry
+		r.module.WithNativeFunctionCalling()
+	}
 
 	return nil
 }
