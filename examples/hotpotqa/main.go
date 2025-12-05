@@ -184,7 +184,8 @@ func RunHotPotQAExample(apiKey string) {
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
-	cot := modules.NewChainOfThought(signature)
+	// Use native JSON structured output for more reliable parsing
+	cot := modules.NewChainOfThought(signature).WithStructuredOutput()
 
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
 		// Process() now automatically uses interceptors when XML mode is enabled

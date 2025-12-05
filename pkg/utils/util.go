@@ -12,9 +12,15 @@ import (
 )
 
 // ParseJSONResponse attempts to parse a string response as JSON.
+// It handles common LLM response formats including:
+// - Raw JSON
+// - JSON wrapped in markdown code blocks (```json ... ```)
 func ParseJSONResponse(response string) (map[string]interface{}, error) {
+	// Strip markdown code blocks if present
+	cleanedResponse := stripMarkdownCodeBlock(response)
+
 	var result map[string]interface{}
-	err := json.Unmarshal([]byte(response), &result)
+	err := json.Unmarshal([]byte(cleanedResponse), &result)
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to parse JSON"),
@@ -25,6 +31,29 @@ func ParseJSONResponse(response string) (map[string]interface{}, error) {
 			})
 	}
 	return result, nil
+}
+
+// stripMarkdownCodeBlock removes markdown code block wrappers from a string.
+// Handles formats like ```json\n{...}\n``` or ```\n{...}\n```.
+func stripMarkdownCodeBlock(s string) string {
+	s = strings.TrimSpace(s)
+
+	// Check for ```json or ``` prefix
+	if strings.HasPrefix(s, "```json") {
+		s = strings.TrimPrefix(s, "```json")
+	} else if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```")
+	} else {
+		// No markdown wrapper, return as-is
+		return s
+	}
+
+	// Remove closing ```
+	if idx := strings.LastIndex(s, "```"); idx != -1 {
+		s = s[:idx]
+	}
+
+	return strings.TrimSpace(s)
 }
 
 func truncateString(s string, maxLen int) string {

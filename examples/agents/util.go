@@ -26,8 +26,9 @@ func CreateClassifierStep() *workflows.Step {
     First explain your reasoning, then provide your selection.
     You must classify the ticket into exactly one of these categories: "billing", "technical", "account", or "product".
     Do not use any other classification values.`)
-	// Create a specialized predict module that formats the response correctly
-	predictModule := modules.NewPredict(signature)
+	// Create a specialized predict module with native JSON structured output
+	// for reliable multi-field extraction (reasoning + selection + classification)
+	predictModule := modules.NewPredict(signature).WithStructuredOutput()
 
 	return &workflows.Step{
 		ID:     "support_classifier",
@@ -48,7 +49,7 @@ func CreateHandlerStep(routeType string, prompt string) *workflows.Step {
 
 	return &workflows.Step{
 		ID:     fmt.Sprintf("%s_handler", routeType),
-		Module: modules.NewPredict(signature),
+		Module: modules.NewPredict(signature).WithStructuredOutput(),
 	}
 }
 
@@ -93,7 +94,7 @@ func NewStakeholderAnalysis(index int) core.Module {
         Provide specific impacts and recommended actions.
         Format with clear sections and priorities.`)
 
-	return modules.NewPredict(signature)
+	return modules.NewPredict(signature).WithStructuredOutput()
 }
 
 func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
@@ -111,7 +112,7 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
         45%: revenue growth`)
 	extractStep := &workflows.Step{
 		ID:     "extract_numbers",
-		Module: modules.NewPredict(extractSignature),
+		Module: modules.NewPredict(extractSignature).WithStructuredOutput(),
 	}
 
 	// Step 2: Standardize to percentages
@@ -129,7 +130,7 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 
 	standardizeStep := &workflows.Step{
 		ID:     "standardize_values",
-		Module: modules.NewPredict(standardizeSignature),
+		Module: modules.NewPredict(standardizeSignature).WithStructuredOutput(),
 	}
 
 	// Step 3: Sort values
@@ -141,7 +142,7 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 		`)
 	sortStep := &workflows.Step{
 		ID:     "sort_values",
-		Module: modules.NewPredict(sortSignature),
+		Module: modules.NewPredict(sortSignature).WithStructuredOutput(),
 	}
 
 	// Step 4: Format as table
@@ -158,7 +159,7 @@ Format example:
 | Customer Satisfaction | 92% |`)
 	tableStep := &workflows.Step{
 		ID:     "format_table",
-		Module: modules.NewPredict(tableSignature),
+		Module: modules.NewPredict(tableSignature).WithStructuredOutput(),
 	}
 
 	// Add steps to workflow

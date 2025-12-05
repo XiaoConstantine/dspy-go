@@ -58,10 +58,11 @@ func RunSIMBAExample(apiKey string) {
 
 	// Create a reasoning program optimized for mathematical problem solving
 	// This showcases how SIMBA can iteratively improve instruction quality
+	// Uses native JSON structured output for reliable multi-field extraction (reasoning + answer)
 	reasoner := modules.NewPredict(core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("reasoning")}, {Field: core.NewField("answer")}},
-	).WithInstruction("Solve this math problem step by step, showing your reasoning clearly and providing the final numerical answer."))
+	).WithInstruction("Solve this math problem step by step, showing your reasoning clearly and providing the final numerical answer.")).WithStructuredOutput()
 
 	// Create the program
 	program := core.NewProgram(

@@ -61,7 +61,8 @@ func RunMIPROExample(apiKey string) {
 		[]core.OutputField{{Field: core.NewField("completion")}},
 	).WithInstruction("Think step by step to solve this math problem.")
 
-	cot := modules.NewChainOfThought(cotSignature)
+	// Use native JSON structured output for more reliable parsing
+	cot := modules.NewChainOfThought(cotSignature).WithStructuredOutput()
 
 	// 2. Answer extractor to get the final answer
 	extractorSignature := core.NewSignature(
@@ -69,7 +70,8 @@ func RunMIPROExample(apiKey string) {
 		[]core.OutputField{{Field: core.NewField("completion")}},
 	).WithInstruction("Extract the final numerical answer from the reasoning.")
 
-	extractor := modules.NewChainOfThought(extractorSignature)
+	// Use native JSON structured output for more reliable parsing
+	extractor := modules.NewChainOfThought(extractorSignature).WithStructuredOutput()
 
 	// Create the program
 	program := core.NewProgram(

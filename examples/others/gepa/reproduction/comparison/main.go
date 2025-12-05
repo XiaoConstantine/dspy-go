@@ -75,7 +75,8 @@ func createHotpotQAProgram() (core.Program, *core.Signature, func(map[string]int
 		},
 	).WithInstruction("Answer the multi-hop question by reasoning step-by-step through the relevant facts.")
 
-	module := modules.NewChainOfThought(signature)
+	// Use native JSON structured output for reliable multi-field extraction
+	module := modules.NewChainOfThought(signature).WithStructuredOutput()
 
 	program := core.NewProgram(
 		map[string]core.Module{"reasoner": module},

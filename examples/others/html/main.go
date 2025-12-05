@@ -26,8 +26,9 @@ func createHTMLParsingProgram() core.Program {
 		},
 	)
 
-	// Create a ChainOfThought module for extraction
-	extract := modules.NewChainOfThought(extractSignature)
+	// Create a ChainOfThought module for extraction with native JSON structured output
+	// for reliable multi-field extraction (title + headings + entity_info)
+	extract := modules.NewChainOfThought(extractSignature).WithStructuredOutput()
 
 	// Create the program
 	program := core.NewProgram(
@@ -64,8 +65,9 @@ func createMetricFunc() func(example, prediction map[string]interface{}, ctx con
     Then, compare this with the predicted metadata.
     Explain your reasoning step by step, and finally determine if the prediction is correct.`)
 
-	// Create a ChainOfThought module with this signature
-	judge := modules.NewChainOfThought(signature)
+	// Create a ChainOfThought module with this signature and structured output
+	// for reliable multi-field extraction (rationale + is_correct)
+	judge := modules.NewChainOfThought(signature).WithStructuredOutput()
 
 	// Return a metric function that uses this module
 	return func(example, prediction map[string]interface{}, ctx context.Context) bool {
@@ -129,7 +131,7 @@ func main() {
 	).WithInstruction(`Generate a list of diverse technical topics.
 Each topic should be something that could have a web page with headings and entities.
 Format your response as a list, DO NOT wrap response in json format`)
-	synthesize_topics := modules.NewPredict(synthesizeTopicsSignature)
+	synthesize_topics := modules.NewPredict(synthesizeTopicsSignature).WithStructuredOutput()
 
 	synthesizeDocSignature := core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "topic"}}},
@@ -138,7 +140,7 @@ Format your response as a list, DO NOT wrap response in json format`)
 The HTML should include a title tag in the head, multiple heading tags (h1, h2, etc.),
 several paragraphs of content, and references to entity names (people, companies, technologies).
 Use proper HTML structure with html, head, and body tags.`)
-	synthesize_doc := modules.NewPredict(synthesizeDocSignature)
+	synthesize_doc := modules.NewPredict(synthesizeDocSignature).WithStructuredOutput()
 
 	// Generate topics
 	topicsResult, err := synthesize_topics.Process(ctx, map[string]interface{}{
