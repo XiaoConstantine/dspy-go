@@ -262,9 +262,10 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 		return err
 	}
 
-	// Create signature and module
+	// Create signature and module with native JSON structured output
+	// for reliable multi-field extraction (reasoning + answer)
 	signature := exp.createOptimizedSignature()
-	module := modules.NewChainOfThought(*signature)
+	module := modules.NewChainOfThought(*signature).WithStructuredOutput()
 
 	// Create program
 	program := core.NewProgram(

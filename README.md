@@ -12,6 +12,7 @@ DSPy-Go is a native Go implementation of the DSPy framework, bringing systematic
 
 - **Modular Architecture**: Build complex LLM applications by composing simple, reusable components
 - **Systematic Prompt Engineering**: Optimize prompts automatically based on examples and feedback
+- **Structured Output Mode**: Native JSON structured output via `.WithStructuredOutput()` for reliable multi-field extraction—comparable to Python DSPy's adapter system with simpler API
 - **Flexible Workflows**: Chain, branch, and orchestrate LLM operations with powerful workflow abstractions
 - **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini (with multimodal support), OpenAI, Ollama, LlamaCPP, and OpenAI-compatible APIs (LiteLLM, LocalAI, etc.)
 - **Multimodal Processing**: Native support for image analysis, vision Q&A, and multimodal chat with streaming capabilities
@@ -146,6 +147,41 @@ result, err := predict.Process(ctx, map[string]interface{}{
 })
 // result contains "summary" and "key_points"
 ```
+
+#### Structured Output Mode
+
+All modules (Predict, ChainOfThought) support native JSON structured output for reliable multi-field extraction. This uses the LLM's native JSON generation capabilities instead of text parsing—similar to Python DSPy's adapter system but with a simpler API.
+
+```go
+// Enable structured output for reliable multi-field extraction
+cot := modules.NewChainOfThought(signature).WithStructuredOutput()
+
+// Also works with Predict
+predict := modules.NewPredict(signature).WithStructuredOutput()
+
+// Process as normal - outputs are extracted reliably via JSON
+result, err := cot.Process(ctx, map[string]interface{}{
+    "question": "What is 25 × 16?",
+})
+// result["reasoning"] and result["answer"] are reliably extracted
+```
+
+**Benefits of Structured Output:**
+- **Reliable Parsing**: Uses `GenerateWithJSON` for native JSON responses instead of regex-based text parsing
+- **Multi-Field Extraction**: Reliably extracts multiple output fields (e.g., `reasoning` + `answer`) without parsing errors
+- **Graceful Fallback**: Automatically falls back to text-based parsing if JSON generation fails
+- **Provider Support**: Works with Gemini, OpenAI, Anthropic, and other providers that support structured output
+
+**Comparison with Python DSPy Adapters:**
+
+| Feature | DSPy-Go `.WithStructuredOutput()` | Python DSPy Adapters |
+|---------|-----------------------------------|----------------------|
+| API | Simple method chaining | Separate adapter classes |
+| Schema Generation | Automatic from signature | Requires Pydantic models |
+| Fallback | Built-in graceful fallback | Manual configuration |
+| Integration | Native interceptor pattern | Adapter wrapping |
+
+DSPy-Go's approach provides the same reliability benefits as Python's `JSONAdapter` or `ChatAdapter` while maintaining Go's idiomatic simplicity.
 
 #### ChainOfThought
 

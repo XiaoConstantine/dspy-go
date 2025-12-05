@@ -199,8 +199,8 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
         If context is provided, learn from previous attempts and feedback.
     `)
 
-	// Create predict module with the signature
-	predict := modules.NewPredict(signature)
+	// Create predict module with the signature and native JSON structured output
+	predict := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Create program that uses predict module
 	program := core.NewProgram(

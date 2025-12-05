@@ -132,8 +132,8 @@ func basicImageAnalysis(ctx context.Context, llm core.LLM) error {
 		return fmt.Errorf("failed to load sample image: %w", err)
 	}
 
-	// Create image analysis module
-	imageAnalyzer := modules.NewPredict(ImageAnalysisSignature)
+	// Create image analysis module with native JSON structured output
+	imageAnalyzer := modules.NewPredict(ImageAnalysisSignature).WithStructuredOutput()
 	imageAnalyzer.SetLLM(llm)
 
 	// Prepare inputs
@@ -160,8 +160,9 @@ func visionQuestionAnswering(ctx context.Context, llm core.LLM) error {
 		return fmt.Errorf("failed to load sample image: %w", err)
 	}
 
-	// Create vision QA module
-	visionQA := modules.NewPredict(VisionQASignature)
+	// Create vision QA module with native JSON structured output
+	// for reliable multi-field extraction (observation + answer)
+	visionQA := modules.NewPredict(VisionQASignature).WithStructuredOutput()
 	visionQA.SetLLM(llm)
 
 	// Prepare inputs
@@ -189,8 +190,8 @@ func multiModalChat(ctx context.Context, llm core.LLM) error {
 		return fmt.Errorf("failed to load sample image: %w", err)
 	}
 
-	// Create multimodal chat module
-	chatModule := modules.NewPredict(MultiModalChatSignature)
+	// Create multimodal chat module with native JSON structured output
+	chatModule := modules.NewPredict(MultiModalChatSignature).WithStructuredOutput()
 	chatModule.SetLLM(llm)
 
 	// Simulate a conversation

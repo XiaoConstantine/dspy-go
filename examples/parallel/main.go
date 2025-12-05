@@ -58,8 +58,9 @@ func runBasicBatchExample(ctx context.Context) {
 		},
 	).WithInstruction("Provide a brief, clear summary of the given text in 1-2 sentences.")
 
-	// Create a basic predict module
-	predict := modules.NewPredict(signature)
+	// Create a basic predict module with native JSON structured output
+	// This uses GenerateWithJSON for more reliable parsing
+	predict := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Wrap it with parallel execution (default workers = CPU count)
 	parallel := modules.NewParallel(predict)
@@ -109,7 +110,8 @@ func runSentimentAnalysisExample(ctx context.Context) {
 		},
 	).WithInstruction("Analyze the sentiment of the customer review and provide a confidence score.")
 
-	predict := modules.NewPredict(signature)
+	// Use structured output for multi-field extraction (sentiment + confidence)
+	predict := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Configure parallel with custom settings
 	parallel := modules.NewParallel(predict,
@@ -176,7 +178,8 @@ func runTranslationExample(ctx context.Context) {
 		},
 	).WithInstruction("Translate the given text to the specified target language.")
 
-	predict := modules.NewPredict(signature)
+	// Use structured output for reliable translation extraction
+	predict := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Use 3 workers for translation tasks
 	parallel := modules.NewParallel(predict, modules.WithMaxWorkers(3))
@@ -232,7 +235,8 @@ func runQAWithFailuresExample(ctx context.Context) {
 		},
 	).WithInstruction("Provide a clear, factual answer to the question.")
 
-	predict := modules.NewPredict(signature)
+	// Use structured output for reliable QA extraction
+	predict := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Configure to stop on first error
 	parallel := modules.NewParallel(predict,

@@ -57,8 +57,9 @@ func runMathExample(ctx context.Context) {
 		},
 	).WithInstruction("Solve the math problem with clear reasoning and provide the final answer.")
 
-	// Create base prediction module
-	mathSolver := modules.NewPredict(signature)
+	// Create base prediction module with native JSON structured output
+	// This uses GenerateWithJSON for reliable multi-field extraction (reasoning + answer)
+	mathSolver := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Define reward function that checks for correct mathematical reasoning
 	mathRewardFn := func(inputs, outputs map[string]interface{}) float64 {
@@ -139,8 +140,9 @@ func runCreativeWritingExample(ctx context.Context) {
 		},
 	).WithInstruction("Write a creative and engaging short story based on the prompt in the specified style.")
 
-	// Create base prediction module
-	writer := modules.NewPredict(signature)
+	// Create base prediction module with native JSON structured output
+	// for reliable story extraction
+	writer := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Define reward function for creative writing quality
 	creativityRewardFn := func(inputs, outputs map[string]interface{}) float64 {
@@ -229,8 +231,9 @@ func runQAExample(ctx context.Context) {
 		},
 	).WithInstruction("Answer the question based on the context provided. Include your confidence level.")
 
-	// Create base prediction module
-	qa := modules.NewPredict(signature)
+	// Create base prediction module with native JSON structured output
+	// for reliable multi-field extraction (answer + confidence)
+	qa := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Define reward function for answer quality
 	qaRewardFn := func(inputs, outputs map[string]interface{}) float64 {
@@ -357,8 +360,9 @@ func runAdvancedExample(ctx context.Context) {
 		},
 	).WithInstruction("Write clean, well-documented code to solve the given task.")
 
-	// Create base prediction module
-	coder := modules.NewPredict(signature)
+	// Create base prediction module with native JSON structured output
+	// for reliable multi-field extraction (code + explanation)
+	coder := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Complex reward function that evaluates multiple aspects
 	codeQualityRewardFn := func(inputs, outputs map[string]interface{}) float64 {

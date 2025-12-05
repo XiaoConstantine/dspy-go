@@ -83,8 +83,10 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
-	// Create ChainOfThought module
-	cot := modules.NewChainOfThought(signature)
+	// Create ChainOfThought module with native JSON structured output
+	// This uses GenerateWithJSON instead of text parsing, which is more robust
+	// and eliminates parsing errors from malformed LLM responses
+	cot := modules.NewChainOfThought(signature).WithStructuredOutput()
 
 	// Setup interceptors to showcase functionality
 	logger.Info(ctx, "Setting up module interceptors for enhanced observability and reliability...")
@@ -105,7 +107,6 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		interceptors.TracingModuleInterceptor(),
 
 		// Input validation interceptor - validates inputs for safety
-		// Note: Disabled for XML mode since XML formatting instructions contain XML tags
 		// interceptors.ValidationModuleInterceptor(interceptors.DefaultValidationConfig()),
 
 		// Caching interceptor - caches results for identical inputs (5 minute TTL)
@@ -124,11 +125,11 @@ func RunGSM8KExample(configPath string, apiKey string) {
 
 	// Set interceptors on the module
 	// ChainOfThought implements InterceptableModule interface
-	// Note: Append to existing interceptors to preserve XML-by-default functionality
+	// Note: Append to existing interceptors to preserve structured output functionality
 	existingInterceptors := cot.GetInterceptors()
 	allInterceptors := append(existingInterceptors, moduleInterceptors...)
 	cot.SetInterceptors(allInterceptors)
-	logger.Info(ctx, "Successfully configured %d total interceptors for ChainOfThought module (including XML interceptors)", len(allInterceptors))
+	logger.Info(ctx, "Successfully configured %d total interceptors for ChainOfThought module (including structured output interceptor)", len(allInterceptors))
 
 	// Create program with generation options from configuration
 	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {

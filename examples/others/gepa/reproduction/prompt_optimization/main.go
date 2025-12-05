@@ -191,9 +191,10 @@ func (exp *Figure2ReproductionExperiment) runFigure2Reproduction(apiKey string) 
 		return fmt.Errorf("failed to setup LLM: %w", err)
 	}
 
-	// Create the multi-hop retrieval program
+	// Create the multi-hop retrieval program with native JSON structured output
+	// for reliable single-field extraction (query)
 	signature := createMultiHopRetrievalSignature()
-	module := modules.NewChainOfThought(*signature)
+	module := modules.NewChainOfThought(*signature).WithStructuredOutput()
 
 	program := core.NewProgram(
 		map[string]core.Module{"retriever": module},

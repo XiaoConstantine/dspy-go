@@ -102,8 +102,9 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 	// Create the signature and module based on dataset
 	signature, metricFunc := createTaskSignature(datasetName)
 
-	// Create the module to optimize
-	module := modules.NewChainOfThought(*signature)
+	// Create the module to optimize with native JSON structured output
+	// for reliable multi-field extraction (reasoning + answer)
+	module := modules.NewChainOfThought(*signature).WithStructuredOutput()
 
 	// Create the program to be optimized
 	program := core.NewProgram(

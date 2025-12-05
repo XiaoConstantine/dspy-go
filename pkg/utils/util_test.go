@@ -55,6 +55,31 @@ func TestParseJSONResponse(t *testing.T) {
 			expected: nil,
 			wantErr:  true,
 		},
+		// Tests for markdown code block stripping
+		{
+			name:     "JSON wrapped in markdown json block",
+			input:    "```json\n{\"key\": \"value\", \"number\": 42}\n```",
+			expected: map[string]interface{}{"key": "value", "number": float64(42)},
+			wantErr:  false,
+		},
+		{
+			name:     "JSON wrapped in plain markdown block",
+			input:    "```\n{\"key\": \"value\"}\n```",
+			expected: map[string]interface{}{"key": "value"},
+			wantErr:  false,
+		},
+		{
+			name:     "JSON with whitespace around markdown",
+			input:    "  ```json\n{\"answer\": \"Paris\"}\n```  ",
+			expected: map[string]interface{}{"answer": "Paris"},
+			wantErr:  false,
+		},
+		{
+			name:     "Multiline JSON in markdown block",
+			input:    "```json\n{\n  \"reasoning\": \"Step 1: Calculate...\",\n  \"answer\": \"42\"\n}\n```",
+			expected: map[string]interface{}{"reasoning": "Step 1: Calculate...", "answer": "42"},
+			wantErr:  false,
+		},
 	}
 
 	for _, tt := range tests {
