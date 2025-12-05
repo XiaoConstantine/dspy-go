@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XiaoConstantine/anthropic-go/anthropic"
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
@@ -579,14 +579,14 @@ func SetDefaultLLM(llm LLM) {
 type ModelID string
 
 const (
-	// Anthropic models - Claude 3.x series.
-	ModelAnthropicHaiku  ModelID = ModelID(anthropic.ModelHaiku)
-	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelSonnet)
-	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelOpus)
-	// Anthropic models - Claude 4.x series.
-	ModelAnthropicClaude4Opus    ModelID = ModelID(anthropic.ModelClaude4Opus)
-	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaude4Sonnet)
-	ModelAnthropicClaude45Sonnet ModelID = ModelID(anthropic.ModelClaude45Sonnet)
+	// Anthropic models - Claude 3.x and newer series.
+	ModelAnthropicHaiku               ModelID = ModelID(anthropic.ModelClaude_3_Haiku_20240307)
+	ModelAnthropicSonnet              ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929) // For backwards compatibility
+	ModelAnthropicSonnet35            ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicOpus                ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
+	ModelAnthropicClaude4Opus         ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
+	ModelAnthropicClaude4Sonnet       ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicClaude45Sonnet      ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
 
 	// Google Gemini models (existing).
 	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"

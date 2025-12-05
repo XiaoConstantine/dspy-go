@@ -46,7 +46,7 @@ func getDefaultLLMConfig() LLMConfig {
 	return LLMConfig{
 		Default: LLMProviderConfig{
 			Provider: "anthropic",
-			ModelID:  "claude-3-sonnet-20240229",
+			ModelID:  "claude-3-5-sonnet-20250929",
 			APIKey:   "", // Should be provided via environment or config file
 			Endpoint: defaultEndpoint,
 			Generation: defaultGeneration,
@@ -78,7 +78,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 	return map[string]LLMProviderConfig{
 		"anthropic": {
 			Provider: "anthropic",
-			ModelID:  "claude-3-sonnet-20240229",
+			ModelID:  "claude-3-5-sonnet-20250929",
 			APIKey:   "",
 			Endpoint: EndpointConfig{
 				BaseURL: "https://api.anthropic.com",

@@ -13,7 +13,7 @@ func TestGetDefaultLLMProviderConfig(t *testing.T) {
 	anthropicConfig := GetDefaultLLMProviderConfig("anthropic")
 	require.NotNil(t, anthropicConfig)
 	assert.Equal(t, "anthropic", anthropicConfig.Provider)
-	assert.Equal(t, "claude-3-sonnet-20240229", anthropicConfig.ModelID)
+	assert.Equal(t, "claude-3-5-sonnet-20250929", anthropicConfig.ModelID)
 	assert.Equal(t, "https://api.anthropic.com", anthropicConfig.Endpoint.BaseURL)
 
 	// Test getting google config

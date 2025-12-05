@@ -14,17 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func init() {
-	mockLLM := new(testutil.MockLLM)
-
-	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: `answer:
-	Paris`}, nil)
-	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"answer": "Paris"}, nil)
-
-	core.GlobalConfig.DefaultLLM = mockLLM
-	core.GlobalConfig.TeacherLLM = mockLLM
-	core.GlobalConfig.ConcurrencyLevel = 1
-}
 
 func createProgram() core.Program {
 	predict := modules.NewPredict(core.NewSignature(
@@ -50,6 +39,7 @@ func createProgram() core.Program {
 }
 
 func TestBootstrapFewShot(t *testing.T) {
+	setupTestMockLLM(t)
 	student := createProgram()
 	// Create training set as core.Examples
 	trainExamples := []core.Example{
@@ -130,6 +120,7 @@ func TestBootstrapFewShot(t *testing.T) {
 }
 
 func TestBootstrapFewShotEdgeCases(t *testing.T) {
+	setupTestMockLLM(t)
 
 	trainExamples := []core.Example{
 		{

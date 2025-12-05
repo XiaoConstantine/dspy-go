@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/XiaoConstantine/anthropic-go/anthropic"
 	"github.com/XiaoConstantine/dspy-go/pkg/cache"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -283,7 +282,7 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 
 	switch {
 	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus:
-		llm, err = NewAnthropicLLM(apiKey, anthropic.ModelID(modelID))
+		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(string(modelID)))
 	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashLite:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo || modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini:

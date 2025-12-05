@@ -3,8 +3,8 @@ module github.com/XiaoConstantine/dspy-go
 go 1.25
 
 require (
-	github.com/XiaoConstantine/anthropic-go v0.0.9
 	github.com/XiaoConstantine/mcp-go v0.3.1
+	github.com/anthropics/anthropic-sdk-go v1.19.0
 	github.com/apache/arrow/go/v13 v13.0.0
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/google/uuid v1.6.0
@@ -37,6 +37,10 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.2.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
