@@ -182,11 +182,12 @@ func TestStoreFile(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
-		contentType string
-		id          string
-		content     []byte
-		metadata    map[string]interface{}
+		name             string
+		contentType      string
+		id               string
+		content          []byte
+		metadata         map[string]interface{}
+		expectedFilename string // empty means don't check specific filename
 	}{
 		{
 			name:        "cache file",
@@ -209,6 +210,22 @@ func TestStoreFile(t *testing.T) {
 			content:     []byte("observation data"),
 			metadata:    map[string]interface{}{"source": "test"},
 		},
+		{
+			name:             "singleton todo file (no format specifier)",
+			contentType:      "todo",
+			id:               "current",
+			content:          []byte("# Todo\n- [ ] Task 1"),
+			metadata:         map[string]interface{}{"priority": 1},
+			expectedFilename: "todo.md", // Should NOT include id
+		},
+		{
+			name:             "singleton plan file (no format specifier)",
+			contentType:      "plan",
+			id:               "ignored",
+			content:          []byte("# Plan\n## Step 1"),
+			metadata:         nil,
+			expectedFilename: "plan.md", // Should NOT include id
+		},
 	}
 
 	for _, tt := range tests {
@@ -223,6 +240,15 @@ func TestStoreFile(t *testing.T) {
 			fullPath := filepath.Join(memory.baseDir, filename)
 			_, err = os.Stat(fullPath)
 			assert.NoError(t, err)
+
+			// Verify expected filename for singleton patterns (no format specifier)
+			if tt.expectedFilename != "" {
+				assert.Equal(t, tt.expectedFilename, filename,
+					"Singleton pattern should use exact filename without id interpolation")
+				// Verify no malformed %!(EXTRA ...) in filename
+				assert.NotContains(t, filename, "%!(EXTRA",
+					"Filename should not contain Go format error markers")
+			}
 		})
 	}
 }

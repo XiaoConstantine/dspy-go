@@ -253,7 +253,14 @@ func (fsm *FileSystemMemory) StoreFile(ctx context.Context, contentType, id stri
 		pattern = fmt.Sprintf("%s_%%s.dat", contentType)
 	}
 
-	filename := fmt.Sprintf(pattern, id)
+	// Handle patterns with and without format specifiers
+	// Some patterns like "todo.md" are singletons without %s placeholder
+	var filename string
+	if strings.Contains(pattern, "%") {
+		filename = fmt.Sprintf(pattern, id)
+	} else {
+		filename = pattern
+	}
 	fullPath := filepath.Join(fsm.baseDir, filename)
 
 	// Calculate checksum
