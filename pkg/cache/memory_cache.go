@@ -241,6 +241,9 @@ func (c *MemoryCache) Stats() CacheStats {
 }
 
 func (c *MemoryCache) Close() error {
+	if c == nil {
+		return nil
+	}
 	close(c.closeChan)
 	c.cleanupWG.Wait()
 	return nil

@@ -332,6 +332,7 @@ func TestExtractPredictors(t *testing.T) {
 }
 
 func TestGenerateInitialCandidates(t *testing.T) {
+	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
 	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 }, WithBreadth(3))
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
@@ -346,6 +347,7 @@ func TestGenerateInitialCandidates(t *testing.T) {
 }
 
 func TestRefineCandidates(t *testing.T) {
+	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
 	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 }, WithBreadth(4))
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
@@ -898,6 +900,7 @@ func TestCOPROCompile_EmptyInstruction(t *testing.T) {
 }
 
 func TestGenerateInitialCandidates_MoreThanTemplates(t *testing.T) {
+	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
 	// Test when breadth > number of templates to cover missing branch
 	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 }, WithBreadth(20)) // Large breadth
 	predictor := modules.NewPredict(core.Signature{})
@@ -915,6 +918,7 @@ func TestGenerateInitialCandidates_MoreThanTemplates(t *testing.T) {
 }
 
 func TestOptimizePredictor_EmptyDataset(t *testing.T) {
+	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
 	// Test direct call to optimizePredictor with empty dataset
 	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
 	predictor := modules.NewPredict(core.Signature{})

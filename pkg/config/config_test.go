@@ -19,7 +19,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Test LLM configuration
 	assert.Equal(t, "anthropic", config.LLM.Default.Provider)
-	assert.Equal(t, "claude-3-sonnet-20240229", config.LLM.Default.ModelID)
+	assert.Equal(t, "claude-3-5-sonnet-20250929", config.LLM.Default.ModelID)
 	assert.Equal(t, 8192, config.LLM.Default.Generation.MaxTokens)
 	assert.Equal(t, 0.5, config.LLM.Default.Generation.Temperature)
 

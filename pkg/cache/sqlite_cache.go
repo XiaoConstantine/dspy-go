@@ -270,6 +270,9 @@ func (c *SQLiteCache) Stats() CacheStats {
 }
 
 func (c *SQLiteCache) Close() error {
+	if c == nil {
+		return nil
+	}
 	close(c.closeChan)
 	c.cleanupWG.Wait()
 	c.vacuumWG.Wait()
