@@ -316,15 +316,19 @@ func buildCoTStructuredPrompt(inputs map[string]any, signature core.Signature, r
 	// Always include reasoning first
 	sb.WriteString(fmt.Sprintf("  \"%s\": \"<your step-by-step reasoning>\",\n", reasoningField))
 
-	// Then add output fields
-	for i, outputField := range signature.Outputs {
-		// Skip if this is the reasoning field (already added)
-		if outputField.Name == reasoningField {
-			continue
+	// Build list of fields to render (excluding reasoning field which is already added)
+	fieldsToRender := []core.OutputField{}
+	for _, outputField := range signature.Outputs {
+		if outputField.Name != reasoningField {
+			fieldsToRender = append(fieldsToRender, outputField)
 		}
+	}
+
+	// Then add output fields with correct comma handling
+	for i, outputField := range fieldsToRender {
 		fieldType := getJSONType(outputField.Type)
 		sb.WriteString(fmt.Sprintf("  \"%s\": <%s>", outputField.Name, fieldType))
-		if i < len(signature.Outputs)-1 {
+		if i < len(fieldsToRender)-1 {
 			sb.WriteString(",")
 		}
 		sb.WriteString("\n")

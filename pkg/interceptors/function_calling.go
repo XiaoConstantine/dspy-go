@@ -209,16 +209,22 @@ func buildPromptFromInputs(inputs map[string]any, info *core.ModuleInfo) string 
 		prompt += "\nObservation from previous action: " + observation + "\n"
 	}
 
-	// Add any other relevant inputs
-	for key, value := range inputs {
+	// Add any other relevant inputs in deterministic order
+	var otherKeys []string
+	for key := range inputs {
 		switch key {
 		case "task", "question", "observation", "conversation_context", "thought", "action":
 			// Already handled or internal fields
 			continue
 		default:
-			if strVal, ok := value.(string); ok && strVal != "" {
-				prompt += fmt.Sprintf("\n%s: %s", key, strVal)
-			}
+			otherKeys = append(otherKeys, key)
+		}
+	}
+	slices.Sort(otherKeys) // Sort keys for deterministic prompt order
+
+	for _, key := range otherKeys {
+		if strVal, ok := inputs[key].(string); ok && strVal != "" {
+			prompt += fmt.Sprintf("\n%s: %s", key, strVal)
 		}
 	}
 
