@@ -176,6 +176,8 @@ func TestRetrieveObservation_InvalidReference(t *testing.T) {
 func TestStoreFile(t *testing.T) {
 	tempDir := t.TempDir()
 	config := DefaultConfig()
+	// Add custom pattern with escaped percent sign to test edge case
+	config.Memory.FilePatterns["progress"] = "progress_100%%.txt"
 	memory, err := NewFileSystemMemory(tempDir, "test-session", "test-agent", config.Memory)
 	require.NoError(t, err)
 
@@ -225,6 +227,14 @@ func TestStoreFile(t *testing.T) {
 			content:          []byte("# Plan\n## Step 1"),
 			metadata:         nil,
 			expectedFilename: "plan.md", // Should NOT include id
+		},
+		{
+			name:             "singleton pattern with escaped percent",
+			contentType:      "progress",
+			id:               "ignored",
+			content:          []byte("100%"),
+			metadata:         nil,
+			expectedFilename: "progress_100%.txt", // %% should become single %
 		},
 	}
 

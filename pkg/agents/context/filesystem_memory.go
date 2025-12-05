@@ -255,11 +255,13 @@ func (fsm *FileSystemMemory) StoreFile(ctx context.Context, contentType, id stri
 
 	// Handle patterns with and without format specifiers
 	// Some patterns like "todo.md" are singletons without %s placeholder
+	// We check for format verbs while ignoring escaped %% sequences
 	var filename string
-	if strings.Contains(pattern, "%") {
+	if strings.Contains(strings.ReplaceAll(pattern, "%%", ""), "%") {
 		filename = fmt.Sprintf(pattern, id)
 	} else {
-		filename = pattern
+		// The pattern doesn't take an ID - just unescape any %% to %
+		filename = strings.ReplaceAll(pattern, "%%", "%")
 	}
 	fullPath := filepath.Join(fsm.baseDir, filename)
 
