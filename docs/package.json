@@ -32,9 +32,6 @@
   "engines": {
     "node": ">=20.11.0"
   },
-  "overrides": {
-    "glob": "^11.1.0"
-  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
