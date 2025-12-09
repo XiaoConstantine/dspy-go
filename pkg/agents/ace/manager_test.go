@@ -27,9 +27,9 @@ func TestManager(t *testing.T) {
 		recorder := m.StartTrajectory("agent-1", "test", "Do something")
 		recorder.RecordStep("think", "", "Planning", nil, nil, nil)
 		recorder.RecordStep("tool", "search", "Searching", nil, nil, nil)
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
-		metrics := m.GetMetrics()
+		metrics := m.Metrics()
 		assert.Equal(t, int64(1), metrics["trajectories_processed"])
 	})
 
@@ -47,14 +47,14 @@ func TestManager(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			recorder := m.StartTrajectory("agent-1", "test", "Query")
 			recorder.RecordStep("action", "", "Reasoning", nil, nil, nil)
-			m.EndTrajectory(recorder, OutcomeSuccess)
+			m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 		}
 
 		// Close flushes pending
 		err = m.Close()
 		require.NoError(t, err)
 
-		metrics := m.GetMetrics()
+		metrics := m.Metrics()
 		assert.Equal(t, int64(3), metrics["trajectories_processed"])
 	})
 
@@ -76,7 +76,7 @@ func TestManager(t *testing.T) {
 		require.NoError(t, err)
 		defer m.Close()
 
-		ctx := m.GetLearningsContext()
+		ctx := m.LearningsContext()
 		assert.Contains(t, ctx, "L001")
 		assert.Contains(t, ctx, "M001")
 		assert.Contains(t, ctx, "Test strategy")
@@ -103,10 +103,10 @@ func TestManager(t *testing.T) {
 		// Simulate trajectory with citation
 		recorder := m.StartTrajectory("agent-1", "test", "Query")
 		recorder.RecordStep("think", "", "Using [L001] pattern here", nil, nil, nil)
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
 		// Citation should trigger helpful update
-		learnings := m.GetLearnings()
+		learnings := m.Learnings()
 		found := FindByID(learnings, "strategies-00001")
 		require.NotNil(t, found)
 		assert.Equal(t, 6, found.Helpful) // 5 + 1 from citation
@@ -135,7 +135,7 @@ func TestManager(t *testing.T) {
 		require.NoError(t, err)
 		defer m2.Close()
 
-		learnings := m2.GetLearnings()
+		learnings := m2.Learnings()
 		require.Len(t, learnings, 1)
 		assert.Equal(t, "Persisted learning", learnings[0].Content)
 	})
@@ -150,13 +150,13 @@ func TestManager(t *testing.T) {
 		require.NoError(t, err)
 		defer m.Close()
 
-		initialMetrics := m.GetMetrics()
+		initialMetrics := m.Metrics()
 		assert.Equal(t, int64(0), initialMetrics["trajectories_processed"])
 
 		recorder := m.StartTrajectory("agent-1", "test", "Query")
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
-		finalMetrics := m.GetMetrics()
+		finalMetrics := m.Metrics()
 		assert.Equal(t, int64(1), finalMetrics["trajectories_processed"])
 	})
 
@@ -180,13 +180,13 @@ func TestManager(t *testing.T) {
 				defer wg.Done()
 				recorder := m.StartTrajectory("agent-1", "task", "query")
 				recorder.RecordStep("step", "", "step for trajectory", nil, nil, nil)
-				m.EndTrajectory(recorder, OutcomeSuccess)
+				m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 			}(i)
 		}
 
 		wg.Wait()
 
-		metrics := m.GetMetrics()
+		metrics := m.Metrics()
 		assert.Equal(t, int64(numConcurrent), metrics["trajectories_processed"])
 	})
 }
@@ -209,13 +209,13 @@ func TestManagerWithReflector(t *testing.T) {
 		defer m.Close()
 
 		recorder := m.StartTrajectory("agent-1", "test", "Query")
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
-		// Wait for processing
-		time.Sleep(10 * time.Millisecond)
-
-		metrics := m.GetMetrics()
-		assert.GreaterOrEqual(t, metrics["insights_extracted"], int64(1))
+		// Wait for async processing to complete
+		assert.Eventually(t, func() bool {
+			metrics := m.Metrics()
+			return metrics["insights_extracted"] >= int64(1)
+		}, 100*time.Millisecond, 5*time.Millisecond, "expected at least 1 insight to be extracted")
 	})
 }
 
@@ -238,9 +238,9 @@ func TestManagerEndTrajectoryNilRecorder(t *testing.T) {
 	defer m.Close()
 
 	// End trajectory with nil recorder - should not panic
-	m.EndTrajectory(nil, OutcomeSuccess)
+	m.EndTrajectory(context.Background(), nil, OutcomeSuccess)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(0), metrics["trajectories_processed"])
 }
 
@@ -258,7 +258,7 @@ func TestManagerAsyncQueueFull(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		recorder := m.StartTrajectory("agent-1", "test", "Query")
 		recorder.RecordStep("think", "", "Reasoning", nil, nil, nil)
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 	}
 
 	// Should not hang or panic
@@ -278,9 +278,9 @@ func TestManagerPartialOutcome(t *testing.T) {
 
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
 	recorder.RecordStep("think", "", "Partial work", nil, nil, nil)
-	m.EndTrajectory(recorder, OutcomePartial)
+	m.EndTrajectory(context.Background(), recorder, OutcomePartial)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(1), metrics["trajectories_processed"])
 }
 
@@ -296,9 +296,9 @@ func TestManagerFailureOutcome(t *testing.T) {
 
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
 	recorder.RecordStep("tool", "search", "Failed search", nil, nil, nil)
-	m.EndTrajectory(recorder, OutcomeFailure)
+	m.EndTrajectory(context.Background(), recorder, OutcomeFailure)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(1), metrics["trajectories_processed"])
 }
 
@@ -313,7 +313,7 @@ func TestManagerRefreshCacheError(t *testing.T) {
 	defer m.Close()
 
 	// Get initial learnings
-	initial := m.GetLearnings()
+	initial := m.Learnings()
 	assert.Empty(t, initial)
 
 	// Add learning externally
@@ -325,10 +325,10 @@ func TestManagerRefreshCacheError(t *testing.T) {
 
 	// Trigger refresh via trajectory
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
-	m.EndTrajectory(recorder, OutcomeSuccess)
+	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
 	// Cache should be refreshed
-	updated := m.GetLearnings()
+	updated := m.Learnings()
 	assert.Len(t, updated, 1)
 }
 
@@ -346,13 +346,13 @@ func TestManagerAsyncTickerFlush(t *testing.T) {
 
 	// Add one trajectory (won't trigger batch)
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
-	m.EndTrajectory(recorder, OutcomeSuccess)
+	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
 	// Close will flush
 	err = m.Close()
 	require.NoError(t, err)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(1), metrics["trajectories_processed"])
 }
 
@@ -372,9 +372,9 @@ func TestManagerRecordStepWithError(t *testing.T) {
 	testErr := assert.AnError
 	recorder.RecordStep("tool", "search", "Failed search", nil, nil, testErr)
 
-	m.EndTrajectory(recorder, OutcomeFailure)
+	m.EndTrajectory(context.Background(), recorder, OutcomeFailure)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(1), metrics["trajectories_processed"])
 }
 
@@ -395,9 +395,9 @@ func TestManagerRecordStepWithToolInput(t *testing.T) {
 	toolOutput := map[string]interface{}{"results": []string{"a", "b"}}
 	recorder.RecordStep("tool", "search", "Search operation", toolInput, toolOutput, nil)
 
-	m.EndTrajectory(recorder, OutcomeSuccess)
+	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(1), metrics["trajectories_processed"])
 }
 
@@ -417,9 +417,9 @@ func TestManagerSyncProcessing(t *testing.T) {
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
 	recorder.RecordStep("think", "", "Planning step", nil, nil, nil)
 	recorder.RecordStep("tool", "read", "Reading file", map[string]interface{}{"path": "/test"}, nil, nil)
-	m.EndTrajectory(recorder, OutcomeSuccess)
+	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
-	metrics := m.GetMetrics()
+	metrics := m.Metrics()
 	assert.Equal(t, int64(1), metrics["trajectories_processed"])
 }
 
@@ -437,17 +437,17 @@ func TestManagerAsyncBatchProcessing(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		recorder := m.StartTrajectory("agent-1", "test", "Query")
 		recorder.RecordStep("action", "", "Work", nil, nil, nil)
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 	}
 
-	// Small delay to allow async processing
-	time.Sleep(50 * time.Millisecond)
+	// Wait for async batch processing to complete
+	assert.Eventually(t, func() bool {
+		metrics := m.Metrics()
+		return metrics["trajectories_processed"] >= int64(3)
+	}, 200*time.Millisecond, 10*time.Millisecond, "expected all 3 trajectories to be processed")
 
 	err = m.Close()
 	require.NoError(t, err)
-
-	metrics := m.GetMetrics()
-	assert.Equal(t, int64(3), metrics["trajectories_processed"])
 }
 
 func TestManagerLearningsContextWithCategories(t *testing.T) {
@@ -470,7 +470,7 @@ func TestManagerLearningsContextWithCategories(t *testing.T) {
 	require.NoError(t, err)
 	defer m.Close()
 
-	ctx := m.GetLearningsContext()
+	ctx := m.LearningsContext()
 
 	// Should contain sections with learnings
 	assert.Contains(t, ctx, "Strategies")
@@ -493,7 +493,7 @@ func TestManagerEmptyLearningsContext(t *testing.T) {
 	require.NoError(t, err)
 	defer m.Close()
 
-	ctx := m.GetLearningsContext()
+	ctx := m.LearningsContext()
 	// Empty context returns empty string
 	assert.Empty(t, ctx)
 }
@@ -516,6 +516,6 @@ func BenchmarkManagerTrajectoryProcessing(b *testing.B) {
 		recorder := m.StartTrajectory("agent-1", "test", "Query")
 		recorder.RecordStep("think", "", "Reasoning", nil, nil, nil)
 		recorder.RecordStep("tool", "search", "Searching", nil, nil, nil)
-		m.EndTrajectory(recorder, OutcomeSuccess)
+		m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 	}
 }

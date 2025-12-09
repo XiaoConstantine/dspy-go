@@ -91,7 +91,8 @@ func (m *Manager) StartTrajectory(agentID, taskType, query string) *TrajectoryRe
 
 // EndTrajectory finalizes a trajectory and queues it for processing.
 // The recorder should not be used after calling this method.
-func (m *Manager) EndTrajectory(recorder *TrajectoryRecorder, outcome Outcome) {
+// The context is used for synchronous processing; async processing uses a background context.
+func (m *Manager) EndTrajectory(ctx context.Context, recorder *TrajectoryRecorder, outcome Outcome) {
 	if recorder == nil {
 		return
 	}
@@ -113,24 +114,27 @@ func (m *Manager) EndTrajectory(recorder *TrajectoryRecorder, outcome Outcome) {
 		case m.trajectoryQueue <- trajectory:
 			m.pendingCount.Add(1)
 		default:
-			// Queue full, process synchronously
-			m.processTrajectory(context.Background(), trajectory)
+			// Queue full, process synchronously with provided context
+			m.processTrajectory(ctx, trajectory)
 		}
 	} else {
-		m.processTrajectory(context.Background(), trajectory)
+		m.processTrajectory(ctx, trajectory)
 	}
 }
 
-// GetLearningsContext returns formatted learnings for context injection.
-func (m *Manager) GetLearningsContext() string {
+// LearningsContext returns formatted learnings for context injection.
+func (m *Manager) LearningsContext() string {
+	// Copy slice under lock, then format outside lock to minimize lock duration
 	m.learningsCacheMu.RLock()
-	defer m.learningsCacheMu.RUnlock()
+	learnings := make([]Learning, len(m.learningsCache))
+	copy(learnings, m.learningsCache)
+	m.learningsCacheMu.RUnlock()
 
-	return FormatForInjection(m.learningsCache)
+	return FormatForInjection(learnings)
 }
 
-// GetLearnings returns a copy of current learnings.
-func (m *Manager) GetLearnings() []Learning {
+// Learnings returns a copy of current learnings.
+func (m *Manager) Learnings() []Learning {
 	m.learningsCacheMu.RLock()
 	defer m.learningsCacheMu.RUnlock()
 
@@ -148,8 +152,8 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// GetMetrics returns current performance metrics.
-func (m *Manager) GetMetrics() map[string]int64 {
+// Metrics returns current performance metrics.
+func (m *Manager) Metrics() map[string]int64 {
 	return map[string]int64{
 		"trajectories_processed": m.trajectoriesProcessed.Load(),
 		"insights_extracted":     m.insightsExtracted.Load(),

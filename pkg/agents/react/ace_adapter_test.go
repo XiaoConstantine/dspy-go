@@ -133,7 +133,7 @@ func TestACELearningsInjection(t *testing.T) {
 
 	// Verify learnings are available
 	require.NotNil(t, agent.aceManager)
-	learnings := agent.aceManager.GetLearningsContext()
+	learnings := agent.aceManager.LearningsContext()
 	assert.Contains(t, learnings, "validate input")
 }
 

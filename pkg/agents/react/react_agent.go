@@ -553,7 +553,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 
 	// ACE: Inject learnings into context (prepended for cache efficiency)
 	if r.config.EnableACE && r.aceManager != nil {
-		if learnings := r.aceManager.GetLearningsContext(); learnings != "" {
+		if learnings := r.aceManager.LearningsContext(); learnings != "" {
 			optimizedInput["ace_learnings"] = learnings
 		}
 	}
@@ -624,7 +624,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		} else if !record.Success {
 			outcome = ace.OutcomePartial
 		}
-		r.aceManager.EndTrajectory(aceRecorder, outcome)
+		r.aceManager.EndTrajectory(ctx, aceRecorder, outcome)
 	}
 
 	// STEP 7: Update legacy memory system
@@ -1273,7 +1273,7 @@ func (r *ReActAgent) GetACEMetrics() map[string]int64 {
 	if r.aceManager == nil {
 		return nil
 	}
-	return r.aceManager.GetMetrics()
+	return r.aceManager.Metrics()
 }
 
 // Utility functions
