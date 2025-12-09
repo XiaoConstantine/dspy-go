@@ -8,6 +8,8 @@ import (
 )
 
 // Manager coordinates all ACE components for self-improving agents.
+// It is safe for concurrent use - each StartTrajectory call returns an
+// independent TrajectoryRecorder handle.
 type Manager struct {
 	config    Config
 	file      *LearningsFile
@@ -69,9 +71,11 @@ func NewManager(config Config, reflector *UnifiedReflector) (*Manager, error) {
 	return m, nil
 }
 
-// StartTrajectory begins recording a new execution trajectory.
-func (m *Manager) StartTrajectory(agentID, taskType, query string) {
-	m.generator.Start(agentID, taskType, query)
+// StartTrajectory begins recording a new execution trajectory and returns a handle.
+// The returned TrajectoryRecorder is independent and safe for concurrent use.
+// Each concurrent execution should use its own handle.
+func (m *Manager) StartTrajectory(agentID, taskType, query string) *TrajectoryRecorder {
+	recorder := m.generator.Start(agentID, taskType, query)
 
 	// Inject current learnings
 	m.learningsCacheMu.RLock()
@@ -81,23 +85,24 @@ func (m *Manager) StartTrajectory(agentID, taskType, query string) {
 	}
 	m.learningsCacheMu.RUnlock()
 
-	m.generator.SetInjectedLearnings(ids)
+	recorder.SetInjectedLearnings(ids)
+	return recorder
 }
 
-// RecordStep captures a single action in the trajectory.
-func (m *Manager) RecordStep(action, tool, reasoning string, input, output map[string]any, err error) {
-	m.generator.RecordStep(action, tool, reasoning, input, output, err)
-}
+// EndTrajectory finalizes a trajectory and queues it for processing.
+// The recorder should not be used after calling this method.
+func (m *Manager) EndTrajectory(recorder *TrajectoryRecorder, outcome Outcome) {
+	if recorder == nil {
+		return
+	}
 
-// EndTrajectory finalizes the trajectory and queues for processing.
-func (m *Manager) EndTrajectory(outcome Outcome) {
-	trajectory := m.generator.Current()
+	trajectory := recorder.Current()
 	if trajectory == nil {
 		return
 	}
 
 	quality := m.quality.Calculate(trajectory)
-	trajectory = m.generator.End(outcome, quality)
+	trajectory = recorder.End(outcome, quality)
 
 	if trajectory == nil {
 		return

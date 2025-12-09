@@ -524,13 +524,14 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		defer cancel()
 	}
 
-	// ACE: Start trajectory recording
+	// ACE: Start trajectory recording with handle for concurrency safety
 	var taskQuery string
 	if task, ok := input["task"].(string); ok {
 		taskQuery = task
 	}
+	var aceRecorder *ace.TrajectoryRecorder
 	if r.config.EnableACE && r.aceManager != nil {
-		r.aceManager.StartTrajectory(r.id, "react_execution", taskQuery)
+		aceRecorder = r.aceManager.StartTrajectory(r.id, "react_execution", taskQuery)
 	}
 
 	// STEP 1: Build optimized context using Manus patterns (if enabled)
@@ -586,14 +587,14 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 	processingTime := time.Since(startTime)
 	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, processingTime)
 
-	// ACE: Record steps from execution record
-	if r.config.EnableACE && r.aceManager != nil {
+	// ACE: Record steps from execution record using the recorder handle
+	if aceRecorder != nil {
 		for _, action := range record.Actions {
 			var stepErr error
 			if !action.Success {
 				stepErr = fmt.Errorf("%s", action.Observation)
 			}
-			r.aceManager.RecordStep(action.Action, action.Tool, action.Thought, action.Arguments, map[string]any{"observation": action.Observation}, stepErr)
+			aceRecorder.RecordStep(action.Action, action.Tool, action.Thought, action.Arguments, map[string]any{"observation": action.Observation}, stepErr)
 		}
 	}
 
@@ -615,15 +616,15 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		}
 	}
 
-	// ACE: End trajectory with outcome
-	if r.config.EnableACE && r.aceManager != nil {
+	// ACE: End trajectory with outcome using the recorder handle
+	if aceRecorder != nil {
 		outcome := ace.OutcomeSuccess
 		if err != nil {
 			outcome = ace.OutcomeFailure
 		} else if !record.Success {
 			outcome = ace.OutcomePartial
 		}
-		r.aceManager.EndTrajectory(outcome)
+		r.aceManager.EndTrajectory(aceRecorder, outcome)
 	}
 
 	// STEP 7: Update legacy memory system

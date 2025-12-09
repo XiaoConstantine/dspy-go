@@ -2,6 +2,7 @@ package ace
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,15 +12,15 @@ import (
 func TestGenerator(t *testing.T) {
 	t.Run("full lifecycle", func(t *testing.T) {
 		g := NewGenerator()
-		g.Start("agent-1", "code_review", "Review this PR")
+		recorder := g.Start("agent-1", "code_review", "Review this PR")
 
-		g.SetInjectedLearnings([]string{"L001", "L002", "M001"})
+		recorder.SetInjectedLearnings([]string{"L001", "L002", "M001"})
 
-		g.RecordStep("think", "", "I'll check the diff first", nil, nil, nil)
-		g.RecordStep("tool", "git_diff", "Using [L001] pattern", map[string]any{"path": "."}, map[string]any{"diff": "..."}, nil)
-		g.RecordStep("tool", "lint", "Based on [M001] avoid this mistake", nil, nil, errors.New("lint failed"))
+		recorder.RecordStep("think", "", "I'll check the diff first", nil, nil, nil)
+		recorder.RecordStep("tool", "git_diff", "Using [L001] pattern", map[string]any{"path": "."}, map[string]any{"diff": "..."}, nil)
+		recorder.RecordStep("tool", "lint", "Based on [M001] avoid this mistake", nil, nil, errors.New("lint failed"))
 
-		traj := g.End(OutcomePartial, 0.7)
+		traj := recorder.End(OutcomePartial, 0.7)
 
 		require.NotNil(t, traj)
 		assert.Equal(t, "agent-1", traj.AgentID)
@@ -34,28 +35,62 @@ func TestGenerator(t *testing.T) {
 		assert.ElementsMatch(t, []string{"L001", "M001"}, traj.Context.CitedLearnings)
 	})
 
-	t.Run("nil trajectory handling", func(t *testing.T) {
+	t.Run("nil recorder handling", func(t *testing.T) {
+		// Create a recorder and end it
 		g := NewGenerator()
+		recorder := g.Start("agent-1", "task", "query")
+		recorder.End(OutcomeSuccess, 1.0)
 
-		// Operations before Start should not panic
-		g.RecordStep("test", "", "", nil, nil, nil)
-		g.SetInjectedLearnings([]string{"L001"})
-		traj := g.End(OutcomeSuccess, 1.0)
+		// Operations after End should not panic
+		recorder.RecordStep("test", "", "", nil, nil, nil)
+		recorder.SetInjectedLearnings([]string{"L001"})
+		traj := recorder.End(OutcomeSuccess, 1.0)
 
 		assert.Nil(t, traj)
 	})
 
 	t.Run("current returns in-progress trajectory", func(t *testing.T) {
 		g := NewGenerator()
-		assert.Nil(t, g.Current())
+		recorder := g.Start("agent-1", "task", "query")
 
-		g.Start("agent-1", "task", "query")
-		current := g.Current()
+		current := recorder.Current()
 		require.NotNil(t, current)
 		assert.Equal(t, "agent-1", current.AgentID)
 
-		g.End(OutcomeSuccess, 1.0)
-		assert.Nil(t, g.Current())
+		recorder.End(OutcomeSuccess, 1.0)
+		assert.Nil(t, recorder.Current())
+	})
+
+	t.Run("concurrent trajectories are isolated", func(t *testing.T) {
+		g := NewGenerator()
+
+		var wg sync.WaitGroup
+		results := make(chan *Trajectory, 10)
+
+		// Start 10 concurrent trajectories
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+
+				recorder := g.Start("agent-1", "task", "query")
+				recorder.RecordStep("step", "", "step for trajectory", nil, nil, nil)
+				traj := recorder.End(OutcomeSuccess, 1.0)
+				results <- traj
+			}(i)
+		}
+
+		wg.Wait()
+		close(results)
+
+		// All trajectories should be independent and complete
+		count := 0
+		for traj := range results {
+			require.NotNil(t, traj)
+			assert.Len(t, traj.Steps, 1)
+			count++
+		}
+		assert.Equal(t, 10, count)
 	})
 }
 

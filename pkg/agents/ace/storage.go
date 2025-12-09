@@ -9,13 +9,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 )
 
 // LearningsFile handles plain text storage of learnings.
+// It uses a mutex for in-process concurrency and file locking for cross-process safety.
 type LearningsFile struct {
-	Path     string
-	lockFile *os.File
+	Path string
+	mu   sync.Mutex // Protects concurrent access within the same process
 }
 
 // NewLearningsFile creates a new file handler for the given path.
@@ -27,10 +29,14 @@ var learningRegex = regexp.MustCompile(`^\[([^\]]+)\]\s+helpful=(\d+)\s+harmful=
 
 // Load reads all learnings from the file.
 func (f *LearningsFile) Load() ([]Learning, error) {
-	if err := f.acquireSharedLock(); err != nil {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	lockFile, err := f.acquireFileLock(syscall.LOCK_SH)
+	if err != nil {
 		return nil, err
 	}
-	defer f.releaseLock()
+	defer f.releaseFileLock(lockFile)
 
 	data, err := os.ReadFile(f.Path)
 	if os.IsNotExist(err) {
@@ -45,10 +51,14 @@ func (f *LearningsFile) Load() ([]Learning, error) {
 
 // Save writes all learnings to the file atomically.
 func (f *LearningsFile) Save(learnings []Learning) error {
-	if err := f.acquireExclusiveLock(); err != nil {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	lockFile, err := f.acquireFileLock(syscall.LOCK_EX)
+	if err != nil {
 		return err
 	}
-	defer f.releaseLock()
+	defer f.releaseFileLock(lockFile)
 
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0755); err != nil {
 		return err
@@ -71,10 +81,14 @@ func (f *LearningsFile) Save(learnings []Learning) error {
 
 // LoadContent returns the raw file content for context injection.
 func (f *LearningsFile) LoadContent() (string, error) {
-	if err := f.acquireSharedLock(); err != nil {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	lockFile, err := f.acquireFileLock(syscall.LOCK_SH)
+	if err != nil {
 		return "", err
 	}
-	defer f.releaseLock()
+	defer f.releaseFileLock(lockFile)
 
 	data, err := os.ReadFile(f.Path)
 	if os.IsNotExist(err) {
@@ -102,40 +116,32 @@ func (f *LearningsFile) EstimateTokens() (int, error) {
 	return len(content) / 4, nil
 }
 
-func (f *LearningsFile) acquireSharedLock() error {
-	return f.acquireLock(syscall.LOCK_SH)
-}
-
-func (f *LearningsFile) acquireExclusiveLock() error {
-	return f.acquireLock(syscall.LOCK_EX)
-}
-
-func (f *LearningsFile) acquireLock(lockType int) error {
+// acquireFileLock acquires a file lock and returns the lock file handle.
+// The caller is responsible for calling releaseFileLock when done.
+func (f *LearningsFile) acquireFileLock(lockType int) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0755); err != nil {
-		return err
+		return nil, err
 	}
 
 	lockPath := f.Path + ".lock"
-	var err error
-	f.lockFile, err = os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if err := syscall.Flock(int(f.lockFile.Fd()), lockType); err != nil {
-		f.lockFile.Close()
-		f.lockFile = nil
-		return err
+	if err := syscall.Flock(int(lockFile.Fd()), lockType); err != nil {
+		lockFile.Close()
+		return nil, err
 	}
 
-	return nil
+	return lockFile, nil
 }
 
-func (f *LearningsFile) releaseLock() {
-	if f.lockFile != nil {
-		_ = syscall.Flock(int(f.lockFile.Fd()), syscall.LOCK_UN)
-		f.lockFile.Close()
-		f.lockFile = nil
+// releaseFileLock releases a file lock acquired by acquireFileLock.
+func (f *LearningsFile) releaseFileLock(lockFile *os.File) {
+	if lockFile != nil {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
 	}
 }
 

@@ -8,55 +8,24 @@ import (
 	"github.com/google/uuid"
 )
 
-// Generator records trajectories during agent execution.
-type Generator struct {
+// TrajectoryRecorder is a handle for recording a single trajectory.
+// It is concurrency-safe and isolates trajectory state from other concurrent executions.
+type TrajectoryRecorder struct {
 	trajectory *Trajectory
 	mu         sync.Mutex
 }
 
-// NewGenerator creates a new trajectory generator.
-func NewGenerator() *Generator {
-	return &Generator{}
-}
-
-// Start begins recording a new trajectory.
-func (g *Generator) Start(agentID, taskType, query string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	g.trajectory = &Trajectory{
-		ID:        uuid.New().String(),
-		AgentID:   agentID,
-		TaskType:  taskType,
-		Query:     query,
-		Steps:     make([]Step, 0),
-		StartedAt: time.Now(),
-		Context:   TrajectoryContext{},
-		Metadata:  make(map[string]any),
-	}
-}
-
-// SetInjectedLearnings records which learnings were available in context.
-func (g *Generator) SetInjectedLearnings(learningIDs []string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.trajectory != nil {
-		g.trajectory.Context.InjectedLearnings = learningIDs
-	}
-}
-
 // RecordStep captures a single action in the trajectory.
-func (g *Generator) RecordStep(action, tool, reasoning string, input, output map[string]any, err error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (r *TrajectoryRecorder) RecordStep(action, tool, reasoning string, input, output map[string]any, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	if g.trajectory == nil {
+	if r.trajectory == nil {
 		return
 	}
 
 	step := Step{
-		Index:     len(g.trajectory.Steps),
+		Index:     len(r.trajectory.Steps),
 		Action:    action,
 		Tool:      tool,
 		Reasoning: reasoning,
@@ -72,37 +41,75 @@ func (g *Generator) RecordStep(action, tool, reasoning string, input, output map
 	// Detect citations in reasoning
 	cited := DetectCitations(reasoning)
 	if len(cited) > 0 {
-		g.trajectory.Context.CitedLearnings = appendUnique(g.trajectory.Context.CitedLearnings, cited...)
+		r.trajectory.Context.CitedLearnings = appendUnique(r.trajectory.Context.CitedLearnings, cited...)
 	}
 
-	g.trajectory.Steps = append(g.trajectory.Steps, step)
+	r.trajectory.Steps = append(r.trajectory.Steps, step)
+}
+
+// SetInjectedLearnings records which learnings were available in context.
+func (r *TrajectoryRecorder) SetInjectedLearnings(learningIDs []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.trajectory != nil {
+		r.trajectory.Context.InjectedLearnings = learningIDs
+	}
 }
 
 // End finalizes the trajectory with outcome and quality.
-func (g *Generator) End(outcome Outcome, quality float64) *Trajectory {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (r *TrajectoryRecorder) End(outcome Outcome, quality float64) *Trajectory {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	if g.trajectory == nil {
+	if r.trajectory == nil {
 		return nil
 	}
 
-	g.trajectory.FinalOutcome = outcome
-	g.trajectory.Quality = quality
-	g.trajectory.CompletedAt = time.Now()
-	g.trajectory.Duration = g.trajectory.CompletedAt.Sub(g.trajectory.StartedAt)
+	r.trajectory.FinalOutcome = outcome
+	r.trajectory.Quality = quality
+	r.trajectory.CompletedAt = time.Now()
+	r.trajectory.Duration = r.trajectory.CompletedAt.Sub(r.trajectory.StartedAt)
 
-	result := g.trajectory
-	g.trajectory = nil
+	result := r.trajectory
+	r.trajectory = nil
 	return result
 }
 
 // Current returns the in-progress trajectory (for inspection).
-func (g *Generator) Current() *Trajectory {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (r *TrajectoryRecorder) Current() *Trajectory {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	return g.trajectory
+	return r.trajectory
+}
+
+// Generator creates trajectory recorders for agent executions.
+// It is stateless regarding active trajectories, making it safe for concurrent use.
+type Generator struct{}
+
+// NewGenerator creates a new trajectory generator.
+func NewGenerator() *Generator {
+	return &Generator{}
+}
+
+// Start begins recording a new trajectory and returns a handle for it.
+// Each call returns an independent TrajectoryRecorder, safe for concurrent use.
+func (g *Generator) Start(agentID, taskType, query string) *TrajectoryRecorder {
+	trajectory := &Trajectory{
+		ID:        uuid.New().String(),
+		AgentID:   agentID,
+		TaskType:  taskType,
+		Query:     query,
+		Steps:     make([]Step, 0),
+		StartedAt: time.Now(),
+		Context:   TrajectoryContext{},
+		Metadata:  make(map[string]any),
+	}
+
+	return &TrajectoryRecorder{
+		trajectory: trajectory,
+	}
 }
 
 var citationRegex = regexp.MustCompile(`\[([LMP]\d{3})\]`)
