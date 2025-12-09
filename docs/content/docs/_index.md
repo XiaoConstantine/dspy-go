@@ -63,15 +63,21 @@ Build production-ready agents with reasoning, tool use, and memory:
 - **Orchestration**: Task decomposition and multi-agent coordination
 - **Custom Tools**: Easy integration with APIs, databases, and external systems
 - **Reflection**: Self-improving agents that learn from their actions
+- **ACE Framework**: Agentic Context Engineering for self-improving agents
 
 ```go
-// Create an agent with tools and memory
-agent := NewProductionAgent()
-response, _ := agent.Chat(ctx, "What's the population of Tokyo divided by 1000?")
+// Create a self-improving agent with ACE
+aceConfig := ace.Config{
+    Enabled:       true,
+    LearningsPath: "./learnings/agent.md",
+}
+agent := react.NewReActAgent("my-agent", "Assistant",
+    react.WithACE(aceConfig),  // Enable self-improvement!
+)
 // Agent automatically:
-// 1. Searches for Tokyo population
-// 2. Uses calculator tool
-// 3. Provides the answer with reasoning
+// 1. Records execution trajectories
+// 2. Learns from successes and failures
+// 3. Applies learnings to future tasks
 ```
 
 ## What Can You Build?

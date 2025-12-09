@@ -440,6 +440,208 @@ func (a *ReflectiveAgent) ExecuteWithReflection(ctx context.Context, task string
 
 ---
 
+## ACE Framework (Agentic Context Engineering)
+
+**Self-improving agents** that learn from execution trajectories.
+
+Based on the [ACE paper (arXiv:2510.04618)](https://arxiv.org/abs/2510.04618), ACE enables agents to:
+- Record execution trajectories (steps, tool calls, reasoning)
+- Extract patterns from successes and failures
+- Persist learnings across sessions
+- Inject learnings into future prompts
+
+### Quick Start with ACE
+
+Enable ACE on a ReAct agent:
+
+```go
+import (
+    "github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
+    "github.com/XiaoConstantine/dspy-go/pkg/agents/react"
+)
+
+// Configure ACE
+aceConfig := ace.Config{
+    Enabled:           true,
+    LearningsPath:     "./learnings/agent.md",  // Persistent storage
+    AsyncReflection:   true,                    // Process in background
+    CurationFrequency: 10,                      // Curate every 10 trajectories
+    MinConfidence:     0.7,                     // Threshold for new learnings
+    MaxTokens:         80000,                   // Token budget for learnings
+}
+
+// Create agent with ACE
+agent := react.NewReActAgent(
+    "my-agent",
+    "Research Assistant",
+    react.WithACE(aceConfig),          // Enable ACE!
+    react.WithReflection(true, 3),     // Also enable reflection
+    react.WithMaxIterations(10),
+)
+```
+
+### How ACE Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent Execution                          │
+├─────────────────────────────────────────────────────────────┤
+│  1. StartTrajectory() - Begin recording                     │
+│  2. RecordStep() - Capture each action/observation          │
+│  3. EndTrajectory() - Finalize with outcome                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Reflection                               │
+├─────────────────────────────────────────────────────────────┤
+│  • UnifiedReflector combines multiple insight sources       │
+│  • SimpleReflector extracts basic patterns (no LLM)         │
+│  • Adapters bridge existing systems (SelfReflector, etc.)   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Curation                                 │
+├─────────────────────────────────────────────────────────────┤
+│  • Add new learnings (strategies, mistakes)                 │
+│  • Update existing learnings (helpful/harmful counts)       │
+│  • Prune ineffective learnings                              │
+│  • Merge similar learnings                                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Storage (learnings.md)                   │
+├─────────────────────────────────────────────────────────────┤
+│  ## STRATEGIES                                              │
+│  [strategies-00001] helpful=5 harmful=0 :: Use calculator   │
+│  [strategies-00002] helpful=3 harmful=1 :: Search once      │
+│                                                             │
+│  ## MISTAKES                                                │
+│  [mistakes-00001] helpful=0 harmful=4 :: Avoid broken_db    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Standalone ACE Usage
+
+Use ACE components directly without a ReAct agent:
+
+```go
+import (
+    "context"
+    "github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
+)
+
+func main() {
+    // Configure
+    config := ace.Config{
+        Enabled:           true,
+        LearningsPath:     "./learnings.md",
+        AsyncReflection:   false,
+        CurationFrequency: 5,
+        MinConfidence:     0.6,
+        MaxTokens:         80000,
+    }
+
+    // Create reflector and manager
+    reflector := ace.NewUnifiedReflector(nil, ace.NewSimpleReflector())
+    manager, _ := ace.NewManager(config, reflector)
+    defer manager.Close()
+
+    ctx := context.Background()
+
+    // Record a trajectory
+    recorder := manager.StartTrajectory("agent-1", "research", "Find weather in NYC")
+
+    recorder.RecordStep(
+        "search",           // action
+        "web_search",       // tool
+        "Searching for NYC weather",  // reasoning
+        map[string]any{"query": "NYC weather"},  // input
+        map[string]any{"result": "Sunny, 72F"},  // output
+        nil,                // error (nil = success)
+    )
+
+    manager.EndTrajectory(ctx, recorder, ace.OutcomeSuccess)
+
+    // Get learnings for context injection
+    contextStr := manager.LearningsContext()
+    fmt.Println(contextStr)
+
+    // Check metrics
+    metrics := manager.Metrics()
+    fmt.Printf("Trajectories: %d, Learnings: %d\n",
+        metrics["trajectories_processed"],
+        metrics["learnings_added"])
+}
+```
+
+### Citation Tracking
+
+ACE tracks when the agent cites learnings in its reasoning:
+
+```go
+// Agent reasoning that cites a learning
+recorder.RecordStep(
+    "search",
+    "web_search",
+    "Using [L001] efficient search strategy, I'll search once",  // Cites L001!
+    input, output, nil,
+)
+
+// After successful execution, L001 gets a "helpful" vote
+// After failure, L001 gets a "harmful" vote
+// Learnings with low success rates get pruned
+```
+
+### Learnings File Format
+
+ACE stores learnings in a human-readable markdown format:
+
+```markdown
+## STRATEGIES
+[strategies-00001] helpful=5 harmful=0 :: Use calculator for arithmetic
+[strategies-00002] helpful=3 harmful=1 :: Search once, then respond
+
+## MISTAKES
+[mistakes-00001] helpful=0 harmful=4 :: Avoid broken_database tool
+```
+
+### Context Injection
+
+Learnings are formatted for injection into agent prompts:
+
+```go
+contextStr := manager.LearningsContext()
+// Returns:
+// ## Learned Strategies (cite by ID if using)
+// [L001] Use calculator for arithmetic (100% success)
+// [L002] Search once, then respond (75% success)
+//
+// ## Mistakes to Avoid (cite by ID if avoiding)
+// [M001] Avoid broken_database tool
+```
+
+### ACE Examples
+
+Two complete examples are available:
+
+```bash
+# Basic ACE usage (no LLM required)
+go run ./examples/ace_basic/...
+
+# ACE integrated with ReAct agent
+GEMINI_API_KEY=your-key go run ./examples/ace_react/...
+
+# Persist learnings across runs
+go run ./examples/ace_react/... --learnings-dir=./my_learnings
+```
+
+**[ACE Examples →](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/ace_basic)**
+
+---
+
 ## Production Agent Example
 
 **Complete production-ready agent** with all features:
@@ -579,6 +781,7 @@ func main() {
 | **Orchestration** | Task decomposition | Complex workflows |
 | **Multi-Agent** | Specialized agents | Research + analysis + writing |
 | **Reflection** | Self-improvement | Iterative refinement |
+| **ACE Framework** | Self-improving agents | Learn from trajectories |
 
 ---
 
@@ -586,6 +789,8 @@ func main() {
 
 ### Complete Agent Examples
 - **[Agents Package Examples](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/agents)** - ReAct, orchestrator, memory
+- **[ACE Basic Example](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/ace_basic)** - Standalone ACE usage (no LLM)
+- **[ACE + ReAct Example](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/ace_react)** - Self-improving ReAct agent
 - **[Maestro](https://github.com/XiaoConstantine/maestro)** - Production code review agent
 - **[Smart Tool Registry](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/smart_tool_registry)** - Advanced tool management
 
@@ -594,6 +799,10 @@ func main() {
 ```bash
 # Basic agent examples
 cd examples/agents && go run main.go
+
+# ACE examples
+go run ./examples/ace_basic/...
+GEMINI_API_KEY=your-key go run ./examples/ace_react/...
 
 # Production agent (Maestro)
 git clone https://github.com/XiaoConstantine/maestro
