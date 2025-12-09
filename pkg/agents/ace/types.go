@@ -4,6 +4,8 @@ package ace
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -52,8 +54,11 @@ func (l *Learning) ShortCode() string {
 	case "patterns":
 		prefix = "P"
 	}
+	// Parse number from ID more robustly using strings.LastIndex
 	var num int
-	_, _ = fmt.Sscanf(l.ID, l.Category+"-%d", &num)
+	if i := strings.LastIndex(l.ID, "-"); i != -1 && i < len(l.ID)-1 {
+		num, _ = strconv.Atoi(l.ID[i+1:])
+	}
 	return fmt.Sprintf("%s%03d", prefix, num)
 }
 

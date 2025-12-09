@@ -91,10 +91,6 @@ func (qc *QualityCalculator) efficiencyScore(stepCount int) float64 {
 }
 
 func (qc *QualityCalculator) toolSuccessScore(steps []Step) float64 {
-	if len(steps) == 0 {
-		return 0.5
-	}
-
 	toolSteps := 0
 	successfulTools := 0
 
@@ -114,10 +110,6 @@ func (qc *QualityCalculator) toolSuccessScore(steps []Step) float64 {
 }
 
 func (qc *QualityCalculator) errorFreeScore(steps []Step) float64 {
-	if len(steps) == 0 {
-		return 0.5
-	}
-
 	for _, step := range steps {
 		if step.Error != "" {
 			return 0.0

@@ -6,14 +6,35 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
 )
 
+// DefaultTopReflectionsLimit is the default number of reflections to extract.
+const DefaultTopReflectionsLimit = 10
+
 // SelfReflectorACEAdapter bridges the existing SelfReflector with ACE's Adapter interface.
 type SelfReflectorACEAdapter struct {
 	reflector *SelfReflector
+	limit     int
+}
+
+// SelfReflectorACEAdapterOption configures a SelfReflectorACEAdapter.
+type SelfReflectorACEAdapterOption func(*SelfReflectorACEAdapter)
+
+// WithReflectionsLimit sets the maximum number of reflections to extract.
+func WithReflectionsLimit(limit int) SelfReflectorACEAdapterOption {
+	return func(a *SelfReflectorACEAdapter) {
+		a.limit = limit
+	}
 }
 
 // NewSelfReflectorACEAdapter creates an adapter that extracts insights from SelfReflector.
-func NewSelfReflectorACEAdapter(reflector *SelfReflector) *SelfReflectorACEAdapter {
-	return &SelfReflectorACEAdapter{reflector: reflector}
+func NewSelfReflectorACEAdapter(reflector *SelfReflector, opts ...SelfReflectorACEAdapterOption) *SelfReflectorACEAdapter {
+	a := &SelfReflectorACEAdapter{
+		reflector: reflector,
+		limit:     DefaultTopReflectionsLimit,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Extract implements ace.Adapter by converting SelfReflector's reflections to InsightCandidates.
@@ -22,7 +43,7 @@ func (a *SelfReflectorACEAdapter) Extract(ctx context.Context) ([]ace.InsightCan
 		return nil, nil
 	}
 
-	reflections := a.reflector.GetTopReflections(10)
+	reflections := a.reflector.GetTopReflections(a.limit)
 	if len(reflections) == 0 {
 		return nil, nil
 	}

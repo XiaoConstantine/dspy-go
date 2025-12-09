@@ -2,6 +2,7 @@ package ace
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -186,14 +187,10 @@ func (c *Curator) aggressivePrune(learnings []Learning, tokensToRemove int) ([]L
 		candidates = append(candidates, scored{i, l.SuccessRate(), tokens})
 	}
 
-	// Sort by score ascending
-	for i := 0; i < len(candidates)-1; i++ {
-		for j := i + 1; j < len(candidates); j++ {
-			if candidates[j].score < candidates[i].score {
-				candidates[i], candidates[j] = candidates[j], candidates[i]
-			}
-		}
-	}
+	// Sort by score ascending (lowest first for removal)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score < candidates[j].score
+	})
 
 	// Remove until we've freed enough tokens
 	removed := make(map[int]bool)

@@ -4,6 +4,25 @@ import (
 	"context"
 )
 
+// Confidence calculation constants for adapters.
+const (
+	// SelfReflector defaults
+	DefaultMinOccurrences = 3
+	DefaultMinSuccessRate = 0.7
+
+	// Error pattern confidence calculation
+	ErrorConfidenceBase       = 0.5
+	ErrorConfidencePerCount   = 0.1
+	ErrorConfidenceMax        = 0.9
+	ErrorMinCount             = 2
+
+	// ErrorRetainer confidence calculation
+	RetainerConfidenceBase    = 0.6
+	RetainerConfidenceMulti   = 0.7
+	RetainerConfidencePerCount = 0.05
+	RetainerConfidenceMax     = 0.95
+)
+
 // PatternSource provides patterns for adaptation to ACE learnings.
 type PatternSource interface {
 	GetPatterns() map[string]*PatternInfo
@@ -21,6 +40,23 @@ type MetricsSource interface {
 	GetErrorPatterns() map[string]int
 }
 
+// SelfReflectorAdapterOption configures a SelfReflectorAdapter.
+type SelfReflectorAdapterOption func(*SelfReflectorAdapter)
+
+// WithMinOccurrences sets the minimum occurrences threshold.
+func WithMinOccurrences(n int) SelfReflectorAdapterOption {
+	return func(a *SelfReflectorAdapter) {
+		a.minOccurrences = n
+	}
+}
+
+// WithMinSuccessRate sets the minimum success rate threshold.
+func WithMinSuccessRate(rate float64) SelfReflectorAdapterOption {
+	return func(a *SelfReflectorAdapter) {
+		a.minSuccessRate = rate
+	}
+}
+
 // SelfReflectorAdapter extracts insights from SelfReflector patterns.
 type SelfReflectorAdapter struct {
 	patterns       PatternSource
@@ -30,13 +66,17 @@ type SelfReflectorAdapter struct {
 }
 
 // NewSelfReflectorAdapter creates an adapter for SelfReflector.
-func NewSelfReflectorAdapter(patterns PatternSource, metrics MetricsSource) *SelfReflectorAdapter {
-	return &SelfReflectorAdapter{
+func NewSelfReflectorAdapter(patterns PatternSource, metrics MetricsSource, opts ...SelfReflectorAdapterOption) *SelfReflectorAdapter {
+	a := &SelfReflectorAdapter{
 		patterns:       patterns,
 		metrics:        metrics,
-		minOccurrences: 3,
-		minSuccessRate: 0.7,
+		minOccurrences: DefaultMinOccurrences,
+		minSuccessRate: DefaultMinSuccessRate,
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Extract converts SelfReflector patterns to InsightCandidates.
@@ -62,10 +102,10 @@ func (a *SelfReflectorAdapter) Extract(ctx context.Context) ([]InsightCandidate,
 	if a.metrics != nil {
 		errorPatterns := a.metrics.GetErrorPatterns()
 		for errMsg, count := range errorPatterns {
-			if count >= 2 {
-				confidence := 0.5 + float64(count)*0.1
-				if confidence > 0.9 {
-					confidence = 0.9
+			if count >= ErrorMinCount {
+				confidence := ErrorConfidenceBase + float64(count)*ErrorConfidencePerCount
+				if confidence > ErrorConfidenceMax {
+					confidence = ErrorConfidenceMax
 				}
 				insights = append(insights, InsightCandidate{
 					Content:    "Recurring error: " + errMsg,
@@ -127,11 +167,11 @@ func (a *ErrorRetainerAdapter) Extract(ctx context.Context) ([]InsightCandidate,
 			content = err.Pattern + ": " + err.Message
 		}
 
-		confidence := 0.6
+		confidence := RetainerConfidenceBase
 		if err.Count > 1 {
-			confidence = 0.7 + float64(err.Count)*0.05
-			if confidence > 0.95 {
-				confidence = 0.95
+			confidence = RetainerConfidenceMulti + float64(err.Count)*RetainerConfidencePerCount
+			if confidence > RetainerConfidenceMax {
+				confidence = RetainerConfidenceMax
 			}
 		}
 
