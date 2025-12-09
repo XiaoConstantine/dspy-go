@@ -6,17 +6,17 @@ import (
 
 // Confidence calculation constants for adapters.
 const (
-	// SelfReflector defaults
+	// SelfReflector defaults.
 	DefaultMinOccurrences = 3
 	DefaultMinSuccessRate = 0.7
 
-	// Error pattern confidence calculation
+	// Error pattern confidence calculation.
 	ErrorConfidenceBase       = 0.5
 	ErrorConfidencePerCount   = 0.1
 	ErrorConfidenceMax        = 0.9
 	ErrorMinCount             = 2
 
-	// ErrorRetainer confidence calculation
+	// ErrorRetainer confidence calculation.
 	RetainerConfidenceBase    = 0.6
 	RetainerConfidenceMulti   = 0.7
 	RetainerConfidencePerCount = 0.05
