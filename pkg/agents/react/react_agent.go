@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
 	contextmgmt "github.com/XiaoConstantine/dspy-go/pkg/agents/context"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
@@ -85,6 +86,10 @@ type ReActAgentConfig struct {
 	ContextOptLevel         contextmgmt.CompressionPriority  `json:"context_optimization_level"`
 	MaxContextTokens        int                              `json:"max_context_tokens"`
 	CacheEfficiencyTarget   float64                          `json:"cache_efficiency_target"`
+
+	// ACE (Agentic Context Engineering) settings
+	EnableACE   bool       `json:"enable_ace"`
+	ACEConfig   ace.Config `json:"ace_config,omitempty"`
 }
 
 // DefaultReActAgentConfig returns sensible defaults.
@@ -152,6 +157,9 @@ type ReActAgent struct {
 
 	// Context Engineering (Manus-inspired patterns)
 	contextManager *contextmgmt.Manager
+
+	// ACE (Agentic Context Engineering)
+	aceManager *ace.Manager
 
 	// Configuration
 	config ReActAgentConfig
@@ -272,6 +280,23 @@ func NewReActAgent(id, name string, opts ...Option) *ReActAgent {
 		)
 	}
 
+	// Initialize ACE if enabled
+	if config.EnableACE {
+		var reflector *ace.UnifiedReflector
+		if agent.Reflector != nil {
+			adapter := NewSelfReflectorACEAdapter(agent.Reflector)
+			reflector = ace.NewUnifiedReflector([]ace.Adapter{adapter}, ace.NewSimpleReflector())
+		}
+
+		aceManager, err := ace.NewManager(config.ACEConfig, reflector)
+		if err != nil {
+			logger := logging.GetLogger()
+			logger.Warn(context.Background(), "Failed to initialize ACE manager for agent %s: %v", id, err)
+		} else {
+			agent.aceManager = aceManager
+		}
+	}
+
 	return agent
 }
 
@@ -372,6 +397,16 @@ func WithContextOptimization(level contextmgmt.CompressionPriority, maxTokens in
 		c.ContextOptLevel = level
 		c.MaxContextTokens = maxTokens
 		c.CacheEfficiencyTarget = cacheTarget
+	}
+}
+
+// WithACE enables Agentic Context Engineering for self-improving agents.
+// The reflector parameter is optional - if nil, a default reflector using the
+// agent's SelfReflector will be created automatically.
+func WithACE(config ace.Config) Option {
+	return func(c *ReActAgentConfig) {
+		c.EnableACE = true
+		c.ACEConfig = config
 	}
 }
 
@@ -489,6 +524,15 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		defer cancel()
 	}
 
+	// ACE: Start trajectory recording
+	var taskQuery string
+	if task, ok := input["task"].(string); ok {
+		taskQuery = task
+	}
+	if r.config.EnableACE && r.aceManager != nil {
+		r.aceManager.StartTrajectory(r.id, "react_execution", taskQuery)
+	}
+
 	// STEP 1: Build optimized context using Manus patterns (if enabled)
 	var contextResponse *contextmgmt.ContextResponse
 	var optimizedInput map[string]interface{}
@@ -504,6 +548,13 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		}
 	} else {
 		optimizedInput = input
+	}
+
+	// ACE: Inject learnings into context (prepended for cache efficiency)
+	if r.config.EnableACE && r.aceManager != nil {
+		if learnings := r.aceManager.GetLearningsContext(); learnings != "" {
+			optimizedInput["ace_learnings"] = learnings
+		}
 	}
 
 	// STEP 2: Load relevant memory context (legacy system)
@@ -535,6 +586,17 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 	processingTime := time.Since(startTime)
 	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, processingTime)
 
+	// ACE: Record steps from execution record
+	if r.config.EnableACE && r.aceManager != nil {
+		for _, action := range record.Actions {
+			var stepErr error
+			if !action.Success {
+				stepErr = fmt.Errorf("%s", action.Observation)
+			}
+			r.aceManager.RecordStep(action.Action, action.Tool, action.Thought, action.Arguments, map[string]any{"observation": action.Observation}, stepErr)
+		}
+	}
+
 	r.mu.Lock()
 	r.executionHistory = append(r.executionHistory, record)
 	r.avgProcessingTime = r.updateAvgProcessingTime(processingTime)
@@ -551,6 +613,17 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 		if len(reflections) > 0 {
 			r.updateFromReflections(ctx, reflections)
 		}
+	}
+
+	// ACE: End trajectory with outcome
+	if r.config.EnableACE && r.aceManager != nil {
+		outcome := ace.OutcomeSuccess
+		if err != nil {
+			outcome = ace.OutcomeFailure
+		} else if !record.Success {
+			outcome = ace.OutcomePartial
+		}
+		r.aceManager.EndTrajectory(outcome)
 	}
 
 	// STEP 7: Update legacy memory system
@@ -1184,6 +1257,22 @@ func (r *ReActAgent) GetContextHealthStatus() map[string]interface{} {
 	}
 
 	return r.contextManager.GetHealthStatus()
+}
+
+// Close releases resources held by the agent.
+func (r *ReActAgent) Close() error {
+	if r.aceManager != nil {
+		return r.aceManager.Close()
+	}
+	return nil
+}
+
+// GetACEMetrics returns ACE performance metrics if enabled.
+func (r *ReActAgent) GetACEMetrics() map[string]int64 {
+	if r.aceManager == nil {
+		return nil
+	}
+	return r.aceManager.GetMetrics()
 }
 
 // Utility functions
