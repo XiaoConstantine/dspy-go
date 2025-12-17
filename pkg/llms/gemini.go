@@ -188,7 +188,7 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	// Validate model ID
 	switch model {
 	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashLite,
-		core.ModelGoogleGemini3ProPreview,
+		core.ModelGoogleGemini3ProPreview, core.ModelGoogleGemini3FlashPreview,
 		core.ModelGoogleGemini20Flash, core.ModelGoogleGemini20FlashLite:
 		break
 	default:
@@ -302,7 +302,8 @@ func isValidGeminiModel(modelID core.ModelID) bool {
 		core.ModelGoogleGeminiPro,       // gemini-2.5-pro
 		core.ModelGoogleGeminiFlashLite, // gemini-2.5-flash-lite
 		// Gemini 3 series (new)
-		core.ModelGoogleGemini3ProPreview, // gemini-3-pro-preview
+		core.ModelGoogleGemini3ProPreview,   // gemini-3-pro-preview
+		core.ModelGoogleGemini3FlashPreview, // gemini-3-flash-preview
 		// Gemini 2.0 series (new)
 		core.ModelGoogleGemini20Flash,     // gemini-2.0-flash
 		core.ModelGoogleGemini20FlashLite, // gemini-2.0-flash-lite

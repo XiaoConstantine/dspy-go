@@ -44,6 +44,18 @@ func TestNewGeminiLLM(t *testing.T) {
 			wantError: false,
 		},
 		{
+			name:      "Valid configuration with Gemini 3 Pro Preview model",
+			apiKey:    "test-api-key",
+			model:     core.ModelGoogleGemini3ProPreview,
+			wantError: false,
+		},
+		{
+			name:      "Valid configuration with Gemini 3 Flash Preview model",
+			apiKey:    "test-api-key",
+			model:     core.ModelGoogleGemini3FlashPreview,
+			wantError: false,
+		},
+		{
 			name:      "Empty API key",
 			apiKey:    "",
 			envKey:    "",
@@ -1755,6 +1767,71 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 				expectedRequests := (len(tc.inputs) + tc.batchSize - 1) / tc.batchSize
 				assert.Equal(t, expectedRequests, requestCount, "Expected %d batch requests", expectedRequests)
 			}
+		})
+	}
+}
+
+func TestIsValidGeminiModel(t *testing.T) {
+	tests := []struct {
+		name    string
+		modelID core.ModelID
+		want    bool
+	}{
+		// Gemini 2.5 series
+		{
+			name:    "Gemini 2.5 Flash",
+			modelID: core.ModelGoogleGeminiFlash,
+			want:    true,
+		},
+		{
+			name:    "Gemini 2.5 Pro",
+			modelID: core.ModelGoogleGeminiPro,
+			want:    true,
+		},
+		{
+			name:    "Gemini 2.5 Flash Lite",
+			modelID: core.ModelGoogleGeminiFlashLite,
+			want:    true,
+		},
+		// Gemini 3 series
+		{
+			name:    "Gemini 3 Pro Preview",
+			modelID: core.ModelGoogleGemini3ProPreview,
+			want:    true,
+		},
+		{
+			name:    "Gemini 3 Flash Preview",
+			modelID: core.ModelGoogleGemini3FlashPreview,
+			want:    true,
+		},
+		// Gemini 2.0 series
+		{
+			name:    "Gemini 2.0 Flash",
+			modelID: core.ModelGoogleGemini20Flash,
+			want:    true,
+		},
+		{
+			name:    "Gemini 2.0 Flash Lite",
+			modelID: core.ModelGoogleGemini20FlashLite,
+			want:    true,
+		},
+		// Invalid models
+		{
+			name:    "Invalid model",
+			modelID: "invalid-model",
+			want:    false,
+		},
+		{
+			name:    "Empty model",
+			modelID: "",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidGeminiModel(tt.modelID)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
