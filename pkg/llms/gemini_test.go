@@ -44,6 +44,18 @@ func TestNewGeminiLLM(t *testing.T) {
 			wantError: false,
 		},
 		{
+			name:      "Valid configuration with Gemini 3 Pro Preview model",
+			apiKey:    "test-api-key",
+			model:     core.ModelGoogleGemini3ProPreview,
+			wantError: false,
+		},
+		{
+			name:      "Valid configuration with Gemini 3 Flash Preview model",
+			apiKey:    "test-api-key",
+			model:     core.ModelGoogleGemini3FlashPreview,
+			wantError: false,
+		},
+		{
 			name:      "Empty API key",
 			apiKey:    "",
 			envKey:    "",
@@ -1755,6 +1767,38 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 				expectedRequests := (len(tc.inputs) + tc.batchSize - 1) / tc.batchSize
 				assert.Equal(t, expectedRequests, requestCount, "Expected %d batch requests", expectedRequests)
 			}
+		})
+	}
+}
+
+func TestIsValidGeminiModel(t *testing.T) {
+	// Test all supported Google models from the single source of truth
+	for _, modelID := range core.ProviderModels["google"] {
+		t.Run(fmt.Sprintf("Valid model: %s", modelID), func(t *testing.T) {
+			got := isValidGeminiModel(modelID)
+			assert.True(t, got, "Expected model %s to be valid", modelID)
+		})
+	}
+
+	// Test invalid models
+	invalidTests := []struct {
+		name    string
+		modelID core.ModelID
+	}{
+		{
+			name:    "Invalid model string",
+			modelID: "invalid-model",
+		},
+		{
+			name:    "Empty model string",
+			modelID: "",
+		},
+	}
+
+	for _, tt := range invalidTests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidGeminiModel(tt.modelID)
+			assert.False(t, got, "Expected model %s to be invalid", tt.modelID)
 		})
 	}
 }
