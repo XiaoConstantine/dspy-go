@@ -19,6 +19,9 @@ type OptimizerConfig struct {
 	OptimizerName string
 	DatasetName   string
 	APIKey        string
+	Provider      string
+	Model         string
+	BaseURL       string
 	MaxExamples   int
 	Verbose       bool
 	SuppressLogs  bool // Suppress console output for TUI mode
@@ -54,7 +57,7 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 	ctx := core.WithExecutionState(context.Background())
 
 	// Setup LLM
-	if err := setupLLM(config.APIKey); err != nil {
+	if err := setupLLM(config); err != nil {
 		result.ErrorMessage = fmt.Sprintf("LLM setup failed: %v", err)
 		return result, err
 	}
@@ -218,7 +221,9 @@ func setupLogging(verbose bool, suppressLogs bool) {
 	logging.SetLogger(logger)
 }
 
-func setupLLM(apiKey string) error {
+func setupLLM(config OptimizerConfig) error {
+	apiKey := config.APIKey
+
 	// Auto-detect API key from environment if not provided
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
@@ -228,13 +233,43 @@ func setupLLM(apiKey string) error {
 		if apiKey == "" {
 			apiKey = os.Getenv("DSPY_API_KEY")
 		}
-		if apiKey == "" {
-			return fmt.Errorf("API key required. Set GEMINI_API_KEY, GOOGLE_API_KEY, or DSPY_API_KEY environment variable")
-		}
+	}
+
+	provider := config.Provider
+	if provider == "" {
+		provider = "google"
+	}
+
+	modelID := config.Model
+	if modelID == "" {
+		modelID = string(core.ModelGoogleGeminiFlash)
 	}
 
 	llms.EnsureFactory()
-	return core.ConfigureDefaultLLM(apiKey, core.ModelGoogleGeminiFlash)
+
+	// Special handling for local/OpenAI-compatible providers with custom BaseURL
+	if provider == "local" || (provider == "openai" && config.BaseURL != "") {
+		baseURL := config.BaseURL
+		if baseURL == "" {
+			baseURL = "http://localhost:1234/v1" // Common default for LM Studio
+		}
+		if apiKey == "" {
+			apiKey = "sk-dummy" // Local LLMs often don't need real keys
+		}
+
+		llm, err := llms.NewOpenAICompatible(provider, core.ModelID(modelID), baseURL, llms.WithAPIKey(apiKey))
+		if err != nil {
+			return err
+		}
+		core.SetDefaultLLM(llm)
+		return nil
+	}
+
+	if apiKey == "" {
+		return fmt.Errorf("API key required. Set GEMINI_API_KEY, GOOGLE_API_KEY, or DSPY_API_KEY environment variable")
+	}
+
+	return core.ConfigureDefaultLLM(apiKey, core.ModelID(modelID))
 }
 
 func createSignature() core.Signature {
