@@ -44,6 +44,7 @@ export GEMINI_API_KEY="your-api-key-here"
 - **All Optimizers Supported**: Bootstrap, MIPRO, SIMBA, GEPA, COPRO
 - **Sample Datasets**: Built-in GSM8K, HotPotQA, and Simple Q&A datasets
 - **Intelligent Recommendations**: Get optimizer suggestions based on your use case
+- **Local LLM Support**: Run optimizations using local models (Ollama, LM Studio) or OpenAI-compatible APIs
 - **Prompt Structure Analyzer**: Advanced 10-component prompt analysis with color-coded visualization
 - **Interactive Mode**: Rich TUI experience for complex prompt analysis
 - **DSPy Signature Conversion**: Automatic conversion from prompts to optimizable DSPy signatures
@@ -135,14 +136,23 @@ dspy-cli try <optimizer> [flags]
 **Flags:**
 - `--dataset`: Dataset to use (gsm8k, hotpotqa, simple)
 - `--max-examples`: Limit number of examples (default: all)
-- `--verbose`: Enable detailed logging
+- `--provider`: LLM provider: `google`, `openai`, or `local` (default: `google`)
+- `--model`: Model ID to use (default: `gemini-2.0-flash`)
+- `--base-url`: Custom endpoint for local or OpenAI-compatible providers
 - `--api-key`: API key (overrides environment variable)
+- `--verbose`: Enable detailed logging
 
 **Examples:**
 
 ```bash
 # Basic usage
 dspy-cli try bootstrap --dataset gsm8k
+
+# Use a local LLM (LM Studio / Ollama)
+dspy-cli try mipro --provider local --base-url http://localhost:1234/v1 --model local-model
+
+# Use OpenAI
+dspy-cli try simba --provider openai --api-key sk-... --model gpt-4o
 
 # Limit examples for faster testing
 dspy-cli try mipro --dataset gsm8k --max-examples 5
@@ -443,20 +453,38 @@ dspy-cli analyze --export optimized_prompt.yaml "Your final prompt"
 ### Environment Variables
 
 ```bash
-# Required: Gemini API key
+# For Google Gemini (Default)
 export GEMINI_API_KEY="your-api-key-here"
 
-# Alternative names (auto-detected)
-export GOOGLE_API_KEY="your-api-key-here"
-export DSPY_API_KEY="your-api-key-here"
+# For OpenAI
+export OPENAI_API_KEY="sk-..."
 ```
 
-### LLM Configuration
+### LLM Providers
 
-The CLI automatically configures:
-- **Model**: Google Gemini Flash (fast and cost-effective)
-- **Provider**: Google AI Platform
-- **Auto-detection**: API key from multiple environment variables
+The CLI supports multiple LLM providers to give you flexibility in where you run your optimizations.
+
+#### Google Gemini (Default)
+Fast and cost-effective, ideal for quick experiments.
+```bash
+dspy-cli try bootstrap --dataset gsm8k
+```
+
+#### Local LLMs (Ollama, LM Studio, vLLM)
+Run optimizations entirely on your local machine using OpenAI-compatible servers.
+```bash
+# Example for LM Studio
+dspy-cli try bootstrap --provider local --base-url http://localhost:1234/v1 --model local-model
+
+# Example for Ollama (using its OpenAI-compatible endpoint)
+dspy-cli try bootstrap --provider local --base-url http://localhost:11434/v1 --model llama3
+```
+
+#### OpenAI
+Use standard OpenAI models.
+```bash
+dspy-cli try bootstrap --provider openai --model gpt-4o
+```
 
 ### Logging Levels
 

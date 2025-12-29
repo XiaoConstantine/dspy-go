@@ -14,6 +14,9 @@ import (
 func NewTryCommand() *cobra.Command {
 	var dataset string
 	var apiKey string
+	var provider string
+	var model string
+	var baseURL string
 	var maxExamples int
 	var verbose bool
 
@@ -40,7 +43,10 @@ Perfect for:
   dspy-cli try simba --dataset hotpotqa --verbose
 
   # Use custom API key
-  dspy-cli try gepa --dataset gsm8k --api-key your-key-here`,
+  dspy-cli try gepa --dataset gsm8k --api-key your-key-here
+  
+  # Use local LLM (e.g. LM Studio)
+  dspy-cli try simba --dataset gsm8k --provider local --base-url http://localhost:1234/v1 --model local-model`,
 		Args: cobra.ExactArgs(1),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			return optimizers.ListAll(), cobra.ShellCompDirectiveNoFileComp
@@ -91,6 +97,9 @@ Perfect for:
 				OptimizerName: optimizerName,
 				DatasetName:   dataset,
 				APIKey:        apiKey,
+				Provider:      provider,
+				Model:         model,
+				BaseURL:       baseURL,
 				MaxExamples:   maxExamples,
 				Verbose:       verbose,
 			}
@@ -114,6 +123,9 @@ Perfect for:
 
 	cmd.Flags().StringVar(&dataset, "dataset", "qa", "Dataset to use (qa, gsm8k, hotpotqa)")
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key (or set GEMINI_API_KEY env var)")
+	cmd.Flags().StringVar(&provider, "provider", "google", "LLM provider (google, openai, local)")
+	cmd.Flags().StringVar(&model, "model", "gemini-2.0-flash", "Model ID to use")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for the LLM provider (optional)")
 	cmd.Flags().IntVar(&maxExamples, "max-examples", 0, "Limit number of examples (0 = use all)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 
