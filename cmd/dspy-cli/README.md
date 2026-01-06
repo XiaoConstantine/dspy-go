@@ -30,6 +30,7 @@ export GEMINI_API_KEY="your-api-key-here"
 - [Features](#-features)
 - [Installation](#-installation)
 - [Commands](#-commands)
+- [Log Viewer](#-log-viewer)
 - [Prompt Analyzer](#-prompt-analyzer)
 - [Optimizers](#-optimizers)
 - [Datasets](#-datasets)
@@ -51,6 +52,7 @@ export GEMINI_API_KEY="your-api-key-here"
 - **Beautiful Output**: Colored, formatted results with progress indicators
 - **Dependency Isolation**: CLI dependencies don't pollute the main library
 - **Quick Experimentation**: Test optimizers in seconds, not minutes
+- **Session Log Viewer**: Interactive viewer for dspy-go JSONL session logs with search, stats, and export
 
 ## 🛠 Installation
 
@@ -200,6 +202,54 @@ dspy-cli analyze --export signature.yaml "Your prompt here"
 dspy-cli  # Select "🔍 Analyze prompt structure"
 ```
 
+### `view` - Session Log Viewer
+
+```bash
+dspy-cli view <file.jsonl> [flags]
+```
+
+Enhanced CLI viewer for dspy-go JSONL session logs with colored output, search, statistics, and export. Supports both RLM format (iterations) and native DSPy format (events).
+
+**Flags:**
+- `-c, --compact`: Compact output (hide full responses)
+- `-i, --interactive`: Interactive navigation mode
+- `-w, --watch`: Watch file for changes (live tail)
+- `--iter N`: Show only iteration N (1-indexed)
+- `--errors`: Show only iterations with errors
+- `--final`: Show only the final answer
+- `-s, --search TEXT`: Search for text in responses/code
+- `--stats`: Show detailed statistics only
+- `--export FILE`: Export to markdown file (.md)
+- `--no-color`: Disable colored output
+
+**Examples:**
+
+```bash
+# View a log file
+dspy-cli view session.jsonl
+
+# Interactive navigation mode
+dspy-cli view -i session.jsonl
+
+# Watch live as log is being written
+dspy-cli view -w session.jsonl
+
+# Show only statistics
+dspy-cli view --stats session.jsonl
+
+# Show specific iteration
+dspy-cli view --iter 3 session.jsonl
+
+# Search for errors
+dspy-cli view -s "error" session.jsonl
+
+# Export to markdown
+dspy-cli view --export report.md session.jsonl
+
+# Show only final answer
+dspy-cli view --final session.jsonl
+```
+
 #### Interactive Mode Features
 
 The interactive analyzer provides a rich TUI experience with:
@@ -239,6 +289,66 @@ The analyzer evaluates prompts against a professional 10-component structure:
 10. **Prefilled Response**: Provide response starters
 
 ```
+
+## 📺 Log Viewer
+
+The DSPy-CLI includes a powerful session log viewer for analyzing JSONL logs from dspy-go. It automatically detects and handles both RLM format (iteration-based) and native DSPy format (event-based) logs.
+
+### Key Features
+
+- **Colored Output**: Easy-to-read display with syntax highlighting
+- **Interactive Navigation**: Browse through entries with keyboard controls
+- **Live Watching**: Monitor logs in real-time as they're being written
+- **Search**: Find specific text in responses and code blocks
+- **Statistics**: View detailed session metrics (tokens, timing, LLM calls)
+- **Export**: Generate markdown reports from session logs
+- **Dual Format Support**: Automatically detects RLM (iterations) and DSPy (events) formats
+
+### Interactive Mode Keys
+
+When using `-i` or `--interactive`:
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Next entry |
+| `k` / `↑` | Previous entry |
+| `g` | Go to first entry |
+| `G` | Go to last entry |
+| `/` | Enter search query (RLM format) |
+| `n` | Next search result |
+| `N` | Previous search result |
+| `e` | Toggle expand/compact mode |
+| `s` | Show detailed statistics |
+| `?` | Show help |
+| `q` | Quit |
+
+### Statistics View
+
+The `--stats` flag displays:
+
+- **Overview**: Entry count (iterations/events), code blocks, LLM calls, total time
+- **Token Usage**: Prompt tokens, completion tokens, averages per call
+- **Timing Analysis**: Min/max/median/avg timing metrics
+- **Per-Entry Breakdown**: Detailed table of each entry
+- **Timeline**: Visual bar chart of entry durations
+
+### Export Format
+
+The `--export` flag generates a markdown file containing:
+
+**For RLM format:**
+- Session metadata (model, backend, query)
+- Each iteration with code blocks and outputs
+- Final answer highlighted
+- Summary statistics
+
+**For DSPy format:**
+- Session information (trace ID, start time)
+- LLM calls with prompts and responses
+- Module executions with inputs/outputs
+- Code executions with stdout/stderr
+- Tool calls and errors
+- Summary statistics
 
 ## 🔍 Prompt Analyzer
 
