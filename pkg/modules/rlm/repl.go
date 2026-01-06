@@ -359,9 +359,11 @@ func (r *YaegiREPL) Reset() error {
 	return r.injectBuiltins()
 }
 
+// recordLLMCall appends an LLM call record. This method does NOT acquire the mutex
+// because it's only called from llmQuery/llmQueryBatched during Execute(), which
+// already holds the lock. Using a lock here would cause a deadlock since Go's
+// sync.Mutex is not reentrant.
 func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duration, promptTokens, completionTokens int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.llmCalls = append(r.llmCalls, LLMCall{
 		Prompt:           prompt,
 		Response:         response,

@@ -213,6 +213,15 @@ func runBaseline(ctx context.Context, llm core.LLM, task OolongTask) (string, ti
 		return "", time.Since(start), err
 	}
 
+	// Debug: print all keys in result
+	if len(result) == 0 {
+		fmt.Printf("  [DEBUG] Baseline result is empty\n")
+	} else {
+		for k, v := range result {
+			fmt.Printf("  [DEBUG] Baseline result[%q] = %q\n", k, truncate(fmt.Sprintf("%v", v), 100))
+		}
+	}
+
 	answer, _ := result["answer"].(string)
 	return strings.TrimSpace(answer), time.Since(start), nil
 }

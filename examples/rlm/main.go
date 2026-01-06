@@ -68,11 +68,13 @@ Review 10: Average product, works fine. Rating: 3 stars
 	fmt.Println(strings.Repeat("-", 60))
 
 	// Create RLM module - just pass the LLM, no adapter needed!
+	// Enable tracing with WithTraceDir to generate JSONL logs compatible with rlm-viewer
 	rlmModule := rlm.NewFromLLM(
 		llm,
 		rlm.WithMaxIterations(10),
 		rlm.WithVerbose(true),
 		rlm.WithTimeout(5*time.Minute),
+		rlm.WithTraceDir("./rlm_logs"), // Enable tracing - view with: rlm-viewer ./rlm_logs/*.jsonl
 	)
 
 	fmt.Println("\nStarting RLM completion...")

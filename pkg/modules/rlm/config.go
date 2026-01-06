@@ -16,6 +16,10 @@ type Config struct {
 	// Timeout is the maximum duration for the entire RLM completion.
 	// Zero means no timeout (default).
 	Timeout time.Duration
+
+	// TraceDir is the directory for RLM trace logs (JSONL format compatible with rlm-viewer).
+	// Empty string disables tracing.
+	TraceDir string
 }
 
 // DefaultConfig returns the default RLM configuration.
@@ -24,6 +28,7 @@ func DefaultConfig() Config {
 		MaxIterations: 30,
 		Verbose:       false,
 		Timeout:       0,
+		TraceDir:      "",
 	}
 }
 
@@ -51,5 +56,13 @@ func WithVerbose(v bool) Option {
 func WithTimeout(d time.Duration) Option {
 	return func(c *Config) {
 		c.Timeout = d
+	}
+}
+
+// WithTraceDir enables JSONL tracing to the specified directory.
+// The trace files are compatible with rlm-go's rlm-viewer command.
+func WithTraceDir(dir string) Option {
+	return func(c *Config) {
+		c.TraceDir = dir
 	}
 }

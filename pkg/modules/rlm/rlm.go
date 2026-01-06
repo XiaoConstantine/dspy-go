@@ -173,6 +173,33 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		defer cancel()
 	}
 
+	// Initialize trace session if tracing is enabled
+	var traceSession *logging.RLMTraceSession
+	if r.config.TraceDir != "" {
+		contextStr := ""
+		if s, ok := contextPayload.(string); ok {
+			contextStr = s
+		} else {
+			contextStr = fmt.Sprintf("%v", contextPayload)
+		}
+
+		var err error
+		traceSession, err = logging.NewRLMTraceSession(r.config.TraceDir, logging.RLMSessionConfig{
+			RootModel:     r.rootLLM.ModelID(),
+			MaxIterations: r.config.MaxIterations,
+			Backend:       r.rootLLM.ProviderName(),
+			BackendKwargs: map[string]any{},
+			Context:       contextStr,
+			Query:         query,
+		})
+		if err != nil {
+			logger.Warn(ctx, "[RLM] Failed to create trace session: %v", err)
+		} else {
+			defer traceSession.Close()
+			logger.Info(ctx, "[RLM] Tracing to: %s", traceSession.Path())
+		}
+	}
+
 	// Create REPL environment
 	replEnv, err := NewYaegiREPL(r.subLLMClient)
 	if err != nil {
@@ -189,6 +216,8 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 
 	// Iteration loop
 	for i := 0; i < r.config.MaxIterations; i++ {
+		iterStart := time.Now()
+
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -249,6 +278,17 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			}
 
 			if finalAnswer != "" {
+				// Log final iteration to trace
+				if traceSession != nil {
+					_ = traceSession.LogIteration(
+						[]logging.RLMMessage{{Role: "user", Content: query}},
+						reasoning,
+						[]logging.RLMCodeBlock{},
+						finalAnswer,
+						time.Since(iterStart),
+					)
+				}
+
 				return &CompletionResult{
 					Response:   finalAnswer,
 					Iterations: i + 1,
@@ -275,12 +315,52 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				logger.Debug(ctx, "[RLM] Stderr: %s", truncate(result.Stderr, truncateLenMedium))
 			}
 
+			// Collect sub-LLM calls for trace
+			var rlmCalls []logging.RLMCallEntry
 			for _, call := range replEnv.GetLLMCalls() {
 				r.tokenTracker.AddSubCall(call)
+				rlmCalls = append(rlmCalls, logging.RLMCallEntry{
+					Prompt:           call.Prompt,
+					Response:         call.Response,
+					PromptTokens:     call.PromptTokens,
+					CompletionTokens: call.CompletionTokens,
+					ExecutionTime:    call.Duration.Seconds(),
+				})
+			}
+
+			// Log iteration to trace
+			if traceSession != nil {
+				codeBlocks := []logging.RLMCodeBlock{{
+					Code: code,
+					Result: logging.RLMCodeResult{
+						Stdout:        result.Stdout,
+						Stderr:        result.Stderr,
+						Locals:        replEnv.GetLocals(),
+						ExecutionTime: result.Duration.Seconds(),
+						RLMCalls:      rlmCalls,
+					},
+				}}
+				_ = traceSession.LogIteration(
+					[]logging.RLMMessage{{Role: "user", Content: query}},
+					reasoning,
+					codeBlocks,
+					nil,
+					time.Since(iterStart),
+				)
 			}
 
 			r.appendIterationHistory(&history, i+1, action, reasoning, code, FormatExecutionResult(result))
 		} else if action != "final" {
+			// Log non-code iteration to trace
+			if traceSession != nil {
+				_ = traceSession.LogIteration(
+					[]logging.RLMMessage{{Role: "user", Content: query}},
+					reasoning,
+					[]logging.RLMCodeBlock{},
+					nil,
+					time.Since(iterStart),
+				)
+			}
 			r.appendIterationHistory(&history, i+1, action, reasoning, "", "")
 		}
 	}
