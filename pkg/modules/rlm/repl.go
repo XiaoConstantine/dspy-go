@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/sourcegraph/conc/pool"
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
 )
@@ -91,23 +92,22 @@ func (c *LLMSubClient) Query(ctx context.Context, prompt string) (QueryResponse,
 // QueryBatched implements SubLLMClient with concurrent queries.
 func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]QueryResponse, error) {
 	results := make([]QueryResponse, len(prompts))
-	var wg sync.WaitGroup
+	p := pool.New().WithErrors().WithContext(ctx)
 
 	for i, prompt := range prompts {
-		wg.Add(1)
-		go func(idx int, p string) {
-			defer wg.Done()
-			result, err := c.Query(ctx, p)
+		i, prompt := i, prompt
+		p.Go(func(ctx context.Context) error {
+			result, err := c.Query(ctx, prompt)
 			if err != nil {
-				results[idx] = QueryResponse{Response: fmt.Sprintf("Error: %v", err)}
-			} else {
-				results[idx] = result
+				results[i] = QueryResponse{Response: fmt.Sprintf("Error: %v", err)}
+				return err
 			}
-		}(i, prompt)
+			results[i] = result
+			return nil
+		})
 	}
 
-	wg.Wait()
-	return results, nil
+	return results, p.Wait()
 }
 
 // YaegiREPL is a Yaegi-based Go interpreter with RLM capabilities.
@@ -121,6 +121,25 @@ type YaegiREPL struct {
 	llmCalls  []LLMCall
 }
 
+// safeStdlibSymbols returns a sandboxed subset of stdlib symbols.
+// Excludes dangerous packages: os, os/exec, net, syscall, unsafe, plugin, runtime.
+func safeStdlibSymbols() interp.Exports {
+	return interp.Exports{
+		"fmt/fmt":               stdlib.Symbols["fmt/fmt"],
+		"strings/strings":       stdlib.Symbols["strings/strings"],
+		"strconv/strconv":       stdlib.Symbols["strconv/strconv"],
+		"regexp/regexp":         stdlib.Symbols["regexp/regexp"],
+		"math/math":             stdlib.Symbols["math/math"],
+		"sort/sort":             stdlib.Symbols["sort/sort"],
+		"encoding/json/json":    stdlib.Symbols["encoding/json/json"],
+		"encoding/base64/base64": stdlib.Symbols["encoding/base64/base64"],
+		"bytes/bytes":           stdlib.Symbols["bytes/bytes"],
+		"unicode/unicode":       stdlib.Symbols["unicode/unicode"],
+		"unicode/utf8/utf8":     stdlib.Symbols["unicode/utf8/utf8"],
+		"time/time":             stdlib.Symbols["time/time"],
+	}
+}
+
 // NewYaegiREPL creates a new YaegiREPL instance.
 func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 	stdout := new(bytes.Buffer)
@@ -130,7 +149,7 @@ func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 		Stdout: stdout,
 		Stderr: stderr,
 	})
-	if err := i.Use(stdlib.Symbols); err != nil {
+	if err := i.Use(safeStdlibSymbols()); err != nil {
 		panic(fmt.Sprintf("failed to load stdlib: %v", err))
 	}
 
@@ -340,7 +359,7 @@ func (r *YaegiREPL) Reset() error {
 		Stdout: r.stdout,
 		Stderr: r.stderr,
 	})
-	if err := i.Use(stdlib.Symbols); err != nil {
+	if err := i.Use(safeStdlibSymbols()); err != nil {
 		return fmt.Errorf("failed to load stdlib: %w", err)
 	}
 	r.interp = i
