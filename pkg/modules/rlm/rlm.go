@@ -387,12 +387,12 @@ func (r *RLM) trackTokenUsage(ctx context.Context) {
 }
 
 func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, action, reasoning, code, output string) {
-	history.WriteString(fmt.Sprintf("\n--- Iteration %d ---\n", iteration))
-	history.WriteString(fmt.Sprintf("Action: %s\n", action))
-	history.WriteString(fmt.Sprintf("Reasoning: %s\n", reasoning))
+	fmt.Fprintf(history, "\n--- Iteration %d ---\n", iteration)
+	fmt.Fprintf(history, "Action: %s\n", action)
+	fmt.Fprintf(history, "Reasoning: %s\n", reasoning)
 	if code != "" {
-		history.WriteString(fmt.Sprintf("Code:\n```go\n%s\n```\n", code))
-		history.WriteString(fmt.Sprintf("Output:\n%s\n", truncate(output, truncateLenLong)))
+		fmt.Fprintf(history, "Code:\n```go\n%s\n```\n", code)
+		fmt.Fprintf(history, "Output:\n%s\n", truncate(output, truncateLenLong))
 	}
 }
 
