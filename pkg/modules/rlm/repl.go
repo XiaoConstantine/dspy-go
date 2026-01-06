@@ -111,6 +111,14 @@ func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]Qu
 }
 
 // YaegiREPL is a Yaegi-based Go interpreter with RLM capabilities.
+//
+// SECURITY NOTE: The interpreter is sandboxed by restricting imports to a safe
+// subset of the standard library (no os, net, syscall, etc.). However, it does
+// NOT protect against resource exhaustion attacks. LLM-generated code could
+// potentially allocate large amounts of memory or create infinite loops that
+// exceed the execution timeout. If running untrusted code in production, consider
+// additional OS-level resource limits (e.g., cgroups, containers) or running
+// the interpreter in a separate process with strict memory limits.
 type YaegiREPL struct {
 	interp    *interp.Interpreter
 	stdout    *bytes.Buffer
@@ -141,7 +149,8 @@ func safeStdlibSymbols() interp.Exports {
 }
 
 // NewYaegiREPL creates a new YaegiREPL instance.
-func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
+// Returns an error if initialization fails (e.g., stdlib loading or builtin injection).
+func NewYaegiREPL(client SubLLMClient) (*YaegiREPL, error) {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 
@@ -150,7 +159,7 @@ func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 		Stderr: stderr,
 	})
 	if err := i.Use(safeStdlibSymbols()); err != nil {
-		panic(fmt.Sprintf("failed to load stdlib: %v", err))
+		return nil, fmt.Errorf("failed to load stdlib: %w", err)
 	}
 
 	r := &YaegiREPL{
@@ -161,10 +170,10 @@ func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 		ctx:       context.Background(),
 	}
 	if err := r.injectBuiltins(); err != nil {
-		panic(fmt.Sprintf("failed to inject builtins: %v", err))
+		return nil, fmt.Errorf("failed to inject builtins: %w", err)
 	}
 
-	return r
+	return r, nil
 }
 
 func (r *YaegiREPL) injectBuiltins() error {
@@ -371,10 +380,15 @@ func (r *YaegiREPL) Reset() error {
 }
 
 // GetLLMCalls returns and clears the recorded LLM calls.
+// Returns a copy of the calls slice to prevent external modification.
 func (r *YaegiREPL) GetLLMCalls() []LLMCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	calls := r.llmCalls
+	if len(r.llmCalls) == 0 {
+		return nil
+	}
+	calls := make([]LLMCall, len(r.llmCalls))
+	copy(calls, r.llmCalls)
 	r.llmCalls = nil
 	return calls
 }

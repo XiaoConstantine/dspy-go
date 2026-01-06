@@ -163,7 +163,10 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 	}
 
 	// Create REPL environment
-	replEnv := NewYaegiREPL(r.subLLMClient)
+	replEnv, err := NewYaegiREPL(r.subLLMClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create REPL: %w", err)
+	}
 
 	// Load context into REPL
 	if err := replEnv.LoadContext(contextPayload); err != nil {
