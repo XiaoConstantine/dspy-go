@@ -31,9 +31,12 @@ func DefaultConfig() Config {
 type Option func(*Config)
 
 // WithMaxIterations sets the maximum number of iterations.
+// Values <= 0 are ignored and the default is used.
 func WithMaxIterations(n int) Option {
 	return func(c *Config) {
-		c.MaxIterations = n
+		if n > 0 {
+			c.MaxIterations = n
+		}
 	}
 }
 

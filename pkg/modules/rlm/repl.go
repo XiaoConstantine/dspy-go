@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -113,6 +114,8 @@ func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]Qu
 	return results, p.Wait()
 }
 
+var errStdlibLoad = errors.New("failed to load stdlib")
+
 // YaegiREPL is a Yaegi-based Go interpreter with RLM capabilities.
 //
 // SECURITY NOTE: The interpreter is sandboxed by restricting imports to a safe
@@ -162,7 +165,7 @@ func NewYaegiREPL(client SubLLMClient) (*YaegiREPL, error) {
 		Stderr: stderr,
 	})
 	if err := i.Use(safeStdlibSymbols()); err != nil {
-		return nil, fmt.Errorf("failed to load stdlib: %w", err)
+		return nil, fmt.Errorf("%w: %v", errStdlibLoad, err)
 	}
 
 	r := &YaegiREPL{
@@ -210,16 +213,7 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 		response = fmt.Sprintf("Error: %v", err)
 	}
 
-	r.mu.Lock()
-	r.llmCalls = append(r.llmCalls, LLMCall{
-		Prompt:           prompt,
-		Response:         response,
-		Duration:         duration,
-		PromptTokens:     result.PromptTokens,
-		CompletionTokens: result.CompletionTokens,
-	})
-	r.mu.Unlock()
-
+	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
 	return response
 }
 
@@ -233,38 +227,20 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
 
-	// If a batch-level error occurs (e.g., context cancellation),
-	// the results slice might be incomplete. Return consistent error
-	// messages for all prompts to avoid partial results.
 	if err != nil {
 		responses := make([]string, len(prompts))
 		errMsg := fmt.Sprintf("Error: %v", err)
-		r.mu.Lock()
-		defer r.mu.Unlock()
 		for i, prompt := range prompts {
 			responses[i] = errMsg
-			r.llmCalls = append(r.llmCalls, LLMCall{
-				Prompt:   prompt,
-				Response: errMsg,
-				Duration: avgDuration,
-			})
+			r.recordLLMCall(prompt, errMsg, avgDuration, 0, 0)
 		}
 		return responses
 	}
 
 	responses := make([]string, len(results))
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	for i, res := range results {
 		responses[i] = res.Response
-		r.llmCalls = append(r.llmCalls, LLMCall{
-			Prompt:           prompts[i],
-			Response:         res.Response,
-			Duration:         avgDuration,
-			PromptTokens:     res.PromptTokens,
-			CompletionTokens: res.CompletionTokens,
-		})
+		r.recordLLMCall(prompts[i], res.Response, avgDuration, res.PromptTokens, res.CompletionTokens)
 	}
 	return responses
 }
@@ -376,11 +352,23 @@ func (r *YaegiREPL) Reset() error {
 		Stderr: r.stderr,
 	})
 	if err := i.Use(safeStdlibSymbols()); err != nil {
-		return fmt.Errorf("failed to load stdlib: %w", err)
+		return fmt.Errorf("%w: %v", errStdlibLoad, err)
 	}
 	r.interp = i
 
 	return r.injectBuiltins()
+}
+
+func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duration, promptTokens, completionTokens int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.llmCalls = append(r.llmCalls, LLMCall{
+		Prompt:           prompt,
+		Response:         response,
+		Duration:         duration,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+	})
 }
 
 // GetLLMCalls returns and clears the recorded LLM calls.

@@ -18,7 +18,7 @@ type LLMCall struct {
 
 // TokenTracker aggregates token usage across root LLM and sub-LLM calls.
 type TokenTracker struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	// Root LLM usage (orchestration)
 	rootPromptTokens     int
@@ -69,8 +69,8 @@ func (t *TokenTracker) AddSubCalls(calls []LLMCall) {
 
 // GetTotalUsage returns the total aggregated token usage.
 func (t *TokenTracker) GetTotalUsage() core.TokenUsage {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	totalPrompt := t.rootPromptTokens + t.subPromptTokens
 	totalCompletion := t.rootCompletionTokens + t.subCompletionTokens
@@ -84,8 +84,8 @@ func (t *TokenTracker) GetTotalUsage() core.TokenUsage {
 
 // GetRootUsage returns token usage from root LLM calls only.
 func (t *TokenTracker) GetRootUsage() core.TokenUsage {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	return core.TokenUsage{
 		PromptTokens:     t.rootPromptTokens,
@@ -96,8 +96,8 @@ func (t *TokenTracker) GetRootUsage() core.TokenUsage {
 
 // GetSubUsage returns token usage from sub-LLM calls only.
 func (t *TokenTracker) GetSubUsage() core.TokenUsage {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	return core.TokenUsage{
 		PromptTokens:     t.subPromptTokens,
@@ -108,8 +108,8 @@ func (t *TokenTracker) GetSubUsage() core.TokenUsage {
 
 // GetSubCalls returns a copy of all sub-LLM calls.
 func (t *TokenTracker) GetSubCalls() []LLMCall {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	calls := make([]LLMCall, len(t.subCalls))
 	copy(calls, t.subCalls)

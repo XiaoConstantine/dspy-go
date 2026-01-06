@@ -3,7 +3,6 @@ package rlm
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -498,13 +497,9 @@ func TestContextMetadata(t *testing.T) {
 
 // TestTruncate tests the truncate helper functions.
 func TestTruncate(t *testing.T) {
-	// Test truncate
 	assert.Equal(t, "hello", truncate("hello", 10))
 	assert.Equal(t, "hel...", truncate("hello world", 3))
-
-	// Test truncateString
-	assert.Equal(t, "hello", truncateString("hello", 10))
-	assert.True(t, strings.Contains(truncateString("hello world", 5), "truncated"))
+	assert.Equal(t, "hello...", truncate("hello world", 5))
 }
 
 // TestStripQuotes tests the quote stripping helper.

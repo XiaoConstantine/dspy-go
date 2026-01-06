@@ -2,6 +2,7 @@ package rlm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,17 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
+)
+
+const (
+	truncateLenShort  = 100
+	truncateLenMedium = 200
+	truncateLenLong   = 5000
+)
+
+var (
+	ErrMissingContext = errors.New("missing required input: context")
+	ErrMissingQuery   = errors.New("missing or invalid required input: query")
 )
 
 // CodeBlock represents an extracted and executed code block.
@@ -108,15 +120,14 @@ func (r *RLM) Process(ctx context.Context, inputs map[string]any, opts ...core.O
 	defer core.EndSpan(ctx)
 	span.WithAnnotation("inputs", inputs)
 
-	// Extract context and query from inputs
 	contextPayload, ok := inputs["context"]
 	if !ok {
-		return nil, fmt.Errorf("missing required input: context")
+		return nil, ErrMissingContext
 	}
 
 	query, ok := inputs["query"].(string)
 	if !ok {
-		return nil, fmt.Errorf("missing or invalid required input: query")
+		return nil, ErrMissingQuery
 	}
 
 	logger.Debug(ctx, "Starting RLM completion with query: %s", query)
@@ -208,16 +219,10 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		answer := extractStringOutput(outputs, "answer")
 		reasoning := extractStringOutput(outputs, "reasoning")
 
-		// Track token usage from iteration module
-		if state := core.GetExecutionState(ctx); state != nil {
-			usage := state.GetTokenUsage()
-			if usage != nil {
-				r.tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
-			}
-		}
+		r.trackTokenUsage(ctx)
 
 		if r.config.Verbose {
-			logger.Debug(ctx, "[RLM] Action: %s, Reasoning: %s", action, truncate(reasoning, 100))
+			logger.Debug(ctx, "[RLM] Action: %s, Reasoning: %s", action, truncate(reasoning, truncateLenShort))
 		}
 
 		// Handle the action
@@ -253,37 +258,30 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			}
 		}
 
-		// Execute code if provided (for explore, query, compute actions)
 		if code != "" {
 			if r.config.Verbose {
-				logger.Debug(ctx, "[RLM] Executing code:\n%s", truncate(code, 200))
+				logger.Debug(ctx, "[RLM] Executing code:\n%s", truncate(code, truncateLenMedium))
 			}
 
-			result, _ := replEnv.Execute(ctx, code)
+			result, execErr := replEnv.Execute(ctx, code)
+			if execErr != nil {
+				logger.Warn(ctx, "[RLM] Code execution error: %v", execErr)
+			}
 
 			if r.config.Verbose && result.Stdout != "" {
-				logger.Debug(ctx, "[RLM] Output: %s", truncate(result.Stdout, 200))
+				logger.Debug(ctx, "[RLM] Output: %s", truncate(result.Stdout, truncateLenMedium))
 			}
 			if r.config.Verbose && result.Stderr != "" {
-				logger.Debug(ctx, "[RLM] Stderr: %s", truncate(result.Stderr, 200))
+				logger.Debug(ctx, "[RLM] Stderr: %s", truncate(result.Stderr, truncateLenMedium))
 			}
 
-			// Get LLM calls made during code execution and track tokens
 			for _, call := range replEnv.GetLLMCalls() {
 				r.tokenTracker.AddSubCall(call)
 			}
 
-			// Append to history
-			history.WriteString(fmt.Sprintf("\n--- Iteration %d ---\n", i+1))
-			history.WriteString(fmt.Sprintf("Action: %s\n", action))
-			history.WriteString(fmt.Sprintf("Reasoning: %s\n", reasoning))
-			history.WriteString(fmt.Sprintf("Code:\n```go\n%s\n```\n", code))
-			history.WriteString(fmt.Sprintf("Output:\n%s\n", truncateString(FormatExecutionResult(result), 5000)))
+			r.appendIterationHistory(&history, i+1, action, reasoning, code, FormatExecutionResult(result))
 		} else if action != "final" {
-			// No code and not final - still record the iteration
-			history.WriteString(fmt.Sprintf("\n--- Iteration %d ---\n", i+1))
-			history.WriteString(fmt.Sprintf("Action: %s\n", action))
-			history.WriteString(fmt.Sprintf("Reasoning: %s\n", reasoning))
+			r.appendIterationHistory(&history, i+1, action, reasoning, "", "")
 		}
 	}
 
@@ -306,13 +304,7 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 		return nil, fmt.Errorf("default answer: module process failed: %w", err)
 	}
 
-	// Track token usage
-	if state := core.GetExecutionState(ctx); state != nil {
-		usage := state.GetTokenUsage()
-		if usage != nil {
-			r.tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
-		}
-	}
+	r.trackTokenUsage(ctx)
 
 	// Extract the answer
 	answer := extractStringOutput(outputs, "answer")
@@ -379,7 +371,6 @@ func formatREPLState(locals map[string]any) string {
 	return strings.Join(parts, "\n")
 }
 
-// truncate shortens a string for logging.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -387,12 +378,22 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// truncateString shortens a string with a suffix indicator.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func (r *RLM) trackTokenUsage(ctx context.Context) {
+	if state := core.GetExecutionState(ctx); state != nil {
+		if usage := state.GetTokenUsage(); usage != nil {
+			r.tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+		}
 	}
-	return s[:maxLen] + "\n... (truncated)"
+}
+
+func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, action, reasoning, code, output string) {
+	history.WriteString(fmt.Sprintf("\n--- Iteration %d ---\n", iteration))
+	history.WriteString(fmt.Sprintf("Action: %s\n", action))
+	history.WriteString(fmt.Sprintf("Reasoning: %s\n", reasoning))
+	if code != "" {
+		history.WriteString(fmt.Sprintf("Code:\n```go\n%s\n```\n", code))
+		history.WriteString(fmt.Sprintf("Output:\n%s\n", truncate(output, truncateLenLong)))
+	}
 }
 
 // ContextMetadata returns a string describing the context.
