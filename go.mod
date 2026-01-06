@@ -11,6 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.11.1
+	github.com/traefik/yaegi v0.16.1
 	golang.org/x/text v0.32.0
 	gopkg.in/yaml.v3 v3.0.1
 )
