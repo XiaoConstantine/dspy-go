@@ -324,6 +324,50 @@ for i, res := range results {
 }
 ```
 
+#### RLM (Recursive Language Model)
+
+Enables LLMs to explore large contexts programmatically through a sandboxed Go REPL, making iterative queries to sub-LLMs until a final answer is reached. Ideal for analyzing contexts that exceed token limits.
+
+```go
+import "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
+
+// Create RLM module from any LLM
+rlmModule := rlm.NewFromLLM(
+    llm,
+    rlm.WithMaxIterations(10),    // Maximum exploration iterations
+    rlm.WithVerbose(true),        // Enable detailed logging
+    rlm.WithTimeout(5*time.Minute), // Overall timeout
+)
+
+// Large context (e.g., 100K+ characters)
+document := loadLargeDocument()
+query := "What percentage of reviews are positive?"
+
+// Complete returns structured results with token tracking
+result, err := rlmModule.Complete(ctx, document, query)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Answer: %s\n", result.Response)
+fmt.Printf("Iterations: %d\n", result.Iterations)
+fmt.Printf("Total Tokens: %d\n", result.Usage.TotalTokens)
+
+// Access detailed token tracking (root LLM vs sub-LLM calls)
+tracker := rlmModule.GetTokenTracker()
+fmt.Printf("Root LLM tokens: %d\n", tracker.GetRootUsage().TotalTokens)
+fmt.Printf("Sub-LLM calls: %d\n", len(tracker.GetSubCalls()))
+```
+
+**Key Features:**
+- **Recursive Exploration**: LLM iteratively writes and executes Go code to explore large contexts
+- **Sandboxed REPL**: Yaegi interpreter with restricted stdlib (no os, net, syscall) for security
+- **Sub-LLM Queries**: `Query(prompt)` and `QueryBatched(prompts)` for parallel LLM calls from within code
+- **Token Tracking**: Separate tracking for root orchestration and sub-LLM calls
+- **DSPy-Native**: Uses signatures and demos for few-shot learning
+
+**When to use**: Analyzing documents too large to fit in context, complex multi-step analysis requiring programmatic exploration.
+
 ### Programs
 
 Programs combine modules into executable workflows. They define how inputs flow through the system and how outputs are produced.
@@ -1068,6 +1112,7 @@ Check the examples directory for complete implementations:
 * **[examples/smart_tool_registry](examples/smart_tool_registry)**: Intelligent tool management with Bayesian selection
 * **[examples/tool_chaining](examples/tool_chaining)**: Sequential tool execution with data transformation, conditional logic, dependency resolution, and parallel execution
 * **[examples/tool_composition](examples/tool_composition)**: Creating reusable composite tools by combining multiple tools into single units
+* **[examples/rlm](examples/rlm)**: Recursive Language Model for exploring large contexts through a Go REPL
 * [examples/agents](examples/agents): Demonstrates different agent patterns
 * [examples/hotpotqa](examples/hotpotqa): Question-answering implementation
 * [examples/gsm8k](examples/gsm8k): Math problem solving

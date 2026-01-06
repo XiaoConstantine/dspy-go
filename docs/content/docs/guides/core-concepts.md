@@ -235,6 +235,35 @@ results := result["results"].([]map[string]interface{})
 
 **When to use**: Batch processing, bulk operations, performance optimization.
 
+#### 7. RLM - Recursive Language Model
+
+Enables LLMs to programmatically explore large contexts through a sandboxed Go REPL. The LLM iteratively writes and executes code, making sub-LLM queries until it reaches a final answer.
+
+```go
+import "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
+
+// Create RLM from any LLM
+rlmModule := rlm.NewFromLLM(llm,
+    rlm.WithMaxIterations(10),
+    rlm.WithTimeout(5*time.Minute),
+)
+
+// Analyze a large document
+result, err := rlmModule.Complete(ctx, largeDocument, "What are the key findings?")
+
+// result.Response contains the answer
+// result.Iterations shows how many exploration steps were needed
+// result.Usage tracks total token consumption
+```
+
+**Key capabilities:**
+- `Query(prompt)` - Make sub-LLM calls from within REPL code
+- `QueryBatched(prompts)` - Parallel sub-LLM calls for efficiency
+- Sandboxed execution (no os, net, syscall access)
+- Separate token tracking for root and sub-LLM calls
+
+**When to use**: Documents exceeding context limits, complex multi-step analysis, programmatic data exploration.
+
 ### Module Composition
 
 **Modules can be composed** to create sophisticated workflows:
@@ -457,6 +486,7 @@ func main() {
 | Quality-Critical | `Refine` |
 | Batch Processing | `Parallel` |
 | Complex Decisions | `MultiChainComparison` |
+| Large Context Analysis | `RLM` |
 
 ### Program Structure
 
