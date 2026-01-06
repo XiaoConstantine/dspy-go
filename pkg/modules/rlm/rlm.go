@@ -292,7 +292,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 }
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
-func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv *YaegiREPL, query string, history string, start time.Time) (*CompletionResult, error) {
+func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time) (*CompletionResult, error) {
 	// Prepare inputs asking for a final answer
 	iterInputs := map[string]any{
 		"context_info": replEnv.ContextInfo(),

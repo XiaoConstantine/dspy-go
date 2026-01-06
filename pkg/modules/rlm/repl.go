@@ -34,6 +34,9 @@ type REPLEnvironment interface {
 
 	// ContextInfo returns metadata about the loaded context.
 	ContextInfo() string
+
+	// GetLocals extracts commonly used variables from the interpreter.
+	GetLocals() map[string]any
 }
 
 // ExecutionResult represents the result of executing code in the REPL.
