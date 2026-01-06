@@ -421,6 +421,7 @@ func TestEvaluateCandidate_LLMError(t *testing.T) {
 	mockLLM := &MockLLM{}
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{}, fmt.Errorf("LLM error"))
 	mockLLM.On("GetModelName").Return("test-model")
+	mockLLM.On("ModelID").Return("test-model")
 	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
 	predictor.SetLLM(mockLLM)
 

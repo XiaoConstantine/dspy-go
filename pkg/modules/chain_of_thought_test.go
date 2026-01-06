@@ -66,6 +66,7 @@ func TestChainOfThought_WithLLMError(t *testing.T) {
 	// Set up the expected behavior with an error
 	expectedErr := errors.New(errors.LLMGenerationFailed, "LLM service unavailable")
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return((*core.LLMResponse)(nil), expectedErr)
+	mockLLM.On("ModelID").Return("test-model")
 
 	// Create a ChainOfThought module
 	signature := core.NewSignature(

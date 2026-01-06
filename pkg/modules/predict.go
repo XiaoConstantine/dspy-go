@@ -218,7 +218,7 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 				errors.Fields{
 					"module":         "Predict",
 					"content_blocks": len(content),
-					"model":          p.LLM,
+					"model":          p.LLM.ModelID(),
 				})
 		}
 
@@ -254,7 +254,7 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 			errors.Fields{
 				"module": "Predict",
 				"prompt": prompt,
-				"model":  p.LLM,
+				"model":  p.LLM.ModelID(),
 			})
 	}
 	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
@@ -347,7 +347,7 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 				errors.Fields{
 					"module":         "Predict",
 					"content_blocks": len(content),
-					"model":          p.LLM,
+					"model":          p.LLM.ModelID(),
 				})
 		}
 
@@ -392,7 +392,7 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 			errors.Fields{
 				"module": "Predict",
 				"prompt": prompt,
-				"model":  p.LLM,
+				"model":  p.LLM.ModelID(),
 			})
 	}
 	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
@@ -506,7 +506,7 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 			errors.Fields{
 				"module": "Predict",
 				"prompt": prompt,
-				"model":  p.LLM,
+				"model":  p.LLM.ModelID(),
 			})
 	}
 

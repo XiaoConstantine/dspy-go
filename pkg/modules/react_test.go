@@ -861,6 +861,7 @@ action:
 	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(
 		nil, fmt.Errorf("LLM service unavailable"),
 	).Once()
+	mockLLM.On("ModelID").Return("test-model")
 
 	testTool := testutil.NewMockTool("test_tool")
 	testTool.On("Name").Return("test_tool")

@@ -191,6 +191,7 @@ func TestRefineAllAttemptsFail(t *testing.T) {
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
 		(*core.LLMResponse)(nil), fmt.Errorf("mock LLM error"),
 	)
+	mockLLM.On("ModelID").Return("test-model")
 
 	predict := NewPredict(signature)
 	predict.SetLLM(mockLLM)

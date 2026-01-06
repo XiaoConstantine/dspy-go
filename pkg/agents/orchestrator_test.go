@@ -260,6 +260,7 @@ func TestFlexibleOrchestrator(t *testing.T) {
 				setupMocks: func(mockLLM *testutil.MockLLM, mockParser *MockTaskParser, mockPlanner *MockPlanCreator, mockProcessor *MockTaskProcessor) {
 					mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
 						Return(nil, errors.New("analyzer error"))
+					mockLLM.On("ModelID").Return("test-model")
 				},
 				expectError:   true,
 				errorContains: "analyzer error",
