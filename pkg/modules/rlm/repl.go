@@ -217,40 +217,24 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	}
 
 	start := time.Now()
-	results, err := r.llmClient.QueryBatched(r.ctx, prompts)
+	results, _ := r.llmClient.QueryBatched(r.ctx, prompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
 
-	if err != nil {
-		errResults := make([]string, len(prompts))
-		for i := range errResults {
-			errResults[i] = fmt.Sprintf("Error: %v", err)
-		}
-		r.mu.Lock()
-		for i, p := range prompts {
-			r.llmCalls = append(r.llmCalls, LLMCall{
-				Prompt:   p,
-				Response: errResults[i],
-				Duration: avgDuration,
-			})
-		}
-		r.mu.Unlock()
-		return errResults
-	}
-
 	responses := make([]string, len(results))
 	r.mu.Lock()
-	for i, p := range prompts {
-		responses[i] = results[i].Response
+	defer r.mu.Unlock()
+
+	for i, res := range results {
+		responses[i] = res.Response
 		r.llmCalls = append(r.llmCalls, LLMCall{
-			Prompt:           p,
-			Response:         results[i].Response,
+			Prompt:           prompts[i],
+			Response:         res.Response,
 			Duration:         avgDuration,
-			PromptTokens:     results[i].PromptTokens,
-			CompletionTokens: results[i].CompletionTokens,
+			PromptTokens:     res.PromptTokens,
+			CompletionTokens: res.CompletionTokens,
 		})
 	}
-	r.mu.Unlock()
 	return responses
 }
 
