@@ -184,15 +184,16 @@ func runBaseline(ctx context.Context, llm core.LLM, task OolongTask) (string, ti
 	start := time.Now()
 
 	// Create a simple signature for direct Q&A
+	// Use core.NewField to ensure proper Prefix is set for text parsing
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "context", Description: "The context to analyze"}},
-			{Field: core.Field{Name: "question", Description: "The question to answer"}},
+			{Field: core.NewField("context", core.WithDescription("The context to analyze"))},
+			{Field: core.NewField("question", core.WithDescription("The question to answer"))},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "answer", Description: "The answer to the question"}},
+			{Field: core.NewField("answer", core.WithDescription("The answer to the question"))},
 		},
-	).WithInstruction("Answer the question based on the provided context. Be precise and concise.")
+	).WithInstruction("Answer the question based on the provided context. Be precise and concise. Provide only the numerical answer.")
 
 	predict := modules.NewPredict(signature)
 	predict.SetLLM(llm)
@@ -209,17 +210,14 @@ func runBaseline(ctx context.Context, llm core.LLM, task OolongTask) (string, ti
 		"question": task.Question,
 	})
 
-	if err != nil {
-		return "", time.Since(start), err
+	fmt.Printf("  [DEBUG] Baseline err: %v\n", err)
+	fmt.Printf("  [DEBUG] Baseline result keys: %d\n", len(result))
+	for k, v := range result {
+		fmt.Printf("  [DEBUG] result[%q] = %q\n", k, truncate(fmt.Sprintf("%v", v), 100))
 	}
 
-	// Debug: print all keys in result
-	if len(result) == 0 {
-		fmt.Printf("  [DEBUG] Baseline result is empty\n")
-	} else {
-		for k, v := range result {
-			fmt.Printf("  [DEBUG] Baseline result[%q] = %q\n", k, truncate(fmt.Sprintf("%v", v), 100))
-		}
+	if err != nil {
+		return "", time.Since(start), err
 	}
 
 	answer, _ := result["answer"].(string)
