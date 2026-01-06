@@ -232,7 +232,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 						if err == nil {
 							finalAnswer = resolved
 						} else {
-							finalAnswer = final.Content
+							finalAnswer = fmt.Sprintf("Error: failed to resolve FINAL_VAR(%s): %v", final.Content, err)
 						}
 					} else {
 						finalAnswer = final.Content

@@ -217,9 +217,28 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	}
 
 	start := time.Now()
-	results, _ := r.llmClient.QueryBatched(r.ctx, prompts)
+	results, err := r.llmClient.QueryBatched(r.ctx, prompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
+
+	// If a batch-level error occurs (e.g., context cancellation),
+	// the results slice might be incomplete. Return consistent error
+	// messages for all prompts to avoid partial results.
+	if err != nil {
+		responses := make([]string, len(prompts))
+		errMsg := fmt.Sprintf("Error: %v", err)
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for i, prompt := range prompts {
+			responses[i] = errMsg
+			r.llmCalls = append(r.llmCalls, LLMCall{
+				Prompt:   prompt,
+				Response: errMsg,
+				Duration: avgDuration,
+			})
+		}
+		return responses
+	}
 
 	responses := make([]string, len(results))
 	r.mu.Lock()
