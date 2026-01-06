@@ -51,9 +51,14 @@ func FindCodeBlocks(text string) []string {
 
 // FindFinalAnswer detects FINAL() or FINAL_VAR() signals in the LLM response.
 // Returns nil if no final answer is found.
+// Note: Code blocks are filtered out first to avoid false positives when
+// FINAL appears in code examples.
 func FindFinalAnswer(text string) *FinalAnswer {
+	// Remove code blocks first to avoid false positives from FINAL in examples
+	textWithoutCode := goCodeBlockRe.ReplaceAllString(text, "")
+
 	// Check FINAL_VAR first (more specific pattern)
-	if match := finalVarRe.FindStringSubmatch(text); match != nil {
+	if match := finalVarRe.FindStringSubmatch(textWithoutCode); match != nil {
 		return &FinalAnswer{
 			Type:    FinalTypeVariable,
 			Content: strings.TrimSpace(match[1]),
@@ -61,7 +66,7 @@ func FindFinalAnswer(text string) *FinalAnswer {
 	}
 
 	// Check FINAL
-	if match := finalRe.FindStringSubmatch(text); match != nil {
+	if match := finalRe.FindStringSubmatch(textWithoutCode); match != nil {
 		content := strings.TrimSpace(match[1])
 		content = stripQuotes(content)
 		return &FinalAnswer{

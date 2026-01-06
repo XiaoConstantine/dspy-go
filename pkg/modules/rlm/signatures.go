@@ -69,6 +69,10 @@ func IterationSignature() core.Signature {
 - QueryBatched(prompts []string) []string: Query multiple prompts in parallel
 - Standard Go: fmt, strings, regexp, strconv
 
+Sub-LLM Capacity: Sub-LLMs can handle ~500K characters. For efficiency, batch ~200K characters per Query call.
+IMPORTANT: REPL outputs are truncated. Use Query() to analyze full content rather than printing large outputs.
+Make sure to explicitly look through the entire context before answering.
+
 Actions:
 - explore: Write code to examine the context (len, preview, structure)
 - query: Write code to call Query/QueryBatched for analysis
@@ -197,6 +201,53 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 				"action":    "final",
 				"code":      "",
 				"answer":    "ALPHA-7892",
+			},
+		},
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 800000 chars",
+				"query":        "Count all error messages in the logs",
+				"history":      "",
+				"repl_state":   "context: <loaded>",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "Context is 800K chars. Sub-LLMs handle ~500K, so I'll use regex to filter first, then batch ~200K per query for efficiency.",
+				"action":    "explore",
+				"code": `errorRe := regexp.MustCompile("(?i)error|exception|failed")
+matches := errorRe.FindAllString(context, -1)
+fmt.Println("Total potential errors:", len(matches))
+fmt.Println("Sample:", context[:1000])`,
+				"answer": "",
+			},
+		},
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 1200000 chars",
+				"query":        "Summarize the main themes in this document collection",
+				"history":      "Explored: 1.2M chars, appears to be multiple documents separated by ---",
+				"repl_state":   "context: <loaded>",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "At 1.2M chars, I need to chunk strategically. I'll split by document separator and batch ~200K chars per Query call for efficiency.",
+				"action":    "query",
+				"code": `docs := strings.Split(context, "---")
+fmt.Println("Found", len(docs), "documents")
+
+var prompts []string
+var batch string
+for _, doc := range docs {
+    if len(batch)+len(doc) > 200000 && batch != "" {
+        prompts = append(prompts, "Identify main themes in these documents:\n"+batch)
+        batch = ""
+    }
+    batch += doc + "\n---\n"
+}
+if batch != "" {
+    prompts = append(prompts, "Identify main themes in these documents:\n"+batch)
+}
+results := QueryBatched(prompts)
+for i, r := range results { fmt.Printf("Batch %d themes: %s\n", i, r) }`,
+				"answer": "",
 			},
 		},
 	}
