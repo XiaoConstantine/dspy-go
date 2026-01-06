@@ -125,7 +125,7 @@ func TestFindCodeBlocks(t *testing.T) {
 		{
 			name:     "no blocks",
 			input:    "Just plain text without code blocks",
-			expected: nil,
+			expected: []string{},
 		},
 		{
 			name:     "empty block",

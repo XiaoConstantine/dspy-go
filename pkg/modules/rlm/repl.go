@@ -318,23 +318,24 @@ func (r *YaegiREPL) SetContext(ctx context.Context) {
 
 // Execute runs Go code in the interpreter. Execution errors are captured in
 // stderr rather than returned, allowing the caller to inspect all output.
+// The mutex is held for the entire duration to ensure thread safety, as the
+// yaegi interpreter is not safe for concurrent use.
 func (r *YaegiREPL) Execute(ctx context.Context, code string) (*ExecutionResult, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.ctx = ctx
 	r.stdout.Reset()
 	r.stderr.Reset()
-	r.mu.Unlock()
 
 	start := time.Now()
 	_, err := r.interp.Eval(code)
 
-	r.mu.Lock()
 	result := &ExecutionResult{
 		Stdout:   r.stdout.String(),
 		Stderr:   r.stderr.String(),
 		Duration: time.Since(start),
 	}
-	r.mu.Unlock()
 
 	if err != nil {
 		if result.Stderr != "" {

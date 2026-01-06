@@ -34,12 +34,9 @@ type FinalAnswer struct {
 }
 
 // FindCodeBlocks extracts all ```go or ```repl code blocks from the LLM response.
+// Returns an empty slice if no code blocks are found.
 func FindCodeBlocks(text string) []string {
 	matches := goCodeBlockRe.FindAllStringSubmatch(text, -1)
-	if matches == nil {
-		return nil
-	}
-
 	results := make([]string, 0, len(matches))
 	for _, match := range matches {
 		if len(match) > 1 {
