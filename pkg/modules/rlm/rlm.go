@@ -262,7 +262,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			// If action is final, use the answer field
 			finalAnswer := answer
 			if finalAnswer == "" {
-				// Fallback: try to find FINAL() in the raw reasoning
+				// Fallback 1: try to find FINAL() in the raw reasoning
 				if final := FindFinalAnswer(reasoning); final != nil {
 					if final.Type == FinalTypeVariable {
 						resolved, err := replEnv.GetVariable(final.Content)
@@ -273,6 +273,16 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 						}
 					} else {
 						finalAnswer = final.Content
+					}
+				}
+			}
+
+			// Fallback 2: when action is explicitly "final", check common REPL variables
+			if finalAnswer == "" && action == "final" {
+				for _, varName := range []string{"result", "answer", "final_answer", "output", "total", "count"} {
+					if val, err := replEnv.GetVariable(varName); err == nil && val != "" {
+						finalAnswer = val
+						break
 					}
 				}
 			}
@@ -388,8 +398,20 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 
 	// Extract the answer
 	answer := extractStringOutput(outputs, "answer")
+
+	// Fallback 1: check REPL state for computed values before using reasoning
 	if answer == "" {
-		// Fallback to reasoning if no answer field
+		locals := replEnv.GetLocals()
+		for _, key := range []string{"result", "answer", "final_answer", "output", "total", "count"} {
+			if val, ok := locals[key]; ok && val != "" {
+				answer = fmt.Sprintf("%v", val)
+				break
+			}
+		}
+	}
+
+	// Fallback 2: use reasoning as last resort
+	if answer == "" {
 		answer = extractStringOutput(outputs, "reasoning")
 	}
 

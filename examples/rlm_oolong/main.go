@@ -210,12 +210,6 @@ func runBaseline(ctx context.Context, llm core.LLM, task OolongTask) (string, ti
 		"question": task.Question,
 	})
 
-	fmt.Printf("  [DEBUG] Baseline err: %v\n", err)
-	fmt.Printf("  [DEBUG] Baseline result keys: %d\n", len(result))
-	for k, v := range result {
-		fmt.Printf("  [DEBUG] result[%q] = %q\n", k, truncate(fmt.Sprintf("%v", v), 100))
-	}
-
 	if err != nil {
 		return "", time.Since(start), err
 	}

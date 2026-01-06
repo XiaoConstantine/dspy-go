@@ -296,7 +296,8 @@ func (r *YaegiREPL) SetContext(ctx context.Context) {
 // stderr rather than returned, allowing the caller to inspect all output.
 // The mutex is held for the entire duration to ensure thread safety, as the
 // yaegi interpreter is not safe for concurrent use.
-func (r *YaegiREPL) Execute(ctx context.Context, code string) (*ExecutionResult, error) {
+// Panics from the Yaegi interpreter are recovered and reported as stderr errors.
+func (r *YaegiREPL) Execute(ctx context.Context, code string) (result *ExecutionResult, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -305,19 +306,32 @@ func (r *YaegiREPL) Execute(ctx context.Context, code string) (*ExecutionResult,
 	r.stderr.Reset()
 
 	start := time.Now()
-	_, err := r.interp.Eval(code)
 
-	result := &ExecutionResult{
+	// Recover from Yaegi interpreter panics (e.g., nil pointer dereference on certain code patterns)
+	defer func() {
+		if rec := recover(); rec != nil {
+			result = &ExecutionResult{
+				Stdout:   r.stdout.String(),
+				Stderr:   fmt.Sprintf("interpreter panic: %v", rec),
+				Duration: time.Since(start),
+			}
+			err = nil // Report as stderr, not error, so iteration can continue
+		}
+	}()
+
+	_, evalErr := r.interp.Eval(code)
+
+	result = &ExecutionResult{
 		Stdout:   r.stdout.String(),
 		Stderr:   r.stderr.String(),
 		Duration: time.Since(start),
 	}
 
-	if err != nil {
+	if evalErr != nil {
 		if result.Stderr != "" {
 			result.Stderr += "\n"
 		}
-		result.Stderr += err.Error()
+		result.Stderr += evalErr.Error()
 	}
 
 	return result, nil

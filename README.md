@@ -51,9 +51,10 @@ export GEMINI_API_KEY="your-api-key-here"
 ./dspy-cli try bootstrap --dataset gsm8k          # Test Bootstrap with math problems
 ./dspy-cli try mipro --dataset gsm8k --verbose    # Advanced systematic optimization
 ./dspy-cli recommend balanced                      # Get optimizer recommendations
+./dspy-cli view session.jsonl --stats             # View RLM session logs
 ```
 
-The CLI eliminates 60+ lines of boilerplate code and lets you test all optimizers (Bootstrap, MIPRO, SIMBA, GEPA, COPRO) with sample datasets instantly. **[→ Full CLI Documentation](cmd/dspy-cli/README.md)**
+The CLI eliminates 60+ lines of boilerplate code and lets you test all optimizers (Bootstrap, MIPRO, SIMBA, GEPA, COPRO) with sample datasets instantly. It also includes an interactive log viewer for analyzing RLM session logs. **[→ Full CLI Documentation](cmd/dspy-cli/README.md)**
 
 ## Programming Quick Start
 
@@ -1103,6 +1104,27 @@ Results are saved as JSON files with detailed compatibility analysis and recomme
 ```bash
 cd cmd/dspy-cli && go build -o dspy-cli
 ./dspy-cli try mipro --dataset gsm8k --max-examples 5 --verbose
+```
+
+#### RLM Log Viewer
+
+The CLI includes a powerful viewer for RLM JSONL session logs:
+
+```bash
+# View log with statistics
+./dspy-cli view session.jsonl --stats
+
+# Interactive navigation mode
+./dspy-cli view -i session.jsonl
+
+# Watch live as log is written
+./dspy-cli view -w session.jsonl
+
+# Search and filter
+./dspy-cli view -s "error" session.jsonl --errors
+
+# Export to markdown
+./dspy-cli view --export report.md session.jsonl
 ```
 
 ### 📚 Code Examples
