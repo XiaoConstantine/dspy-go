@@ -30,8 +30,7 @@ func main() {
 	// Get API key from environment
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		fmt.Println("Error: ANTHROPIC_API_KEY environment variable not set")
-		os.Exit(1)
+		logger.Fatal(ctx, "ANTHROPIC_API_KEY environment variable not set")
 	}
 
 	// Initialize the LLM factory
@@ -40,8 +39,7 @@ func main() {
 	// Create the Anthropic LLM using dspy-go's built-in LLM
 	llm, err := llms.NewAnthropicLLM(apiKey, "claude-haiku-4-5")
 	if err != nil {
-		fmt.Printf("Failed to create LLM: %v\n", err)
-		os.Exit(1)
+		logger.Fatalf(ctx, "Failed to create LLM: %v", err)
 	}
 
 	// Create a sample document with product reviews
@@ -83,8 +81,7 @@ Review 10: Average product, works fine. Rating: 3 stars
 	// Use Complete() for the RLM-specific interface
 	result, err := rlmModule.Complete(ctx, document, query)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+		logger.Fatalf(ctx, "RLM completion failed: %v", err)
 	}
 
 	fmt.Println("\n" + strings.Repeat("=", 60))

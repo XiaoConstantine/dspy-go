@@ -110,7 +110,7 @@ func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]Qu
 	return results, nil
 }
 
-// YaegiREPL represents a Yaegi-based Go interpreter with RLM capabilities.
+// YaegiREPL is a Yaegi-based Go interpreter with RLM capabilities.
 type YaegiREPL struct {
 	interp    *interp.Interpreter
 	stdout    *bytes.Buffer
@@ -118,7 +118,7 @@ type YaegiREPL struct {
 	llmClient SubLLMClient
 	ctx       context.Context
 	mu        sync.Mutex
-	llmCalls  []LLMCall // Track LLM calls made during execution
+	llmCalls  []LLMCall
 }
 
 // NewYaegiREPL creates a new YaegiREPL instance.
@@ -130,8 +130,6 @@ func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 		Stdout: stdout,
 		Stderr: stderr,
 	})
-
-	// Load standard library
 	if err := i.Use(stdlib.Symbols); err != nil {
 		panic(fmt.Sprintf("failed to load stdlib: %v", err))
 	}
@@ -143,8 +141,6 @@ func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 		llmClient: client,
 		ctx:       context.Background(),
 	}
-
-	// Inject RLM functions
 	if err := r.injectBuiltins(); err != nil {
 		panic(fmt.Sprintf("failed to inject builtins: %v", err))
 	}
@@ -152,7 +148,6 @@ func NewYaegiREPL(client SubLLMClient) *YaegiREPL {
 	return r
 }
 
-// injectBuiltins registers Query and QueryBatched functions in the interpreter.
 func (r *YaegiREPL) injectBuiltins() error {
 	symbols := interp.Exports{
 		"rlm/rlm": {
@@ -160,24 +155,20 @@ func (r *YaegiREPL) injectBuiltins() error {
 			"QueryBatched": reflect.ValueOf(r.llmQueryBatched),
 		},
 	}
-
 	if err := r.interp.Use(symbols); err != nil {
 		return fmt.Errorf("failed to inject rlm symbols: %w", err)
 	}
 
-	// Pre-import common packages and RLM functions so they're available without qualification
-	setupCode := `
+	_, err := r.interp.Eval(`
 import "fmt"
 import "strings"
 import "regexp"
 import "strconv"
 import . "rlm/rlm"
-`
-	_, err := r.interp.Eval(setupCode)
+`)
 	return err
 }
 
-// llmQuery makes a single LLM query. This is called from interpreted code.
 func (r *YaegiREPL) llmQuery(prompt string) string {
 	start := time.Now()
 	result, err := r.llmClient.Query(r.ctx, prompt)
@@ -188,7 +179,7 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 		response = fmt.Sprintf("Error: %v", err)
 	}
 
-	// Record the call with token usage
+	r.mu.Lock()
 	r.llmCalls = append(r.llmCalls, LLMCall{
 		Prompt:           prompt,
 		Response:         response,
@@ -196,23 +187,27 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 		PromptTokens:     result.PromptTokens,
 		CompletionTokens: result.CompletionTokens,
 	})
+	r.mu.Unlock()
 
 	return response
 }
 
-// llmQueryBatched makes concurrent LLM queries. This is called from interpreted code.
 func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
+	if len(prompts) == 0 {
+		return []string{}
+	}
+
 	start := time.Now()
 	results, err := r.llmClient.QueryBatched(r.ctx, prompts)
 	duration := time.Since(start)
+	avgDuration := duration / time.Duration(len(prompts))
 
 	if err != nil {
 		errResults := make([]string, len(prompts))
 		for i := range errResults {
 			errResults[i] = fmt.Sprintf("Error: %v", err)
 		}
-		// Record each as a failed call
-		avgDuration := duration / time.Duration(len(prompts))
+		r.mu.Lock()
 		for i, p := range prompts {
 			r.llmCalls = append(r.llmCalls, LLMCall{
 				Prompt:   p,
@@ -220,12 +215,12 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 				Duration: avgDuration,
 			})
 		}
+		r.mu.Unlock()
 		return errResults
 	}
 
-	// Record each successful call with token usage
 	responses := make([]string, len(results))
-	avgDuration := duration / time.Duration(len(prompts))
+	r.mu.Lock()
 	for i, p := range prompts {
 		responses[i] = results[i].Response
 		r.llmCalls = append(r.llmCalls, LLMCall{
@@ -236,6 +231,7 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 			CompletionTokens: results[i].CompletionTokens,
 		})
 	}
+	r.mu.Unlock()
 	return responses
 }
 
@@ -246,20 +242,13 @@ func (r *YaegiREPL) LoadContext(payload any) error {
 
 	switch v := payload.(type) {
 	case string:
-		// String context - inject directly
 		_, err := r.interp.Eval(`var context = ` + strconv.Quote(v))
 		return err
-
 	case map[string]any:
-		// Map context - serialize to JSON, then unmarshal in REPL
 		return r.loadStructuredContext(v, "map[string]interface{}")
-
 	case []any:
-		// Slice context - serialize to JSON, then unmarshal in REPL
 		return r.loadStructuredContext(v, "[]interface{}")
-
 	default:
-		// Try JSON marshaling as fallback
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("unsupported context type %T: %w", v, err)
@@ -268,7 +257,6 @@ func (r *YaegiREPL) LoadContext(payload any) error {
 	}
 }
 
-// loadStructuredContext handles map and slice context types.
 func (r *YaegiREPL) loadStructuredContext(v any, typeDecl string) error {
 	jsonBytes, err := json.Marshal(v)
 	if err != nil {
@@ -294,20 +282,16 @@ func (r *YaegiREPL) SetContext(ctx context.Context) {
 	r.ctx = ctx
 }
 
-// Execute runs Go code in the interpreter and returns the result.
+// Execute runs Go code in the interpreter. Execution errors are captured in
+// stderr rather than returned, allowing the caller to inspect all output.
 func (r *YaegiREPL) Execute(ctx context.Context, code string) (*ExecutionResult, error) {
 	r.mu.Lock()
-	// Set context for LLM calls
 	r.ctx = ctx
-
-	// Reset buffers
 	r.stdout.Reset()
 	r.stderr.Reset()
-	r.mu.Unlock() // Release lock before executing code (allows LLM calls to proceed)
+	r.mu.Unlock()
 
 	start := time.Now()
-
-	// Execute the code (may call llmQuery which doesn't need lock)
 	_, err := r.interp.Eval(code)
 
 	r.mu.Lock()
@@ -319,18 +303,16 @@ func (r *YaegiREPL) Execute(ctx context.Context, code string) (*ExecutionResult,
 	r.mu.Unlock()
 
 	if err != nil {
-		// Append error to stderr
 		if result.Stderr != "" {
 			result.Stderr += "\n"
 		}
 		result.Stderr += err.Error()
 	}
 
-	return result, nil // We don't return error - execution errors go to stderr
+	return result, nil
 }
 
 // GetVariable retrieves a variable value from the interpreter.
-// Used for resolving FINAL_VAR references.
 func (r *YaegiREPL) GetVariable(name string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -339,15 +321,13 @@ func (r *YaegiREPL) GetVariable(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("variable %q not found: %w", name, err)
 	}
-
 	if !v.IsValid() {
 		return "", fmt.Errorf("variable %q is invalid", name)
 	}
-
 	return fmt.Sprintf("%v", v.Interface()), nil
 }
 
-// Reset clears the interpreter state.
+// Reset clears the interpreter state and creates a fresh instance.
 func (r *YaegiREPL) Reset() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -356,16 +336,13 @@ func (r *YaegiREPL) Reset() error {
 	r.stderr.Reset()
 	r.llmCalls = nil
 
-	// Create a fresh interpreter
 	i := interp.New(interp.Options{
 		Stdout: r.stdout,
 		Stderr: r.stderr,
 	})
-
 	if err := i.Use(stdlib.Symbols); err != nil {
 		return fmt.Errorf("failed to load stdlib: %w", err)
 	}
-
 	r.interp = i
 
 	return r.injectBuiltins()
@@ -387,21 +364,17 @@ func (r *YaegiREPL) ClearLLMCalls() {
 	r.llmCalls = nil
 }
 
-// GetLocals extracts user-defined variables from the interpreter.
-// Returns a map of variable names to their values.
+// GetLocals extracts commonly used variables from the interpreter.
 func (r *YaegiREPL) GetLocals() map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	locals := make(map[string]any)
-
-	// Check for commonly used variable names in RLM code
 	varNames := []string{
 		"context", "result", "answer", "data", "output", "response",
 		"analysis", "summary", "final_answer", "count", "total",
 		"items", "records", "values", "results", "findings",
 	}
-
 	for _, name := range varNames {
 		v, err := r.interp.Eval(name)
 		if err != nil || !v.IsValid() {
@@ -409,7 +382,6 @@ func (r *YaegiREPL) GetLocals() map[string]any {
 		}
 		locals[name] = v.Interface()
 	}
-
 	return locals
 }
 
@@ -419,16 +391,11 @@ func (r *YaegiREPL) ContextInfo() string {
 	defer r.mu.Unlock()
 
 	v, err := r.interp.Eval("context")
-	if err != nil {
+	if err != nil || !v.IsValid() {
 		return "context not loaded"
 	}
 
-	if !v.IsValid() {
-		return "context not loaded"
-	}
-
-	iface := v.Interface()
-	switch ctx := iface.(type) {
+	switch ctx := v.Interface().(type) {
 	case string:
 		return fmt.Sprintf("type=string, len=%d", len(ctx))
 	default:
@@ -436,20 +403,17 @@ func (r *YaegiREPL) ContextInfo() string {
 	}
 }
 
-// FormatExecutionResult formats an execution result for display to the LLM.
+// FormatExecutionResult formats an execution result for display.
 func FormatExecutionResult(result *ExecutionResult) string {
 	var parts []string
-
 	if result.Stdout != "" {
 		parts = append(parts, result.Stdout)
 	}
 	if result.Stderr != "" {
 		parts = append(parts, result.Stderr)
 	}
-
 	if len(parts) == 0 {
 		return "No output"
 	}
-
 	return strings.Join(parts, "\n\n")
 }
