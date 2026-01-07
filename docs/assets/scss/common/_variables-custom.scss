@@ -1,1 +1,55 @@
-// Put your custom SCSS variables here
+// Neural Terminal Theme - Bold custom variables for dspy-go
+// A brutalist/terminal aesthetic with neural network undertones
+
+// Primary palette - Electric neon on deep dark
+$neural-black: #0a0a0f;
+$neural-dark: #0f0f18;
+$neural-surface: #16161f;
+$neural-border: #2a2a3a;
+
+// Electric accents
+$electric-cyan: #00fff2;
+$electric-magenta: #ff00ff;
+$electric-lime: #b8ff00;
+$electric-orange: #ff6b00;
+
+// Text colors
+$text-primary: #e8e8f0;
+$text-secondary: #9898a8;
+$text-muted: #5a5a6a;
+
+// Gradients
+$gradient-neural: linear-gradient(135deg, $electric-cyan 0%, $electric-magenta 100%);
+$gradient-glow: linear-gradient(135deg, rgba($electric-cyan, 0.3) 0%, rgba($electric-magenta, 0.3) 100%);
+
+// Override Doks theme variables
+$body-bg-dark: $neural-black;
+$body-color-dark: $text-primary;
+
+// Links
+$link-color-dark: $electric-cyan;
+$link-hover-color-dark: lighten($electric-cyan, 15%);
+
+// Code
+$code-color-dark: $electric-lime;
+
+// Borders
+$border-color-dark: $neural-border;
+
+// Cards
+$card-bg-dark: $neural-surface;
+
+// Custom component variables
+$hero-gradient: linear-gradient(180deg, $neural-dark 0%, $neural-black 100%);
+$feature-card-bg: rgba($neural-surface, 0.6);
+$feature-card-border: rgba($electric-cyan, 0.15);
+$feature-card-hover-border: rgba($electric-cyan, 0.4);
+
+// Animation timings
+$transition-fast: 0.15s ease;
+$transition-base: 0.3s ease;
+$transition-slow: 0.5s ease;
+
+// Typography scale
+$display-font-weight: 800;
+$heading-font-weight: 700;
