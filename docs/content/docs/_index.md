@@ -95,10 +95,13 @@ agent := react.NewReActAgent("my-agent", "Assistant",
 |---------|-------------|
 | **Modular Design** | Compose simple, reusable components into complex applications |
 | **Multiple LLMs** | Anthropic, OpenAI, Google Gemini, Ollama, LlamaCPP, and more |
-| **Intelligent Agents** | ReAct patterns, memory management, orchestration, and custom tools |
+| **Intelligent Agents** | ReAct patterns, ACE framework, memory management, and custom tools |
+| **A2A Protocol** | Multi-agent orchestration with hierarchical composition |
+| **RLM Module** | Large context exploration through sandboxed Go REPL |
+| **XML Adapters** | Structured output parsing with security controls |
 | **Tool Chaining** | Sequential pipelines with data transformation and conditional logic |
 | **Dependency Resolution** | Automatic execution planning with parallel optimization |
-| **CLI Tool** | Explore optimizers without writing code |
+| **CLI Tool** | Explore optimizers and view RLM session logs |
 | **Compatibility Testing** | Framework ensures Python DSPy parity |
 | **Dataset Management** | Auto-download GSM8K, HotPotQA, and more |
 
@@ -106,7 +109,10 @@ agent := react.NewReActAgent("my-agent", "Assistant",
 
 - **[Getting Started →](guides/getting-started/)** - Install and run your first program
 - **[Core Concepts →](guides/core-concepts/)** - Understand Signatures, Modules, and Programs
-- **[Building Agents →](guides/agents/)** - ReAct patterns, orchestration, and memory
+- **[Building Agents →](guides/agents/)** - ReAct patterns, ACE framework, and memory
+- **[A2A Protocol →](guides/a2a-protocol/)** - Multi-agent orchestration and composition
+- **[RLM Module →](guides/rlm/)** - Large context exploration with recursive LLM
+- **[XML Adapters →](guides/xml-adapters/)** - Structured output with XML parsing
 - **[Optimizers →](guides/optimizers/)** - Master GEPA, MIPRO, SIMBA and more
 - **[Tool Management →](guides/tools/)** - Smart Registry, MCP, and tool chaining
 - **[Examples →](https://github.com/XiaoConstantine/dspy-go/tree/main/examples)** - Real-world implementations
