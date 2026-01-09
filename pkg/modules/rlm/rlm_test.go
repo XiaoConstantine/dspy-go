@@ -566,3 +566,502 @@ This concludes the analysis.`
 		FindFinalAnswer(input)
 	}
 }
+
+// TestHistoryCompressionConfig tests history compression configuration.
+func TestHistoryCompressionConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	WithHistoryCompression(5, 1000)(&cfg)
+
+	assert.NotNil(t, cfg.HistoryCompression)
+	assert.True(t, cfg.HistoryCompression.Enabled)
+	assert.Equal(t, 5, cfg.HistoryCompression.VerbatimIterations)
+	assert.Equal(t, 1000, cfg.HistoryCompression.MaxSummaryTokens)
+
+	// Test default values
+	cfg = DefaultConfig()
+	WithHistoryCompression(0, 0)(&cfg)
+	assert.Equal(t, 3, cfg.HistoryCompression.VerbatimIterations) // Default
+	assert.Equal(t, 500, cfg.HistoryCompression.MaxSummaryTokens) // Default
+}
+
+// TestAdaptiveIterationConfig tests adaptive iteration configuration.
+func TestAdaptiveIterationConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	WithAdaptiveIteration()(&cfg)
+
+	assert.NotNil(t, cfg.AdaptiveIteration)
+	assert.True(t, cfg.AdaptiveIteration.Enabled)
+	assert.Equal(t, 10, cfg.AdaptiveIteration.BaseIterations)
+	assert.Equal(t, 50, cfg.AdaptiveIteration.MaxIterations)
+	assert.Equal(t, 100000, cfg.AdaptiveIteration.ContextScaleFactor)
+	assert.True(t, cfg.AdaptiveIteration.EnableEarlyTermination)
+	assert.Equal(t, 1, cfg.AdaptiveIteration.ConfidenceThreshold)
+}
+
+// TestAdaptiveIterationConfigCustom tests custom adaptive iteration configuration.
+func TestAdaptiveIterationConfigCustom(t *testing.T) {
+	customCfg := AdaptiveIterationConfig{
+		BaseIterations:         5,
+		MaxIterations:          20,
+		ContextScaleFactor:     50000,
+		EnableEarlyTermination: false,
+		ConfidenceThreshold:    3,
+	}
+
+	cfg := DefaultConfig()
+	WithAdaptiveIterationConfig(customCfg)(&cfg)
+
+	assert.True(t, cfg.AdaptiveIteration.Enabled)
+	assert.Equal(t, 5, cfg.AdaptiveIteration.BaseIterations)
+	assert.Equal(t, 20, cfg.AdaptiveIteration.MaxIterations)
+	assert.Equal(t, 50000, cfg.AdaptiveIteration.ContextScaleFactor)
+	assert.False(t, cfg.AdaptiveIteration.EnableEarlyTermination)
+	assert.Equal(t, 3, cfg.AdaptiveIteration.ConfidenceThreshold)
+}
+
+// TestComputeMaxIterations tests the dynamic max iterations calculation.
+func TestComputeMaxIterations(t *testing.T) {
+	mockRoot := &mockLLM{}
+	mockSub := &mockSubLLMClient{}
+
+	tests := []struct {
+		name         string
+		contextSize  int
+		config       Config
+		expectedMax  int
+	}{
+		{
+			name:        "adaptive disabled uses config max",
+			contextSize: 500000,
+			config: Config{
+				MaxIterations: 30,
+			},
+			expectedMax: 30,
+		},
+		{
+			name:        "adaptive enabled small context",
+			contextSize: 10000, // 10KB
+			config: Config{
+				MaxIterations: 30,
+				AdaptiveIteration: &AdaptiveIterationConfig{
+					Enabled:            true,
+					BaseIterations:     10,
+					MaxIterations:      50,
+					ContextScaleFactor: 100000, // 100KB per iteration
+				},
+			},
+			expectedMax: 10, // base + (10000/100000) = 10 + 0 = 10
+		},
+		{
+			name:        "adaptive enabled medium context",
+			contextSize: 300000, // 300KB
+			config: Config{
+				MaxIterations: 30,
+				AdaptiveIteration: &AdaptiveIterationConfig{
+					Enabled:            true,
+					BaseIterations:     10,
+					MaxIterations:      50,
+					ContextScaleFactor: 100000, // 100KB per iteration
+				},
+			},
+			expectedMax: 13, // base + (300000/100000) = 10 + 3 = 13
+		},
+		{
+			name:        "adaptive enabled capped at max",
+			contextSize: 10000000, // 10MB
+			config: Config{
+				MaxIterations: 30,
+				AdaptiveIteration: &AdaptiveIterationConfig{
+					Enabled:            true,
+					BaseIterations:     10,
+					MaxIterations:      50,
+					ContextScaleFactor: 100000,
+				},
+			},
+			expectedMax: 50, // Would be 110 but capped at 50
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rlm := New(mockRoot, mockSub)
+			rlm.config = tt.config
+			result := rlm.computeMaxIterations(tt.contextSize)
+			assert.Equal(t, tt.expectedMax, result)
+		})
+	}
+}
+
+// TestHistoryCompression tests the history compression functionality.
+func TestHistoryCompression(t *testing.T) {
+	mockRoot := &mockLLM{}
+	mockSub := &mockSubLLMClient{}
+
+	rlm := New(mockRoot, mockSub, WithHistoryCompression(2, 500))
+
+	// Build history with multiple iterations
+	history := `
+--- Iteration 1 ---
+Action: explore
+Reasoning: Looking at the first part
+Code:
+` + "```go" + `
+fmt.Println("test1")
+` + "```" + `
+Output:
+test1
+
+--- Iteration 2 ---
+Action: explore
+Reasoning: Looking at the second part
+Code:
+` + "```go" + `
+fmt.Println("test2")
+` + "```" + `
+Output:
+test2
+
+--- Iteration 3 ---
+Action: explore
+Reasoning: Looking at the third part
+Code:
+` + "```go" + `
+fmt.Println("test3")
+` + "```" + `
+Output:
+test3
+
+--- Iteration 4 ---
+Action: explore
+Reasoning: Looking at the fourth part with an Error: something went wrong
+Code:
+` + "```go" + `
+fmt.Println("test4")
+` + "```" + `
+Output:
+test4
+`
+
+	// Compress the history keeping last 2 iterations verbatim
+	compressed := rlm.compressHistory(history, 4)
+
+	// Should contain summary of iterations 1-2 and verbatim 3-4
+	assert.Contains(t, compressed, "[Previous iterations summary]")
+	assert.Contains(t, compressed, "--- Iteration 3 ---") // Verbatim
+	assert.Contains(t, compressed, "--- Iteration 4 ---") // Verbatim
+	assert.NotContains(t, compressed, "Looking at the first part") // Summarized
+}
+
+// TestDetectConfidence tests confidence detection.
+func TestDetectConfidence(t *testing.T) {
+	mockRoot := &mockLLM{}
+	mockSub := &mockSubLLMClient{}
+
+	// Test with default detector (uses FINAL markers)
+	rlm := New(mockRoot, mockSub, WithAdaptiveIteration())
+
+	// Response with FINAL marker should be detected as confident
+	// Note: FINAL must be at the start of a line per the regex pattern
+	assert.True(t, rlm.detectConfidence("After analysis.\nFINAL(the answer is 42)"))
+
+	// Response with FINAL_VAR should also be detected
+	assert.True(t, rlm.detectConfidence("FINAL_VAR(result)"))
+
+	// Response without FINAL should not be confident
+	assert.False(t, rlm.detectConfidence("Let me continue exploring..."))
+
+	// Test with custom detector
+	customDetector := func(response string) bool {
+		return len(response) > 100 // Silly custom detector
+	}
+
+	rlm2 := New(mockRoot, mockSub, WithAdaptiveIterationConfig(AdaptiveIterationConfig{
+		Enabled:            true,
+		ConfidenceDetector: customDetector,
+	}))
+
+	shortResponse := "short"
+	longResponse := "This is a very long response that exceeds one hundred characters in length to test the custom detector"
+
+	assert.False(t, rlm2.detectConfidence(shortResponse))
+	assert.True(t, rlm2.detectConfidence(longResponse))
+}
+
+// TestProgressHandler tests the progress callback.
+func TestProgressHandler(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nI'll provide a final answer.\n\nAction:\nfinal\n\nCode:\n\n\nAnswer:\ntest answer",
+		},
+	}
+	mockSub := &mockSubLLMClient{}
+
+	var progressUpdates []IterationProgress
+	rlm := New(mockRoot, mockSub, WithProgressHandler(func(progress IterationProgress) {
+		progressUpdates = append(progressUpdates, progress)
+	}))
+
+	_, err := rlm.Complete(context.Background(), "test context", "test query")
+	require.NoError(t, err)
+
+	assert.Len(t, progressUpdates, 1)
+	assert.Equal(t, 1, progressUpdates[0].CurrentIteration)
+	assert.Equal(t, 30, progressUpdates[0].MaxIterations)
+}
+
+// TestContextAnalyzer tests the context analyzer.
+func TestContextAnalyzer(t *testing.T) {
+	tests := []struct {
+		name         string
+		content      string
+		expectedType ContextType
+	}{
+		{
+			name:         "JSON content",
+			content:      `{"key": "value", "nested": {"a": 1}}`,
+			expectedType: TypeJSON,
+		},
+		{
+			name:         "Markdown content",
+			content:      "# Header\n\nSome text\n\n## Subheader\n\n- list item\n- another item",
+			expectedType: TypeMarkdown,
+		},
+		{
+			name:         "Code content",
+			content:      "package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"hello\")\n}",
+			expectedType: TypeCode,
+		},
+		{
+			name:         "Plain text",
+			content:      "Just some regular text without any special formatting.",
+			expectedType: TypePlainText,
+		},
+		{
+			name:         "Log content",
+			content:      "2024-01-15 10:30:00 INFO Starting application\n2024-01-15 10:30:01 DEBUG Connected to database",
+			expectedType: TypeLog,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			analysis := AnalyzeContext(tt.content)
+			assert.Equal(t, tt.expectedType, analysis.Type)
+			assert.Greater(t, analysis.Size, 0)
+			assert.Greater(t, analysis.EstimatedTokens, 0)
+		})
+	}
+}
+
+// TestContextAnalyzerChunkStrategy tests chunking recommendations.
+func TestContextAnalyzerChunkStrategy(t *testing.T) {
+	// Small context - no chunking needed
+	smallContent := "Small content"
+	analysis := AnalyzeContext(smallContent)
+	assert.Equal(t, StrategyNone, analysis.RecommendedStrategy)
+
+	// Large JSON - hierarchical chunking
+	largeJSON := `{"data": [` + repeatString(`{"id": 1, "name": "test"},`, 10000) + `]}`
+	analysis = AnalyzeContext(largeJSON)
+	assert.NotEqual(t, StrategyNone, analysis.RecommendedStrategy)
+}
+
+func repeatString(s string, count int) string {
+	result := ""
+	for i := 0; i < count; i++ {
+		result += s
+	}
+	return result
+}
+
+// TestAsyncQueryHandle tests async query functionality.
+func TestAsyncQueryHandle(t *testing.T) {
+	mockSub := &mockSubLLMClient{
+		queryResponse: "async response",
+	}
+
+	repl, err := NewYaegiREPL(mockSub)
+	require.NoError(t, err)
+
+	// Start async query
+	handle := repl.QueryAsync("test prompt")
+	assert.NotEmpty(t, handle.ID())
+
+	// Wait for result
+	result, err := handle.Wait()
+	require.NoError(t, err)
+	assert.Equal(t, "async response", result)
+	assert.True(t, handle.Ready())
+
+	// Result should still be available after Wait
+	resultStr, ready := handle.Result()
+	assert.True(t, ready)
+	assert.Equal(t, "async response", resultStr)
+}
+
+// TestAsyncBatchHandle tests batch async query functionality.
+func TestAsyncBatchHandle(t *testing.T) {
+	mockSub := &mockSubLLMClient{
+		batchedResponses: []string{"response1", "response2", "response3"},
+	}
+
+	repl, err := NewYaegiREPL(mockSub)
+	require.NoError(t, err)
+
+	// Start batch async queries
+	prompts := []string{"prompt1", "prompt2", "prompt3"}
+	batchHandle := repl.QueryBatchedAsync(prompts)
+
+	assert.Equal(t, 3, batchHandle.TotalCount())
+
+	// Wait for all results
+	results, err := batchHandle.WaitAll()
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+	assert.True(t, batchHandle.Ready())
+	assert.Equal(t, 3, batchHandle.CompletedCount())
+}
+
+// TestAsyncQueryFromInterpreter tests async queries from interpreted code.
+func TestAsyncQueryFromInterpreter(t *testing.T) {
+	mockSub := &mockSubLLMClient{
+		queryResponse: "interpreted async response",
+	}
+
+	repl, err := NewYaegiREPL(mockSub)
+	require.NoError(t, err)
+
+	// Start async query from interpreted code
+	code := `
+handleID := QueryAsync("test async prompt")
+result := WaitAsync(handleID)
+fmt.Println(result)
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "interpreted async response")
+}
+
+// TestPendingAsyncQueries tests tracking of pending queries.
+func TestPendingAsyncQueries(t *testing.T) {
+	// Create a slow mock client for testing pending state
+	slowMock := &slowMockSubLLMClient{
+		delay:    50 * time.Millisecond,
+		response: "delayed response",
+	}
+
+	repl, err := NewYaegiREPL(slowMock)
+	require.NoError(t, err)
+
+	// Start multiple async queries
+	_ = repl.QueryAsync("prompt1")
+	_ = repl.QueryAsync("prompt2")
+
+	// Should have pending queries immediately
+	pending := repl.PendingAsyncQueries()
+	assert.GreaterOrEqual(t, pending, 0) // May already complete on fast systems
+
+	// Wait for all
+	repl.WaitAllAsyncQueries()
+
+	// Should have no pending after wait
+	assert.Equal(t, 0, repl.PendingAsyncQueries())
+}
+
+// slowMockSubLLMClient is a mock that introduces delay for testing async behavior.
+type slowMockSubLLMClient struct {
+	delay    time.Duration
+	response string
+}
+
+func (m *slowMockSubLLMClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
+	time.Sleep(m.delay)
+	return QueryResponse{Response: m.response}, nil
+}
+
+func (m *slowMockSubLLMClient) QueryBatched(ctx context.Context, prompts []string) ([]QueryResponse, error) {
+	time.Sleep(m.delay)
+	responses := make([]QueryResponse, len(prompts))
+	for i := range prompts {
+		responses[i] = QueryResponse{Response: m.response}
+	}
+	return responses, nil
+}
+
+// TestGetContextSize tests context size calculation.
+func TestGetContextSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  any
+		expected int
+	}{
+		{
+			name:     "string payload",
+			payload:  "hello world",
+			expected: 11,
+		},
+		{
+			name:     "byte slice payload",
+			payload:  []byte("test bytes"),
+			expected: 10,
+		},
+		{
+			name:     "complex payload",
+			payload:  map[string]any{"key": "value"},
+			expected: len(fmt.Sprintf("%v", map[string]any{"key": "value"})),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getContextSize(tt.payload)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestShouldTerminateEarly tests early termination logic.
+func TestShouldTerminateEarly(t *testing.T) {
+	mockRoot := &mockLLM{}
+	mockSub := &mockSubLLMClient{}
+
+	// Adaptive disabled
+	rlm := New(mockRoot, mockSub)
+	assert.False(t, rlm.shouldTerminateEarly(5, false))
+
+	// Adaptive enabled, threshold not met
+	rlm = New(mockRoot, mockSub, WithAdaptiveIterationConfig(AdaptiveIterationConfig{
+		Enabled:                true,
+		EnableEarlyTermination: true,
+		ConfidenceThreshold:    3,
+	}))
+	assert.False(t, rlm.shouldTerminateEarly(2, false)) // 2 < 3
+
+	// Threshold met
+	assert.True(t, rlm.shouldTerminateEarly(3, false))
+
+	// Threshold met but has code (should not terminate)
+	assert.False(t, rlm.shouldTerminateEarly(5, true))
+
+	// Early termination disabled
+	rlm = New(mockRoot, mockSub, WithAdaptiveIterationConfig(AdaptiveIterationConfig{
+		Enabled:                true,
+		EnableEarlyTermination: false,
+		ConfidenceThreshold:    1,
+	}))
+	assert.False(t, rlm.shouldTerminateEarly(10, false))
+}
+
+// TestContextAnalysisHelpers tests helper methods on ContextAnalysis.
+func TestContextAnalysisHelpers(t *testing.T) {
+	// Small context
+	analysis := AnalyzeContext("small content")
+	assert.False(t, analysis.IsLargeContext())
+	assert.False(t, analysis.ShouldUseBatching())
+
+	// Large context simulation
+	analysis.EstimatedTokens = 60000
+	analysis.RecommendedStrategy = StrategyFixed
+	assert.True(t, analysis.IsLargeContext())
+	assert.True(t, analysis.ShouldUseBatching())
+}

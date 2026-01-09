@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/google/uuid"
 	"github.com/sourcegraph/conc/pool"
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
@@ -116,6 +118,176 @@ func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]Qu
 
 var errStdlibLoad = errors.New("failed to load stdlib")
 
+// AsyncQueryHandle represents a pending async query.
+type AsyncQueryHandle struct {
+	id       string
+	done     chan struct{}
+	result   *QueryResponse
+	err      error
+	mu       sync.Mutex
+	started  time.Time
+}
+
+// newAsyncQueryHandle creates a new async query handle.
+func newAsyncQueryHandle() *AsyncQueryHandle {
+	return &AsyncQueryHandle{
+		id:      uuid.New().String(),
+		done:    make(chan struct{}),
+		started: time.Now(),
+	}
+}
+
+// ID returns the unique identifier for this async query.
+func (h *AsyncQueryHandle) ID() string {
+	return h.id
+}
+
+// Wait blocks until the query completes and returns the result.
+func (h *AsyncQueryHandle) Wait() (string, error) {
+	<-h.done
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.err != nil {
+		return "", h.err
+	}
+	if h.result != nil {
+		return h.result.Response, nil
+	}
+	return "", nil
+}
+
+// Ready returns true if the result is available.
+func (h *AsyncQueryHandle) Ready() bool {
+	select {
+	case <-h.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// Result returns the result if ready, or empty string if not.
+func (h *AsyncQueryHandle) Result() (string, bool) {
+	if !h.Ready() {
+		return "", false
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.result != nil {
+		return h.result.Response, true
+	}
+	return "", true
+}
+
+// Error returns any error that occurred during the query.
+func (h *AsyncQueryHandle) Error() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.err
+}
+
+// Duration returns the time elapsed since the query was started.
+func (h *AsyncQueryHandle) Duration() time.Duration {
+	return time.Since(h.started)
+}
+
+// complete marks the handle as complete with the given result.
+func (h *AsyncQueryHandle) complete(resp QueryResponse, err error) {
+	h.mu.Lock()
+	if err != nil {
+		h.err = err
+	} else {
+		h.result = &resp
+	}
+	h.mu.Unlock()
+
+	close(h.done)
+}
+
+// AsyncBatchHandle represents a batch of pending async queries.
+type AsyncBatchHandle struct {
+	handles    []*AsyncQueryHandle
+	allDone    chan struct{}
+	doneOnce   sync.Once
+	completed  int32
+	totalCount int32
+}
+
+// newAsyncBatchHandle creates a new batch handle for the given handles.
+func newAsyncBatchHandle(handles []*AsyncQueryHandle) *AsyncBatchHandle {
+	bh := &AsyncBatchHandle{
+		handles:    handles,
+		allDone:    make(chan struct{}),
+		totalCount: int32(len(handles)),
+	}
+
+	// Start a goroutine to track completion
+	go bh.trackCompletion()
+
+	return bh
+}
+
+// trackCompletion monitors all handles and closes allDone when all complete.
+func (bh *AsyncBatchHandle) trackCompletion() {
+	for _, h := range bh.handles {
+		go func(handle *AsyncQueryHandle) {
+			<-handle.done
+			if atomic.AddInt32(&bh.completed, 1) == bh.totalCount {
+				bh.doneOnce.Do(func() {
+					close(bh.allDone)
+				})
+			}
+		}(h)
+	}
+}
+
+// WaitAll blocks until all queries complete and returns all results.
+func (bh *AsyncBatchHandle) WaitAll() ([]string, error) {
+	<-bh.allDone
+
+	results := make([]string, len(bh.handles))
+	var firstErr error
+
+	for i, h := range bh.handles {
+		result, err := h.Wait()
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		results[i] = result
+	}
+
+	return results, firstErr
+}
+
+// Ready returns true if all queries have completed.
+func (bh *AsyncBatchHandle) Ready() bool {
+	select {
+	case <-bh.allDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Handles returns the individual query handles.
+func (bh *AsyncBatchHandle) Handles() []*AsyncQueryHandle {
+	return bh.handles
+}
+
+// CompletedCount returns the number of completed queries.
+func (bh *AsyncBatchHandle) CompletedCount() int {
+	return int(atomic.LoadInt32(&bh.completed))
+}
+
+// TotalCount returns the total number of queries in the batch.
+func (bh *AsyncBatchHandle) TotalCount() int {
+	return int(bh.totalCount)
+}
+
 // YaegiREPL is a Yaegi-based Go interpreter with RLM capabilities.
 //
 // SECURITY NOTE: The interpreter is sandboxed by restricting imports to a safe
@@ -126,13 +298,16 @@ var errStdlibLoad = errors.New("failed to load stdlib")
 // additional OS-level resource limits (e.g., cgroups, containers) or running
 // the interpreter in a separate process with strict memory limits.
 type YaegiREPL struct {
-	interp    *interp.Interpreter
-	stdout    *bytes.Buffer
-	stderr    *bytes.Buffer
-	llmClient SubLLMClient
-	ctx       context.Context
-	mu        sync.Mutex
-	llmCalls  []LLMCall
+	interp       *interp.Interpreter
+	stdout       *bytes.Buffer
+	stderr       *bytes.Buffer
+	llmClient    SubLLMClient
+	ctx          context.Context
+	mu           sync.Mutex
+	llmCalls     []LLMCall
+	llmCallsMu   sync.Mutex // Separate mutex for async LLM call recording
+	asyncQueries map[string]*AsyncQueryHandle
+	asyncMu      sync.RWMutex
 }
 
 // safeStdlibSymbols returns a sandboxed subset of stdlib symbols.
@@ -169,11 +344,12 @@ func NewYaegiREPL(client SubLLMClient) (*YaegiREPL, error) {
 	}
 
 	r := &YaegiREPL{
-		interp:    i,
-		stdout:    stdout,
-		stderr:    stderr,
-		llmClient: client,
-		ctx:       context.Background(),
+		interp:       i,
+		stdout:       stdout,
+		stderr:       stderr,
+		llmClient:    client,
+		ctx:          context.Background(),
+		asyncQueries: make(map[string]*AsyncQueryHandle),
 	}
 	if err := r.injectBuiltins(); err != nil {
 		return nil, fmt.Errorf("failed to inject builtins: %w", err)
@@ -185,8 +361,13 @@ func NewYaegiREPL(client SubLLMClient) (*YaegiREPL, error) {
 func (r *YaegiREPL) injectBuiltins() error {
 	symbols := interp.Exports{
 		"rlm/rlm": {
-			"Query":        reflect.ValueOf(r.llmQuery),
-			"QueryBatched": reflect.ValueOf(r.llmQueryBatched),
+			"Query":             reflect.ValueOf(r.llmQuery),
+			"QueryBatched":      reflect.ValueOf(r.llmQueryBatched),
+			"QueryAsync":        reflect.ValueOf(r.llmQueryAsync),
+			"QueryBatchedAsync": reflect.ValueOf(r.llmQueryBatchedAsync),
+			"WaitAsync":         reflect.ValueOf(r.waitAsync),
+			"AsyncReady":        reflect.ValueOf(r.asyncReady),
+			"AsyncResult":       reflect.ValueOf(r.asyncResult),
 		},
 	}
 	if err := r.interp.Use(symbols); err != nil {
@@ -359,7 +540,11 @@ func (r *YaegiREPL) Reset() error {
 
 	r.stdout.Reset()
 	r.stderr.Reset()
+
+	// Clear LLM calls with its dedicated mutex
+	r.llmCallsMu.Lock()
 	r.llmCalls = nil
+	r.llmCallsMu.Unlock()
 
 	i := interp.New(interp.Options{
 		Stdout: r.stdout,
@@ -373,11 +558,10 @@ func (r *YaegiREPL) Reset() error {
 	return r.injectBuiltins()
 }
 
-// recordLLMCall appends an LLM call record. This method does NOT acquire the mutex
-// because it's only called from llmQuery/llmQueryBatched during Execute(), which
-// already holds the lock. Using a lock here would cause a deadlock since Go's
-// sync.Mutex is not reentrant.
+// recordLLMCall appends an LLM call record using the dedicated LLM calls mutex.
+// This is called from llmQuery/llmQueryBatched during Execute().
 func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duration, promptTokens, completionTokens int) {
+	r.llmCallsMu.Lock()
 	r.llmCalls = append(r.llmCalls, LLMCall{
 		Prompt:           prompt,
 		Response:         response,
@@ -385,13 +569,14 @@ func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duratio
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 	})
+	r.llmCallsMu.Unlock()
 }
 
 // GetLLMCalls returns and clears the recorded LLM calls.
 // Returns a copy of the calls slice to prevent external modification.
 func (r *YaegiREPL) GetLLMCalls() []LLMCall {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.llmCallsMu.Lock()
+	defer r.llmCallsMu.Unlock()
 	if len(r.llmCalls) == 0 {
 		return nil
 	}
@@ -403,8 +588,8 @@ func (r *YaegiREPL) GetLLMCalls() []LLMCall {
 
 // ClearLLMCalls clears the recorded LLM calls.
 func (r *YaegiREPL) ClearLLMCalls() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.llmCallsMu.Lock()
+	defer r.llmCallsMu.Unlock()
 	r.llmCalls = nil
 }
 
@@ -460,4 +645,201 @@ func FormatExecutionResult(result *ExecutionResult) string {
 		return "No output"
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// llmQueryAsync starts an async query and returns a handle ID.
+// This is called from interpreted code via QueryAsync().
+func (r *YaegiREPL) llmQueryAsync(prompt string) string {
+	handle := newAsyncQueryHandle()
+
+	// Track the handle
+	r.asyncMu.Lock()
+	r.asyncQueries[handle.id] = handle
+	r.asyncMu.Unlock()
+
+	// Start the async query
+	go func() {
+		start := time.Now()
+		result, err := r.llmClient.Query(r.ctx, prompt)
+		duration := time.Since(start)
+
+		response := result.Response
+		if err != nil {
+			response = fmt.Sprintf("Error: %v", err)
+		}
+
+		// Record the async call using the dedicated LLM calls mutex
+		// This avoids deadlock with the main interpreter mutex
+		r.llmCallsMu.Lock()
+		r.llmCalls = append(r.llmCalls, LLMCall{
+			Prompt:           prompt,
+			Response:         response,
+			Duration:         duration,
+			PromptTokens:     result.PromptTokens,
+			CompletionTokens: result.CompletionTokens,
+		})
+		r.llmCallsMu.Unlock()
+
+		// Complete the handle
+		handle.complete(result, err)
+	}()
+
+	return handle.id
+}
+
+// llmQueryBatchedAsync starts batch async queries and returns handle IDs.
+// This is called from interpreted code via QueryBatchedAsync().
+func (r *YaegiREPL) llmQueryBatchedAsync(prompts []string) []string {
+	handleIDs := make([]string, len(prompts))
+
+	for i, prompt := range prompts {
+		handleIDs[i] = r.llmQueryAsync(prompt)
+	}
+
+	return handleIDs
+}
+
+// waitAsync blocks until the async query with the given ID completes.
+// This is called from interpreted code via WaitAsync().
+func (r *YaegiREPL) waitAsync(handleID string) string {
+	r.asyncMu.RLock()
+	handle, exists := r.asyncQueries[handleID]
+	r.asyncMu.RUnlock()
+
+	if !exists {
+		return fmt.Sprintf("Error: async query %s not found", handleID)
+	}
+
+	result, err := handle.Wait()
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+	return result
+}
+
+// asyncReady returns true if the async query with the given ID is complete.
+// This is called from interpreted code via AsyncReady().
+func (r *YaegiREPL) asyncReady(handleID string) bool {
+	r.asyncMu.RLock()
+	handle, exists := r.asyncQueries[handleID]
+	r.asyncMu.RUnlock()
+
+	if !exists {
+		return true // Non-existent handle is considered "ready" (error case)
+	}
+
+	return handle.Ready()
+}
+
+// asyncResult returns the result if ready, or empty string if not.
+// This is called from interpreted code via AsyncResult().
+func (r *YaegiREPL) asyncResult(handleID string) string {
+	r.asyncMu.RLock()
+	handle, exists := r.asyncQueries[handleID]
+	r.asyncMu.RUnlock()
+
+	if !exists {
+		return fmt.Sprintf("Error: async query %s not found", handleID)
+	}
+
+	result, ready := handle.Result()
+	if !ready {
+		return ""
+	}
+	return result
+}
+
+// QueryAsync starts an async query and returns a handle.
+// This is the Go API for async queries.
+func (r *YaegiREPL) QueryAsync(prompt string) *AsyncQueryHandle {
+	handle := newAsyncQueryHandle()
+
+	// Track the handle
+	r.asyncMu.Lock()
+	r.asyncQueries[handle.id] = handle
+	r.asyncMu.Unlock()
+
+	// Start the async query
+	go func() {
+		start := time.Now()
+		result, err := r.llmClient.Query(r.ctx, prompt)
+		duration := time.Since(start)
+
+		response := result.Response
+		if err != nil {
+			response = fmt.Sprintf("Error: %v", err)
+		}
+
+		// Record the async call using the dedicated LLM calls mutex
+		// This avoids deadlock with the main interpreter mutex
+		r.llmCallsMu.Lock()
+		r.llmCalls = append(r.llmCalls, LLMCall{
+			Prompt:           prompt,
+			Response:         response,
+			Duration:         duration,
+			PromptTokens:     result.PromptTokens,
+			CompletionTokens: result.CompletionTokens,
+		})
+		r.llmCallsMu.Unlock()
+
+		// Complete the handle
+		handle.complete(result, err)
+	}()
+
+	return handle
+}
+
+// QueryBatchedAsync starts batch async queries and returns a batch handle.
+// This is the Go API for batch async queries.
+func (r *YaegiREPL) QueryBatchedAsync(prompts []string) *AsyncBatchHandle {
+	handles := make([]*AsyncQueryHandle, len(prompts))
+
+	for i, prompt := range prompts {
+		handles[i] = r.QueryAsync(prompt)
+	}
+
+	return newAsyncBatchHandle(handles)
+}
+
+// GetAsyncQuery returns the async query handle by ID.
+func (r *YaegiREPL) GetAsyncQuery(handleID string) (*AsyncQueryHandle, bool) {
+	r.asyncMu.RLock()
+	defer r.asyncMu.RUnlock()
+	handle, exists := r.asyncQueries[handleID]
+	return handle, exists
+}
+
+// PendingAsyncQueries returns the number of pending async queries.
+func (r *YaegiREPL) PendingAsyncQueries() int {
+	r.asyncMu.RLock()
+	defer r.asyncMu.RUnlock()
+
+	count := 0
+	for _, h := range r.asyncQueries {
+		if !h.Ready() {
+			count++
+		}
+	}
+	return count
+}
+
+// WaitAllAsyncQueries waits for all pending async queries to complete.
+func (r *YaegiREPL) WaitAllAsyncQueries() {
+	r.asyncMu.RLock()
+	handles := make([]*AsyncQueryHandle, 0, len(r.asyncQueries))
+	for _, h := range r.asyncQueries {
+		handles = append(handles, h)
+	}
+	r.asyncMu.RUnlock()
+
+	for _, h := range handles {
+		<-h.done
+	}
+}
+
+// ClearAsyncQueries clears all tracked async queries.
+func (r *YaegiREPL) ClearAsyncQueries() {
+	r.asyncMu.Lock()
+	defer r.asyncMu.Unlock()
+	r.asyncQueries = make(map[string]*AsyncQueryHandle)
 }

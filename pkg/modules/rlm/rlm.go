@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
+
+// iterationPattern matches "--- Iteration N ---" headers in history.
+var iterationPattern = regexp.MustCompile(`(?m)^--- Iteration (\d+) ---$`)
 
 const (
 	truncateLenShort  = 100
@@ -211,11 +215,18 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		return nil, fmt.Errorf("failed to load context: %w", err)
 	}
 
+	// Compute max iterations (adaptive or fixed)
+	contextSize := getContextSize(contextPayload)
+	maxIterations := r.computeMaxIterations(contextSize)
+
+	// Track confidence signals for early termination
+	var confidenceSignals int
+
 	// Build iteration history
 	var history strings.Builder
 
 	// Iteration loop
-	for i := 0; i < r.config.MaxIterations; i++ {
+	for i := 0; i < maxIterations; i++ {
 		iterStart := time.Now()
 
 		select {
@@ -224,8 +235,19 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		default:
 		}
 
+		// Report progress if handler is set
+		if r.config.OnProgress != nil {
+			r.config.OnProgress(IterationProgress{
+				CurrentIteration:  i + 1,
+				MaxIterations:     maxIterations,
+				ConfidenceSignals: confidenceSignals,
+				HasFinalAttempt:   false,
+				ContextSize:       contextSize,
+			})
+		}
+
 		if r.config.Verbose {
-			logger.Info(ctx, "[RLM] Iteration %d/%d", i+1, r.config.MaxIterations)
+			logger.Info(ctx, "[RLM] Iteration %d/%d", i+1, maxIterations)
 		}
 
 		// Prepare inputs for iteration module
@@ -373,14 +395,44 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			}
 			r.appendIterationHistory(&history, i+1, action, reasoning, "", "")
 		}
+
+		// Detect confidence signals for adaptive early termination
+		if r.detectConfidence(reasoning) {
+			confidenceSignals++
+			if r.config.Verbose {
+				logger.Debug(ctx, "[RLM] Confidence signal detected (total: %d)", confidenceSignals)
+			}
+		}
+
+		// Check for early termination based on confidence signals
+		hasCode := code != ""
+		if r.shouldTerminateEarly(confidenceSignals, hasCode) {
+			if r.config.Verbose {
+				logger.Info(ctx, "[RLM] Early termination triggered (confidence signals: %d)", confidenceSignals)
+			}
+			return r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+		}
+
+		// Apply history compression if enabled
+		if r.config.HistoryCompression != nil && r.config.HistoryCompression.Enabled {
+			historyStr := history.String()
+			compressedHistory := r.compressHistory(historyStr, i+1)
+			if compressedHistory != historyStr {
+				history.Reset()
+				history.WriteString(compressedHistory)
+				if r.config.Verbose {
+					logger.Debug(ctx, "[RLM] History compressed: %d -> %d chars", len(historyStr), len(compressedHistory))
+				}
+			}
+		}
 	}
 
 	// Max iterations exhausted - force final answer
-	return r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start)
+	return r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
 }
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
-func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time) (*CompletionResult, error) {
+func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time, maxIterations int) (*CompletionResult, error) {
 	// Prepare inputs asking for a final answer
 	iterInputs := map[string]any{
 		"context_info": replEnv.ContextInfo(),
@@ -417,10 +469,167 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 
 	return &CompletionResult{
 		Response:   answer,
-		Iterations: r.config.MaxIterations,
+		Iterations: maxIterations,
 		Duration:   time.Since(start),
 		Usage:      r.tokenTracker.GetTotalUsage(),
 	}, nil
+}
+
+// computeMaxIterations calculates the dynamic max iterations based on context size.
+func (r *RLM) computeMaxIterations(contextSize int) int {
+	if r.config.AdaptiveIteration == nil || !r.config.AdaptiveIteration.Enabled {
+		return r.config.MaxIterations
+	}
+
+	cfg := r.config.AdaptiveIteration
+	additionalIterations := contextSize / cfg.ContextScaleFactor
+	computed := cfg.BaseIterations + additionalIterations
+
+	if computed > cfg.MaxIterations {
+		return cfg.MaxIterations
+	}
+	return computed
+}
+
+// getContextSize returns the size of the context payload in bytes.
+func getContextSize(payload any) int {
+	switch v := payload.(type) {
+	case string:
+		return len(v)
+	case []byte:
+		return len(v)
+	default:
+		// For complex types, estimate based on string representation
+		return len(fmt.Sprintf("%v", v))
+	}
+}
+
+// detectConfidence checks if the response contains confidence signals.
+// Uses the custom detector if configured, otherwise defaults to checking for FINAL markers.
+func (r *RLM) detectConfidence(response string) bool {
+	if r.config.AdaptiveIteration == nil || !r.config.AdaptiveIteration.Enabled {
+		return false
+	}
+
+	// Use custom detector if provided
+	if r.config.AdaptiveIteration.ConfidenceDetector != nil {
+		return r.config.AdaptiveIteration.ConfidenceDetector(response)
+	}
+
+	// Default: check for FINAL markers which indicate the model is ready to provide an answer
+	return FindFinalAnswer(response) != nil
+}
+
+// shouldTerminateEarly checks if we should terminate early based on confidence signals.
+// Early termination only happens when:
+// 1. Adaptive iteration is enabled with early termination
+// 2. Confidence threshold is met
+// 3. There are no pending code blocks (the model isn't waiting for execution results)
+func (r *RLM) shouldTerminateEarly(confidenceSignals int, hasCode bool) bool {
+	if r.config.AdaptiveIteration == nil || !r.config.AdaptiveIteration.Enabled {
+		return false
+	}
+	if !r.config.AdaptiveIteration.EnableEarlyTermination {
+		return false
+	}
+	if hasCode {
+		return false // Don't terminate while code was just executed
+	}
+	return confidenceSignals >= r.config.AdaptiveIteration.ConfidenceThreshold
+}
+
+// compressHistory compresses older iterations in the history string.
+// It keeps the most recent N iterations verbatim and summarizes older ones.
+func (r *RLM) compressHistory(history string, currentIteration int) string {
+	cfg := r.config.HistoryCompression
+	if cfg == nil || !cfg.Enabled {
+		return history
+	}
+
+	// Find all iteration boundaries
+	matches := iterationPattern.FindAllStringSubmatchIndex(history, -1)
+	if len(matches) <= cfg.VerbatimIterations {
+		return history // Nothing to compress
+	}
+
+	// Calculate the split point
+	splitIndex := len(matches) - cfg.VerbatimIterations
+	if splitIndex <= 0 {
+		return history
+	}
+
+	// Get the position where verbatim content starts
+	verbatimStartPos := matches[splitIndex][0]
+
+	// Content to summarize
+	toSummarize := history[:verbatimStartPos]
+
+	// Content to keep verbatim
+	verbatim := history[verbatimStartPos:]
+
+	// Create summary
+	summary := r.summarizeIterations(toSummarize, cfg.MaxSummaryTokens)
+
+	return summary + verbatim
+}
+
+// summarizeIterations creates a concise summary of older iteration history.
+func (r *RLM) summarizeIterations(history string, maxTokens int) string {
+	var summary strings.Builder
+	summary.WriteString("[Previous iterations summary]\n")
+
+	// Find iterations in the history to summarize
+	matches := iterationPattern.FindAllStringSubmatchIndex(history, -1)
+
+	for i, match := range matches {
+		iterNum := "?"
+		if len(match) >= 4 {
+			iterNum = history[match[2]:match[3]]
+		}
+
+		// Find the content of this iteration (until next iteration or end)
+		startPos := match[1] // End of the header line
+		var endPos int
+		if i+1 < len(matches) {
+			endPos = matches[i+1][0]
+		} else {
+			endPos = len(history)
+		}
+
+		iterContent := history[startPos:endPos]
+
+		// Extract key information
+		hasCode := strings.Contains(iterContent, "```go")
+		hasFinal := strings.Contains(iterContent, "FINAL")
+		hasError := strings.Contains(iterContent, "Error:") || strings.Contains(iterContent, "error")
+
+		summary.WriteString(fmt.Sprintf("- Iteration %s: ", iterNum))
+		var parts []string
+		if hasCode {
+			parts = append(parts, "executed code")
+		}
+		if hasError {
+			parts = append(parts, "had errors")
+		}
+		if hasFinal {
+			parts = append(parts, "mentioned FINAL")
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "reasoning only")
+		}
+		summary.WriteString(strings.Join(parts, ", "))
+		summary.WriteString("\n")
+	}
+
+	result := summary.String()
+
+	// Rough token estimation: ~4 chars per token
+	maxChars := maxTokens * 4
+	if len(result) > maxChars {
+		result = result[:maxChars] + "\n[...truncated]"
+	}
+
+	return result
 }
 
 // Clone creates a copy of the RLM module.
