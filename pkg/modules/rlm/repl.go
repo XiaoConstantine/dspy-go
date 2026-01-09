@@ -368,25 +368,89 @@ func (r *YaegiREPL) injectBuiltins() error {
 			"WaitAsync":         reflect.ValueOf(r.waitAsync),
 			"AsyncReady":        reflect.ValueOf(r.asyncReady),
 			"AsyncResult":       reflect.ValueOf(r.asyncResult),
+			// FINAL and FINAL_VAR allow LLMs to signal completion from within code blocks
+			"FINAL":     reflect.ValueOf(r.finalAnswer),
+			"FINAL_VAR": reflect.ValueOf(r.finalVarAnswer),
 		},
 	}
 	if err := r.interp.Use(symbols); err != nil {
 		return fmt.Errorf("failed to inject rlm symbols: %w", err)
 	}
 
+	// Pre-import common packages and RLM functions so they're available without qualification
+	// NOTE: All common packages are pre-imported so LLM code should NOT use import statements
+	// (mixing imports with statements causes Yaegi to treat code as package-level where statements are invalid)
 	_, err := r.interp.Eval(`
 import "fmt"
 import "strings"
 import "regexp"
 import "strconv"
+import "encoding/json"
+import "sort"
 import . "rlm/rlm"
 `)
 	return err
 }
 
+// finalAnswer handles FINAL(value) calls from within code blocks.
+// It prints a special marker that the RLM parser can detect.
+// This allows LLMs to signal completion from inside code, which is more natural.
+func (r *YaegiREPL) finalAnswer(value string) string {
+	// Print to stdout so it appears in the output and can be parsed
+	fmt.Fprintf(r.stdout, "\nFINAL(%s)\n", value)
+	return value
+}
+
+// finalVarAnswer handles FINAL_VAR(varName) calls from within code blocks.
+// The varName is treated as the value directly (the variable was already evaluated by Go).
+// This is called when LLM writes FINAL_VAR(answer) where answer is a Go variable.
+func (r *YaegiREPL) finalVarAnswer(value string) string {
+	// The value parameter IS the resolved variable value (Go already evaluated it)
+	// Print to stdout so it appears in the output and can be parsed
+	fmt.Fprintf(r.stdout, "\nFINAL(%s)\n", value)
+	return value
+}
+
+// buildPromptWithContext retrieves the context variable and prepends it to the prompt.
+// This ensures sub-LLM queries have access to the loaded context data.
+func (r *YaegiREPL) buildPromptWithContext(prompt string) string {
+	// Try to get the context variable from the interpreter
+	v, err := r.interp.Eval("context")
+	if err != nil || !v.IsValid() {
+		// No context loaded, use prompt as-is
+		return prompt
+	}
+
+	contextStr := ""
+	switch ctx := v.Interface().(type) {
+	case string:
+		contextStr = ctx
+	default:
+		// For non-string context, try JSON marshaling
+		jsonBytes, err := json.Marshal(ctx)
+		if err != nil {
+			return prompt
+		}
+		contextStr = string(jsonBytes)
+	}
+
+	if contextStr == "" {
+		return prompt
+	}
+
+	// Prepend context to prompt
+	return fmt.Sprintf("Context data:\n%s\n\nTask: %s", contextStr, prompt)
+}
+
+// llmQuery makes a single LLM query. This is called from interpreted code.
+// It automatically includes the context variable (if loaded) in the prompt.
 func (r *YaegiREPL) llmQuery(prompt string) string {
 	start := time.Now()
-	result, err := r.llmClient.Query(r.ctx, prompt)
+
+	// Get the context variable from the interpreter and include it in the prompt
+	fullPrompt := r.buildPromptWithContext(prompt)
+
+	result, err := r.llmClient.Query(r.ctx, fullPrompt)
 	duration := time.Since(start)
 
 	response := result.Response
@@ -394,17 +458,27 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 		response = fmt.Sprintf("Error: %v", err)
 	}
 
+	// Record the call (store original prompt for clarity)
 	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
 	return response
 }
 
+// llmQueryBatched makes concurrent LLM queries. This is called from interpreted code.
+// It automatically includes the context variable (if loaded) in each prompt.
 func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	if len(prompts) == 0 {
 		return []string{}
 	}
 
 	start := time.Now()
-	results, err := r.llmClient.QueryBatched(r.ctx, prompts)
+
+	// Build full prompts with context included
+	fullPrompts := make([]string, len(prompts))
+	for i, p := range prompts {
+		fullPrompts[i] = r.buildPromptWithContext(p)
+	}
+
+	results, err := r.llmClient.QueryBatched(r.ctx, fullPrompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
 
@@ -649,8 +723,12 @@ func FormatExecutionResult(result *ExecutionResult) string {
 
 // llmQueryAsync starts an async query and returns a handle ID.
 // This is called from interpreted code via QueryAsync().
+// It automatically includes the context variable (if loaded) in the prompt.
 func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 	handle := newAsyncQueryHandle()
+
+	// Build full prompt with context included (capture before goroutine)
+	fullPrompt := r.buildPromptWithContext(prompt)
 
 	// Track the handle
 	r.asyncMu.Lock()
@@ -660,7 +738,7 @@ func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 	// Start the async query
 	go func() {
 		start := time.Now()
-		result, err := r.llmClient.Query(r.ctx, prompt)
+		result, err := r.llmClient.Query(r.ctx, fullPrompt)
 		duration := time.Since(start)
 
 		response := result.Response
@@ -668,7 +746,7 @@ func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 			response = fmt.Sprintf("Error: %v", err)
 		}
 
-		// Record the async call using the dedicated LLM calls mutex
+		// Record the async call using the dedicated LLM calls mutex (store original prompt for clarity)
 		// This avoids deadlock with the main interpreter mutex
 		r.llmCallsMu.Lock()
 		r.llmCalls = append(r.llmCalls, LLMCall{

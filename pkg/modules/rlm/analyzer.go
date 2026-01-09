@@ -127,20 +127,20 @@ type StructureHints struct {
 
 // Regular expressions for content detection.
 var (
-	// Markdown patterns
+	// Markdown patterns.
 	markdownHeaderRe    = regexp.MustCompile(`(?m)^#{1,6}\s+.+$`)
 	markdownCodeBlockRe = regexp.MustCompile("(?s)```[a-zA-Z]*\\n.*?```")
 	markdownListRe      = regexp.MustCompile(`(?m)^[\s]*[-*+]\s+.+$|^[\s]*\d+\.\s+.+$`)
 	markdownTableRe     = regexp.MustCompile(`(?m)^\|.+\|$`)
 	markdownLinkRe      = regexp.MustCompile(`\[.+?\]\(.+?\)`)
 
-	// Code patterns
+	// Code patterns.
 	codePatternRe = regexp.MustCompile(`(?m)^\s*(func|def|class|function|import|package|const|var|let|public|private|#include)\s`)
 
-	// Log patterns
+	// Log patterns.
 	logPatternRe = regexp.MustCompile(`(?m)^\[?\d{4}[-/]\d{2}[-/]\d{2}[T\s]\d{2}:\d{2}:\d{2}`)
 
-	// XML patterns
+	// XML patterns.
 	xmlPatternRe = regexp.MustCompile(`(?s)^\s*<\?xml|^\s*<[a-zA-Z][a-zA-Z0-9]*(\s|>)`)
 )
 

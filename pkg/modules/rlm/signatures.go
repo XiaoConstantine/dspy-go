@@ -67,11 +67,29 @@ func IterationSignature() core.Signature {
 	).WithInstruction(`You are exploring a large context using a Go REPL. Available functions:
 - Query(prompt string) string: Query a sub-LLM with the prompt
 - QueryBatched(prompts []string) []string: Query multiple prompts in parallel
-- Standard Go: fmt, strings, regexp, strconv
+- FINAL(value string): Signal completion with a direct value
+- FINAL_VAR(value string): Signal completion with a variable value
+- Standard Go: fmt, strings, regexp, strconv, encoding/json, sort
 
 Sub-LLM Capacity: Sub-LLMs can handle ~500K characters. For efficiency, batch ~200K characters per Query call.
 IMPORTANT: REPL outputs are truncated. Use Query() to analyze full content rather than printing large outputs.
 Make sure to explicitly look through the entire context before answering.
+
+CRITICAL CODE RULES (violations cause errors):
+- DO NOT use 'import' statements - packages are already imported
+- DO NOT use 'type' declarations - use map[string]interface{} or inline structs
+- DO NOT use 'func' declarations at top level - use closures if needed
+- Write ONLY executable statements (assignments, function calls, loops, conditionals)
+- EVERY variable must be declared with := before use
+- Keep code blocks SHORT (under 15 lines)
+- DO NOT use strings.Count() for semantic labels - "correct" matches inside "incorrect"! Use Query() instead.
+
+CRITICAL - SIGNALING COMPLETION:
+When Query() returns the answer, IMMEDIATELY call FINAL() in the SAME code block!
+
+BEST PRACTICE:
+answer := Query("What is the label? " + context)
+FINAL(answer)  // IMMEDIATELY signal completion - don't wait for next iteration!
 
 Actions:
 - explore: Write code to examine the context (len, preview, structure)
@@ -201,6 +219,22 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 				"action":    "final",
 				"code":      "",
 				"answer":    "ALPHA-7892",
+			},
+		},
+		// Example demonstrating FINAL() called immediately after Query()
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 5000 chars",
+				"query":        "What is the label: correct or incorrect?",
+				"history":      "Explored: Length=5000, Preview shows labeled data",
+				"repl_state":   "context: <loaded>",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "Small context that fits in one Query call. I'll ask the sub-LLM to determine the label and IMMEDIATELY call FINAL with the result.",
+				"action":    "query",
+				"code": `answer := Query("What is the label in this text? Return ONLY 'correct' or 'incorrect': " + context)
+FINAL(answer)`,
+				"answer": "",
 			},
 		},
 		{

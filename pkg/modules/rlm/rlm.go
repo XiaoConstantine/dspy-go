@@ -47,10 +47,10 @@ type CompletionResult struct {
 type RLM struct {
 	core.BaseModule
 	config          Config
-	rootLLM         core.LLM          // Root LLM for orchestration
-	subLLMClient    SubLLMClient      // Client for sub-LLM calls from REPL
-	tokenTracker    *TokenTracker     // Tracks token usage across all calls
-	iterationModule *modules.Predict  // Internal Predict module for iterations
+	rootLLM         core.LLM         // Root LLM for orchestration
+	subLLMClient    SubLLMClient     // Client for sub-LLM calls from REPL
+	tokenTracker    *TokenTracker    // Tracks token usage across all calls
+	iterationModule *modules.Predict // Internal Predict module for iterations
 }
 
 // Ensure RLM implements the InterceptableModule interface.
@@ -347,9 +347,11 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				logger.Debug(ctx, "[RLM] Stderr: %s", truncate(result.Stderr, truncateLenMedium))
 			}
 
-			// Collect sub-LLM calls for trace
+			// Collect sub-LLM calls for trace and add Query results to history
 			var rlmCalls []logging.RLMCallEntry
-			for _, call := range replEnv.GetLLMCalls() {
+			var allOutput strings.Builder
+			llmCalls := replEnv.GetLLMCalls()
+			for _, call := range llmCalls {
 				r.tokenTracker.AddSubCall(call)
 				rlmCalls = append(rlmCalls, logging.RLMCallEntry{
 					Prompt:           call.Prompt,
@@ -358,6 +360,56 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 					CompletionTokens: call.CompletionTokens,
 					ExecutionTime:    call.Duration.Seconds(),
 				})
+
+				// CRITICAL FIX: Add Query results to output so the LLM can see them in subsequent iterations.
+				// Without this, Query() return values assigned to variables are invisible in history,
+				// causing the LLM to guess/hallucinate the answer in later iterations.
+				allOutput.WriteString(fmt.Sprintf("\n[Query] %s\n[Result] %s\n",
+					truncate(call.Prompt, truncateLenMedium),
+					call.Response))
+			}
+
+			// Also capture execution stdout in allOutput for FINAL detection
+			if result.Stdout != "" {
+				allOutput.WriteString(result.Stdout)
+			}
+
+			// Check for FINAL in execution output (from code-called FINAL/FINAL_VAR functions)
+			outputStr := allOutput.String()
+			if final := FindFinalAnswer(outputStr); final != nil {
+				// Found FINAL in execution output - the value is already resolved
+				resultResponse := final.Content
+
+				if r.config.Verbose {
+					logger.Debug(ctx, "[RLM] Found FINAL in execution output: %s", truncate(resultResponse, truncateLenShort))
+				}
+
+				// Log final iteration to trace
+				if traceSession != nil {
+					_ = traceSession.LogIteration(
+						[]logging.RLMMessage{{Role: "user", Content: query}},
+						reasoning,
+						[]logging.RLMCodeBlock{{
+							Code: code,
+							Result: logging.RLMCodeResult{
+								Stdout:        result.Stdout,
+								Stderr:        result.Stderr,
+								Locals:        replEnv.GetLocals(),
+								ExecutionTime: result.Duration.Seconds(),
+								RLMCalls:      rlmCalls,
+							},
+						}},
+						resultResponse,
+						time.Since(iterStart),
+					)
+				}
+
+				return &CompletionResult{
+					Response:   resultResponse,
+					Iterations: i + 1,
+					Duration:   time.Since(start),
+					Usage:      r.tokenTracker.GetTotalUsage(),
+				}, nil
 			}
 
 			// Log iteration to trace
@@ -381,7 +433,12 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				)
 			}
 
-			r.appendIterationHistory(&history, i+1, action, reasoning, code, FormatExecutionResult(result))
+			// Include Query results in history output
+			execOutput := FormatExecutionResult(result)
+			if allOutput.Len() > 0 {
+				execOutput = execOutput + allOutput.String()
+			}
+			r.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
 		} else if action != "final" {
 			// Log non-code iteration to trace
 			if traceSession != nil {
@@ -524,7 +581,7 @@ func (r *RLM) detectConfidence(response string) bool {
 // Early termination only happens when:
 // 1. Adaptive iteration is enabled with early termination
 // 2. Confidence threshold is met
-// 3. There are no pending code blocks (the model isn't waiting for execution results)
+// 3. There are no pending code blocks (the model isn't waiting for execution results).
 func (r *RLM) shouldTerminateEarly(confidenceSignals int, hasCode bool) bool {
 	if r.config.AdaptiveIteration == nil || !r.config.AdaptiveIteration.Enabled {
 		return false
