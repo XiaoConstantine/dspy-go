@@ -354,6 +354,16 @@ func (s *GEPAState) extractParetoOptimal(candidates []*GEPACandidate, fitnessMap
 
 // dominates checks if fitness1 dominates fitness2 (all objectives >= and at least one >).
 func (s *GEPAState) dominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
+	return multiObjectiveDominates(fitness1, fitness2)
+}
+
+// multiObjectiveDominates is a package-level helper that checks if fitness1 dominates fitness2.
+// fitness1 dominates if it's >= in all objectives and > in at least one.
+func multiObjectiveDominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
+	if fitness1 == nil || fitness2 == nil {
+		return false
+	}
+
 	objectives1 := []float64{
 		fitness1.SuccessRate, fitness1.OutputQuality, fitness1.Efficiency,
 		fitness1.Robustness, fitness1.Generalization, fitness1.Diversity, fitness1.Innovation,
@@ -1932,47 +1942,7 @@ func (g *GEPA) calculateParetoFronts(candidates []*GEPACandidate, fitnessMap map
 
 // dominates checks if fitness1 dominates fitness2 in multi-objective space.
 func (g *GEPA) dominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
-	if fitness1 == nil || fitness2 == nil {
-		return false
-	}
-
-	// Extract objective values
-	objectives1 := []float64{
-		fitness1.SuccessRate,
-		fitness1.OutputQuality,
-		fitness1.Efficiency,
-		fitness1.Robustness,
-		fitness1.Generalization,
-		fitness1.Diversity,
-		fitness1.Innovation,
-	}
-
-	objectives2 := []float64{
-		fitness2.SuccessRate,
-		fitness2.OutputQuality,
-		fitness2.Efficiency,
-		fitness2.Robustness,
-		fitness2.Generalization,
-		fitness2.Diversity,
-		fitness2.Innovation,
-	}
-
-	// Check if fitness1 dominates fitness2
-	// fitness1 dominates if it's >= in all objectives and > in at least one
-	allGreaterOrEqual := true
-	atLeastOneGreater := false
-
-	for i := 0; i < len(objectives1); i++ {
-		if objectives1[i] < objectives2[i] {
-			allGreaterOrEqual = false
-			break
-		}
-		if objectives1[i] > objectives2[i] {
-			atLeastOneGreater = true
-		}
-	}
-
-	return allGreaterOrEqual && atLeastOneGreater
+	return multiObjectiveDominates(fitness1, fitness2)
 }
 
 // selectWithParetoRanking selects candidates using Pareto ranking and crowding distance.

@@ -596,7 +596,7 @@ func stripMarkdown(content string, signature core.Signature) string {
 				result.WriteString(preserveStructure(content))
 			} else {
 				// Clean unstructured content
-				result.WriteString(cleanUnstructuredContentNew(content))
+				result.WriteString(cleanUnstructuredLines(content))
 			}
 			result.WriteString("\n\n")
 		}
@@ -749,23 +749,17 @@ func countLeadingSpaces(s string) int {
 	return len(s) - len(strings.TrimLeft(s, " \t"))
 }
 
+// cleanUnstructuredContent handles unstructured content by removing empty lines.
+// It takes a string, splits it by newlines, and removes blank lines.
 func cleanUnstructuredContent(content string) string {
-	// Handle unstructured content (like plain text or lists)
-	lines := strings.Split(content, "\n")
-	var cleaned []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			cleaned = append(cleaned, trimmed)
-		}
-	}
-
-	return strings.Join(cleaned, "\n")
+	return cleanUnstructuredLines(strings.Split(content, "\n"))
 }
-func cleanUnstructuredContentNew(content []string) string {
+
+// cleanUnstructuredLines handles unstructured content by removing empty lines from a slice.
+// This is the core implementation used by cleanUnstructuredContent.
+func cleanUnstructuredLines(lines []string) string {
 	var cleaned []string
-	for _, line := range content {
+	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {
 			cleaned = append(cleaned, line)
 		}
@@ -773,28 +767,11 @@ func cleanUnstructuredContentNew(content []string) string {
 	return strings.Join(cleaned, "\n")
 }
 
-func (p *Predict) FormatOutputs(outputs map[string]interface{}) map[string]interface{} {
-	formattedOutputs := make(map[string]interface{})
-	for _, field := range p.GetSignature().Outputs {
-		if value, ok := outputs[field.Name]; ok {
-			formattedOutputs[field.Name] = value
-		}
-	}
-	return formattedOutputs
-}
+// Note: ValidateInputs and FormatOutputs are inherited from BaseModule.
+// Predict relies on the embedded BaseModule implementation.
 
 func (p *Predict) GetSignature() core.Signature {
 	return p.BaseModule.GetSignature()
-}
-
-func (p *Predict) ValidateInputs(inputs map[string]interface{}) error {
-	signature := p.GetSignature()
-	for _, field := range signature.Inputs {
-		if _, ok := inputs[field.Name]; !ok {
-			return fmt.Errorf("missing required input: %s", field.Name)
-		}
-	}
-	return nil
 }
 
 func (p *Predict) SetDemos(demos []core.Example) {

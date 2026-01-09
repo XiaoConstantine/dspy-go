@@ -317,3 +317,14 @@ func EnsureFactory() {
 
 // Provider factories are defined in their respective LLM files
 // (anthrophic.go, gemini.go, ollama.go, llamacpp.go)
+
+// isValidModelInList checks if a model ID is in the provided list of valid models.
+// This provides O(n) lookup which is acceptable for small lists of valid models.
+func isValidModelInList(modelID core.ModelID, validModels []core.ModelID) bool {
+	for _, validModel := range validModels {
+		if modelID == validModel {
+			return true
+		}
+	}
+	return false
+}

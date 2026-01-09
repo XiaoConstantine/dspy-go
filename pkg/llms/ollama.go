@@ -893,8 +893,10 @@ func (o *OllamaLLM) parseOpenAIStreamResponse(body io.Reader, chunkChan chan<- c
 }
 
 // supportsOllamaStreaming checks if the model supports streaming.
-func supportsOllamaStreaming(modelName string) bool {
-	// Most Ollama models support streaming
+// Currently all Ollama models support streaming, but this function is kept
+// as a placeholder for future model-specific capability checks.
+// The modelName parameter is unused but kept for API consistency.
+func supportsOllamaStreaming(_ string) bool {
 	return true
 }
 

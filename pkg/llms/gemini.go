@@ -294,38 +294,38 @@ func GeminiProviderFactory(ctx context.Context, config core.ProviderConfig, mode
 	return NewGeminiLLMFromConfig(ctx, config, modelID)
 }
 
+// validGeminiModels is the list of supported Gemini model IDs.
+var validGeminiModels = []core.ModelID{
+	// Gemini 2.5 series (existing)
+	core.ModelGoogleGeminiFlash,     // gemini-2.5-flash
+	core.ModelGoogleGeminiPro,       // gemini-2.5-pro
+	core.ModelGoogleGeminiFlashLite, // gemini-2.5-flash-lite
+	// Gemini 3 series (new)
+	core.ModelGoogleGemini3ProPreview,   // gemini-3-pro-preview
+	core.ModelGoogleGemini3FlashPreview, // gemini-3-flash-preview
+	// Gemini 2.0 series (new)
+	core.ModelGoogleGemini20Flash,     // gemini-2.0-flash
+	core.ModelGoogleGemini20FlashLite, // gemini-2.0-flash-lite
+}
+
 // isValidGeminiModel checks if the model is a valid Gemini model.
 func isValidGeminiModel(modelID core.ModelID) bool {
-	validModels := []core.ModelID{
-		// Gemini 2.5 series (existing)
-		core.ModelGoogleGeminiFlash,     // gemini-2.5-flash
-		core.ModelGoogleGeminiPro,       // gemini-2.5-pro
-		core.ModelGoogleGeminiFlashLite, // gemini-2.5-flash-lite
-		// Gemini 3 series (new)
-		core.ModelGoogleGemini3ProPreview,   // gemini-3-pro-preview
-		core.ModelGoogleGemini3FlashPreview, // gemini-3-flash-preview
-		// Gemini 2.0 series (new)
-		core.ModelGoogleGemini20Flash,     // gemini-2.0-flash
-		core.ModelGoogleGemini20FlashLite, // gemini-2.0-flash-lite
-	}
-
-	for _, validModel := range validModels {
-		if modelID == validModel {
-			return true
-		}
-	}
-	return false
+	return isValidModelInList(modelID, validGeminiModels)
 }
 
 // supportsGeminiStreaming checks if the model supports streaming.
-func supportsGeminiStreaming(modelID core.ModelID) bool {
-	// Most Gemini models support streaming
+// Currently all Gemini models support streaming, but this function is kept
+// as a placeholder for future model-specific capability checks.
+// The modelID parameter is unused but kept for API consistency.
+func supportsGeminiStreaming(_ core.ModelID) bool {
 	return true
 }
 
 // supportsGeminiFunctionCalling checks if the model supports function calling.
-func supportsGeminiFunctionCalling(modelID core.ModelID) bool {
-	// Most Gemini models support function calling
+// Currently all Gemini models support function calling, but this function is kept
+// as a placeholder for future model-specific capability checks.
+// The modelID parameter is unused but kept for API consistency.
+func supportsGeminiFunctionCalling(_ core.ModelID) bool {
 	return true
 }
 
