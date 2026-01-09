@@ -333,16 +333,17 @@ func (r *ReAct) executeToolByName(ctx context.Context, toolName string, argument
 // Cloning the registry itself might be complex and depends on the registry implementation.
 // Sharing the registry is usually acceptable.
 func (r *ReAct) Clone() core.Module {
-	// Ensure Predict module is cloned
+	// Clone Predict module. The type assertion panic is defensive - Clone() always returns
+	// the same concrete type, so this should never fail in practice.
 	clonedPredict, ok := r.Predict.Clone().(*Predict)
 	if !ok {
-		panic("Failed to clone Predict module")
+		panic("Failed to clone Predict module: unexpected type returned from Clone()")
 	}
 
-	// Ensure Extract module is cloned
+	// Clone Extract module. Same defensive check as above.
 	clonedExtract, ok := r.Extract.Clone().(*ChainOfThought)
 	if !ok {
-		panic("Failed to clone Extract module")
+		panic("Failed to clone Extract module: unexpected type returned from Clone()")
 	}
 
 	return &ReAct{
@@ -564,65 +565,118 @@ func (r *ReAct) parseActionString(ctx context.Context, actionStr string) (string
 
 // parseActionStruct handles structured action parsing from XML-by-default parsing.
 func (r *ReAct) parseActionStruct(ctx context.Context, actionStruct map[string]interface{}) (string, map[string]interface{}, error) {
+	// Check for simple finish action first (early return)
+	if isFinishAction(actionStruct) {
+		return "finish", make(map[string]interface{}), nil
+	}
+
 	// Look for tool_name field in the structured data
 	toolNameRaw, hasToolName := actionStruct["tool_name"]
-	if hasToolName {
-		toolName, ok := toolNameRaw.(string)
+	if !hasToolName {
+		return "", nil, fmt.Errorf("unable to extract tool information from structured action: %+v", actionStruct)
+	}
+
+	toolName, ok := toolNameRaw.(string)
+	if !ok {
+		return "", nil, fmt.Errorf("tool_name field is not a string: %T", toolNameRaw)
+	}
+
+	argsMap := extractArguments(actionStruct)
+	return toolName, argsMap, nil
+}
+
+// isFinishAction checks if the action struct represents a finish action.
+func isFinishAction(actionStruct map[string]interface{}) bool {
+	content, hasContent := actionStruct["content"]
+	if !hasContent {
+		return false
+	}
+
+	contentStr, ok := content.(string)
+	if !ok {
+		return false
+	}
+
+	return strings.ToLower(strings.TrimSpace(contentStr)) == "finish"
+}
+
+// extractArguments extracts arguments from the action struct.
+func extractArguments(actionStruct map[string]interface{}) map[string]interface{} {
+	argsRaw, hasArgs := actionStruct["arguments"]
+	if !hasArgs {
+		return make(map[string]interface{})
+	}
+
+	argsStruct, ok := argsRaw.(map[string]interface{})
+	if !ok {
+		return make(map[string]interface{})
+	}
+
+	// Check for nested "arg" structure
+	argsList, hasArg := argsStruct["arg"]
+	if !hasArg {
+		// Direct argument mapping
+		return argsStruct
+	}
+
+	// Handle nested argument structure
+	switch args := argsList.(type) {
+	case map[string]interface{}:
+		return extractSingleArg(args)
+	case []interface{}:
+		return extractArgsFromList(args)
+	default:
+		return make(map[string]interface{})
+	}
+}
+
+// extractSingleArg extracts a single argument from a map with "key" and "content" fields.
+func extractSingleArg(args map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	key, hasKey := args["key"]
+	if !hasKey {
+		return result
+	}
+
+	keyStr, ok := key.(string)
+	if !ok {
+		return result
+	}
+
+	if content, hasContent := args["content"]; hasContent {
+		result[keyStr] = content
+	}
+
+	return result
+}
+
+// extractArgsFromList extracts multiple arguments from a list of arg maps.
+func extractArgsFromList(args []interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	for _, argItem := range args {
+		argMap, ok := argItem.(map[string]interface{})
 		if !ok {
-			return "", nil, fmt.Errorf("tool_name field is not a string: %T", toolNameRaw)
+			continue
 		}
 
-		// Extract arguments if present
-		argsMap := make(map[string]interface{})
-		if argsRaw, hasArgs := actionStruct["arguments"]; hasArgs {
-			if argsStruct, ok := argsRaw.(map[string]interface{}); ok {
-				// Handle nested argument structure
-				if argsList, hasArg := argsStruct["arg"]; hasArg {
-					// Handle both single arg and multiple args
-					switch args := argsList.(type) {
-					case map[string]interface{}:
-						// Single argument
-						if key, hasKey := args["key"]; hasKey {
-							if keyStr, ok := key.(string); ok {
-								if content, hasContent := args["content"]; hasContent {
-									argsMap[keyStr] = content
-								}
-							}
-						}
-					case []interface{}:
-						// Multiple arguments
-						for _, argItem := range args {
-							if argMap, ok := argItem.(map[string]interface{}); ok {
-								if key, hasKey := argMap["key"]; hasKey {
-									if keyStr, ok := key.(string); ok {
-										if content, hasContent := argMap["content"]; hasContent {
-											argsMap[keyStr] = content
-										}
-									}
-								}
-							}
-						}
-					}
-				} else {
-					// Direct argument mapping
-					argsMap = argsStruct
-				}
-			}
+		key, hasKey := argMap["key"]
+		if !hasKey {
+			continue
 		}
 
-		return toolName, argsMap, nil
-	}
+		keyStr, ok := key.(string)
+		if !ok {
+			continue
+		}
 
-	// Check if this is a simple finish action or direct tool name
-	if content, hasContent := actionStruct["content"]; hasContent {
-		if contentStr, ok := content.(string); ok {
-			if strings.ToLower(strings.TrimSpace(contentStr)) == "finish" {
-				return "finish", make(map[string]interface{}), nil
-			}
+		if content, hasContent := argMap["content"]; hasContent {
+			result[keyStr] = content
 		}
 	}
 
-	return "", nil, fmt.Errorf("unable to extract tool information from structured action: %+v", actionStruct)
+	return result
 }
 
 // parseActionWithInterceptors uses the centralized XML parser to parse action strings.

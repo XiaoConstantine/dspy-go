@@ -11,6 +11,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 // iterationPattern matches "--- Iteration N ---" headers in history.
@@ -273,7 +274,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		r.trackTokenUsage(ctx)
 
 		if r.config.Verbose {
-			logger.Debug(ctx, "[RLM] Action: %s, Reasoning: %s", action, truncate(reasoning, truncateLenShort))
+			logger.Debug(ctx, "[RLM] Action: %s, Reasoning: %s", action, utils.TruncateString(reasoning, truncateLenShort))
 		}
 
 		// Handle the action
@@ -332,7 +333,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 
 		if code != "" {
 			if r.config.Verbose {
-				logger.Debug(ctx, "[RLM] Executing code:\n%s", truncate(code, truncateLenMedium))
+				logger.Debug(ctx, "[RLM] Executing code:\n%s", utils.TruncateString(code, truncateLenMedium))
 			}
 
 			result, execErr := replEnv.Execute(ctx, code)
@@ -341,10 +342,10 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			}
 
 			if r.config.Verbose && result.Stdout != "" {
-				logger.Debug(ctx, "[RLM] Output: %s", truncate(result.Stdout, truncateLenMedium))
+				logger.Debug(ctx, "[RLM] Output: %s", utils.TruncateString(result.Stdout, truncateLenMedium))
 			}
 			if r.config.Verbose && result.Stderr != "" {
-				logger.Debug(ctx, "[RLM] Stderr: %s", truncate(result.Stderr, truncateLenMedium))
+				logger.Debug(ctx, "[RLM] Stderr: %s", utils.TruncateString(result.Stderr, truncateLenMedium))
 			}
 
 			// Collect sub-LLM calls for trace and add Query results to history
@@ -365,7 +366,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				// Without this, Query() return values assigned to variables are invisible in history,
 				// causing the LLM to guess/hallucinate the answer in later iterations.
 				allOutput.WriteString(fmt.Sprintf("\n[Query] %s\n[Result] %s\n",
-					truncate(call.Prompt, truncateLenMedium),
+					utils.TruncateString(call.Prompt, truncateLenMedium),
 					call.Response))
 			}
 
@@ -381,7 +382,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				resultResponse := final.Content
 
 				if r.config.Verbose {
-					logger.Debug(ctx, "[RLM] Found FINAL in execution output: %s", truncate(resultResponse, truncateLenShort))
+					logger.Debug(ctx, "[RLM] Found FINAL in execution output: %s", utils.TruncateString(resultResponse, truncateLenShort))
 				}
 
 				// Log final iteration to trace
@@ -739,13 +740,6 @@ func formatREPLState(locals map[string]any) string {
 	return strings.Join(parts, "\n")
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
-
 func (r *RLM) trackTokenUsage(ctx context.Context) {
 	if state := core.GetExecutionState(ctx); state != nil {
 		if usage := state.GetTokenUsage(); usage != nil {
@@ -760,7 +754,7 @@ func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, ac
 	fmt.Fprintf(history, "Reasoning: %s\n", reasoning)
 	if code != "" {
 		fmt.Fprintf(history, "Code:\n```go\n%s\n```\n", code)
-		fmt.Fprintf(history, "Output:\n%s\n", truncate(output, truncateLenLong))
+		fmt.Fprintf(history, "Output:\n%s\n", utils.TruncateString(output, truncateLenLong))
 	}
 }
 

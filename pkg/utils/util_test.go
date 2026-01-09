@@ -167,16 +167,16 @@ func TestTruncateString(t *testing.T) {
 				// Let's test for current behavior if maxLen is 0, which is what negative would lead to if corrected.
 				if tt.maxLen < 0 {
 					// Simulating corrected behavior or explicit test for maxLen = 0
-					result := truncateString(tt.inputS, 0)
+					result := TruncateString(tt.inputS, 0)
 					if result != tt.expected {
-						t.Errorf("truncateString() with maxLen 0 for negative case = %q, want %q", result, tt.expected)
+						t.Errorf("TruncateString() with maxLen 0 for negative case = %q, want %q", result, tt.expected)
 					}
 					return
 				}
 			}
-			result := truncateString(tt.inputS, tt.maxLen)
+			result := TruncateString(tt.inputS, tt.maxLen)
 			if result != tt.expected {
-				t.Errorf("truncateString() = %q, want %q", result, tt.expected)
+				t.Errorf("TruncateString() = %q, want %q", result, tt.expected)
 			}
 		})
 	}

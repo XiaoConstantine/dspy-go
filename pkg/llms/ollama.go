@@ -221,8 +221,8 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 		Stream:   false,
 	}
 
-	// Apply generate options
-	o.applyGenerateOptions(req, opts)
+	// Apply generate options using shared helper
+	req.ApplyOptions(coreOptsToOpenAI(opts))
 
 	// Make HTTP request
 	jsonData, err := json.Marshal(req)
@@ -401,7 +401,7 @@ func (o *OllamaLLM) streamGenerateOpenAI(ctx context.Context, prompt string, opt
 		Stream:   true,
 	}
 
-	o.applyGenerateOptions(req, opts)
+	req.ApplyOptions(coreOptsToOpenAI(opts))
 
 	chunkChan := make(chan core.StreamChunk, 100)
 	streamCtx, cancelStream := context.WithCancel(ctx)
@@ -859,28 +859,6 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 }
 
 // Helper functions
-
-// applyGenerateOptions applies generation options to OpenAI request.
-func (o *OllamaLLM) applyGenerateOptions(req *openai.ChatCompletionRequest, opts *core.GenerateOptions) {
-	if opts.MaxTokens > 0 {
-		req.MaxTokens = &opts.MaxTokens
-	}
-	if opts.Temperature >= 0 {
-		req.Temperature = &opts.Temperature
-	}
-	if opts.TopP > 0 {
-		req.TopP = &opts.TopP
-	}
-	if opts.FrequencyPenalty != 0 {
-		req.FrequencyPenalty = &opts.FrequencyPenalty
-	}
-	if opts.PresencePenalty != 0 {
-		req.PresencePenalty = &opts.PresencePenalty
-	}
-	if len(opts.Stop) > 0 {
-		req.Stop = opts.Stop
-	}
-}
 
 // parseOpenAIStreamResponse parses OpenAI SSE format.
 func (o *OllamaLLM) parseOpenAIStreamResponse(body io.Reader, chunkChan chan<- core.StreamChunk) {

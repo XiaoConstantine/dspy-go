@@ -443,8 +443,8 @@ func ConvertInputsToContentBlocks(signature Signature, inputs map[string]any) []
 
 	// Add instruction block that explains the expected format
 	instructionText := fmt.Sprintf("Given the fields '%s', produce the fields '%s'.\n\n",
-		joinFieldNames(inputFieldsToFields(signature.Inputs)),
-		joinFieldNames(outputFieldsToFields(signature.Outputs)),
+		JoinFieldNames(InputFieldsToFields(signature.Inputs)),
+		JoinFieldNames(OutputFieldsToFields(signature.Outputs)),
 	)
 
 	// Add prefix instructions for output fields
@@ -528,8 +528,8 @@ func ConvertInputsToContentBlocks(signature Signature, inputs map[string]any) []
 
 // Helper functions for field processing in core package
 
-// joinFieldNames joins field names with commas.
-func joinFieldNames(fields []Field) string {
+// JoinFieldNames joins field names with commas.
+func JoinFieldNames(fields []Field) string {
 	names := make([]string, len(fields))
 	for i, field := range fields {
 		names[i] = field.Name
@@ -537,8 +537,8 @@ func joinFieldNames(fields []Field) string {
 	return strings.Join(names, ", ")
 }
 
-// inputFieldsToFields converts InputField slice to Field slice.
-func inputFieldsToFields(inputs []InputField) []Field {
+// InputFieldsToFields converts InputField slice to Field slice.
+func InputFieldsToFields(inputs []InputField) []Field {
 	fields := make([]Field, len(inputs))
 	for i, input := range inputs {
 		fields[i] = input.Field
@@ -546,8 +546,8 @@ func inputFieldsToFields(inputs []InputField) []Field {
 	return fields
 }
 
-// outputFieldsToFields converts OutputField slice to Field slice.
-func outputFieldsToFields(outputs []OutputField) []Field {
+// OutputFieldsToFields converts OutputField slice to Field slice.
+func OutputFieldsToFields(outputs []OutputField) []Field {
 	fields := make([]Field, len(outputs))
 	for i, output := range outputs {
 		fields[i] = output.Field

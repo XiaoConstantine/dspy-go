@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -495,11 +496,11 @@ func TestContextMetadata(t *testing.T) {
 	}
 }
 
-// TestTruncate tests the truncate helper functions.
+// TestTruncate tests the TruncateString helper from utils package.
 func TestTruncate(t *testing.T) {
-	assert.Equal(t, "hello", truncate("hello", 10))
-	assert.Equal(t, "hel...", truncate("hello world", 3))
-	assert.Equal(t, "hello...", truncate("hello world", 5))
+	assert.Equal(t, "hello", utils.TruncateString("hello", 10))
+	assert.Equal(t, "hel...", utils.TruncateString("hello world", 3))
+	assert.Equal(t, "hello...", utils.TruncateString("hello world", 5))
 }
 
 // TestStripQuotes tests the quote stripping helper.

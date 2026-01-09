@@ -730,7 +730,7 @@ func (r *ReActAgent) analyzeTaskComplexity(input map[string]interface{}) float64
 		// Check for keywords indicating complexity
 		complexKeywords := []string{"analyze", "compare", "synthesize", "evaluate", "multiple"}
 		for _, keyword := range complexKeywords {
-			if contains(task, keyword) {
+			if strings.Contains(task, keyword) {
 				complexity += 0.1
 			}
 		}
@@ -1274,10 +1274,4 @@ func (r *ReActAgent) GetACEMetrics() map[string]int64 {
 		return nil
 	}
 	return r.aceManager.Metrics()
-}
-
-// Utility functions
-
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
 }

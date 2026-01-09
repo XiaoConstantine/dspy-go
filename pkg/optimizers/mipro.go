@@ -606,8 +606,8 @@ func (m *MIPRO) updateOptimizationState(params map[string]interface{}, score flo
 
 func (m *MIPRO) extractAndStorePatterns(program core.Program) {
 	// Analyze program structure and extract successful patterns
-	for _, predictor := range program.Predictors() {
-		signature := predictor.GetSignature()
+	for _, module := range program.GetModules() {
+		signature := module.GetSignature()
 		if signature.Instruction != "" {
 			m.state.SuccessfulPatterns = append(m.state.SuccessfulPatterns, signature.Instruction)
 		}

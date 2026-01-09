@@ -26,7 +26,7 @@ func ParseJSONResponse(response string) (map[string]interface{}, error) {
 			errors.Wrap(err, errors.InvalidResponse, "failed to parse JSON"),
 			errors.Fields{
 				"error_type":   "json_parse_error",
-				"data_preview": truncateString(response, 100),
+				"data_preview": TruncateString(response, 100),
 				"data_length":  len(response),
 			})
 	}
@@ -56,7 +56,8 @@ func stripMarkdownCodeBlock(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func truncateString(s string, maxLen int) string {
+// TruncateString truncates a string to maxLen characters and appends "..." if truncated.
+func TruncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}

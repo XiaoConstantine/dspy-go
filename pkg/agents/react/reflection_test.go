@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,7 +234,7 @@ func TestSelfReflector_ComprehensiveTests(t *testing.T) {
 			// Check if any reflection mentions patterns or systemic issues
 			found := false
 			for _, r := range reflections {
-				if contains(r.Insight, "Frequent errors") || contains(r.Insight, "systemic") {
+				if strings.Contains(r.Insight, "Frequent errors") || strings.Contains(r.Insight, "systemic") {
 					found = true
 					break
 				}

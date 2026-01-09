@@ -29,9 +29,6 @@ type Predict struct {
 var _ core.Module = (*Predict)(nil)
 var _ core.InterceptableModule = (*Predict)(nil)
 
-// Ensure Predict implements InterceptableModule.
-var _ core.InterceptableModule = (*Predict)(nil)
-
 // Ensure Predict implements demo interfaces for saving/loading.
 var _ core.DemoProvider = (*Predict)(nil)
 var _ core.DemoConsumer = (*Predict)(nil)
@@ -167,136 +164,27 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, op
 		return p.ProcessWithInterceptors(ctx, inputs, nil, opts...)
 	}
 
-	logger := logging.GetLogger()
-	callOptions := &core.ModuleOptions{}
-	for _, opt := range opts {
-		opt(callOptions)
-	}
-
-	finalOptions := p.defaultOptions.MergeWith(callOptions)
-
-	if callOptions.StreamHandler != nil {
-		return p.processWithStreaming(ctx, inputs, callOptions.StreamHandler, finalOptions)
-	}
-	// Use semantic name if set, otherwise fall back to operation name
-	displayName := p.GetDisplayName()
-	if displayName == "" || displayName == "BaseModule" {
-		displayName = "Predict"
-	}
-
-	metadata := map[string]interface{}{
-		"module_type":   p.GetModuleType(),
-		"module_config": p.GetSignature().String(),
-	}
-	ctx, span := core.StartSpanWithContext(ctx, "Predict", displayName, metadata)
-	defer core.EndSpan(ctx)
-	span.WithAnnotation("inputs", inputs)
-
-	if err := p.ValidateInputs(inputs); err != nil {
-		span.WithError(err)
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.ValidationFailed, "input validation failed"),
-			errors.Fields{
-				"module": "Predict",
-				"inputs": inputs,
-			})
-	}
-
-	signature := p.GetSignature()
-
-	// Check if inputs contain multimodal content
-	if core.IsMultimodalContent(signature, inputs) {
-		// Use structured content approach
-		content := core.ConvertInputsToContentBlocks(signature, inputs)
-		logger.Debug(ctx, "Using multimodal content generation with %d blocks", len(content))
-
-		resp, err := p.LLM.GenerateWithContent(ctx, content, finalOptions.GenerateOptions...)
-		if err != nil {
-			span.WithError(err)
-			return nil, errors.WithFields(
-				errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate multimodal prediction"),
-				errors.Fields{
-					"module":         "Predict",
-					"content_blocks": len(content),
-					"model":          p.LLM.ModelID(),
-				})
-		}
-
-		logger.Debug(ctx, "LLM Multimodal Completion: %v", resp.Content)
-
-		if resp.Usage != nil {
-			if state := core.GetExecutionState(ctx); state != nil {
-				state.WithTokenUsage(&core.TokenUsage{
-					PromptTokens:     resp.Usage.PromptTokens,
-					CompletionTokens: resp.Usage.CompletionTokens,
-					TotalTokens:      resp.Usage.TotalTokens,
-				})
-			}
-		}
-
-		// Parse the response (same as text-based)
-		cleaned := stripMarkdown(resp.Content, signature)
-		outputs := parseCompletion(cleaned, signature)
-		formattedOutputs := p.FormatOutputs(outputs)
-
-		return formattedOutputs, nil
-	}
-
-	// Fall back to traditional text-based approach
-	prompt := formatPrompt(signature, p.Demos, inputs)
-	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
-
-	resp, err := p.LLM.Generate(ctx, prompt, finalOptions.GenerateOptions...)
-	if err != nil {
-		span.WithError(err)
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.LLMGenerationFailed, "failed to generate prediction"),
-			errors.Fields{
-				"module": "Predict",
-				"prompt": prompt,
-				"model":  p.LLM.ModelID(),
-			})
-	}
-	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
-
-	if resp.Usage != nil {
-		if state := core.GetExecutionState(ctx); state != nil {
-			state.WithTokenUsage(&core.TokenUsage{
-				PromptTokens:     resp.Usage.PromptTokens,
-				CompletionTokens: resp.Usage.CompletionTokens,
-				TotalTokens:      resp.Usage.TotalTokens,
-			})
-		}
-		logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d", resp.Usage.TotalTokens, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
-	}
-
-	// Traditional parsing for non-XML mode
-	cleaned := stripMarkdown(resp.Content, p.GetSignature())
-	logger.Debug(ctx, "Normalized completion: %s", cleaned)
-	outputs := parseCompletion(cleaned, signature)
-	logger.Debug(ctx, "Parsed LLM Completion: %v", outputs)
-	formattedOutputs := p.FormatOutputs(outputs)
-	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
-
-	// Include raw response for XML interceptor processing
-	if p.IsXMLModeEnabled() {
-		formattedOutputs["__raw_response"] = resp.Content
-	}
-
-	span.WithAnnotation("outputs", formattedOutputs)
-
-	return formattedOutputs, nil
+	// Use the shared core implementation with non-XML output formatting
+	return p.executeGeneration(ctx, inputs, false, opts...)
 }
 
 // ProcessWithInterceptors executes the Predict module's logic with interceptor support.
 func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
-	// Use the helper method from BaseModule, but pass our core processing method (without XML logic)
+	// Use the helper method from BaseModule, but pass our core processing method
 	return p.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, p.processCore, opts...)
 }
 
-// processCore handles the core prediction logic without XML interceptor routing.
+// processCore handles the core prediction logic for interceptor pipeline.
+// When called via ProcessWithInterceptors, XML interceptors handle response parsing.
 func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
-	logger := logging.GetLogger()
+	// For XML mode via interceptors, return raw response for XML interceptor to parse
+	return p.executeGeneration(ctx, inputs, p.enableXMLMode, opts...)
+}
+
+// executeGeneration contains the shared generation logic for both Process and processCore.
+// The returnRawForXML parameter controls whether to return raw LLM response (for XML interceptor parsing)
+// or parsed/formatted outputs (for traditional text mode).
+func (p *Predict) executeGeneration(ctx context.Context, inputs map[string]interface{}, returnRawForXML bool, opts ...core.Option) (map[string]interface{}, error) {
 	callOptions := &core.ModuleOptions{}
 	for _, opt := range opts {
 		opt(callOptions)
@@ -307,6 +195,7 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 	if callOptions.StreamHandler != nil {
 		return p.processWithStreaming(ctx, inputs, callOptions.StreamHandler, finalOptions)
 	}
+
 	// Use semantic name if set, otherwise fall back to operation name
 	displayName := p.GetDisplayName()
 	if displayName == "" || displayName == "BaseModule" {
@@ -333,9 +222,25 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 
 	signature := p.GetSignature()
 
+	// Execute generation (multimodal or text-based)
+	resp, err := p.callLLM(ctx, signature, inputs, finalOptions, span)
+	if err != nil {
+		return nil, err
+	}
+
+	// Track token usage
+	p.trackTokenUsage(ctx, resp)
+
+	// Format output based on mode
+	return p.formatResponse(ctx, resp.Content, signature, returnRawForXML, span)
+}
+
+// callLLM executes the appropriate LLM call based on content type.
+func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs map[string]interface{}, finalOptions *core.ModuleOptions, span *core.Span) (*core.LLMResponse, error) {
+	logger := logging.GetLogger()
+
 	// Check if inputs contain multimodal content
 	if core.IsMultimodalContent(signature, inputs) {
-		// Use structured content approach
 		content := core.ConvertInputsToContentBlocks(signature, inputs)
 		logger.Debug(ctx, "Using multimodal content generation with %d blocks", len(content))
 
@@ -350,34 +255,8 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 					"model":          p.LLM.ModelID(),
 				})
 		}
-
 		logger.Debug(ctx, "LLM Multimodal Completion: %v", resp.Content)
-
-		if resp.Usage != nil {
-			if state := core.GetExecutionState(ctx); state != nil {
-				state.WithTokenUsage(&core.TokenUsage{
-					PromptTokens:     resp.Usage.PromptTokens,
-					CompletionTokens: resp.Usage.CompletionTokens,
-					TotalTokens:      resp.Usage.TotalTokens,
-				})
-			}
-		}
-
-		// For XML mode, return raw LLM content; for non-XML mode, parse normally
-		if p.enableXMLMode {
-			// Return raw LLM response for XML interceptor to parse
-			rawOutputs := map[string]interface{}{
-				"response": resp.Content,
-			}
-			return rawOutputs, nil
-		}
-
-		// Traditional parsing for non-XML mode
-		cleaned := stripMarkdown(resp.Content, signature)
-		outputs := parseCompletion(cleaned, signature)
-		formattedOutputs := p.FormatOutputs(outputs)
-
-		return formattedOutputs, nil
+		return resp, nil
 	}
 
 	// Traditional text-based approach
@@ -396,43 +275,57 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 			})
 	}
 	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
+	return resp, nil
+}
 
-	if resp.Usage != nil {
-		if state := core.GetExecutionState(ctx); state != nil {
-			state.WithTokenUsage(&core.TokenUsage{
-				PromptTokens:     resp.Usage.PromptTokens,
-				CompletionTokens: resp.Usage.CompletionTokens,
-				TotalTokens:      resp.Usage.TotalTokens,
-			})
-		}
-		logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d", resp.Usage.TotalTokens, resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+// trackTokenUsage updates execution state with token usage from the response.
+func (p *Predict) trackTokenUsage(ctx context.Context, resp *core.LLMResponse) {
+	if resp.Usage == nil {
+		return
 	}
 
-	// For XML mode, return raw LLM content so XML interceptor can parse it
-	// For non-XML mode, use traditional parsing
-	if p.enableXMLMode {
-		// Return raw LLM response for XML interceptor to parse
-		rawOutputs := map[string]interface{}{
-			"response": resp.Content, // Use standard field name that XML parser looks for
-		}
-		return rawOutputs, nil
+	usage := &core.TokenUsage{
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+	}
+	recordTokenUsage(ctx, usage)
+}
+
+// recordTokenUsage updates execution state with the given token usage.
+func recordTokenUsage(ctx context.Context, usage *core.TokenUsage) {
+	if usage == nil {
+		return
+	}
+
+	logger := logging.GetLogger()
+	if state := core.GetExecutionState(ctx); state != nil {
+		state.WithTokenUsage(usage)
+	}
+	logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d",
+		usage.TotalTokens, usage.PromptTokens, usage.CompletionTokens)
+}
+
+// formatResponse formats the LLM response based on the processing mode.
+func (p *Predict) formatResponse(ctx context.Context, content string, signature core.Signature, returnRawForXML bool, span *core.Span) (map[string]interface{}, error) {
+	logger := logging.GetLogger()
+
+	// For XML mode, return raw LLM content for interceptor to parse
+	if returnRawForXML {
+		return map[string]interface{}{
+			"response": content,
+		}, nil
 	}
 
 	// Traditional parsing for non-XML mode
-	cleaned := stripMarkdown(resp.Content, p.GetSignature())
+	cleaned := stripMarkdown(content, signature)
 	logger.Debug(ctx, "Normalized completion: %s", cleaned)
 	outputs := parseCompletion(cleaned, signature)
 	logger.Debug(ctx, "Parsed LLM Completion: %v", outputs)
 	formattedOutputs := p.FormatOutputs(outputs)
 	logger.Debug(ctx, "Formatted LLM Completion: %v", outputs)
 
-	// Include raw response for XML interceptor processing
-	if p.IsXMLModeEnabled() {
-		formattedOutputs["__raw_response"] = resp.Content
-	}
-
 	span.WithAnnotation("outputs", formattedOutputs)
-
 	return formattedOutputs, nil
 }
 
@@ -568,13 +461,11 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 	}
 
 	// Update execution state with token usage
-	if state := core.GetExecutionState(ctx); state != nil {
-		state.WithTokenUsage(&core.TokenUsage{
-			PromptTokens:     tokenUsage.PromptTokens,
-			CompletionTokens: tokenUsage.CompletionTokens,
-			TotalTokens:      tokenUsage.TotalTokens,
-		})
-	}
+	recordTokenUsage(ctx, &core.TokenUsage{
+		PromptTokens:     tokenUsage.PromptTokens,
+		CompletionTokens: tokenUsage.CompletionTokens,
+		TotalTokens:      tokenUsage.TotalTokens,
+	})
 
 	return formattedOutputs, nil
 }
@@ -584,8 +475,8 @@ func formatPrompt(signature core.Signature, demos []core.Example, inputs map[str
 
 	// Write the instruction
 	sb.WriteString(fmt.Sprintf("Given the fields '%s', produce the fields '%s'.\n\n",
-		joinFieldNames(inputFieldsToFields(signature.Inputs)),
-		joinFieldNames(outputFieldsToFields(signature.Outputs)),
+		core.JoinFieldNames(core.InputFieldsToFields(signature.Inputs)),
+		core.JoinFieldNames(core.OutputFieldsToFields(signature.Outputs)),
 	))
 
 	for _, field := range signature.Outputs {
@@ -881,29 +772,6 @@ func cleanUnstructuredContentNew(content []string) string {
 	}
 	return strings.Join(cleaned, "\n")
 }
-func joinFieldNames(fields []core.Field) string {
-	names := make([]string, len(fields))
-	for i, field := range fields {
-		names[i] = field.Name
-	}
-	return strings.Join(names, ", ")
-}
-
-func inputFieldsToFields(inputs []core.InputField) []core.Field {
-	fields := make([]core.Field, len(inputs))
-	for i, input := range inputs {
-		fields[i] = input.Field
-	}
-	return fields
-}
-
-func outputFieldsToFields(outputs []core.OutputField) []core.Field {
-	fields := make([]core.Field, len(outputs))
-	for i, output := range outputs {
-		fields[i] = output.Field
-	}
-	return fields
-}
 
 func (p *Predict) FormatOutputs(outputs map[string]interface{}) map[string]interface{} {
 	formattedOutputs := make(map[string]interface{})
@@ -1082,6 +950,11 @@ func NewTypedPredict[TInput, TOutput any]() *Predict {
 
 // shouldUseXMLByDefault determines if XML output should be enabled by default
 // based on the signature characteristics.
+//
+// The heuristic uses structural properties of the signature rather than fragile
+// string matching against field names:
+//   - Multiple output fields benefit from structured XML parsing
+//   - Single fields with descriptions suggest complex content needing structure
 func shouldUseXMLByDefault(signature core.Signature) bool {
 	// Enable XML by default for signatures with multiple output fields
 	// as they benefit most from structured output
@@ -1089,25 +962,18 @@ func shouldUseXMLByDefault(signature core.Signature) bool {
 		return true
 	}
 
-	// For single output fields, be more conservative to avoid breaking existing code
-	// Only enable for fields that clearly suggest structured content
+	// For single output fields, use XML if the field has a non-trivial description
+	// This indicates the author expects structured/complex content
 	if len(signature.Outputs) == 1 {
 		output := signature.Outputs[0]
-		// Check if the field name suggests structured content
-		structuredNames := []string{
-			"summary", "analysis", "report", "response", "result",
-			"evaluation", "assessment", "recommendations", "findings",
-			"conclusion", "review", "feedback", "details", "information",
-		}
-
-		for _, name := range structuredNames {
-			if strings.Contains(strings.ToLower(output.Name), name) {
-				return true
-			}
+		// A description longer than a short phrase suggests complex output
+		const minDescriptionLength = 20
+		if len(output.Description) >= minDescriptionLength {
+			return true
 		}
 	}
 
-	// Default to text mode for backward compatibility with single simple fields
+	// Default to text mode for backward compatibility with simple fields
 	// Users can opt in with WithXMLOutput() if they want structured output
 	return false
 }

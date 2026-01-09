@@ -102,3 +102,54 @@ type APIError struct {
 type ErrorResponse struct {
 	Error APIError `json:"error"`
 }
+
+// GenerateOptions holds configuration that can be applied to a chat completion request.
+// This mirrors core.GenerateOptions but avoids import cycles.
+type GenerateOptions struct {
+	MaxTokens        int
+	Temperature      float64
+	TopP             float64
+	PresencePenalty  float64
+	FrequencyPenalty float64
+	Stop             []string
+}
+
+// ApplyOptions applies generation options to a ChatCompletionRequest.
+// This consolidates the common option-application logic used by OpenAI-compatible providers.
+func (r *ChatCompletionRequest) ApplyOptions(opts *GenerateOptions) {
+	if opts == nil {
+		return
+	}
+
+	if opts.MaxTokens > 0 {
+		r.MaxTokens = &opts.MaxTokens
+	}
+	if opts.Temperature >= 0 {
+		r.Temperature = &opts.Temperature
+	}
+	if opts.TopP > 0 {
+		r.TopP = &opts.TopP
+	}
+	if opts.FrequencyPenalty != 0 {
+		r.FrequencyPenalty = &opts.FrequencyPenalty
+	}
+	if opts.PresencePenalty != 0 {
+		r.PresencePenalty = &opts.PresencePenalty
+	}
+	if len(opts.Stop) > 0 {
+		r.Stop = opts.Stop
+	}
+}
+
+// FromCoreOptions creates GenerateOptions from core.GenerateOptions values.
+// This helper allows providers to easily convert between types.
+func NewGenerateOptions(maxTokens int, temperature, topP, presencePenalty, frequencyPenalty float64, stop []string) *GenerateOptions {
+	return &GenerateOptions{
+		MaxTokens:        maxTokens,
+		Temperature:      temperature,
+		TopP:             topP,
+		PresencePenalty:  presencePenalty,
+		FrequencyPenalty: frequencyPenalty,
+		Stop:             stop,
+	}
+}

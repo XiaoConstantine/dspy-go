@@ -236,22 +236,8 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 				Content: prompt,
 			},
 		},
-		MaxTokens:   &opts.MaxTokens,
-		Temperature: &opts.Temperature,
 	}
-
-	if opts.TopP > 0 {
-		request.TopP = &opts.TopP
-	}
-	if opts.FrequencyPenalty != 0 {
-		request.FrequencyPenalty = &opts.FrequencyPenalty
-	}
-	if opts.PresencePenalty != 0 {
-		request.PresencePenalty = &opts.PresencePenalty
-	}
-	if len(opts.Stop) > 0 {
-		request.Stop = opts.Stop
-	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
 
 	response, err := o.makeRequest(ctx, request)
 	if err != nil {
@@ -294,25 +280,11 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 				Content: prompt,
 			},
 		},
-		MaxTokens:   &opts.MaxTokens,
-		Temperature: &opts.Temperature,
 		ResponseFormat: &openai.ResponseFormat{
 			Type: "json_object",
 		},
 	}
-
-	if opts.TopP > 0 {
-		request.TopP = &opts.TopP
-	}
-	if opts.FrequencyPenalty != 0 {
-		request.FrequencyPenalty = &opts.FrequencyPenalty
-	}
-	if opts.PresencePenalty != 0 {
-		request.PresencePenalty = &opts.PresencePenalty
-	}
-	if len(opts.Stop) > 0 {
-		request.Stop = opts.Stop
-	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
 
 	response, err := o.makeRequest(ctx, request)
 	if err != nil {
@@ -435,23 +407,9 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 				Content: prompt,
 			},
 		},
-		MaxTokens:   &opts.MaxTokens,
-		Temperature: &opts.Temperature,
-		Stream:      true,
+		Stream: true,
 	}
-
-	if opts.TopP > 0 {
-		request.TopP = &opts.TopP
-	}
-	if opts.FrequencyPenalty != 0 {
-		request.FrequencyPenalty = &opts.FrequencyPenalty
-	}
-	if opts.PresencePenalty != 0 {
-		request.PresencePenalty = &opts.PresencePenalty
-	}
-	if len(opts.Stop) > 0 {
-		request.Stop = opts.Stop
-	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
 
 	// Create a channel for the stream chunks
 	chunkChan := make(chan core.StreamChunk)
@@ -681,4 +639,16 @@ func (o *OpenAILLM) makeStreamingRequest(ctx context.Context, request *openai.Ch
 	}
 
 	return resp, nil
+}
+
+// coreOptsToOpenAI converts core.GenerateOptions to openai.GenerateOptions.
+func coreOptsToOpenAI(opts *core.GenerateOptions) *openai.GenerateOptions {
+	return openai.NewGenerateOptions(
+		opts.MaxTokens,
+		opts.Temperature,
+		opts.TopP,
+		opts.PresencePenalty,
+		opts.FrequencyPenalty,
+		opts.Stop,
+	)
 }

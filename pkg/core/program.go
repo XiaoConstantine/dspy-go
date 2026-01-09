@@ -105,6 +105,8 @@ func (p *Program) SetForward(forward func(context.Context, map[string]interface{
 	p.Forward = forward
 }
 
+// GetModules returns all modules in deterministic alphabetical order by name.
+// This ensures consistent behavior across operations that iterate over modules.
 func (p *Program) GetModules() []Module {
 	moduleNames := make([]string, 0, len(p.Modules))
 	for name := range p.Modules {
@@ -112,19 +114,9 @@ func (p *Program) GetModules() []Module {
 	}
 	sort.Strings(moduleNames)
 
-	// Build ordered module slice
 	modules := make([]Module, len(moduleNames))
 	for i, name := range moduleNames {
 		modules[i] = p.Modules[name]
-	}
-	return modules
-
-}
-
-func (p *Program) Predictors() []Module {
-	modules := make([]Module, 0, len(p.Modules))
-	for _, module := range p.Modules {
-		modules = append(modules, module)
 	}
 	return modules
 }
