@@ -310,7 +310,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 		attemptCtx, attemptSpan := core.StartSpan(ctx, fmt.Sprintf("AnalyzeAttempt_%d", attempt))
 
 		// Check context cancellation
-		if err := checkCtxErr(attemptCtx); err != nil {
+		if err := attemptCtx.Err(); err != nil {
 			core.EndSpan(attemptCtx)
 
 			return nil, "", errors.Wrap(err, errors.Canceled, "context canceled during analysis")
@@ -514,11 +514,3 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 	return lastErr
 }
 
-func checkCtxErr(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
-	}
-}

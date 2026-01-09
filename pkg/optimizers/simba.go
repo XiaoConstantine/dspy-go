@@ -1093,16 +1093,8 @@ Enhanced Instruction:`, originalInstruction, selectedRule)
 
 // sampleMiniBatch creates a random mini-batch from the dataset.
 func (s *SIMBA) sampleMiniBatch(ctx context.Context, dataset core.Dataset) ([]core.Example, error) {
-	// Collect all examples first (simple implementation)
-	allExamples := make([]core.Example, 0)
-	dataset.Reset()
-	for {
-		example, hasNext := dataset.Next()
-		if !hasNext {
-			break
-		}
-		allExamples = append(allExamples, example)
-	}
+	// Collect all examples first
+	allExamples := core.DatasetToSlice(dataset)
 
 	if len(allExamples) == 0 {
 		return nil, errors.New(errors.ValidationFailed, "dataset is empty")

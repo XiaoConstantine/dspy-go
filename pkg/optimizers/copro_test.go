@@ -476,10 +476,9 @@ func TestEvaluateCandidatesParallel(t *testing.T) {
 }
 
 func TestDatasetToExamples(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
 	dataset := createCOPROTestDataset()
 
-	examples := copro.datasetToExamples(dataset)
+	examples := core.DatasetToSlice(dataset)
 
 	assert.Len(t, examples, 2)
 	assert.Equal(t, "What is 2+2?", examples[0].Inputs["question"])
@@ -594,15 +593,15 @@ func TestApplyPromptToPredictor(t *testing.T) {
 
 
 func TestHelperFunctions(t *testing.T) {
-	// Test min function
+	// Test built-in min function
 	assert.Equal(t, 3, min(3, 5))
 	assert.Equal(t, 2, min(7, 2))
 	assert.Equal(t, 4, min(4, 4))
 
-	// Test maxInt function
-	assert.Equal(t, 5, maxInt(3, 5))
-	assert.Equal(t, 7, maxInt(7, 2))
-	assert.Equal(t, 4, maxInt(4, 4))
+	// Test built-in max function
+	assert.Equal(t, 5, max(3, 5))
+	assert.Equal(t, 7, max(7, 2))
+	assert.Equal(t, 4, max(4, 4))
 }
 
 func TestCOPROWithExecutionState(t *testing.T) {

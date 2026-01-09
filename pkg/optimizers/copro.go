@@ -180,7 +180,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	logger := logging.GetLogger()
 
 	// Convert dataset to examples for evaluation
-	examples := c.datasetToExamples(dataset)
+	examples := core.DatasetToSlice(dataset)
 	if len(examples) == 0 {
 		return fmt.Errorf("no examples in dataset for optimization")
 	}
@@ -375,7 +375,7 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 	// Fallback to enhanced refinement strategy
 	var refined []PromptCandidate
 	for _, candidate := range topCandidates {
-		numRefinements := maxInt(1, c.Breadth/len(topCandidates))
+		numRefinements := max(1, c.Breadth/len(topCandidates))
 
 		for i := 0; i < numRefinements; i++ {
 			temp := c.InitTemperature * math.Pow(0.8, float64(depth))
@@ -484,22 +484,6 @@ func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modul
 	wg.Wait()
 }
 
-// Helper functions
-
-func (c *COPRO) datasetToExamples(dataset core.Dataset) []core.Example {
-	var examples []core.Example
-	dataset.Reset()
-
-	for {
-		example, hasNext := dataset.Next()
-		if !hasNext {
-			break
-		}
-		examples = append(examples, example)
-	}
-
-	return examples
-}
 
 // LLMPromptGenerator handles sophisticated prompt generation using LLM assistance.
 type LLMPromptGenerator struct {
@@ -615,7 +599,7 @@ func (lpg *LLMPromptGenerator) generateRefinedInstructions(ctx context.Context, 
 		bestInstructions += fmt.Sprintf("- %s (score: %.3f)\n", history[i].Instruction, history[i].Score)
 	}
 
-	for i := maxInt(0, len(history)-3); i < len(history); i++ {
+	for i := max(0, len(history)-3); i < len(history); i++ {
 		worstInstructions += fmt.Sprintf("- %s (score: %.3f)\n", history[i].Instruction, history[i].Score)
 	}
 
@@ -817,19 +801,6 @@ func (c *COPRO) truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 // getFieldNames extracts field names from InputField or OutputField slices.
 func getFieldNames(fields interface{}) []string {

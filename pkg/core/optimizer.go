@@ -28,6 +28,21 @@ type Example struct {
 	Outputs map[string]interface{}
 }
 
+// DatasetToSlice converts a Dataset to a slice of Examples.
+// This is a helper function to avoid repeated iteration patterns.
+func DatasetToSlice(dataset Dataset) []Example {
+	var examples []Example
+	dataset.Reset()
+	for {
+		example, hasNext := dataset.Next()
+		if !hasNext {
+			break
+		}
+		examples = append(examples, example)
+	}
+	return examples
+}
+
 // BaseOptimizer provides a basic implementation of the Optimizer interface.
 type BaseOptimizer struct {
 	Name string
