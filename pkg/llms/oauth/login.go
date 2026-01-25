@@ -76,6 +76,49 @@ func extractCode(input string) string {
 	return input
 }
 
+// LoginOpenAI performs interactive OAuth login for ChatGPT Plus/Pro subscriptions.
+// It opens a browser for authentication and returns the access token.
+func LoginOpenAI() (*OpenAITokenResponse, error) {
+	// Generate PKCE
+	verifier, challenge, err := GeneratePKCE()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PKCE: %w", err)
+	}
+
+	// Get authorization URL
+	authURL := GetOpenAIAuthorizationURL(verifier, challenge)
+
+	// Open browser
+	fmt.Println("Opening browser for OpenAI authentication...")
+	fmt.Printf("If browser doesn't open, visit:\n%s\n\n", authURL)
+	openBrowser(authURL)
+
+	// Prompt for code
+	fmt.Print("After authorizing, paste the code from the redirect URL: ")
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %w", err)
+	}
+	code := strings.TrimSpace(input)
+
+	// Extract code if user pasted full URL
+	code = extractCode(code)
+
+	// Exchange for token
+	fmt.Println("Exchanging code for token...")
+	tokens, err := ExchangeOpenAICode(code, verifier)
+	if err != nil {
+		return nil, fmt.Errorf("failed to exchange code: %w", err)
+	}
+
+	fmt.Println("\nSuccess! Your OAuth token:")
+	fmt.Printf("export OPENAI_OAUTH_TOKEN=\"%s\"\n", tokens.AccessToken)
+	fmt.Printf("\nRefresh token (save for later):\n%s\n", tokens.RefreshToken)
+
+	return tokens, nil
+}
+
 func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

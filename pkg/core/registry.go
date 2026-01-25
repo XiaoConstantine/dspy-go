@@ -344,6 +344,14 @@ func (r *DefaultLLMRegistry) inferProviderFromModelID(modelID ModelID) string {
 		return "google"
 	}
 
+	// OpenAI models - check for gpt-, o1, o3 prefixes
+	if len(modelStr) >= 4 && modelStr[:4] == "gpt-" {
+		return "openai"
+	}
+	if len(modelStr) >= 2 && (modelStr[:2] == "o1" || modelStr[:2] == "o3") {
+		return "openai"
+	}
+
 	// Ollama models
 	if len(modelStr) > 7 && modelStr[:7] == "ollama:" {
 		return "ollama"

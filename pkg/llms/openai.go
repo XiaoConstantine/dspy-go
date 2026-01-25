@@ -37,6 +37,12 @@ type OpenAIConfig struct {
 	httpClient *http.Client
 }
 
+// isOpenAIOAuthToken checks if the token is an OAuth token from ChatGPT Plus/Pro subscription.
+func isOpenAIOAuthToken(token string) bool {
+	// OpenAI OAuth tokens from auth.openai.com typically start with specific prefixes
+	return strings.HasPrefix(token, "sess-") || strings.HasPrefix(token, "oat-")
+}
+
 // NewOpenAILLM creates a new OpenAILLM instance with functional options.
 func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error) {
 	config := &OpenAIConfig{
@@ -51,6 +57,10 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 	}
 
 	// Environment variable fallback for API key
+	// Priority: OPENAI_OAUTH_TOKEN > config.apiKey > OPENAI_API_KEY
+	if config.apiKey == "" {
+		config.apiKey = os.Getenv("OPENAI_OAUTH_TOKEN")
+	}
 	if config.apiKey == "" {
 		config.apiKey = os.Getenv("OPENAI_API_KEY")
 	}
@@ -58,8 +68,8 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 	// API key validation - required for official OpenAI API endpoint
 	if config.apiKey == "" && config.baseURL == "https://api.openai.com" {
 		return nil, errors.WithFields(
-			errors.New(errors.InvalidInput, "OpenAI API key is required for api.openai.com"),
-			errors.Fields{"env_var": "OPENAI_API_KEY"})
+			errors.New(errors.InvalidInput, "OpenAI API key or OAuth token required"),
+			errors.Fields{"env_vars": "OPENAI_API_KEY or OPENAI_OAUTH_TOKEN"})
 	}
 
 	// Build endpoint configuration
@@ -70,9 +80,15 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 		TimeoutSec: int(config.timeout.Seconds()),
 	}
 
-	// Set authorization header only if API key is provided
+	// Set authorization header and OAuth-specific headers if needed
 	if config.apiKey != "" {
 		endpointCfg.Headers["Authorization"] = "Bearer " + config.apiKey
+
+		// Add OAuth-specific headers for ChatGPT Plus/Pro subscriptions
+		if isOpenAIOAuthToken(config.apiKey) {
+			endpointCfg.Headers["openai-beta"] = "assistants=v2"
+			endpointCfg.Headers["x-openai-client"] = "dspy-go"
+		}
 	}
 	endpointCfg.Headers["Content-Type"] = "application/json"
 
@@ -143,9 +159,16 @@ func NewOpenAI(modelID core.ModelID, apiKey string) (*OpenAILLM, error) {
 func NewOpenAILLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*OpenAILLM, error) {
 	opts := []OpenAIOption{}
 
-	// Parse configuration into options
-	if config.APIKey != "" {
-		opts = append(opts, WithAPIKey(config.APIKey))
+	// Priority: OPENAI_OAUTH_TOKEN > config.APIKey > OPENAI_API_KEY
+	apiKey := os.Getenv("OPENAI_OAUTH_TOKEN")
+	if apiKey == "" {
+		apiKey = config.APIKey
+	}
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey != "" {
+		opts = append(opts, WithAPIKey(apiKey))
 	}
 
 	// Set base URL from config.BaseURL or config.Endpoint.BaseURL (endpoint takes priority)
@@ -210,6 +233,23 @@ var validOpenAIModels = []core.ModelID{
 	core.ModelOpenAIGPT5,
 	core.ModelOpenAIGPT5Mini,
 	core.ModelOpenAIGPT5Nano,
+	// GPT-5.2 series (instant, thinking, pro, codex)
+	core.ModelOpenAIGPT52,
+	core.ModelOpenAIGPT52Instant,
+	core.ModelOpenAIGPT52Thinking,
+	core.ModelOpenAIGPT52ThinkHigh,
+	core.ModelOpenAIGPT52Pro,
+	core.ModelOpenAIGPT52Codex,
+}
+
+// openaiModelAliases maps short names to full model IDs.
+var openaiModelAliases = map[string]core.ModelID{
+	"gpt-5.2-thinking-high": core.ModelOpenAIGPT52ThinkHigh,
+	"gpt52":                 core.ModelOpenAIGPT52,
+	"gpt52-thinking":        core.ModelOpenAIGPT52Thinking,
+	"gpt52-thinking-high":   core.ModelOpenAIGPT52ThinkHigh,
+	"gpt52-pro":             core.ModelOpenAIGPT52Pro,
+	"gpt52-codex":           core.ModelOpenAIGPT52Codex,
 }
 
 // isValidOpenAIModel checks if the model is a valid OpenAI model.

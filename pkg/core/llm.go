@@ -621,6 +621,13 @@ const (
 	ModelOpenAIGPT5     ModelID = "gpt-5"
 	ModelOpenAIGPT5Mini ModelID = "gpt-5-mini"
 	ModelOpenAIGPT5Nano ModelID = "gpt-5-nano"
+	// OpenAI models - GPT-5.2 series (instant, thinking, pro, codex).
+	ModelOpenAIGPT52          ModelID = "gpt-5.2"
+	ModelOpenAIGPT52Instant   ModelID = "gpt-5.2-instant"
+	ModelOpenAIGPT52Thinking  ModelID = "gpt-5.2-thinking"
+	ModelOpenAIGPT52ThinkHigh ModelID = "gpt-5.2-thinking-high"
+	ModelOpenAIGPT52Pro       ModelID = "gpt-5.2-pro"
+	ModelOpenAIGPT52Codex     ModelID = "gpt-5.2-codex"
 
 	// LiteLLM models (can proxy to any provider).
 	ModelLiteLLMGPT4    ModelID = "gpt-4"
@@ -683,6 +690,8 @@ var ProviderModels = map[string][]ModelID{
 		ModelOpenAIO1, ModelOpenAIO1Pro, ModelOpenAIO1Mini,
 		ModelOpenAIO3, ModelOpenAIO3Mini,
 		ModelOpenAIGPT5, ModelOpenAIGPT5Mini, ModelOpenAIGPT5Nano,
+		ModelOpenAIGPT52, ModelOpenAIGPT52Instant, ModelOpenAIGPT52Thinking,
+		ModelOpenAIGPT52ThinkHigh, ModelOpenAIGPT52Pro, ModelOpenAIGPT52Codex,
 	},
 	"ollama": {
 		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,

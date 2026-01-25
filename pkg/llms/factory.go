@@ -289,7 +289,15 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(modelStr))
 	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashLite:
 		llm, err = NewGeminiLLM(apiKey, modelID)
-	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo || modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini:
+	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo ||
+		modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini ||
+		modelID == core.ModelOpenAIGPT41 || modelID == core.ModelOpenAIGPT41Mini || modelID == core.ModelOpenAIGPT41Nano ||
+		modelID == core.ModelOpenAIO1 || modelID == core.ModelOpenAIO1Pro || modelID == core.ModelOpenAIO1Mini ||
+		modelID == core.ModelOpenAIO3 || modelID == core.ModelOpenAIO3Mini ||
+		modelID == core.ModelOpenAIGPT5 || modelID == core.ModelOpenAIGPT5Mini || modelID == core.ModelOpenAIGPT5Nano ||
+		modelID == core.ModelOpenAIGPT52 || modelID == core.ModelOpenAIGPT52Instant || modelID == core.ModelOpenAIGPT52Thinking ||
+		modelID == core.ModelOpenAIGPT52ThinkHigh || modelID == core.ModelOpenAIGPT52Pro || modelID == core.ModelOpenAIGPT52Codex ||
+		strings.HasPrefix(modelStr, "gpt-") || strings.HasPrefix(modelStr, "o1") || strings.HasPrefix(modelStr, "o3"):
 		llm, err = NewOpenAI(modelID, apiKey)
 	case strings.HasPrefix(string(modelID), "ollama:"):
 		parts := strings.SplitN(string(modelID), ":", 2)
