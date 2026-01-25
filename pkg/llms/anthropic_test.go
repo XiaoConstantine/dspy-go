@@ -356,7 +356,7 @@ func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
 		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus4_1_20250805))
 		assert.Error(t, err)
 		assert.Nil(t, llm)
-		assert.Contains(t, err.Error(), "API key is required")
+		assert.Contains(t, err.Error(), "API key or OAuth token required")
 	})
 
 	t.Run("Config with invalid model", func(t *testing.T) {

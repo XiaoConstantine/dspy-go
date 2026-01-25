@@ -34,16 +34,16 @@ var modelNameMapping = map[string]anthropic.Model{
 	"claude-3-sonnet":            anthropic.ModelClaudeSonnet4_5_20250929,
 	"claude-3-haiku":             anthropic.ModelClaude_3_Haiku_20240307,
 	// Opus 4.5 aliases
-	"opus-4.5":                 anthropic.ModelClaudeOpus4_5_20251101,
-	"opus-4-5":                 anthropic.ModelClaudeOpus4_5_20251101,
-	"claude-opus-4.5":          anthropic.ModelClaudeOpus4_5_20251101,
-	"claude-opus-4-5":          anthropic.ModelClaudeOpus4_5,
-	"claude-opus-4-5-20251101": anthropic.ModelClaudeOpus4_5_20251101,
+	"opus-4.5":                     anthropic.ModelClaudeOpus4_5_20251101,
+	"opus-4-5":                     anthropic.ModelClaudeOpus4_5_20251101,
+	"claude-opus-4.5":              anthropic.ModelClaudeOpus4_5_20251101,
+	"claude-opus-4-5":              anthropic.ModelClaudeOpus4_5,
+	"claude-opus-4-5-20251101":     anthropic.ModelClaudeOpus4_5_20251101,
 	// Sonnet 4.5 aliases
-	"sonnet-4.5":       anthropic.ModelClaudeSonnet4_5_20250929,
-	"sonnet-4-5":       anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-sonnet-4.5": anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-sonnet-4-5": anthropic.ModelClaudeSonnet4_5,
+	"sonnet-4.5":                   anthropic.ModelClaudeSonnet4_5_20250929,
+	"sonnet-4-5":                   anthropic.ModelClaudeSonnet4_5_20250929,
+	"claude-sonnet-4.5":            anthropic.ModelClaudeSonnet4_5_20250929,
+	"claude-sonnet-4-5":            anthropic.ModelClaudeSonnet4_5,
 }
 
 // normalizeModelName maps old model names to new official ones.
@@ -55,11 +55,30 @@ func normalizeModelName(name string) anthropic.Model {
 	return anthropic.Model(name)
 }
 
+// isOAuthToken checks if the token is an OAuth token (Claude Max/Pro subscription).
+func isOAuthToken(token string) bool {
+	return strings.HasPrefix(token, "sk-ant-oat")
+}
+
 // NewAnthropicLLM creates a new AnthropicLLM instance.
 func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error) {
-	client := anthropic.NewClient(
-		option.WithAPIKey(apiKey),
-	)
+	var clientOpts []option.RequestOption
+
+	if isOAuthToken(apiKey) {
+		// OAuth token - use Bearer auth with required headers for Claude Max/Pro
+		clientOpts = append(clientOpts,
+			option.WithAuthToken(apiKey),
+			option.WithHeader("anthropic-beta", "claude-code-20250219,oauth-2025-04-20"),
+			option.WithHeader("anthropic-dangerous-direct-browser-access", "true"),
+			option.WithHeader("user-agent", "claude-cli/2.1.2 (external, cli)"),
+			option.WithHeader("x-app", "cli"),
+		)
+	} else {
+		// Standard API key
+		clientOpts = append(clientOpts, option.WithAPIKey(apiKey))
+	}
+
+	client := anthropic.NewClient(clientOpts...)
 
 	capabilities := []core.Capability{
 		core.CapabilityCompletion,
@@ -76,13 +95,16 @@ func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error
 
 // NewAnthropicLLMFromConfig creates a new AnthropicLLM instance from configuration.
 func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (*AnthropicLLM, error) {
-	// Get API key from config or environment
-	apiKey := config.APIKey
+	// Priority: ANTHROPIC_OAUTH_TOKEN > config.APIKey > ANTHROPIC_API_KEY
+	apiKey := os.Getenv("ANTHROPIC_OAUTH_TOKEN")
+	if apiKey == "" {
+		apiKey = config.APIKey
+	}
 	if apiKey == "" {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	if apiKey == "" {
-		return nil, errs.New(errs.InvalidInput, "API key is required")
+		return nil, errs.New(errs.InvalidInput, "API key or OAuth token required")
 	}
 
 	// Normalize model ID and validate
@@ -94,7 +116,21 @@ func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, 
 	}
 
 	// Create client with optional configuration
-	clientOpts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	var clientOpts []option.RequestOption
+
+	if isOAuthToken(apiKey) {
+		// OAuth token - use Bearer auth with required headers for Claude Max/Pro
+		clientOpts = append(clientOpts,
+			option.WithAuthToken(apiKey),
+			option.WithHeader("anthropic-beta", "claude-code-20250219,oauth-2025-04-20"),
+			option.WithHeader("anthropic-dangerous-direct-browser-access", "true"),
+			option.WithHeader("user-agent", "claude-cli/2.1.2 (external, cli)"),
+			option.WithHeader("x-app", "cli"),
+		)
+	} else {
+		// Standard API key
+		clientOpts = append(clientOpts, option.WithAPIKey(apiKey))
+	}
 
 	// Apply endpoint configuration if provided
 	if config.Endpoint != nil && config.Endpoint.BaseURL != "" {
