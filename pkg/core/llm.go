@@ -587,6 +587,7 @@ const (
 	ModelAnthropicClaude4Opus         ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
 	ModelAnthropicClaude4Sonnet       ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
 	ModelAnthropicClaude45Sonnet      ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicClaude45Opus        ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
 
 	// Google Gemini models (existing).
 	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"
@@ -669,6 +670,7 @@ var ProviderModels = map[string][]ModelID{
 	"anthropic": {
 		ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus,
 		ModelAnthropicClaude4Opus, ModelAnthropicClaude4Sonnet, ModelAnthropicClaude45Sonnet,
+		ModelAnthropicClaude45Opus,
 	},
 	"google": {
 		ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite,

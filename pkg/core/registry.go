@@ -320,8 +320,21 @@ func (r *DefaultLLMRegistry) RefreshProvider(ctx context.Context, name string, c
 func (r *DefaultLLMRegistry) inferProviderFromModelID(modelID ModelID) string {
 	modelStr := string(modelID)
 
-	// Anthropic models
-	if modelID == ModelAnthropicHaiku || modelID == ModelAnthropicSonnet || modelID == ModelAnthropicOpus {
+	// Anthropic models - check known constants and claude- prefix patterns
+	if modelID == ModelAnthropicHaiku || modelID == ModelAnthropicSonnet || modelID == ModelAnthropicOpus ||
+		modelID == ModelAnthropicClaude45Opus || modelID == ModelAnthropicClaude4Opus ||
+		modelID == ModelAnthropicClaude4Sonnet || modelID == ModelAnthropicClaude45Sonnet {
+		return "anthropic"
+	}
+	// Also check for claude- prefix patterns (e.g., claude-opus-4-5, claude-sonnet-4-5)
+	if len(modelStr) >= 7 && modelStr[:7] == "claude-" {
+		return "anthropic"
+	}
+	// Check for short aliases (opus-4.5, sonnet-4.5)
+	if len(modelStr) >= 5 && modelStr[:5] == "opus-" {
+		return "anthropic"
+	}
+	if len(modelStr) >= 7 && modelStr[:7] == "sonnet-" {
 		return "anthropic"
 	}
 

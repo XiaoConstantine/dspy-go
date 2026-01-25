@@ -33,6 +33,17 @@ var modelNameMapping = map[string]anthropic.Model{
 	"claude-3-opus":              anthropic.ModelClaudeOpus4_1_20250805,
 	"claude-3-sonnet":            anthropic.ModelClaudeSonnet4_5_20250929,
 	"claude-3-haiku":             anthropic.ModelClaude_3_Haiku_20240307,
+	// Opus 4.5 aliases
+	"opus-4.5":                 anthropic.ModelClaudeOpus4_5_20251101,
+	"opus-4-5":                 anthropic.ModelClaudeOpus4_5_20251101,
+	"claude-opus-4.5":          anthropic.ModelClaudeOpus4_5_20251101,
+	"claude-opus-4-5":          anthropic.ModelClaudeOpus4_5,
+	"claude-opus-4-5-20251101": anthropic.ModelClaudeOpus4_5_20251101,
+	// Sonnet 4.5 aliases
+	"sonnet-4.5":       anthropic.ModelClaudeSonnet4_5_20250929,
+	"sonnet-4-5":       anthropic.ModelClaudeSonnet4_5_20250929,
+	"claude-sonnet-4.5": anthropic.ModelClaudeSonnet4_5_20250929,
+	"claude-sonnet-4-5": anthropic.ModelClaudeSonnet4_5,
 }
 
 // normalizeModelName maps old model names to new official ones.
@@ -112,12 +123,19 @@ func AnthropicProviderFactory(ctx context.Context, config core.ProviderConfig, m
 
 // isValidAnthropicModel checks if the model is a valid Anthropic model.
 func isValidAnthropicModel(model string) bool {
+	// Check if model is in the mapping (handles aliases like opus-4.5)
+	if _, ok := modelNameMapping[model]; ok {
+		return true
+	}
+
 	validPrefixes := []string{
 		"claude-3",
 		"claude-4",
-		"claude-haiku",    // claude-haiku-4-5, etc.
-		"claude-sonnet",   // claude-sonnet-4, etc.
-		"claude-opus",     // claude-opus-4, etc.
+		"claude-haiku",  // claude-haiku-4-5, etc.
+		"claude-sonnet", // claude-sonnet-4, etc.
+		"claude-opus",   // claude-opus-4, etc.
+		"opus-",         // opus-4.5, opus-4-5, etc.
+		"sonnet-",       // sonnet-4.5, sonnet-4-5, etc.
 	}
 
 	for _, prefix := range validPrefixes {

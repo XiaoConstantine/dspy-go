@@ -280,9 +280,13 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	var llm core.LLM
 	var err error
 
+	modelStr := string(modelID)
 	switch {
-	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus:
-		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(string(modelID)))
+	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus ||
+		modelID == core.ModelAnthropicClaude45Opus || modelID == core.ModelAnthropicClaude4Opus ||
+		modelID == core.ModelAnthropicClaude4Sonnet || modelID == core.ModelAnthropicClaude45Sonnet ||
+		strings.HasPrefix(modelStr, "claude-") || strings.HasPrefix(modelStr, "opus-") || strings.HasPrefix(modelStr, "sonnet-"):
+		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(modelStr))
 	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashLite:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo || modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini:
