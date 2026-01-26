@@ -65,15 +65,47 @@ func IterationSignature() core.Signature {
 			)},
 		},
 	).WithInstruction(`You are exploring a large context using a Go REPL. Available functions:
-- Query(prompt string) string: Query a sub-LLM with the prompt
-- QueryBatched(prompts []string) []string: Query multiple prompts in parallel
-- FINAL(value string): Signal completion with a direct value
-- FINAL_VAR(value string): Signal completion with a variable value
-- Standard Go: fmt, strings, regexp, strconv, encoding/json, sort
 
-Sub-LLM Capacity: Sub-LLMs can handle ~500K characters. For efficiency, batch ~200K characters per Query call.
-IMPORTANT: REPL outputs are truncated. Use Query() to analyze full content rather than printing large outputs.
-Make sure to explicitly look through the entire context before answering.
+QUERY FUNCTIONS (choose based on context size):
+- Query(prompt string) string: Auto-prepends FULL context to prompt. Use for small contexts (<50K chars).
+- QueryRaw(prompt string) string: Sends prompt AS-IS without context. Use when you've already included context in prompt.
+- QueryWith(contextSlice, prompt string) string: Prepends ONLY the slice you specify. Use for large contexts.
+- QueryBatched(prompts []string) []string: Parallel Query() calls. Each gets full context prepended.
+- QueryBatchedRaw(prompts []string) []string: Parallel QueryRaw() calls. No context prepended.
+
+CONTEXT ACCESS FUNCTIONS:
+- FindRelevant(query string, topK int) []string: Semantic search - returns top-K relevant chunks
+- GetChunk(id int) string: Get chunk by ID (chunks are ~4KB each)
+- GetContext(startLine, endLine int) string: Get specific line range
+- ChunkCount() int: Number of chunks
+- LineCount() int: Number of lines
+
+COMPLETION FUNCTIONS:
+- FINAL(value string): Signal completion with a direct value
+- FINAL_VAR(varName string): Signal completion with a variable's value
+
+STANDARD GO: fmt, strings, regexp, strconv, encoding/json, sort
+
+CRITICAL - CONTEXT SIZE HANDLING:
+- Context < 50K chars: Use Query(prompt + context) directly
+- Context 50K-200K chars: Use QueryWith(context, prompt) to control what's sent
+- Context > 200K chars: MUST chunk! Use FindRelevant() or split manually, then QueryWith() or QueryRaw()
+
+WARNING: Query() auto-prepends the ENTIRE context (~4 chars = 1 token). For a 500K char context:
+  Query("analyze: " + context[:100000])  // WRONG! Sends 500K + 100K = 600K chars (overflow!)
+  QueryWith(context[:100000], "analyze") // CORRECT! Sends only 100K chars
+
+LARGE CONTEXT PATTERN:
+// For contexts > 200K chars, chunk and query separately:
+chunks := FindRelevant("main entry points", 5)  // Get relevant chunks
+var results []string
+for _, chunk := range chunks {
+    r := QueryWith(chunk, "Find entry points in this code")
+    results = append(results, r)
+}
+combined := strings.Join(results, "\n")
+answer := QueryRaw("Synthesize these findings: " + combined)
+FINAL(answer)
 
 CRITICAL CODE RULES (violations cause errors):
 - DO NOT use 'import' statements - packages are already imported
@@ -82,18 +114,13 @@ CRITICAL CODE RULES (violations cause errors):
 - Write ONLY executable statements (assignments, function calls, loops, conditionals)
 - EVERY variable must be declared with := before use
 - Keep code blocks SHORT (under 15 lines)
-- DO NOT use strings.Count() for semantic labels - "correct" matches inside "incorrect"! Use Query() instead.
 
 CRITICAL - SIGNALING COMPLETION:
-When Query() returns the answer, IMMEDIATELY call FINAL() in the SAME code block!
-
-BEST PRACTICE:
-answer := Query("What is the label? " + context)
-FINAL(answer)  // IMMEDIATELY signal completion - don't wait for next iteration!
+When you have the answer, IMMEDIATELY call FINAL() in the SAME code block!
 
 Actions:
 - explore: Write code to examine the context (len, preview, structure)
-- query: Write code to call Query/QueryBatched for analysis
+- query: Write code to call Query/QueryWith/QueryRaw for analysis
 - compute: Write code to process/combine results
 - final: Provide the answer (no more code needed)
 
@@ -262,25 +289,73 @@ fmt.Println("Sample:", context[:1000])`,
 				"repl_state":   "context: <loaded>",
 			},
 			Outputs: map[string]interface{}{
-				"reasoning": "At 1.2M chars, I need to chunk strategically. I'll split by document separator and batch ~200K chars per Query call for efficiency.",
+				"reasoning": "At 1.2M chars, I MUST use QueryWith or QueryRaw - Query() would overflow! I'll split by document separator and use QueryWith for each batch.",
 				"action":    "query",
 				"code": `docs := strings.Split(context, "---")
 fmt.Println("Found", len(docs), "documents")
 
-var prompts []string
+var results []string
 var batch string
 for _, doc := range docs {
-    if len(batch)+len(doc) > 200000 && batch != "" {
-        prompts = append(prompts, "Identify main themes in these documents:\n"+batch)
+    if len(batch)+len(doc) > 150000 && batch != "" {
+        // Use QueryWith to send ONLY this batch, not full context
+        r := QueryWith(batch, "Identify main themes in these documents")
+        results = append(results, r)
         batch = ""
     }
     batch += doc + "\n---\n"
 }
 if batch != "" {
-    prompts = append(prompts, "Identify main themes in these documents:\n"+batch)
+    r := QueryWith(batch, "Identify main themes in these documents")
+    results = append(results, r)
 }
-results := QueryBatched(prompts)
-for i, r := range results { fmt.Printf("Batch %d themes: %s\n", i, r) }`,
+for i, r := range results { fmt.Printf("Batch %d: %s\n", i, r) }`,
+				"answer": "",
+			},
+		},
+		// Example using FindRelevant for semantic search on large context
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 800000 chars",
+				"query":        "Find all authentication-related code",
+				"history":      "Explored: 800K chars of Go source code, too large for single Query",
+				"repl_state":   "context: <loaded>",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "At 800K chars, I cannot use Query() as it would overflow. I'll use FindRelevant() to get semantically relevant chunks, then QueryWith() to analyze each.",
+				"action":    "query",
+				"code": `// Find chunks most relevant to authentication
+chunks := FindRelevant("authentication login password session token", 10)
+fmt.Println("Found", len(chunks), "relevant chunks")
+
+var authCode []string
+for i, chunk := range chunks {
+    // Use QueryWith to analyze just this chunk
+    result := QueryWith(chunk, "Extract any authentication-related code (login, password, session, token handling). Return the code snippets or 'none' if not found.")
+    if result != "none" && result != "" {
+        authCode = append(authCode, fmt.Sprintf("Chunk %d:\n%s", i, result))
+    }
+}
+fmt.Println("Auth code found in", len(authCode), "chunks")
+for _, code := range authCode { fmt.Println(code) }`,
+				"answer": "",
+			},
+		},
+		// Example showing synthesis with QueryRaw
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 800000 chars",
+				"query":        "Find all authentication-related code",
+				"history":      "Found auth code in 4 chunks: JWT token validation, password hashing, session middleware, OAuth handler",
+				"repl_state":   "context: <loaded>, authCode: [4 code snippets]",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "I have 4 authentication code snippets. Now I'll synthesize them using QueryRaw (no context needed) and immediately FINAL the answer.",
+				"action":    "query",
+				"code": `summary := strings.Join(authCode, "\n\n---\n\n")
+// Use QueryRaw since we're passing our own content, not the original context
+answer := QueryRaw("Summarize these authentication code findings into a coherent explanation:\n\n" + summary)
+FINAL(answer)`,
 				"answer": "",
 			},
 		},
