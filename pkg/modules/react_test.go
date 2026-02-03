@@ -1112,3 +1112,99 @@ The main function is in cmd/main.go
 	mockLLM.AssertExpectations(t)
 	mockTool.AssertExpectations(t)
 }
+
+// TestReAct_ConversationContextInSignature verifies that conversation_context
+// is declared as an input field in the signature, preventing the LLM from
+// losing history between iterations (regression test for issue #198).
+func TestReAct_ConversationContextInSignature(t *testing.T) {
+	registry := tools.NewInMemoryToolRegistry()
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	react := NewReAct(signature, registry, 3)
+
+	// Get the modified signature via appendReActFields
+	modifiedSig := react.appendReActFields(signature)
+
+	// Verify conversation_context is in the input fields
+	found := false
+	for _, input := range modifiedSig.Inputs {
+		if input.Name == "conversation_context" {
+			found = true
+			assert.NotEmpty(t, input.Description, "conversation_context should have a description")
+			break
+		}
+	}
+	assert.True(t, found, "conversation_context must be declared as an input field to prevent history loss")
+}
+
+// TestReAct_ConversationContextPassedToLLM verifies that the LLM receives
+// conversation history from previous iterations (regression test for issue #198).
+func TestReAct_ConversationContextPassedToLLM(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+
+	mockTool := testutil.NewMockTool("search_tool")
+	mockTool.On("Name").Return("search_tool")
+	mockTool.On("Description").Return("A search tool")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type:       "object",
+		Properties: map[string]models.ParameterSchema{},
+	})
+	mockTool.On("Validate", mock.Anything).Return(nil)
+	mockTool.On("Execute", mock.Anything, mock.Anything).Return(
+		core.ToolResult{Data: "Search result: found data"}, nil,
+	)
+
+	// Track prompts sent to LLM
+	var capturedPrompts []string
+
+	resp1 := &core.LLMResponse{Content: `
+thought: I need to search first
+action: <action><tool_name>search_tool</tool_name><arguments></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought: I have the answer from the search
+action: <action><tool_name>Finish</tool_name></action>
+answer: The answer based on search
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+		Run(func(args mock.Arguments) {
+			prompt := args.Get(1).(string)
+			capturedPrompts = append(capturedPrompts, prompt)
+		}).Return(resp1, nil).Once()
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+		Run(func(args mock.Arguments) {
+			prompt := args.Get(1).(string)
+			capturedPrompts = append(capturedPrompts, prompt)
+		}).Return(resp2, nil).Once()
+
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	react := NewReAct(signature, registry, 5)
+	react.SetLLM(mockLLM)
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	_, err = react.Process(ctx, map[string]any{"question": "Find the data"})
+	require.NoError(t, err)
+
+	// The second prompt should contain conversation history from iteration 1
+	require.Len(t, capturedPrompts, 2, "Should have captured 2 prompts")
+
+	// First prompt should NOT have conversation history (first iteration)
+	assert.NotContains(t, capturedPrompts[0], "Iteration 1:", "First prompt should not have iteration history yet")
+
+	// Second prompt MUST contain the history from iteration 1
+	assert.Contains(t, capturedPrompts[1], "Iteration 1", "Second prompt must contain iteration 1 history")
+	assert.Contains(t, capturedPrompts[1], "search_tool", "Second prompt must contain previous action")
+	assert.Contains(t, capturedPrompts[1], "Search result", "Second prompt must contain previous observation")
+}

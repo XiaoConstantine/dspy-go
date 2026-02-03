@@ -585,3 +585,109 @@ Integration test successful
 	mockLLM.AssertExpectations(t)
 	mockTool.AssertExpectations(t)
 }
+
+// TestReActAgent_ConversationHistoryPassedToLLM verifies that the ReActAgent
+// passes conversation history to the LLM across iterations, preventing the LLM
+// from repeating identical tool calls (regression test for issue #198).
+func TestReActAgent_ConversationHistoryPassedToLLM(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+
+	// Create a mock tool
+	mockTool := testutil.NewMockTool("data_lookup")
+	mockTool.On("Name").Return("data_lookup")
+	mockTool.On("Description").Return("Looks up data")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type:       "object",
+		Properties: map[string]models.ParameterSchema{},
+	})
+	mockTool.On("Validate", mock.Anything).Return(nil)
+	mockTool.On("Execute", mock.Anything, mock.Anything).Return(
+		core.ToolResult{Data: "Lookup result: user_id=123, name=Alice"}, nil,
+	)
+
+	// Track prompts sent to LLM to verify history is included
+	var capturedPrompts []string
+
+	resp1 := &core.LLMResponse{Content: `
+thought: I need to look up the data first
+action: <action><tool_name>data_lookup</tool_name><arguments></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought: I found the user data, now I can answer
+action: <action><tool_name>Finish</tool_name></action>
+answer: The user is Alice with ID 123
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+		Run(func(args mock.Arguments) {
+			prompt := args.Get(1).(string)
+			capturedPrompts = append(capturedPrompts, prompt)
+		}).Return(resp1, nil).Once()
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+		Run(func(args mock.Arguments) {
+			prompt := args.Get(1).(string)
+			capturedPrompts = append(capturedPrompts, prompt)
+		}).Return(resp2, nil).Once()
+
+	// Create ReActAgent
+	agent := NewReActAgent("history-test-agent", "History Test Agent")
+	err := agent.RegisterTool(mockTool)
+	require.NoError(t, err)
+
+	// Initialize the agent with the mock LLM
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	agent.Initialize(mockLLM, signature)
+
+	// Execute
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+	_, err = agent.Execute(ctx, map[string]interface{}{"query": "Who is the user?"})
+	require.NoError(t, err)
+
+	// Verify conversation history is passed to LLM
+	require.Len(t, capturedPrompts, 2, "Should have captured 2 prompts")
+
+	// Second prompt MUST contain history from iteration 1
+	assert.Contains(t, capturedPrompts[1], "Iteration 1", "Second prompt must contain iteration 1 history")
+	assert.Contains(t, capturedPrompts[1], "data_lookup", "Second prompt must contain previous tool action")
+	assert.Contains(t, capturedPrompts[1], "Lookup result", "Second prompt must contain previous observation")
+
+	mockLLM.AssertExpectations(t)
+	mockTool.AssertExpectations(t)
+}
+
+// TestReActAgent_ModuleHasConversationContextInput verifies that the underlying
+// ReAct module has conversation_context declared as an input field
+// (regression test for issue #198).
+func TestReActAgent_ModuleHasConversationContextInput(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+
+	agent := NewReActAgent("context-test-agent", "Context Test Agent")
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	agent.Initialize(mockLLM, signature)
+
+	// Access the underlying module and check its signature
+	require.NotNil(t, agent.module, "Agent should have initialized module")
+
+	// Get the module's signature
+	moduleSig := agent.module.GetSignature()
+
+	// Verify conversation_context is in the input fields
+	found := false
+	for _, input := range moduleSig.Inputs {
+		if input.Name == "conversation_context" {
+			found = true
+			assert.NotEmpty(t, input.Description, "conversation_context should have a description")
+			break
+		}
+	}
+	assert.True(t, found, "conversation_context must be declared as an input field to prevent history loss (issue #198)")
+}

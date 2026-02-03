@@ -158,10 +158,8 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		logger.Debug(ctx, "*** STARTING REACT ITERATION %d/%d ***", i+1, r.MaxIters)
 		logger.Debug(ctx, "Current state: %v", state)
 
-		// Add conversation context to state for this iteration
-		if conversationContext != "" {
-			state["conversation_context"] = conversationContext
-		}
+		// Add conversation context to state for this iteration (always set, even if empty)
+		state["conversation_context"] = conversationContext
 
 		// --- Predict Step ---
 		logger.Debug(ctx, "Sending prediction request in iteration %d", i+1)
@@ -357,7 +355,7 @@ func (r *ReAct) Clone() core.Module {
 }
 
 // appendReActFields adds the standard ReAct fields (thought, action, observation)
-// to the beginning of a signature's output fields.
+// to the beginning of a signature's output fields, and adds conversation_context as an input field.
 func (r *ReAct) appendReActFields(signature core.Signature) core.Signature {
 	const reactFormattingInstructions = `
   CRITICAL REASONING RULES:
@@ -374,6 +372,13 @@ func (r *ReAct) appendReActFields(signature core.Signature) core.Signature {
 	newSignature := signature
 
 	newSignature.Instruction = reactFormattingInstructions + "\n" + signature.Instruction
+
+	// Add conversation_context as an INPUT field so the LLM can see the history
+	historyField := core.InputField{
+		Field: core.NewField("conversation_context",
+			core.WithDescription("Complete history of previous thoughts, actions, and observations in this conversation. Use this to avoid repeating actions and to build on what you've already learned.")),
+	}
+	newSignature.Inputs = append(newSignature.Inputs, historyField)
 
 	// Build dynamic action description with available tools
 	actionDescription := r.buildActionDescription()
