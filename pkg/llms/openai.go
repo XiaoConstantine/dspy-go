@@ -242,15 +242,6 @@ var validOpenAIModels = []core.ModelID{
 	core.ModelOpenAIGPT52Codex,
 }
 
-// openaiModelAliases maps short names to full model IDs.
-var openaiModelAliases = map[string]core.ModelID{
-	"gpt-5.2-thinking-high": core.ModelOpenAIGPT52ThinkHigh,
-	"gpt52":                 core.ModelOpenAIGPT52,
-	"gpt52-thinking":        core.ModelOpenAIGPT52Thinking,
-	"gpt52-thinking-high":   core.ModelOpenAIGPT52ThinkHigh,
-	"gpt52-pro":             core.ModelOpenAIGPT52Pro,
-	"gpt52-codex":           core.ModelOpenAIGPT52Codex,
-}
 
 // isValidOpenAIModel checks if the model is a valid OpenAI model.
 func isValidOpenAIModel(modelID core.ModelID) bool {

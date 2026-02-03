@@ -640,7 +640,8 @@ answer: The user is Alice with ID 123
 		[]core.InputField{{Field: core.Field{Name: "query"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	agent.Initialize(mockLLM, signature)
+	err = agent.Initialize(mockLLM, signature)
+	require.NoError(t, err)
 
 	// Execute
 	ctx := context.Background()
@@ -672,7 +673,8 @@ func TestReActAgent_ModuleHasConversationContextInput(t *testing.T) {
 		[]core.InputField{{Field: core.Field{Name: "query"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
-	agent.Initialize(mockLLM, signature)
+	err := agent.Initialize(mockLLM, signature)
+	require.NoError(t, err)
 
 	// Access the underlying module and check its signature
 	require.NotNil(t, agent.module, "Agent should have initialized module")

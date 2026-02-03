@@ -187,7 +187,7 @@ func TestContextIndexAllChunks(t *testing.T) {
 
 	// Verify it's a copy (modifying shouldn't affect original)
 	originalCount := idx.ChunkCount()
-	chunks = chunks[:1]
+	_ = chunks[:1] // Modify slice to verify it doesn't affect original
 	assert.Equal(t, originalCount, idx.ChunkCount())
 }
 

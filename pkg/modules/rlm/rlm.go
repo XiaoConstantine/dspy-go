@@ -368,7 +368,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM error: %v", err))
 			} else {
 				// Store result in REPL variable for access in subsequent iterations
-				replEnv.SetVariable("subrlm_result", subRLMResult)
+				_ = replEnv.SetVariable("subrlm_result", subRLMResult)
 				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM completed: %s", utils.TruncateString(subRLMResult, truncateLenLong)))
 
 				if r.config.Verbose {
@@ -680,7 +680,7 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 		tokenTracker:    NewTokenTracker(),
 		iterationModule: subIterMod,
 	}
-	subRLM.BaseModule.ModuleType = "SubRLM"
+	subRLM.ModuleType = "SubRLM"
 
 	// Execute sub-RLM using the SHARED REPL environment
 	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery)
@@ -778,7 +778,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 				logger.Warn(ctx, "[SubRLM] Nested sub-RLM error: %v", err)
 				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM error: %v", err))
 			} else {
-				replEnv.SetVariable("subrlm_result", nestedResult)
+				_ = replEnv.SetVariable("subrlm_result", nestedResult)
 				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM completed: %s", utils.TruncateString(nestedResult, truncateLenLong)))
 			}
 			continue

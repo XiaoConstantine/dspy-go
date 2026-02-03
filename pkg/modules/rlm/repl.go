@@ -73,12 +73,12 @@ type REPLEnvironment interface {
 
 // REPLVariable provides rich metadata about a variable in the REPL.
 type REPLVariable struct {
-	Name       string // Variable name
-	Value      any    // The actual value
-	Type       string // Type description (string, int, []string, map, etc.)
-	Length     int    // Length/size for strings and collections (-1 if N/A)
-	Preview    string // Truncated representation for display
-	IsImportant bool  // True for key variables (result, answer, etc.)
+	Name        string // Variable name
+	Value       any    // The actual value
+	Type        string // Type description (string, int, []string, map, etc.)
+	Length      int    // Length/size for strings and collections (-1 if N/A)
+	Preview     string // Truncated representation for display
+	IsImportant bool   // True for key variables (result, answer, etc.)
 }
 
 // OutputFieldSpec defines expected type and validation for SUBMIT output fields.
@@ -166,12 +166,12 @@ var errStdlibLoad = errors.New("failed to load stdlib")
 
 // AsyncQueryHandle represents a pending async query.
 type AsyncQueryHandle struct {
-	id       string
-	done     chan struct{}
-	result   *QueryResponse
-	err      error
-	mu       sync.Mutex
-	started  time.Time
+	id      string
+	done    chan struct{}
+	result  *QueryResponse
+	err     error
+	mu      sync.Mutex
+	started time.Time
 }
 
 // newAsyncQueryHandle creates a new async query handle.
@@ -379,18 +379,18 @@ type YaegiREPL struct {
 // Excludes dangerous packages: os, os/exec, net, syscall, unsafe, plugin, runtime.
 func safeStdlibSymbols() interp.Exports {
 	return interp.Exports{
-		"fmt/fmt":               stdlib.Symbols["fmt/fmt"],
-		"strings/strings":       stdlib.Symbols["strings/strings"],
-		"strconv/strconv":       stdlib.Symbols["strconv/strconv"],
-		"regexp/regexp":         stdlib.Symbols["regexp/regexp"],
-		"math/math":             stdlib.Symbols["math/math"],
-		"sort/sort":             stdlib.Symbols["sort/sort"],
-		"encoding/json/json":    stdlib.Symbols["encoding/json/json"],
+		"fmt/fmt":                stdlib.Symbols["fmt/fmt"],
+		"strings/strings":        stdlib.Symbols["strings/strings"],
+		"strconv/strconv":        stdlib.Symbols["strconv/strconv"],
+		"regexp/regexp":          stdlib.Symbols["regexp/regexp"],
+		"math/math":              stdlib.Symbols["math/math"],
+		"sort/sort":              stdlib.Symbols["sort/sort"],
+		"encoding/json/json":     stdlib.Symbols["encoding/json/json"],
 		"encoding/base64/base64": stdlib.Symbols["encoding/base64/base64"],
-		"bytes/bytes":           stdlib.Symbols["bytes/bytes"],
-		"unicode/unicode":       stdlib.Symbols["unicode/unicode"],
-		"unicode/utf8/utf8":     stdlib.Symbols["unicode/utf8/utf8"],
-		"time/time":             stdlib.Symbols["time/time"],
+		"bytes/bytes":            stdlib.Symbols["bytes/bytes"],
+		"unicode/unicode":        stdlib.Symbols["unicode/unicode"],
+		"unicode/utf8/utf8":      stdlib.Symbols["unicode/utf8/utf8"],
+		"time/time":              stdlib.Symbols["time/time"],
 	}
 }
 
@@ -836,7 +836,7 @@ func (r *YaegiREPL) llmQueryRaw(prompt string) string {
 
 // llmQueryWith makes a single LLM query with an explicit context slice.
 // Use this when you want to provide a specific context (e.g., a chunk) instead of the full context.
-// Format: "Context:\n{slice}\n\nTask: {prompt}"
+// Format: "Context:\n{slice}\n\nTask: {prompt}".
 func (r *YaegiREPL) llmQueryWith(contextSlice, prompt string) string {
 	start := time.Now()
 
