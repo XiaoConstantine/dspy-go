@@ -34,6 +34,82 @@ type CodeBlock struct {
 	Result ExecutionResult
 }
 
+// HistoryEntry represents a single iteration in the RLM history.
+// This provides immutable, structured history for debugging/checkpointing.
+type HistoryEntry struct {
+	Iteration int       // 1-indexed iteration number
+	Timestamp time.Time // When this iteration started
+	Action    string    // Action type: explore, query, compute, final, subrlm
+	Code      string    // Code that was executed (if any)
+	Output    string    // Execution output (truncated)
+	Duration  time.Duration
+	SubRLM    *SubRLMEntry // Non-nil if this was a subrlm action
+}
+
+// SubRLMEntry captures sub-RLM invocation details.
+type SubRLMEntry struct {
+	Query      string        // The sub-RLM query
+	Result     string        // The sub-RLM result
+	Iterations int           // How many iterations the sub-RLM took
+	Duration   time.Duration // How long the sub-RLM ran
+}
+
+// ImmutableHistory provides append-only history for RLM iterations.
+type ImmutableHistory struct {
+	entries []HistoryEntry
+}
+
+// NewImmutableHistory creates a new empty history.
+func NewImmutableHistory() *ImmutableHistory {
+	return &ImmutableHistory{
+		entries: make([]HistoryEntry, 0),
+	}
+}
+
+// Append adds a new entry to the history.
+func (h *ImmutableHistory) Append(entry HistoryEntry) {
+	h.entries = append(h.entries, entry)
+}
+
+// Entries returns all history entries (immutable copy).
+func (h *ImmutableHistory) Entries() []HistoryEntry {
+	result := make([]HistoryEntry, len(h.entries))
+	copy(result, h.entries)
+	return result
+}
+
+// Len returns the number of entries.
+func (h *ImmutableHistory) Len() int {
+	return len(h.entries)
+}
+
+// String converts history to a string for LLM prompts.
+// Uses configurable truncation settings.
+func (h *ImmutableHistory) String(maxEntryLen int) string {
+	if len(h.entries) == 0 {
+		return ""
+	}
+
+	var result strings.Builder
+	for _, entry := range h.entries {
+		fmt.Fprintf(&result, "\n--- Iteration %d ---\n", entry.Iteration)
+		fmt.Fprintf(&result, "Action: %s\n", entry.Action)
+		if entry.Code != "" {
+			fmt.Fprintf(&result, "Code:\n```go\n%s\n```\n", entry.Code)
+			output := entry.Output
+			if maxEntryLen > 0 && len(output) > maxEntryLen {
+				output = output[:maxEntryLen] + "..."
+			}
+			fmt.Fprintf(&result, "Output:\n%s\n", output)
+		}
+		if entry.SubRLM != nil {
+			fmt.Fprintf(&result, "SubRLM Query: %s\n", entry.SubRLM.Query)
+			fmt.Fprintf(&result, "SubRLM Result: %s\n", entry.SubRLM.Result)
+		}
+	}
+	return result.String()
+}
+
 // CompletionResult represents the final result of an RLM completion.
 type CompletionResult struct {
 	Response   string
@@ -270,6 +346,10 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		code := extractStringOutput(outputs, "code")
 		answer := extractStringOutput(outputs, "answer")
 		reasoning := extractStringOutput(outputs, "reasoning")
+		subquery := extractStringOutput(outputs, "subquery")
+
+		// Strip language markers from code (handles LLM outputting "go\n" at start)
+		code = stripCodeLanguageMarker(code)
 
 		r.trackTokenUsage(ctx)
 
@@ -280,8 +360,26 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		// Handle the action
 		action = strings.ToLower(strings.TrimSpace(action))
 
+		// Check for subrlm action (nested RLM loop)
+		if action == "subrlm" {
+			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start)
+			if err != nil {
+				logger.Warn(ctx, "[RLM] Sub-RLM execution error: %v", err)
+				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM error: %v", err))
+			} else {
+				// Store result in REPL variable for access in subsequent iterations
+				replEnv.SetVariable("subrlm_result", subRLMResult)
+				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM completed: %s", utils.TruncateString(subRLMResult, truncateLenLong)))
+
+				if r.config.Verbose {
+					logger.Debug(ctx, "[RLM] Sub-RLM result: %s", utils.TruncateString(subRLMResult, truncateLenMedium))
+				}
+			}
+			continue
+		}
+
 		// Check for final answer
-		if action == "final" || answer != "" {
+		if action == "final" {
 			// If action is final, use the answer field
 			finalAnswer := answer
 			if finalAnswer == "" {
@@ -336,6 +434,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				logger.Debug(ctx, "[RLM] Executing code:\n%s", utils.TruncateString(code, truncateLenMedium))
 			}
 
+			// Clear final state before execution (Nightjar Algorithm 1 Gap 1)
+			replEnv.ClearFinal()
+
 			result, execErr := replEnv.Execute(ctx, code)
 			if execErr != nil {
 				logger.Warn(ctx, "[RLM] Code execution error: %v", execErr)
@@ -375,17 +476,52 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				allOutput.WriteString(result.Stdout)
 			}
 
-			// Check for FINAL in execution output (from code-called FINAL/FINAL_VAR functions)
-			outputStr := allOutput.String()
-			if final := FindFinalAnswer(outputStr); final != nil {
-				// Found FINAL in execution output - the value is already resolved
-				resultResponse := final.Content
+			// State-verified completion check (Nightjar Algorithm 1 Gap 1)
+			// This is the PRIMARY completion detection - check REPL state first
+			if replEnv.HasFinal() {
+				resultResponse := replEnv.Final()
 
 				if r.config.Verbose {
-					logger.Debug(ctx, "[RLM] Found FINAL in execution output: %s", utils.TruncateString(resultResponse, truncateLenShort))
+					logger.Debug(ctx, "[RLM] State-verified FINAL detected: %s", utils.TruncateString(resultResponse, truncateLenShort))
 				}
 
 				// Log final iteration to trace
+				if traceSession != nil {
+					_ = traceSession.LogIteration(
+						[]logging.RLMMessage{{Role: "user", Content: query}},
+						reasoning,
+						[]logging.RLMCodeBlock{{
+							Code: code,
+							Result: logging.RLMCodeResult{
+								Stdout:        result.Stdout,
+								Stderr:        result.Stderr,
+								Locals:        replEnv.GetLocals(),
+								ExecutionTime: result.Duration.Seconds(),
+								RLMCalls:      rlmCalls,
+							},
+						}},
+						resultResponse,
+						time.Since(iterStart),
+					)
+				}
+
+				return &CompletionResult{
+					Response:   resultResponse,
+					Iterations: i + 1,
+					Duration:   time.Since(start),
+					Usage:      r.tokenTracker.GetTotalUsage(),
+				}, nil
+			}
+
+			// Fallback: Check for FINAL in execution output via regex (deprecated, kept for backward compatibility)
+			outputStr := allOutput.String()
+			if final := FindFinalAnswer(outputStr); final != nil {
+				resultResponse := final.Content
+
+				if r.config.Verbose {
+					logger.Debug(ctx, "[RLM] Regex-based FINAL detected (fallback): %s", utils.TruncateString(resultResponse, truncateLenShort))
+				}
+
 				if traceSession != nil {
 					_ = traceSession.LogIteration(
 						[]logging.RLMMessage{{Role: "user", Content: query}},
@@ -487,6 +623,256 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 
 	// Max iterations exhausted - force final answer
 	return r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+}
+
+// executeSubRLM spawns a nested RLM loop that shares REPL state with the parent.
+// It respects depth limits to prevent infinite recursion.
+func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time) (string, error) {
+	logger := logging.GetLogger()
+	start := time.Now()
+
+	// Determine current depth and max depth
+	currentDepth := 0
+	maxDepth := 3
+	maxSubIterations := 10
+
+	if r.config.SubRLM != nil {
+		currentDepth = r.config.SubRLM.CurrentDepth
+		maxDepth = r.config.SubRLM.MaxDepth
+		if r.config.SubRLM.MaxIterationsPerSubRLM > 0 {
+			maxSubIterations = r.config.SubRLM.MaxIterationsPerSubRLM
+		}
+	}
+
+	// Check depth limit
+	if currentDepth+1 >= maxDepth {
+		return "", fmt.Errorf("sub-RLM depth limit reached (max: %d)", maxDepth)
+	}
+
+	if subquery == "" {
+		return "", fmt.Errorf("sub-RLM requires a subquery")
+	}
+
+	if r.config.Verbose {
+		logger.Info(ctx, "[RLM] Spawning sub-RLM at depth %d with query: %s", currentDepth+1, utils.TruncateString(subquery, truncateLenShort))
+	}
+
+	// Create sub-RLM config with incremented depth
+	subConfig := r.config
+	subConfig.SubRLM = &SubRLMConfig{
+		MaxDepth:               maxDepth,
+		CurrentDepth:           currentDepth + 1,
+		MaxIterationsPerSubRLM: maxSubIterations,
+	}
+	subConfig.MaxIterations = maxSubIterations
+
+	// Create sub-RLM iteration module
+	subIterMod := modules.NewPredict(IterationSignature()).WithTextOutput()
+	subIterMod.SetDemos(IterationDemos())
+	subIterMod.SetLLM(r.rootLLM)
+
+	// Create sub-RLM instance
+	subRLM := &RLM{
+		BaseModule:      *core.NewModule(RLMSignature()),
+		config:          subConfig,
+		rootLLM:         r.rootLLM,
+		subLLMClient:    r.subLLMClient,
+		tokenTracker:    NewTokenTracker(),
+		iterationModule: subIterMod,
+	}
+	subRLM.BaseModule.ModuleType = "SubRLM"
+
+	// Execute sub-RLM using the SHARED REPL environment
+	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery)
+	if err != nil {
+		return "", fmt.Errorf("sub-RLM execution failed: %w", err)
+	}
+
+	// Track sub-RLM token usage
+	subUsage := subRLM.tokenTracker.GetTotalUsage()
+	r.tokenTracker.AddSubRLMCall(SubRLMCall{
+		Query:            subquery,
+		Result:           result.Response,
+		Iterations:       result.Iterations,
+		Depth:            currentDepth + 1,
+		Duration:         time.Since(start),
+		PromptTokens:     subUsage.PromptTokens,
+		CompletionTokens: subUsage.CompletionTokens,
+	})
+
+	if r.config.Verbose {
+		logger.Debug(ctx, "[RLM] Sub-RLM completed in %d iterations, %v", result.Iterations, time.Since(start))
+	}
+
+	return result.Response, nil
+}
+
+// completeWithSharedREPL runs an RLM completion loop using an existing REPL environment.
+// This allows sub-RLMs to share state with their parent.
+func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *YaegiREPL, query string) (*CompletionResult, error) {
+	logger := logging.GetLogger()
+	start := time.Now()
+
+	// Reset sub-RLM's token tracker
+	subRLM.tokenTracker.Reset()
+
+	// Apply timeout if configured
+	if subRLM.config.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, subRLM.config.Timeout)
+		defer cancel()
+	}
+
+	// Get context info from shared REPL
+	contextSize := 0
+	if idx := replEnv.GetContextIndex(); idx != nil {
+		contextSize = len(idx.GetRawContent())
+	}
+	maxIterations := subRLM.computeMaxIterations(contextSize)
+
+	var confidenceSignals int
+	var history strings.Builder
+
+	// Sub-RLM iteration loop
+	for i := 0; i < maxIterations; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		if subRLM.config.Verbose {
+			logger.Info(ctx, "[SubRLM] Iteration %d/%d (depth %d)", i+1, maxIterations, subRLM.config.SubRLM.CurrentDepth)
+		}
+
+		// Prepare inputs for iteration module
+		iterInputs := map[string]any{
+			"context_info": replEnv.ContextInfo(),
+			"query":        query,
+			"history":      history.String(),
+			"repl_state":   formatREPLState(replEnv.GetLocals()),
+		}
+
+		// Call the iteration module
+		outputs, err := subRLM.iterationModule.Process(ctx, iterInputs)
+		if err != nil {
+			return nil, fmt.Errorf("sub-RLM iteration %d: module process failed: %w", i, err)
+		}
+
+		// Extract structured outputs
+		action := extractStringOutput(outputs, "action")
+		code := extractStringOutput(outputs, "code")
+		answer := extractStringOutput(outputs, "answer")
+		reasoning := extractStringOutput(outputs, "reasoning")
+		subquery := extractStringOutput(outputs, "subquery")
+
+		code = stripCodeLanguageMarker(code)
+		subRLM.trackTokenUsage(ctx)
+
+		action = strings.ToLower(strings.TrimSpace(action))
+
+		// Handle nested subrlm action
+		if action == "subrlm" {
+			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start)
+			if err != nil {
+				logger.Warn(ctx, "[SubRLM] Nested sub-RLM error: %v", err)
+				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM error: %v", err))
+			} else {
+				replEnv.SetVariable("subrlm_result", nestedResult)
+				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM completed: %s", utils.TruncateString(nestedResult, truncateLenLong)))
+			}
+			continue
+		}
+
+		// Check for final answer
+		if action == "final" {
+			finalAnswer := answer
+			if finalAnswer == "" {
+				if final := FindFinalAnswer(reasoning); final != nil {
+					if final.Type == FinalTypeVariable {
+						resolved, err := replEnv.GetVariable(final.Content)
+						if err == nil {
+							finalAnswer = resolved
+						}
+					} else {
+						finalAnswer = final.Content
+					}
+				}
+			}
+			if finalAnswer == "" {
+				for _, varName := range []string{"result", "answer", "final_answer", "output", "subrlm_result"} {
+					if val, err := replEnv.GetVariable(varName); err == nil && val != "" {
+						finalAnswer = val
+						break
+					}
+				}
+			}
+			if finalAnswer != "" {
+				return &CompletionResult{
+					Response:   finalAnswer,
+					Iterations: i + 1,
+					Duration:   time.Since(start),
+					Usage:      subRLM.tokenTracker.GetTotalUsage(),
+				}, nil
+			}
+		}
+
+		if code != "" {
+			replEnv.ClearFinal()
+			result, _ := replEnv.Execute(ctx, code)
+
+			// Collect sub-LLM calls
+			var allOutput strings.Builder
+			for _, call := range replEnv.GetLLMCalls() {
+				subRLM.tokenTracker.AddSubCall(call)
+				allOutput.WriteString(fmt.Sprintf("\n[Query] %s\n[Result] %s\n",
+					utils.TruncateString(call.Prompt, truncateLenMedium),
+					call.Response))
+			}
+			if result.Stdout != "" {
+				allOutput.WriteString(result.Stdout)
+			}
+
+			// Check for FINAL via state
+			if replEnv.HasFinal() {
+				return &CompletionResult{
+					Response:   replEnv.Final(),
+					Iterations: i + 1,
+					Duration:   time.Since(start),
+					Usage:      subRLM.tokenTracker.GetTotalUsage(),
+				}, nil
+			}
+
+			// Fallback regex check
+			if final := FindFinalAnswer(allOutput.String()); final != nil {
+				return &CompletionResult{
+					Response:   final.Content,
+					Iterations: i + 1,
+					Duration:   time.Since(start),
+					Usage:      subRLM.tokenTracker.GetTotalUsage(),
+				}, nil
+			}
+
+			execOutput := FormatExecutionResult(result)
+			if allOutput.Len() > 0 {
+				execOutput = execOutput + allOutput.String()
+			}
+			subRLM.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
+		} else if action != "final" {
+			subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", "")
+		}
+
+		// Detect confidence signals
+		if subRLM.detectConfidence(reasoning) {
+			confidenceSignals++
+		}
+		if subRLM.shouldTerminateEarly(confidenceSignals, code != "") {
+			break
+		}
+	}
+
+	// Max iterations exhausted - force final answer
+	return subRLM.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
 }
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
@@ -723,6 +1109,34 @@ func extractStringOutput(outputs map[string]any, key string) string {
 	return ""
 }
 
+// stripCodeLanguageMarker removes leading language identifiers that LLMs sometimes include
+// in code output (e.g., "go\n" at the start when already in a code field).
+func stripCodeLanguageMarker(code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return code
+	}
+
+	// Common language markers that might appear at the start
+	markers := []string{"go\n", "golang\n", "repl\n", "Go\n", "GO\n"}
+	for _, marker := range markers {
+		if strings.HasPrefix(code, marker) {
+			return strings.TrimSpace(code[len(marker):])
+		}
+	}
+
+	// Also handle case where first line is just "go" (no newline yet trimmed)
+	lines := strings.SplitN(code, "\n", 2)
+	if len(lines) >= 2 {
+		firstLine := strings.TrimSpace(lines[0])
+		if firstLine == "go" || firstLine == "golang" || firstLine == "repl" ||
+			firstLine == "Go" || firstLine == "GO" {
+			return strings.TrimSpace(lines[1])
+		}
+	}
+	return code
+}
+
 // formatREPLState converts the REPL locals map to a readable string.
 func formatREPLState(locals map[string]any) string {
 	if len(locals) == 0 {
@@ -740,6 +1154,43 @@ func formatREPLState(locals map[string]any) string {
 	return strings.Join(parts, "\n")
 }
 
+// formatREPLStateRich converts variable metadata to a rich, informative string.
+// This provides type info, length, and preview for better LLM context.
+func formatREPLStateRich(variables []REPLVariable, maxPreviewLen int) string {
+	if len(variables) == 0 {
+		return "No variables defined"
+	}
+
+	var result strings.Builder
+	result.WriteString("Variables:\n")
+
+	for _, v := range variables {
+		// Mark important variables
+		marker := ""
+		if v.IsImportant {
+			marker = " *"
+		}
+
+		// Format based on type
+		if v.Length >= 0 {
+			fmt.Fprintf(&result, "  %s%s: %s (len=%d)\n", v.Name, marker, v.Type, v.Length)
+		} else {
+			fmt.Fprintf(&result, "  %s%s: %s\n", v.Name, marker, v.Type)
+		}
+
+		// Show preview for non-trivial values
+		preview := v.Preview
+		if maxPreviewLen > 0 && len(preview) > maxPreviewLen {
+			preview = preview[:maxPreviewLen] + "..."
+		}
+		if preview != "" && v.Name != "context" { // Skip context preview (too large)
+			fmt.Fprintf(&result, "    → %s\n", preview)
+		}
+	}
+
+	return result.String()
+}
+
 func (r *RLM) trackTokenUsage(ctx context.Context) {
 	if state := core.GetExecutionState(ctx); state != nil {
 		if usage := state.GetTokenUsage(); usage != nil {
@@ -748,10 +1199,12 @@ func (r *RLM) trackTokenUsage(ctx context.Context) {
 	}
 }
 
-func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, action, reasoning, code, output string) {
+// appendIterationHistory adds iteration info to the history string.
+// Nightjar Algorithm 1 Gap 2: Reasoning is NOT included to save tokens.
+// History contains only: action, code, and truncated output.
+func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, action, _, code, output string) {
 	fmt.Fprintf(history, "\n--- Iteration %d ---\n", iteration)
 	fmt.Fprintf(history, "Action: %s\n", action)
-	fmt.Fprintf(history, "Reasoning: %s\n", reasoning)
 	if code != "" {
 		fmt.Fprintf(history, "Code:\n```go\n%s\n```\n", code)
 		fmt.Fprintf(history, "Output:\n%s\n", utils.TruncateString(output, truncateLenLong))

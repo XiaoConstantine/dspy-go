@@ -16,6 +16,17 @@ type LLMCall struct {
 	CompletionTokens int           `json:"completion_tokens"`
 }
 
+// SubRLMCall represents a nested sub-RLM invocation.
+type SubRLMCall struct {
+	Query            string        `json:"query"`
+	Result           string        `json:"result"`
+	Iterations       int           `json:"iterations"`
+	Depth            int           `json:"depth"`
+	Duration         time.Duration `json:"duration"`
+	PromptTokens     int           `json:"prompt_tokens"`
+	CompletionTokens int           `json:"completion_tokens"`
+}
+
 // TokenTracker aggregates token usage across root LLM and sub-LLM calls.
 type TokenTracker struct {
 	mu sync.RWMutex
@@ -28,14 +39,20 @@ type TokenTracker struct {
 	subPromptTokens     int
 	subCompletionTokens int
 
+	// Sub-RLM usage (nested RLM loops)
+	subRLMPromptTokens     int
+	subRLMCompletionTokens int
+
 	// Detailed call history
-	subCalls []LLMCall
+	subCalls    []LLMCall
+	subRLMCalls []SubRLMCall
 }
 
 // NewTokenTracker creates a new token tracker.
 func NewTokenTracker() *TokenTracker {
 	return &TokenTracker{
-		subCalls: make([]LLMCall, 0),
+		subCalls:    make([]LLMCall, 0),
+		subRLMCalls: make([]SubRLMCall, 0),
 	}
 }
 
@@ -67,13 +84,22 @@ func (t *TokenTracker) AddSubCalls(calls []LLMCall) {
 	}
 }
 
+// AddSubRLMCall adds a sub-RLM call with its token usage.
+func (t *TokenTracker) AddSubRLMCall(call SubRLMCall) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.subRLMCalls = append(t.subRLMCalls, call)
+	t.subRLMPromptTokens += call.PromptTokens
+	t.subRLMCompletionTokens += call.CompletionTokens
+}
+
 // GetTotalUsage returns the total aggregated token usage.
 func (t *TokenTracker) GetTotalUsage() core.TokenUsage {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	totalPrompt := t.rootPromptTokens + t.subPromptTokens
-	totalCompletion := t.rootCompletionTokens + t.subCompletionTokens
+	totalPrompt := t.rootPromptTokens + t.subPromptTokens + t.subRLMPromptTokens
+	totalCompletion := t.rootCompletionTokens + t.subCompletionTokens + t.subRLMCompletionTokens
 
 	return core.TokenUsage{
 		PromptTokens:     totalPrompt,
@@ -116,6 +142,28 @@ func (t *TokenTracker) GetSubCalls() []LLMCall {
 	return calls
 }
 
+// GetSubRLMCalls returns a copy of all sub-RLM calls.
+func (t *TokenTracker) GetSubRLMCalls() []SubRLMCall {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	calls := make([]SubRLMCall, len(t.subRLMCalls))
+	copy(calls, t.subRLMCalls)
+	return calls
+}
+
+// GetSubRLMUsage returns token usage from sub-RLM calls only.
+func (t *TokenTracker) GetSubRLMUsage() core.TokenUsage {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	return core.TokenUsage{
+		PromptTokens:     t.subRLMPromptTokens,
+		CompletionTokens: t.subRLMCompletionTokens,
+		TotalTokens:      t.subRLMPromptTokens + t.subRLMCompletionTokens,
+	}
+}
+
 // ClearSubCalls clears the recorded sub-LLM calls but preserves the counts.
 func (t *TokenTracker) ClearSubCalls() {
 	t.mu.Lock()
@@ -132,5 +180,8 @@ func (t *TokenTracker) Reset() {
 	t.rootCompletionTokens = 0
 	t.subPromptTokens = 0
 	t.subCompletionTokens = 0
+	t.subRLMPromptTokens = 0
+	t.subRLMCompletionTokens = 0
 	t.subCalls = make([]LLMCall, 0)
+	t.subRLMCalls = make([]SubRLMCall, 0)
 }

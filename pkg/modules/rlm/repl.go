@@ -32,6 +32,9 @@ type REPLEnvironment interface {
 	// GetVariable retrieves a variable value from the interpreter.
 	GetVariable(name string) (string, error)
 
+	// SetVariable sets a variable in the interpreter.
+	SetVariable(name, value string) error
+
 	// Reset clears the interpreter state.
 	Reset() error
 
@@ -40,6 +43,49 @@ type REPLEnvironment interface {
 
 	// GetLocals extracts commonly used variables from the interpreter.
 	GetLocals() map[string]any
+
+	// GetVariableMetadata returns rich metadata about REPL variables.
+	GetVariableMetadata() []REPLVariable
+
+	// HasFinal returns true if FINAL() or FINAL_VAR() has been called.
+	// This provides state-verified completion detection (Nightjar Algorithm 1 Gap 1).
+	HasFinal() bool
+
+	// Final returns the value passed to FINAL() or FINAL_VAR().
+	// Returns empty string if not set.
+	Final() string
+
+	// ClearFinal resets the final state.
+	ClearFinal()
+
+	// HasSubmit returns true if SUBMIT() has been called with valid output.
+	HasSubmit() bool
+
+	// GetSubmitOutput returns the submitted output fields.
+	GetSubmitOutput() map[string]any
+
+	// SetSubmitSchema sets the expected output schema for SUBMIT validation.
+	SetSubmitSchema(schema map[string]OutputFieldSpec)
+
+	// GetLLMCalls returns the LLM calls made during code execution.
+	GetLLMCalls() []LLMCall
+}
+
+// REPLVariable provides rich metadata about a variable in the REPL.
+type REPLVariable struct {
+	Name       string // Variable name
+	Value      any    // The actual value
+	Type       string // Type description (string, int, []string, map, etc.)
+	Length     int    // Length/size for strings and collections (-1 if N/A)
+	Preview    string // Truncated representation for display
+	IsImportant bool  // True for key variables (result, answer, etc.)
+}
+
+// OutputFieldSpec defines expected type and validation for SUBMIT output fields.
+type OutputFieldSpec struct {
+	Type        string // Expected type: "string", "int", "float", "bool", "[]string", "map"
+	Required    bool   // Whether the field is required
+	Description string // Description of what this field should contain
 }
 
 // ExecutionResult represents the result of executing code in the REPL.
@@ -308,6 +354,25 @@ type YaegiREPL struct {
 	llmCallsMu   sync.Mutex // Separate mutex for async LLM call recording
 	asyncQueries map[string]*AsyncQueryHandle
 	asyncMu      sync.RWMutex
+
+	// State-verified completion (Nightjar Algorithm 1 Gap 1)
+	// These fields allow programmatic detection of completion via FINAL()/FINAL_VAR()
+	// calls in code, rather than relying on regex parsing of text output.
+	finalSet   bool
+	finalValue string
+	finalMu    sync.RWMutex // Protects finalSet and finalValue
+
+	// Typed SUBMIT support (Nightjar Algorithm 1 - typed output validation)
+	// SUBMIT allows LLMs to provide structured output with type validation.
+	submitSet    bool
+	submitOutput map[string]any
+	submitSchema map[string]OutputFieldSpec
+	submitMu     sync.RWMutex // Protects submitSet, submitOutput, submitSchema
+
+	// Context indexing support
+	contextIndex  *ContextIndex
+	embeddingFunc EmbeddingFunc
+	chunkConfig   ChunkConfig
 }
 
 // safeStdlibSymbols returns a sandboxed subset of stdlib symbols.
@@ -362,7 +427,10 @@ func (r *YaegiREPL) injectBuiltins() error {
 	symbols := interp.Exports{
 		"rlm/rlm": {
 			"Query":             reflect.ValueOf(r.llmQuery),
+			"QueryRaw":          reflect.ValueOf(r.llmQueryRaw),
+			"QueryWith":         reflect.ValueOf(r.llmQueryWith),
 			"QueryBatched":      reflect.ValueOf(r.llmQueryBatched),
+			"QueryBatchedRaw":   reflect.ValueOf(r.llmQueryBatchedRaw),
 			"QueryAsync":        reflect.ValueOf(r.llmQueryAsync),
 			"QueryBatchedAsync": reflect.ValueOf(r.llmQueryBatchedAsync),
 			"WaitAsync":         reflect.ValueOf(r.waitAsync),
@@ -371,6 +439,14 @@ func (r *YaegiREPL) injectBuiltins() error {
 			// FINAL and FINAL_VAR allow LLMs to signal completion from within code blocks
 			"FINAL":     reflect.ValueOf(r.finalAnswer),
 			"FINAL_VAR": reflect.ValueOf(r.finalVarAnswer),
+			// SUBMIT allows typed output with field validation
+			"SUBMIT": reflect.ValueOf(r.submitOutput_),
+			// Context indexing builtins for efficient slice-only queries
+			"FindRelevant": reflect.ValueOf(r.findRelevant),
+			"GetChunk":     reflect.ValueOf(r.getChunk),
+			"GetContext":   reflect.ValueOf(r.getContextRange),
+			"ChunkCount":   reflect.ValueOf(r.chunkCount),
+			"LineCount":    reflect.ValueOf(r.lineCount),
 		},
 	}
 	if err := r.interp.Use(symbols); err != nil {
@@ -393,10 +469,18 @@ import . "rlm/rlm"
 }
 
 // finalAnswer handles FINAL(value) calls from within code blocks.
-// It prints a special marker that the RLM parser can detect.
+// It sets the state-verified completion fields and prints a marker.
 // This allows LLMs to signal completion from inside code, which is more natural.
+// The state fields (finalSet, finalValue) provide reliable programmatic detection
+// instead of regex parsing (Nightjar Algorithm 1 Gap 1).
 func (r *YaegiREPL) finalAnswer(value string) string {
-	// Print to stdout so it appears in the output and can be parsed
+	// Set state-verified completion fields
+	r.finalMu.Lock()
+	r.finalSet = true
+	r.finalValue = value
+	r.finalMu.Unlock()
+
+	// Also print to stdout for backward compatibility and debugging
 	fmt.Fprintf(r.stdout, "\nFINAL(%s)\n", value)
 	return value
 }
@@ -404,11 +488,279 @@ func (r *YaegiREPL) finalAnswer(value string) string {
 // finalVarAnswer handles FINAL_VAR(varName) calls from within code blocks.
 // The varName is treated as the value directly (the variable was already evaluated by Go).
 // This is called when LLM writes FINAL_VAR(answer) where answer is a Go variable.
+// Sets state-verified completion fields (Nightjar Algorithm 1 Gap 1).
 func (r *YaegiREPL) finalVarAnswer(value string) string {
-	// The value parameter IS the resolved variable value (Go already evaluated it)
-	// Print to stdout so it appears in the output and can be parsed
+	// Set state-verified completion fields
+	r.finalMu.Lock()
+	r.finalSet = true
+	r.finalValue = value
+	r.finalMu.Unlock()
+
+	// Also print to stdout for backward compatibility and debugging
 	fmt.Fprintf(r.stdout, "\nFINAL(%s)\n", value)
 	return value
+}
+
+// HasFinal returns true if FINAL() or FINAL_VAR() has been called.
+// This provides state-verified completion detection (Nightjar Algorithm 1 Gap 1).
+func (r *YaegiREPL) HasFinal() bool {
+	r.finalMu.RLock()
+	defer r.finalMu.RUnlock()
+	return r.finalSet
+}
+
+// Final returns the value passed to FINAL() or FINAL_VAR().
+// Returns empty string if not set.
+func (r *YaegiREPL) Final() string {
+	r.finalMu.RLock()
+	defer r.finalMu.RUnlock()
+	return r.finalValue
+}
+
+// ClearFinal resets the final state.
+// Call this at the start of each iteration or when reusing the REPL.
+func (r *YaegiREPL) ClearFinal() {
+	r.finalMu.Lock()
+	r.finalSet = false
+	r.finalValue = ""
+	r.finalMu.Unlock()
+}
+
+// =============================================================================
+// SUBMIT - Typed Output Validation (Nightjar Algorithm 1)
+// =============================================================================
+
+// submitOutput_ handles SUBMIT(fields) calls from within code blocks.
+// It validates the output against the schema (if set) and stores it.
+// This provides typed output validation similar to DSPy Python.
+func (r *YaegiREPL) submitOutput_(fields map[string]any) string {
+	r.submitMu.Lock()
+	defer r.submitMu.Unlock()
+
+	// Validate against schema if set
+	if r.submitSchema != nil {
+		for name, spec := range r.submitSchema {
+			value, exists := fields[name]
+			if spec.Required && !exists {
+				errMsg := fmt.Sprintf("SUBMIT error: missing required field '%s'", name)
+				fmt.Fprintln(r.stderr, errMsg)
+				return errMsg
+			}
+			if exists {
+				if err := validateFieldType(value, spec.Type); err != nil {
+					errMsg := fmt.Sprintf("SUBMIT error: field '%s' %v", name, err)
+					fmt.Fprintln(r.stderr, errMsg)
+					return errMsg
+				}
+			}
+		}
+	}
+
+	// Store the validated output
+	r.submitSet = true
+	r.submitOutput = fields
+
+	// Print confirmation
+	fmt.Fprintf(r.stdout, "\nSUBMIT(%v)\n", fields)
+	return "OK"
+}
+
+// validateFieldType checks if a value matches the expected type.
+func validateFieldType(value any, expectedType string) error {
+	if value == nil {
+		return fmt.Errorf("is nil")
+	}
+
+	switch expectedType {
+	case "string":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("expected string, got %T", value)
+		}
+	case "int":
+		switch value.(type) {
+		case int, int64, int32, float64: // float64 covers JSON numbers
+		default:
+			return fmt.Errorf("expected int, got %T", value)
+		}
+	case "float":
+		switch value.(type) {
+		case float64, float32, int, int64:
+		default:
+			return fmt.Errorf("expected float, got %T", value)
+		}
+	case "bool":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("expected bool, got %T", value)
+		}
+	case "[]string":
+		slice, ok := value.([]string)
+		if !ok {
+			// Try to convert []any to []string
+			if anySlice, ok := value.([]any); ok {
+				for _, v := range anySlice {
+					if _, ok := v.(string); !ok {
+						return fmt.Errorf("expected []string, got []any with non-string element")
+					}
+				}
+			} else {
+				return fmt.Errorf("expected []string, got %T", value)
+			}
+		}
+		_ = slice
+	case "map":
+		switch value.(type) {
+		case map[string]any, map[string]string:
+		default:
+			return fmt.Errorf("expected map, got %T", value)
+		}
+	}
+	return nil
+}
+
+// HasSubmit returns true if SUBMIT() has been called with valid output.
+func (r *YaegiREPL) HasSubmit() bool {
+	r.submitMu.RLock()
+	defer r.submitMu.RUnlock()
+	return r.submitSet
+}
+
+// GetSubmitOutput returns the submitted output fields.
+func (r *YaegiREPL) GetSubmitOutput() map[string]any {
+	r.submitMu.RLock()
+	defer r.submitMu.RUnlock()
+	return r.submitOutput
+}
+
+// SetSubmitSchema sets the expected output schema for SUBMIT validation.
+func (r *YaegiREPL) SetSubmitSchema(schema map[string]OutputFieldSpec) {
+	r.submitMu.Lock()
+	defer r.submitMu.Unlock()
+	r.submitSchema = schema
+}
+
+// ClearSubmit resets the submit state.
+func (r *YaegiREPL) ClearSubmit() {
+	r.submitMu.Lock()
+	r.submitSet = false
+	r.submitOutput = nil
+	r.submitMu.Unlock()
+}
+
+// =============================================================================
+// Variable Metadata (Nightjar Algorithm 1 - rich variable info)
+// =============================================================================
+
+// importantVarNames lists variables that should be marked as important.
+var importantVarNames = map[string]bool{
+	"result": true, "answer": true, "output": true, "final_answer": true,
+	"total": true, "count": true, "response": true, "summary": true,
+}
+
+// GetVariableMetadata returns rich metadata about REPL variables.
+// This provides type info, length, and preview for better LLM context.
+func (r *YaegiREPL) GetVariableMetadata() []REPLVariable {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	varNames := []string{
+		"context", "result", "answer", "data", "output", "response",
+		"analysis", "summary", "final_answer", "count", "total",
+		"items", "records", "values", "results", "findings",
+		"subrlm_result", // Added for sub-RLM support
+	}
+
+	var variables []REPLVariable
+	for _, name := range varNames {
+		v, err := r.interp.Eval(name)
+		if err != nil || !v.IsValid() {
+			continue
+		}
+
+		val := v.Interface()
+		meta := REPLVariable{
+			Name:        name,
+			Value:       val,
+			Type:        getTypeName(val),
+			Length:      getValueLength(val),
+			Preview:     getValuePreview(val, 100),
+			IsImportant: importantVarNames[name],
+		}
+		variables = append(variables, meta)
+	}
+
+	return variables
+}
+
+// getTypeName returns a human-readable type name.
+func getTypeName(val any) string {
+	if val == nil {
+		return "nil"
+	}
+	t := reflect.TypeOf(val)
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Int, reflect.Int64, reflect.Int32:
+		return "int"
+	case reflect.Float64, reflect.Float32:
+		return "float"
+	case reflect.Bool:
+		return "bool"
+	case reflect.Slice:
+		return fmt.Sprintf("[]%s", t.Elem().Name())
+	case reflect.Map:
+		return fmt.Sprintf("map[%s]%s", t.Key().Name(), t.Elem().Name())
+	default:
+		return t.String()
+	}
+}
+
+// getValueLength returns the length/size of a value, or -1 if not applicable.
+func getValueLength(val any) int {
+	if val == nil {
+		return -1
+	}
+	v := reflect.ValueOf(val)
+	switch v.Kind() {
+	case reflect.String:
+		return v.Len()
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return v.Len()
+	default:
+		return -1
+	}
+}
+
+// getValuePreview returns a truncated preview of the value.
+func getValuePreview(val any, maxLen int) string {
+	if val == nil {
+		return "<nil>"
+	}
+
+	var preview string
+	switch v := val.(type) {
+	case string:
+		preview = v
+	default:
+		preview = fmt.Sprintf("%v", val)
+	}
+
+	if len(preview) > maxLen {
+		return preview[:maxLen] + "..."
+	}
+	return preview
+}
+
+// SetVariable sets a variable in the interpreter that can be accessed in subsequent code executions.
+// This is used by sub-RLM to store results that the parent RLM can access.
+func (r *YaegiREPL) SetVariable(name, value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	escapedValue := strings.ReplaceAll(value, "`", "` + \"`\" + `")
+	code := fmt.Sprintf("%s := `%s`", name, escapedValue)
+	_, err := r.interp.Eval(code)
+	return err
 }
 
 // buildPromptWithContext retrieves the context variable and prepends it to the prompt.
@@ -463,6 +815,52 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 	return response
 }
 
+// llmQueryRaw makes a single LLM query WITHOUT prepending context.
+// Use this for slice-only queries where you want to control exactly what context is sent.
+// This is essential for RLM token efficiency - send only the slice needed.
+func (r *YaegiREPL) llmQueryRaw(prompt string) string {
+	start := time.Now()
+
+	// Do NOT prepend context - send prompt as-is
+	result, err := r.llmClient.Query(r.ctx, prompt)
+	duration := time.Since(start)
+
+	response := result.Response
+	if err != nil {
+		response = fmt.Sprintf("Error: %v", err)
+	}
+
+	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
+	return response
+}
+
+// llmQueryWith makes a single LLM query with an explicit context slice.
+// Use this when you want to provide a specific context (e.g., a chunk) instead of the full context.
+// Format: "Context:\n{slice}\n\nTask: {prompt}"
+func (r *YaegiREPL) llmQueryWith(contextSlice, prompt string) string {
+	start := time.Now()
+
+	// Build prompt with the provided slice instead of full context
+	var fullPrompt string
+	if contextSlice != "" {
+		fullPrompt = fmt.Sprintf("Context:\n%s\n\nTask: %s", contextSlice, prompt)
+	} else {
+		fullPrompt = prompt
+	}
+
+	result, err := r.llmClient.Query(r.ctx, fullPrompt)
+	duration := time.Since(start)
+
+	response := result.Response
+	if err != nil {
+		response = fmt.Sprintf("Error: %v", err)
+	}
+
+	// Record with the original prompt for clarity in logs
+	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
+	return response
+}
+
 // llmQueryBatched makes concurrent LLM queries. This is called from interpreted code.
 // It automatically includes the context variable (if loaded) in each prompt.
 func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
@@ -500,26 +898,97 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	return responses
 }
 
+// llmQueryBatchedRaw makes concurrent LLM queries WITHOUT prepending context.
+// Use this for parallel slice-only queries where you control the context per-prompt.
+func (r *YaegiREPL) llmQueryBatchedRaw(prompts []string) []string {
+	if len(prompts) == 0 {
+		return []string{}
+	}
+
+	start := time.Now()
+
+	// Do NOT prepend context - send prompts as-is
+	results, err := r.llmClient.QueryBatched(r.ctx, prompts)
+	duration := time.Since(start)
+	avgDuration := duration / time.Duration(len(prompts))
+
+	if err != nil {
+		responses := make([]string, len(prompts))
+		errMsg := fmt.Sprintf("Error: %v", err)
+		for i, prompt := range prompts {
+			responses[i] = errMsg
+			r.recordLLMCall(prompt, errMsg, avgDuration, 0, 0)
+		}
+		return responses
+	}
+
+	responses := make([]string, len(results))
+	for i, res := range results {
+		responses[i] = res.Response
+		r.recordLLMCall(prompts[i], res.Response, avgDuration, res.PromptTokens, res.CompletionTokens)
+	}
+	return responses
+}
+
 // LoadContext injects the context payload into the interpreter as the `context` variable.
 func (r *YaegiREPL) LoadContext(payload any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	var contentStr string
+
 	switch v := payload.(type) {
 	case string:
+		contentStr = v
 		_, err := r.interp.Eval(`var context = ` + strconv.Quote(v))
-		return err
+		if err != nil {
+			return err
+		}
 	case map[string]any:
-		return r.loadStructuredContext(v, "map[string]interface{}")
+		if err := r.loadStructuredContext(v, "map[string]interface{}"); err != nil {
+			return err
+		}
+		// Convert to string for indexing
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("failed to marshal map context for indexing: %w", err)
+		}
+		contentStr = string(jsonBytes)
 	case []any:
-		return r.loadStructuredContext(v, "[]interface{}")
+		if err := r.loadStructuredContext(v, "[]interface{}"); err != nil {
+			return err
+		}
+		// Convert to string for indexing
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("failed to marshal slice context for indexing: %w", err)
+		}
+		contentStr = string(jsonBytes)
 	default:
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("unsupported context type %T: %w", v, err)
 		}
-		return r.LoadContext(string(jsonBytes))
+		// Recurse with string
+		r.mu.Unlock()
+		err = r.LoadContext(string(jsonBytes))
+		r.mu.Lock()
+		return err
 	}
+
+	// Build context index for efficient slicing
+	config := r.chunkConfig
+	if config.MaxChunkSize == 0 {
+		config = DefaultChunkConfig()
+	}
+	r.contextIndex = NewContextIndex(contentStr, config)
+
+	// Set embedding function if available
+	if r.embeddingFunc != nil {
+		r.contextIndex.SetEmbeddingFunc(r.embeddingFunc)
+	}
+
+	return nil
 }
 
 func (r *YaegiREPL) loadStructuredContext(v any, typeDecl string) error {
@@ -920,4 +1389,112 @@ func (r *YaegiREPL) ClearAsyncQueries() {
 	r.asyncMu.Lock()
 	defer r.asyncMu.Unlock()
 	r.asyncQueries = make(map[string]*AsyncQueryHandle)
+}
+
+// =============================================================================
+// Context Indexing Support
+// =============================================================================
+
+// SetEmbeddingFunc sets the function used for semantic search.
+// If not set, FindRelevant falls back to keyword matching.
+func (r *YaegiREPL) SetEmbeddingFunc(fn EmbeddingFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.embeddingFunc = fn
+}
+
+// SetChunkConfig sets the chunking configuration for context indexing.
+func (r *YaegiREPL) SetChunkConfig(config ChunkConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.chunkConfig = config
+}
+
+// GetContextIndex returns the current context index (for external access).
+func (r *YaegiREPL) GetContextIndex() *ContextIndex {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.contextIndex
+}
+
+// IndexContext eagerly indexes the loaded context for semantic search.
+// Call this after LoadContext if you want embedding-based FindRelevant.
+func (r *YaegiREPL) IndexContext(ctx context.Context) error {
+	r.mu.Lock()
+	idx := r.contextIndex
+	r.mu.Unlock()
+
+	if idx == nil {
+		return fmt.Errorf("no context loaded")
+	}
+
+	return idx.IndexEagerly(ctx)
+}
+
+// findRelevant is the REPL builtin for finding relevant chunks.
+// It returns chunk contents as a slice of strings.
+// Note: Does NOT acquire r.mu since it's called from within Execute which already holds the lock.
+// The contextIndex has its own internal mutex for thread safety.
+func (r *YaegiREPL) findRelevant(query string, topK int) []string {
+	idx := r.contextIndex
+	if idx == nil {
+		return []string{}
+	}
+
+	chunks, err := idx.FindRelevant(r.ctx, query, topK)
+	if err != nil {
+		return []string{fmt.Sprintf("Error: %v", err)}
+	}
+
+	results := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		results[i] = chunk.Content
+	}
+	return results
+}
+
+// getChunk is the REPL builtin for getting a chunk by ID.
+// Note: Does NOT acquire r.mu since it's called from within Execute which already holds the lock.
+func (r *YaegiREPL) getChunk(id int) string {
+	idx := r.contextIndex
+	if idx == nil {
+		return ""
+	}
+
+	chunk, ok := idx.GetChunk(id)
+	if !ok {
+		return ""
+	}
+	return chunk.Content
+}
+
+// getContextRange is the REPL builtin for getting context by line range.
+// Note: Does NOT acquire r.mu since it's called from within Execute which already holds the lock.
+func (r *YaegiREPL) getContextRange(startLine, endLine int) string {
+	idx := r.contextIndex
+	if idx == nil {
+		return ""
+	}
+
+	return idx.GetContext(startLine, endLine)
+}
+
+// chunkCount is the REPL builtin for getting the number of chunks.
+// Note: Does NOT acquire r.mu since it's called from within Execute which already holds the lock.
+func (r *YaegiREPL) chunkCount() int {
+	idx := r.contextIndex
+	if idx == nil {
+		return 0
+	}
+	return idx.ChunkCount()
+}
+
+// lineCount is the REPL builtin for getting the number of lines.
+// Note: Does NOT acquire r.mu since it's called from within Execute which already holds the lock.
+func (r *YaegiREPL) lineCount() int {
+	idx := r.contextIndex
+	if idx == nil {
+		return 0
+	}
+	return idx.LineCount()
 }

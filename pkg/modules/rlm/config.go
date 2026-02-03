@@ -29,9 +29,47 @@ type Config struct {
 	// When enabled, max iterations are dynamically calculated based on context size.
 	AdaptiveIteration *AdaptiveIterationConfig
 
+	// SubRLM configures nested sub-RLM behavior.
+	// When enabled, allows spawning nested RLM loops that share REPL state.
+	SubRLM *SubRLMConfig
+
+	// OutputTruncation configures output truncation settings.
+	// Controls max lengths for execution output, variable previews, and history entries.
+	OutputTruncation *OutputTruncationConfig
+
 	// OnProgress is called at the start of each iteration with progress info.
 	// Can be used to display progress to users or implement custom termination logic.
 	OnProgress func(progress IterationProgress)
+}
+
+// OutputTruncationConfig configures output truncation settings.
+type OutputTruncationConfig struct {
+	// Enabled turns on output truncation (default: true).
+	Enabled bool
+
+	// MaxOutputLen is the maximum characters in execution output (default: 5000).
+	MaxOutputLen int
+
+	// MaxVarPreviewLen is the maximum characters in variable preview (default: 100).
+	MaxVarPreviewLen int
+
+	// MaxHistoryEntryLen is the maximum characters per history entry (default: 1000).
+	MaxHistoryEntryLen int
+}
+
+// SubRLMConfig configures nested sub-RLM behavior.
+type SubRLMConfig struct {
+	// MaxDepth is the maximum nesting depth for sub-RLM calls (default: 3).
+	// A value of 1 means no nesting allowed, 2 means one level of nesting, etc.
+	MaxDepth int
+
+	// CurrentDepth tracks the current nesting level (0 = root RLM).
+	// This is set internally and should not be configured by users.
+	CurrentDepth int
+
+	// MaxIterationsPerSubRLM limits iterations for each sub-RLM call.
+	// Default: 10. Use 0 to inherit parent's max iterations.
+	MaxIterationsPerSubRLM int
 }
 
 // HistoryCompressionConfig configures how message history is compressed.
@@ -202,5 +240,69 @@ func WithAdaptiveIterationConfig(cfg AdaptiveIterationConfig) Option {
 func WithProgressHandler(handler func(IterationProgress)) Option {
 	return func(c *Config) {
 		c.OnProgress = handler
+	}
+}
+
+// WithSubRLM enables sub-RLM support with default configuration.
+// Sub-RLMs allow nested RLM loops that share REPL state for complex multi-step analysis.
+func WithSubRLM() Option {
+	return func(c *Config) {
+		c.SubRLM = &SubRLMConfig{
+			MaxDepth:               3,
+			CurrentDepth:           0,
+			MaxIterationsPerSubRLM: 10,
+		}
+	}
+}
+
+// WithSubRLMConfig enables sub-RLM support with custom configuration.
+func WithSubRLMConfig(cfg SubRLMConfig) Option {
+	return func(c *Config) {
+		if cfg.MaxDepth <= 0 {
+			cfg.MaxDepth = 3
+		}
+		if cfg.MaxIterationsPerSubRLM <= 0 {
+			cfg.MaxIterationsPerSubRLM = 10
+		}
+		c.SubRLM = &cfg
+	}
+}
+
+// WithOutputTruncation enables output truncation with default configuration.
+func WithOutputTruncation() Option {
+	return func(c *Config) {
+		c.OutputTruncation = &OutputTruncationConfig{
+			Enabled:            true,
+			MaxOutputLen:       5000,
+			MaxVarPreviewLen:   100,
+			MaxHistoryEntryLen: 1000,
+		}
+	}
+}
+
+// WithOutputTruncationConfig enables output truncation with custom configuration.
+func WithOutputTruncationConfig(cfg OutputTruncationConfig) Option {
+	return func(c *Config) {
+		cfg.Enabled = true
+		if cfg.MaxOutputLen <= 0 {
+			cfg.MaxOutputLen = 5000
+		}
+		if cfg.MaxVarPreviewLen <= 0 {
+			cfg.MaxVarPreviewLen = 100
+		}
+		if cfg.MaxHistoryEntryLen <= 0 {
+			cfg.MaxHistoryEntryLen = 1000
+		}
+		c.OutputTruncation = &cfg
+	}
+}
+
+// DefaultOutputTruncationConfig returns the default output truncation configuration.
+func DefaultOutputTruncationConfig() OutputTruncationConfig {
+	return OutputTruncationConfig{
+		Enabled:            true,
+		MaxOutputLen:       5000,
+		MaxVarPreviewLen:   100,
+		MaxHistoryEntryLen: 1000,
 	}
 }

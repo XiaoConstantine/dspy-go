@@ -52,19 +52,43 @@ func IterationSignature() core.Signature {
 				core.WithCustomPrefix("Reasoning:"),
 			)},
 			{Field: core.NewField("action",
-				core.WithDescription("The action type: 'explore', 'query', 'compute', or 'final'"),
+				core.WithDescription("The action type: 'explore', 'query', 'compute', 'subrlm', or 'final'"),
 				core.WithCustomPrefix("Action:"),
 			)},
 			{Field: core.NewField("code",
 				core.WithDescription("Go code to execute (if action is explore/query/compute)"),
 				core.WithCustomPrefix("Code:"),
 			)},
+			{Field: core.NewField("subquery",
+				core.WithDescription("The query for the sub-RLM (if action is 'subrlm')"),
+				core.WithCustomPrefix("SubQuery:"),
+			)},
 			{Field: core.NewField("answer",
 				core.WithDescription("The final answer (if action is 'final')"),
 				core.WithCustomPrefix("Answer:"),
 			)},
 		},
-	).WithInstruction(`You are exploring a large context using a Go REPL. Available functions:
+	).WithInstruction(`You are exploring a large context using a Go REPL.
+
+OUTPUT FORMAT (REQUIRED - you MUST follow this exact format):
+Each response MUST contain these fields in order:
+
+Reasoning: <your step-by-step thinking>
+Action: <one of: explore, query, compute, final>
+Code: <Go code to execute, or empty if action is final>
+Answer: <the final answer if action is final, otherwise empty>
+
+Example response format:
+Reasoning: The context is 150K chars. I need to explore its structure first.
+Action: explore
+Code:
+` + "```go" + `
+fmt.Println("Length:", len(context))
+fmt.Println("Preview:", context[:500])
+` + "```" + `
+Answer:
+
+AVAILABLE FUNCTIONS:
 
 QUERY FUNCTIONS (choose based on context size):
 - Query(prompt string) string: Auto-prepends FULL context to prompt. Use for small contexts (<50K chars).
@@ -118,13 +142,19 @@ CRITICAL CODE RULES (violations cause errors):
 CRITICAL - SIGNALING COMPLETION:
 When you have the answer, IMMEDIATELY call FINAL() in the SAME code block!
 
-Actions:
+ACTIONS:
 - explore: Write code to examine the context (len, preview, structure)
 - query: Write code to call Query/QueryWith/QueryRaw for analysis
 - compute: Write code to process/combine results
+- subrlm: Spawn a nested RLM loop with a SubQuery (for complex sub-tasks that need their own iteration)
 - final: Provide the answer (no more code needed)
 
-Always show your reasoning before deciding on an action.`)
+SUBRLM ACTION (for complex multi-step sub-tasks):
+When a sub-task is too complex for a single Query call, use action="subrlm" with a SubQuery.
+The sub-RLM shares all REPL variables and can set new ones. Its result is stored in 'subrlm_result'.
+Example: SubQuery: "Find all authentication-related code sections and summarize their functionality"
+
+REMEMBER: You MUST start your response with "Reasoning:" and include all five fields.`)
 }
 
 // SubQuerySignature defines the signature for sub-LLM queries.
@@ -209,6 +239,7 @@ func IterationDemos() []core.Example {
 				"reasoning": "This is a large context (150K chars). I should first explore its structure before diving into analysis.",
 				"action":    "explore",
 				"code":      "fmt.Println(\"Length:\", len(context))\nfmt.Println(\"Preview:\", context[:500])",
+				"subquery":  "",
 				"answer":    "",
 			},
 		},
@@ -231,7 +262,8 @@ for i := 0; i < 5; i++ {
 }
 results := QueryBatched(prompts)
 for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
-				"answer": "",
+				"subquery": "",
+				"answer":   "",
 			},
 		},
 		{
@@ -245,6 +277,7 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 				"reasoning": "Found the secret code in chunk 1: ALPHA-7892. This is the answer.",
 				"action":    "final",
 				"code":      "",
+				"subquery":  "",
 				"answer":    "ALPHA-7892",
 			},
 		},
@@ -261,7 +294,8 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 				"action":    "query",
 				"code": `answer := Query("What is the label in this text? Return ONLY 'correct' or 'incorrect': " + context)
 FINAL(answer)`,
-				"answer": "",
+				"subquery": "",
+				"answer":   "",
 			},
 		},
 		{
@@ -278,7 +312,8 @@ FINAL(answer)`,
 matches := errorRe.FindAllString(context, -1)
 fmt.Println("Total potential errors:", len(matches))
 fmt.Println("Sample:", context[:1000])`,
-				"answer": "",
+				"subquery": "",
+				"answer":   "",
 			},
 		},
 		{
@@ -310,7 +345,8 @@ if batch != "" {
     results = append(results, r)
 }
 for i, r := range results { fmt.Printf("Batch %d: %s\n", i, r) }`,
-				"answer": "",
+				"subquery": "",
+				"answer":   "",
 			},
 		},
 		// Example using FindRelevant for semantic search on large context
@@ -338,7 +374,8 @@ for i, chunk := range chunks {
 }
 fmt.Println("Auth code found in", len(authCode), "chunks")
 for _, code := range authCode { fmt.Println(code) }`,
-				"answer": "",
+				"subquery": "",
+				"answer":   "",
 			},
 		},
 		// Example showing synthesis with QueryRaw
@@ -356,7 +393,40 @@ for _, code := range authCode { fmt.Println(code) }`,
 // Use QueryRaw since we're passing our own content, not the original context
 answer := QueryRaw("Summarize these authentication code findings into a coherent explanation:\n\n" + summary)
 FINAL(answer)`,
-				"answer": "",
+				"subquery": "",
+				"answer":   "",
+			},
+		},
+		// Example using subrlm action for complex multi-step analysis
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 800000 chars",
+				"query":        "Analyze the authentication system and identify security issues",
+				"history":      "Explored: 800K chars of source code, complex authentication system with multiple components",
+				"repl_state":   "context: <loaded>",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "This is a complex analysis requiring multiple steps. I'll spawn a sub-RLM to first find all authentication-related code, then analyze it for vulnerabilities in a follow-up.",
+				"action":    "subrlm",
+				"code":      "",
+				"subquery":  "Find all authentication-related code sections in this codebase including login, session handling, token validation, and password management",
+				"answer":    "",
+			},
+		},
+		// Example using subrlm result in subsequent iteration
+		{
+			Inputs: map[string]interface{}{
+				"context_info": "string, 800000 chars",
+				"query":        "Analyze the authentication system and identify security issues",
+				"history":      "Sub-RLM completed: Found JWT token handling, password hashing with bcrypt, session cookies, OAuth2 integration",
+				"repl_state":   "context: <loaded>, subrlm_result: 'JWT tokens use HS256, passwords hashed with bcrypt cost 10, sessions stored in Redis'",
+			},
+			Outputs: map[string]interface{}{
+				"reasoning": "The sub-RLM found the authentication components. Now I have the details in subrlm_result. I can spawn another sub-RLM to analyze these specific areas for vulnerabilities.",
+				"action":    "subrlm",
+				"code":      "",
+				"subquery":  "Analyze this authentication implementation for security vulnerabilities: " + "JWT tokens use HS256, passwords hashed with bcrypt cost 10, sessions stored in Redis",
+				"answer":    "",
 			},
 		},
 	}

@@ -42,11 +42,38 @@ func FindCodeBlocks(text string) []string {
 		if len(match) > 1 {
 			code := strings.TrimSpace(match[1])
 			if code != "" {
-				results = append(results, code)
+				// Strip language marker if LLM included it in the code content
+				// This handles cases like ```go\ngo\nactual code``` 
+				code = stripLanguageMarker(code)
+				if code != "" {
+					results = append(results, code)
+				}
 			}
 		}
 	}
 	return results
+}
+
+// stripLanguageMarker removes leading language identifiers that LLMs sometimes include
+// in code blocks (e.g., "go\n" at the start when the fence already specified ```go).
+func stripLanguageMarker(code string) string {
+	// Common language markers that might appear at the start
+	markers := []string{"go\n", "golang\n", "repl\n", "Go\n", "GO\n"}
+	for _, marker := range markers {
+		if strings.HasPrefix(code, marker) {
+			return strings.TrimSpace(code[len(marker):])
+		}
+	}
+	// Also handle case where first line is just "go" (no newline yet trimmed)
+	lines := strings.SplitN(code, "\n", 2)
+	if len(lines) >= 2 {
+		firstLine := strings.TrimSpace(lines[0])
+		if firstLine == "go" || firstLine == "golang" || firstLine == "repl" || 
+		   firstLine == "Go" || firstLine == "GO" {
+			return strings.TrimSpace(lines[1])
+		}
+	}
+	return code
 }
 
 // FindFinalAnswer detects FINAL() or FINAL_VAR() signals in the LLM response.

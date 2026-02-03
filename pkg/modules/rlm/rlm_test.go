@@ -3,6 +3,8 @@ package rlm
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1065,4 +1067,612 @@ func TestContextAnalysisHelpers(t *testing.T) {
 	analysis.RecommendedStrategy = StrategyFixed
 	assert.True(t, analysis.IsLargeContext())
 	assert.True(t, analysis.ShouldUseBatching())
+}
+
+// promptCapturingMockSubLLMClient captures the prompts sent to it for verification.
+type promptCapturingMockSubLLMClient struct {
+	capturedPrompts []string
+	response        string
+	mu              sync.Mutex
+}
+
+func (m *promptCapturingMockSubLLMClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
+	m.mu.Lock()
+	m.capturedPrompts = append(m.capturedPrompts, prompt)
+	m.mu.Unlock()
+	return QueryResponse{Response: m.response, PromptTokens: 10, CompletionTokens: 5}, nil
+}
+
+func (m *promptCapturingMockSubLLMClient) QueryBatched(ctx context.Context, prompts []string) ([]QueryResponse, error) {
+	m.mu.Lock()
+	m.capturedPrompts = append(m.capturedPrompts, prompts...)
+	m.mu.Unlock()
+	responses := make([]QueryResponse, len(prompts))
+	for i := range prompts {
+		responses[i] = QueryResponse{Response: m.response, PromptTokens: 10, CompletionTokens: 5}
+	}
+	return responses, nil
+}
+
+func (m *promptCapturingMockSubLLMClient) getCapturedPrompts() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]string, len(m.capturedPrompts))
+	copy(result, m.capturedPrompts)
+	return result
+}
+
+// TestQueryRaw tests that QueryRaw sends prompts without prepending context.
+func TestQueryRaw(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "raw response"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+
+	// Load a context
+	err = repl.LoadContext("This is the full context that should NOT be prepended")
+	require.NoError(t, err)
+
+	// Execute code that uses QueryRaw
+	code := `
+result := QueryRaw("Analyze this specific slice only")
+fmt.Println(result)
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "raw response")
+
+	// Verify the captured prompt does NOT contain the context
+	prompts := capturingMock.getCapturedPrompts()
+	require.Len(t, prompts, 1)
+	assert.Equal(t, "Analyze this specific slice only", prompts[0])
+	assert.NotContains(t, prompts[0], "full context")
+}
+
+// TestQueryWith tests that QueryWith sends prompts with explicit context slice.
+func TestQueryWith(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "slice response"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+
+	// Load a context (which should be ignored by QueryWith)
+	err = repl.LoadContext("This is the full context that should be IGNORED")
+	require.NoError(t, err)
+
+	// Execute code that uses QueryWith with explicit slice
+	code := `
+slice := "This is the specific chunk to analyze"
+result := QueryWith(slice, "Summarize this chunk")
+fmt.Println(result)
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "slice response")
+
+	// Verify the captured prompt contains the slice but NOT the full context
+	prompts := capturingMock.getCapturedPrompts()
+	require.Len(t, prompts, 1)
+	assert.Contains(t, prompts[0], "Context:\nThis is the specific chunk to analyze")
+	assert.Contains(t, prompts[0], "Task: Summarize this chunk")
+	assert.NotContains(t, prompts[0], "IGNORED")
+}
+
+// TestQueryVsQueryRaw compares Query (with context) vs QueryRaw (without context).
+func TestQueryVsQueryRaw(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "test response"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+
+	// Load a context
+	err = repl.LoadContext("FULL_CONTEXT_MARKER")
+	require.NoError(t, err)
+
+	// Execute code that uses both Query and QueryRaw
+	code := `
+// Regular Query - should include context
+result1 := Query("First query")
+
+// QueryRaw - should NOT include context
+result2 := QueryRaw("Second query")
+
+fmt.Println(result1, result2)
+`
+	_, err = repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+
+	prompts := capturingMock.getCapturedPrompts()
+	require.Len(t, prompts, 2)
+
+	// First prompt (Query) should have context prepended
+	assert.Contains(t, prompts[0], "FULL_CONTEXT_MARKER")
+	assert.Contains(t, prompts[0], "First query")
+
+	// Second prompt (QueryRaw) should NOT have context
+	assert.NotContains(t, prompts[1], "FULL_CONTEXT_MARKER")
+	assert.Equal(t, "Second query", prompts[1])
+}
+
+// TestQueryBatchedRaw tests batched queries without context prepending.
+func TestQueryBatchedRaw(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "batched response"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+
+	// Load a context
+	err = repl.LoadContext("FULL_CONTEXT_SHOULD_BE_IGNORED")
+	require.NoError(t, err)
+
+	// Execute code that uses QueryBatchedRaw
+	code := `
+prompts := []string{"prompt1", "prompt2", "prompt3"}
+results := QueryBatchedRaw(prompts)
+for _, r := range results {
+    fmt.Println(r)
+}
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "batched response")
+
+	// Verify none of the captured prompts contain the context
+	prompts := capturingMock.getCapturedPrompts()
+	require.Len(t, prompts, 3)
+	for _, p := range prompts {
+		assert.NotContains(t, p, "FULL_CONTEXT_SHOULD_BE_IGNORED")
+	}
+	assert.Equal(t, "prompt1", prompts[0])
+	assert.Equal(t, "prompt2", prompts[1])
+	assert.Equal(t, "prompt3", prompts[2])
+}
+
+// TestQueryWithEmptySlice tests QueryWith with an empty slice (should act like QueryRaw).
+func TestQueryWithEmptySlice(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "empty slice response"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+
+	code := `
+result := QueryWith("", "Just the task, no context")
+fmt.Println(result)
+`
+	_, err = repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+
+	prompts := capturingMock.getCapturedPrompts()
+	require.Len(t, prompts, 1)
+	// With empty slice, should just be the prompt
+	assert.Equal(t, "Just the task, no context", prompts[0])
+}
+
+// TestREPLFindRelevant tests the FindRelevant REPL builtin.
+func TestREPLFindRelevant(t *testing.T) {
+	mockSub := &mockSubLLMClient{queryResponse: "response"}
+
+	repl, err := NewYaegiREPL(mockSub)
+	require.NoError(t, err)
+
+	// Load context with multiple topics
+	content := `
+This section covers error handling.
+Errors should be handled carefully.
+
+This section covers user authentication.
+Users must authenticate before access.
+
+This section covers database queries.
+Queries should be optimized.
+`
+	err = repl.LoadContext(content)
+	require.NoError(t, err)
+
+	// Execute code that uses FindRelevant
+	code := `
+chunks := FindRelevant("error handling", 2)
+fmt.Printf("Found %d chunks\n", len(chunks))
+for _, c := range chunks {
+    fmt.Println("---")
+    fmt.Println(c)
+}
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "Found")
+}
+
+// TestREPLGetChunk tests the GetChunk REPL builtin.
+func TestREPLGetChunk(t *testing.T) {
+	mockSub := &mockSubLLMClient{queryResponse: "response"}
+
+	repl, err := NewYaegiREPL(mockSub)
+	require.NoError(t, err)
+
+	// Set small chunk size for testing
+	repl.SetChunkConfig(ChunkConfig{
+		ChunkByLines:  true,
+		LinesPerChunk: 2,
+	})
+
+	content := "line1\nline2\nline3\nline4"
+	err = repl.LoadContext(content)
+	require.NoError(t, err)
+
+	// Execute code that uses GetChunk
+	code := `
+chunk0 := GetChunk(0)
+fmt.Println("Chunk 0:", chunk0)
+count := ChunkCount()
+fmt.Println("Total chunks:", count)
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "Chunk 0:")
+	assert.Contains(t, execResult.Stdout, "line1")
+	assert.Contains(t, execResult.Stdout, "Total chunks:")
+}
+
+// TestREPLGetContext tests the GetContext REPL builtin.
+func TestREPLGetContext(t *testing.T) {
+	mockSub := &mockSubLLMClient{queryResponse: "response"}
+
+	repl, err := NewYaegiREPL(mockSub)
+	require.NoError(t, err)
+
+	content := "line1\nline2\nline3\nline4\nline5"
+	err = repl.LoadContext(content)
+	require.NoError(t, err)
+
+	// Execute code that uses GetContext
+	code := `
+// Get lines 2-4
+section := GetContext(2, 4)
+fmt.Println("Section:")
+fmt.Println(section)
+lines := LineCount()
+fmt.Println("Total lines:", lines)
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "line2")
+	assert.Contains(t, execResult.Stdout, "line3")
+	assert.Contains(t, execResult.Stdout, "line4")
+	assert.Contains(t, execResult.Stdout, "Total lines: 5")
+}
+
+// TestREPLContextIndexingWorkflow tests a realistic workflow using context indexing.
+func TestREPLContextIndexingWorkflow(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "Analysis complete"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+
+	// Set small chunk size (2 lines per chunk) to ensure multiple chunks
+	repl.SetChunkConfig(ChunkConfig{
+		ChunkByLines:  true,
+		LinesPerChunk: 2,
+	})
+
+	// Content with distinct sections
+	content := `package main
+import "fmt"
+func main() {
+    handleErrors()
+}
+func handleErrors() {
+    // Error handling logic
+    fmt.Println("handling errors")
+}
+func processData() {
+    // Data processing
+    fmt.Println("processing")
+}
+func helperFunction() {
+    // Helper code
+    fmt.Println("helper")
+}`
+	err = repl.LoadContext(content)
+	require.NoError(t, err)
+
+	// Verify we have multiple chunks
+	idx := repl.GetContextIndex()
+	require.NotNil(t, idx)
+	assert.Greater(t, idx.ChunkCount(), 1, "Should have multiple small chunks")
+
+	// Workflow: Find relevant chunks, then use QueryRaw for targeted analysis
+	code := `
+// Find chunks about errors
+chunks := FindRelevant("error handling", 1)
+fmt.Printf("Found %d relevant chunks\n", len(chunks))
+
+// Analyze only the relevant chunk using QueryRaw (no context prepending)
+if len(chunks) > 0 {
+    result := QueryRaw("Analyze: " + chunks[0])
+    fmt.Println("Result:", result)
+}
+`
+	execResult, err := repl.Execute(context.Background(), code)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "Found")
+	assert.Contains(t, execResult.Stdout, "Result:")
+
+	// Verify QueryRaw was called with just the chunk, not full context
+	prompts := capturingMock.getCapturedPrompts()
+	require.Greater(t, len(prompts), 0)
+
+	// The prompt should be small (just one chunk) and start with "Analyze:"
+	lastPrompt := prompts[len(prompts)-1]
+	assert.True(t, strings.HasPrefix(lastPrompt, "Analyze:"), "Should use QueryRaw format")
+}
+
+// TestSubRLMConfig tests the sub-RLM configuration options.
+func TestSubRLMConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	assert.Nil(t, cfg.SubRLM, "Sub-RLM should be nil by default")
+
+	// Apply WithSubRLM option
+	WithSubRLM()(&cfg)
+	require.NotNil(t, cfg.SubRLM)
+	assert.Equal(t, 3, cfg.SubRLM.MaxDepth)
+	assert.Equal(t, 0, cfg.SubRLM.CurrentDepth)
+	assert.Equal(t, 10, cfg.SubRLM.MaxIterationsPerSubRLM)
+
+	// Apply custom config
+	cfg2 := DefaultConfig()
+	WithSubRLMConfig(SubRLMConfig{
+		MaxDepth:               5,
+		MaxIterationsPerSubRLM: 15,
+	})(&cfg2)
+	require.NotNil(t, cfg2.SubRLM)
+	assert.Equal(t, 5, cfg2.SubRLM.MaxDepth)
+	assert.Equal(t, 15, cfg2.SubRLM.MaxIterationsPerSubRLM)
+}
+
+// TestSubRLMTokenTracker tests sub-RLM token tracking.
+func TestSubRLMTokenTracker(t *testing.T) {
+	tracker := NewTokenTracker()
+
+	// Add some root usage
+	tracker.AddRootUsage(100, 50)
+
+	// Add sub-LLM calls
+	tracker.AddSubCall(LLMCall{
+		Prompt:           "test prompt",
+		Response:         "test response",
+		PromptTokens:     50,
+		CompletionTokens: 25,
+	})
+
+	// Add sub-RLM call
+	tracker.AddSubRLMCall(SubRLMCall{
+		Query:            "sub-query",
+		Result:           "sub-result",
+		Iterations:       3,
+		Depth:            1,
+		Duration:         time.Second,
+		PromptTokens:     200,
+		CompletionTokens: 100,
+	})
+
+	// Check totals
+	total := tracker.GetTotalUsage()
+	assert.Equal(t, 350, total.PromptTokens, "Total prompt tokens should include all sources")
+	assert.Equal(t, 175, total.CompletionTokens, "Total completion tokens should include all sources")
+
+	// Check sub-RLM specific usage
+	subRLMUsage := tracker.GetSubRLMUsage()
+	assert.Equal(t, 200, subRLMUsage.PromptTokens)
+	assert.Equal(t, 100, subRLMUsage.CompletionTokens)
+
+	// Check sub-RLM calls
+	calls := tracker.GetSubRLMCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "sub-query", calls[0].Query)
+	assert.Equal(t, 3, calls[0].Iterations)
+	assert.Equal(t, 1, calls[0].Depth)
+
+	// Reset and verify
+	tracker.Reset()
+	total = tracker.GetTotalUsage()
+	assert.Equal(t, 0, total.TotalTokens)
+	assert.Empty(t, tracker.GetSubRLMCalls())
+}
+
+// TestYaegiREPLSetVariable tests the SetVariable method.
+func TestYaegiREPLSetVariable(t *testing.T) {
+	client := &mockSubLLMClient{queryResponse: "test"}
+	repl, err := NewYaegiREPL(client)
+	require.NoError(t, err)
+
+	// Set a variable
+	err = repl.SetVariable("testVar", "hello world")
+	require.NoError(t, err)
+
+	// Retrieve it
+	val, err := repl.GetVariable("testVar")
+	require.NoError(t, err)
+	assert.Equal(t, "hello world", val)
+
+	// Test with special characters (backticks)
+	err = repl.SetVariable("complexVar", "code with `backticks` inside")
+	require.NoError(t, err)
+
+	val, err = repl.GetVariable("complexVar")
+	require.NoError(t, err)
+	assert.Contains(t, val, "backticks")
+}
+
+// TestSubRLMDepthLimit tests that sub-RLM respects depth limits.
+func TestSubRLMDepthLimit(t *testing.T) {
+	// Create an RLM with sub-RLM config at max depth
+	llm := &mockLLM{responses: []string{}}
+	client := &mockSubLLMClient{queryResponse: "test"}
+
+	r := New(llm, client, WithSubRLMConfig(SubRLMConfig{
+		MaxDepth:               2, // Only allow 1 level of nesting
+		CurrentDepth:           1, // Already at depth 1
+		MaxIterationsPerSubRLM: 5,
+	}))
+
+	// Create a REPL for testing
+	repl, err := NewYaegiREPL(client)
+	require.NoError(t, err)
+	err = repl.LoadContext("test context")
+	require.NoError(t, err)
+
+	// Try to execute sub-RLM at max depth
+	ctx := context.Background()
+	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now())
+
+	// Should fail due to depth limit
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "depth limit")
+}
+
+// TestSUBMIT tests the typed SUBMIT functionality.
+func TestSUBMIT(t *testing.T) {
+	client := &mockSubLLMClient{queryResponse: "test"}
+	repl, err := NewYaegiREPL(client)
+	require.NoError(t, err)
+
+	// Test without schema (should accept any fields)
+	ctx := context.Background()
+	code := `result := SUBMIT(map[string]any{"answer": "hello", "count": 42})`
+	_, err = repl.Execute(ctx, code)
+	require.NoError(t, err)
+
+	assert.True(t, repl.HasSubmit())
+	output := repl.GetSubmitOutput()
+	assert.Equal(t, "hello", output["answer"])
+	assert.Equal(t, 42, output["count"])
+
+	// Reset and test with schema validation
+	repl.ClearSubmit()
+	repl.SetSubmitSchema(map[string]OutputFieldSpec{
+		"answer":   {Type: "string", Required: true},
+		"optional": {Type: "int", Required: false},
+	})
+
+	// This should work
+	code = `result := SUBMIT(map[string]any{"answer": "world"})`
+	_, err = repl.Execute(ctx, code)
+	require.NoError(t, err)
+	assert.True(t, repl.HasSubmit())
+
+	// Reset and try missing required field
+	repl.ClearSubmit()
+	code = `result := SUBMIT(map[string]any{"optional": 123})`
+	result, err := repl.Execute(ctx, code)
+	require.NoError(t, err) // Execute succeeds, but SUBMIT returns error message
+	assert.False(t, repl.HasSubmit())
+	assert.Contains(t, result.Stderr, "missing required field")
+}
+
+// TestGetVariableMetadata tests rich variable metadata extraction.
+func TestGetVariableMetadata(t *testing.T) {
+	client := &mockSubLLMClient{queryResponse: "test"}
+	repl, err := NewYaegiREPL(client)
+	require.NoError(t, err)
+
+	// Set up some variables
+	err = repl.LoadContext("test context with some content")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, err = repl.Execute(ctx, `result := "computed value"`)
+	require.NoError(t, err)
+	_, err = repl.Execute(ctx, `count := 42`)
+	require.NoError(t, err)
+
+	// Get variable metadata
+	vars := repl.GetVariableMetadata()
+	assert.NotEmpty(t, vars)
+
+	// Check context variable
+	var contextVar *REPLVariable
+	var resultVar *REPLVariable
+	for i := range vars {
+		if vars[i].Name == "context" {
+			contextVar = &vars[i]
+		}
+		if vars[i].Name == "result" {
+			resultVar = &vars[i]
+		}
+	}
+
+	require.NotNil(t, contextVar)
+	assert.Equal(t, "string", contextVar.Type)
+	assert.Greater(t, contextVar.Length, 0)
+
+	require.NotNil(t, resultVar)
+	assert.Equal(t, "string", resultVar.Type)
+	assert.True(t, resultVar.IsImportant) // result is marked as important
+}
+
+// TestImmutableHistory tests the immutable history structure.
+func TestImmutableHistory(t *testing.T) {
+	history := NewImmutableHistory()
+	assert.Equal(t, 0, history.Len())
+
+	// Append entries
+	history.Append(HistoryEntry{
+		Iteration: 1,
+		Action:    "explore",
+		Code:      `fmt.Println(len(context))`,
+		Output:    "12345",
+	})
+	history.Append(HistoryEntry{
+		Iteration: 2,
+		Action:    "query",
+		Code:      `answer := Query("What is X?")`,
+		Output:    "[Query] What is X?\n[Result] X is 42",
+	})
+	history.Append(HistoryEntry{
+		Iteration: 3,
+		Action:    "final",
+		Code:      "",
+		Output:    "",
+	})
+
+	assert.Equal(t, 3, history.Len())
+
+	// Get entries (should be immutable copy)
+	entries := history.Entries()
+	assert.Len(t, entries, 3)
+	assert.Equal(t, "explore", entries[0].Action)
+	assert.Equal(t, "query", entries[1].Action)
+	assert.Equal(t, "final", entries[2].Action)
+
+	// Convert to string
+	str := history.String(1000)
+	assert.Contains(t, str, "Iteration 1")
+	assert.Contains(t, str, "explore")
+	assert.Contains(t, str, "fmt.Println")
+	assert.Contains(t, str, "Iteration 2")
+	assert.Contains(t, str, "Query")
+
+	// Test truncation
+	truncatedStr := history.String(10) // Very short truncation
+	assert.Contains(t, truncatedStr, "...")
+}
+
+// TestFormatREPLStateRich tests the rich variable formatting.
+func TestFormatREPLStateRich(t *testing.T) {
+	vars := []REPLVariable{
+		{Name: "context", Type: "string", Length: 50000, Preview: "test data...", IsImportant: false},
+		{Name: "result", Type: "string", Length: 100, Preview: "computed answer", IsImportant: true},
+		{Name: "count", Type: "int", Length: -1, Preview: "42", IsImportant: true},
+	}
+
+	result := formatREPLStateRich(vars, 50)
+
+	assert.Contains(t, result, "Variables:")
+	assert.Contains(t, result, "context: string (len=50000)")
+	assert.Contains(t, result, "result *: string (len=100)") // Important marked with *
+	assert.Contains(t, result, "count *: int")
+	assert.Contains(t, result, "→ computed answer") // Preview shown
+	assert.Contains(t, result, "→ 42")
+	// Context preview should be skipped (too large)
 }
