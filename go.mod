@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/XiaoConstantine/mcp-go v0.3.1
-	github.com/anthropics/anthropic-sdk-go v1.22.1
+	github.com/anthropics/anthropic-sdk-go v1.25.0
 	github.com/apache/arrow/go/v13 v13.0.0
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/google/uuid v1.6.0
