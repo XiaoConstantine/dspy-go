@@ -68,9 +68,9 @@ func WithTimeout(timeout int) OllamaOption {
 // NewOllamaLLM creates a new OllamaLLM instance with modern defaults.
 func NewOllamaLLM(modelID core.ModelID, options ...OllamaOption) (*OllamaLLM, error) {
 	config := OllamaConfig{
-		UseOpenAIAPI: true,  // Default to modern OpenAI-compatible mode
-		BaseURL:     "http://localhost:11434",
-		Timeout:     60,
+		UseOpenAIAPI: true, // Default to modern OpenAI-compatible mode
+		BaseURL:      "http://localhost:11434",
+		Timeout:      60,
 	}
 
 	// Apply options to override defaults
@@ -147,6 +147,11 @@ func newOllamaLLMWithConfig(config OllamaConfig, modelID core.ModelID) (*OllamaL
 		capabilities = append(capabilities, core.CapabilityEmbedding)
 	}
 
+	// Tool calling support is available via OpenAI-compatible API mode.
+	if config.UseOpenAIAPI {
+		capabilities = append(capabilities, core.CapabilityToolCalling)
+	}
+
 	// Create native API helper for backward compatibility
 	nativeAPI := &ollamaNativeAPI{
 		baseURL: config.BaseURL,
@@ -164,8 +169,8 @@ func newOllamaLLMWithConfig(config OllamaConfig, modelID core.ModelID) (*OllamaL
 func parseOllamaConfig(config core.ProviderConfig) (OllamaConfig, error) {
 	result := OllamaConfig{
 		UseOpenAIAPI: true, // Default to modern mode
-		BaseURL:     "http://localhost:11434",
-		Timeout:     60,
+		BaseURL:      "http://localhost:11434",
+		Timeout:      60,
 	}
 
 	// Parse base URL
@@ -295,8 +300,8 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 			TotalTokens:      openaiResp.Usage.TotalTokens,
 		},
 		Metadata: map[string]interface{}{
-			"model":  openaiResp.Model,
-			"mode":   "openai",
+			"model": openaiResp.Model,
+			"mode":  "openai",
 		},
 	}, nil
 }
@@ -688,14 +693,152 @@ func (o *OllamaLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 	return utils.ParseJSONResponse(response.Content)
 }
 
-// GenerateWithFunctions is not yet implemented for Ollama.
 func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return nil, errors.WithFields(
-		errors.New(errors.UnsupportedOperation, "function calling not yet implemented for Ollama"),
-		errors.Fields{
-			"provider": "ollama",
-			"model":    o.ModelID(),
-		})
+	if !o.config.UseOpenAIAPI {
+		return nil, errors.WithFields(
+			errors.New(errors.UnsupportedOperation, "function calling requires OpenAI-compatible API mode for Ollama"),
+			errors.Fields{
+				"provider":       "ollama",
+				"model":          o.ModelID(),
+				"use_openai_api": false,
+			})
+	}
+
+	if len(functions) == 0 {
+		return nil, errors.New(errors.InvalidInput, "at least one function schema is required")
+	}
+
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	tools, err := convertOpenAIFunctionSchemas(functions)
+	if err != nil {
+		return nil, err
+	}
+
+	req := &openai.ChatCompletionRequest{
+		Model: string(o.ModelID()),
+		Messages: []openai.ChatCompletionMessage{
+			{Role: "user", Content: prompt},
+		},
+		Tools:      tools,
+		ToolChoice: "auto",
+	}
+	req.ApplyOptions(coreOptsToOpenAI(opts))
+
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to marshal request"),
+			errors.Fields{"model": o.ModelID()})
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST",
+		o.GetEndpointConfig().BaseURL+"/v1/chat/completions", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
+			errors.Fields{"model": o.ModelID()})
+	}
+
+	for key, value := range o.GetEndpointConfig().Headers {
+		httpReq.Header.Set(key, value)
+	}
+
+	resp, err := o.GetHTTPClient().Do(httpReq)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
+			errors.Fields{"model": o.ModelID()})
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response"),
+			errors.Fields{"model": o.ModelID()})
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status %d", resp.StatusCode)),
+			errors.Fields{
+				"model":         o.ModelID(),
+				"status_code":   resp.StatusCode,
+				"response_body": string(body),
+			})
+	}
+
+	var openAIResp openai.ChatCompletionResponse
+	if err := json.Unmarshal(body, &openAIResp); err != nil {
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
+			errors.Fields{
+				"model": o.ModelID(),
+				"body":  string(body[:min(len(body), 100)]),
+			})
+	}
+
+	if len(openAIResp.Choices) == 0 {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "no choices in response"),
+			errors.Fields{"model": o.ModelID()})
+	}
+
+	choice := openAIResp.Choices[0]
+	result := map[string]interface{}{}
+
+	if content := strings.TrimSpace(choice.Message.Content); content != "" {
+		result["content"] = content
+	}
+
+	if len(choice.Message.ToolCalls) > 0 {
+		call := choice.Message.ToolCalls[0]
+		arguments, err := parseOpenAIFunctionArguments(call.Function.Arguments)
+		if err != nil {
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.InvalidResponse, "failed to parse tool call arguments"),
+				errors.Fields{
+					"model":     o.ModelID(),
+					"tool_name": call.Function.Name,
+				},
+			)
+		}
+		result["function_call"] = map[string]interface{}{
+			"name":      call.Function.Name,
+			"arguments": arguments,
+		}
+	} else if choice.Message.FunctionCall != nil && choice.Message.FunctionCall.Name != "" {
+		arguments, err := parseOpenAIFunctionArguments(choice.Message.FunctionCall.Arguments)
+		if err != nil {
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.InvalidResponse, "failed to parse legacy function call arguments"),
+				errors.Fields{
+					"model":     o.ModelID(),
+					"tool_name": choice.Message.FunctionCall.Name,
+				},
+			)
+		}
+		result["function_call"] = map[string]interface{}{
+			"name":      choice.Message.FunctionCall.Name,
+			"arguments": arguments,
+		}
+	}
+
+	if len(result) == 0 {
+		result["content"] = "No content or function call received from model"
+	}
+
+	result["_usage"] = &core.TokenInfo{
+		PromptTokens:     openAIResp.Usage.PromptTokens,
+		CompletionTokens: openAIResp.Usage.CompletionTokens,
+		TotalTokens:      openAIResp.Usage.TotalTokens,
+	}
+
+	return result, nil
 }
 
 // GenerateWithContent implements multimodal content generation.

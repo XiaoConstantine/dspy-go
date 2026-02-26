@@ -101,6 +101,7 @@ func TestNewOpenAILLM(t *testing.T) {
 				core.CapabilityJSON,
 				core.CapabilityStreaming,
 				core.CapabilityEmbedding,
+				core.CapabilityToolCalling,
 			}
 
 			if len(capabilities) != len(expectedCapabilities) {
@@ -905,21 +906,126 @@ func TestOpenAILLM_GenerateWithOptions(t *testing.T) {
 }
 
 func TestOpenAILLM_GenerateWithFunctions(t *testing.T) {
-	llm, err := NewOpenAI(core.ModelOpenAIGPT4, "test-api-key")
+	var capturedRequest openai.ChatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("expected /v1/chat/completions, got %s", r.URL.Path)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &capturedRequest); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+
+		response := openai.ChatCompletionResponse{
+			ID:      "chatcmpl-functions",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-4o",
+			Choices: []openai.ChatChoice{
+				{
+					Index: 0,
+					Message: openai.ChatCompletionMessage{
+						Role: "assistant",
+						ToolCalls: []openai.ChatCompletionToolCall{
+							{
+								ID:   "call_123",
+								Type: "function",
+								Function: openai.ChatCompletionFunctionCallDelta{
+									Name:      "get_weather",
+									Arguments: `{"location":"New York","unit":"celsius"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+			Usage: openai.CompletionUsage{
+				PromptTokens:     11,
+				CompletionTokens: 7,
+				TotalTokens:      18,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT4o,
+		WithAPIKey("test-api-key"),
+		WithOpenAIBaseURL(server.URL),
+	)
 	if err != nil {
 		t.Fatalf("failed to create LLM: %v", err)
 	}
 
-	ctx := context.Background()
-	_, err = llm.GenerateWithFunctions(ctx, "test", []map[string]interface{}{})
-	if err == nil {
-		t.Errorf("expected UnsupportedOperation error")
+	functions := []map[string]interface{}{
+		{
+			"name":        "get_weather",
+			"description": "Get weather by city",
+			"parameters": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"location": map[string]interface{}{"type": "string"},
+					"unit":     map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"location"},
+			},
+		},
 	}
 
-	if dsyErr, ok := err.(*errors.Error); ok {
-		if dsyErr.Code() != errors.UnsupportedOperation {
-			t.Errorf("expected UnsupportedOperation error, got %v", dsyErr.Code())
-		}
+	result, err := llm.GenerateWithFunctions(context.Background(), "What's the weather?", functions)
+	if err != nil {
+		t.Fatalf("GenerateWithFunctions failed: %v", err)
+	}
+
+	toolCall, ok := result["function_call"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected function_call map in result, got %#v", result["function_call"])
+	}
+
+	if toolCall["name"] != "get_weather" {
+		t.Errorf("expected tool name get_weather, got %v", toolCall["name"])
+	}
+
+	arguments, ok := toolCall["arguments"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected arguments map, got %#v", toolCall["arguments"])
+	}
+	if arguments["location"] != "New York" {
+		t.Errorf("expected location New York, got %v", arguments["location"])
+	}
+	if arguments["unit"] != "celsius" {
+		t.Errorf("expected unit celsius, got %v", arguments["unit"])
+	}
+
+	usage, ok := result["_usage"].(*core.TokenInfo)
+	if !ok {
+		t.Fatalf("expected token usage metadata in result")
+	}
+	if usage.TotalTokens != 18 {
+		t.Errorf("expected 18 total tokens, got %d", usage.TotalTokens)
+	}
+
+	if len(capturedRequest.Tools) != 1 {
+		t.Fatalf("expected 1 tool in request, got %d", len(capturedRequest.Tools))
+	}
+	if capturedRequest.Tools[0].Function.Name != "get_weather" {
+		t.Errorf("expected tool name get_weather in request, got %s", capturedRequest.Tools[0].Function.Name)
+	}
+	if capturedRequest.ToolChoice != "auto" {
+		t.Errorf("expected tool_choice auto, got %v", capturedRequest.ToolChoice)
 	}
 }
 
@@ -998,7 +1104,7 @@ func TestNewOpenAILLM_Options(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "environment variable fallback",
+			name:    "environment variable fallback",
 			options: []OpenAIOption{
 				// No explicit API key, should fall back to environment
 			},
