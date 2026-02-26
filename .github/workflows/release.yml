@@ -2,7 +2,7 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]*.[0-9]*.[0-9]*"
   repository_dispatch:
     types: [trigger-release]
 permissions:
@@ -16,6 +16,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch tags
+        run: git fetch --tags origin
+
       - name: Get tag name
         id: tag
         run: |
@@ -25,10 +28,32 @@ jobs:
             echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build release changelog
+        id: changelog
+        run: |
+          TAG="${{ steps.tag.outputs.TAG }}"
+          PREV_TAG=$(git tag --sort=-version:refname | grep -Fxv "$TAG" | head -n 1 || true)
+
+          {
+            echo "## Changes"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "_From $PREV_TAG to $TAG_"
+              echo
+              git log --pretty='- %h %s' "$PREV_TAG..$TAG"
+            else
+              echo "_Initial release for $TAG_"
+              echo
+              git log --pretty='- %h %s' "$TAG"
+            fi
+          } > RELEASE_BODY.md
+
+          echo "body_path=RELEASE_BODY.md" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.TAG }}
-          generate_release_notes: true
+          body_path: ${{ steps.changelog.outputs.body_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

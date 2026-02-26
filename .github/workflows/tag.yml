@@ -1,14 +1,7 @@
 name: Automated Semantic Versioning
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub UI
-  schedule:
-    - cron: "0 0 * * *" # Run daily at midnight UTC
-  push:
-    branches:
-      - main # Adjust this as necessary
-    paths:
-      - "**.go"
+  workflow_dispatch: # Manual-only trigger from GitHub UI
 
 jobs:
   tag:
