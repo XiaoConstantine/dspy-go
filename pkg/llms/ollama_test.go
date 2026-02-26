@@ -59,10 +59,10 @@ func TestNewOllamaLLM_ModernDefaults(t *testing.T) {
 			expectedTimeout: 60,
 		},
 		{
-			name:    "Custom timeout",
-			modelID: "llama3:8b",
-			options: []OllamaOption{WithTimeout(120)},
-			expectedOpenAI: true,
+			name:            "Custom timeout",
+			modelID:         "llama3:8b",
+			options:         []OllamaOption{WithTimeout(120)},
+			expectedOpenAI:  true,
 			expectedBaseURL: "http://localhost:11434",
 			expectedTimeout: 120,
 		},
@@ -102,6 +102,7 @@ func TestNewOllamaLLM_ModernDefaults(t *testing.T) {
 			capabilities := llm.Capabilities()
 			if tt.expectedOpenAI {
 				assert.Contains(t, capabilities, core.CapabilityEmbedding)
+				assert.Contains(t, capabilities, core.CapabilityToolCalling)
 			}
 		})
 	}
@@ -464,11 +465,11 @@ func TestOllamaLLM_EmbeddingDualMode(t *testing.T) {
 
 func TestOllamaLLM_ConfigurationParsing(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         core.ProviderConfig
-		expectedOpenAI bool
-		expectedURL    string
-		expectedKey    string
+		name            string
+		config          core.ProviderConfig
+		expectedOpenAI  bool
+		expectedURL     string
+		expectedKey     string
 		expectedTimeout int
 	}{
 		{
@@ -789,13 +790,92 @@ func TestOllamaLLM_MultimodalContent(t *testing.T) {
 	})
 }
 
-func TestOllamaLLM_Functions(t *testing.T) {
-	llm, err := NewOllamaLLM("llama3:8b")
-	assert.NoError(t, err)
+func TestOllamaLLM_Functions_OpenAICompatibleMode(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/chat/completions", r.URL.Path)
+		assert.Equal(t, "POST", r.Method)
 
-	_, err = llm.GenerateWithFunctions(context.Background(), "test", []map[string]interface{}{})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "function calling not yet implemented")
+		err := json.NewDecoder(r.Body).Decode(&capturedRequest)
+		require.NoError(t, err)
+
+		response := openai.ChatCompletionResponse{
+			ID:      "chatcmpl-ollama-func",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "llama3:8b",
+			Choices: []openai.ChatChoice{
+				{
+					Index: 0,
+					Message: openai.ChatCompletionMessage{
+						Role: "assistant",
+						ToolCalls: []openai.ChatCompletionToolCall{
+							{
+								ID:   "call_1",
+								Type: "function",
+								Function: openai.ChatCompletionFunctionCallDelta{
+									Name:      "get_weather",
+									Arguments: `{"location":"sf","unit":"c"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+			Usage: openai.CompletionUsage{
+				PromptTokens:     9,
+				CompletionTokens: 4,
+				TotalTokens:      13,
+			},
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(response))
+	}))
+	defer server.Close()
+
+	llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(server.URL), WithOpenAIAPI())
+	require.NoError(t, err)
+
+	functions := []map[string]interface{}{
+		{
+			"name": "get_weather",
+			"parameters": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"location": map[string]interface{}{"type": "string"},
+					"unit":     map[string]interface{}{"type": "string"},
+				},
+				"required": []string{"location"},
+			},
+		},
+	}
+
+	result, err := llm.GenerateWithFunctions(context.Background(), "check weather", functions)
+	require.NoError(t, err)
+
+	assert.Len(t, capturedRequest.Tools, 1)
+	assert.Equal(t, "get_weather", capturedRequest.Tools[0].Function.Name)
+	assert.Equal(t, "auto", capturedRequest.ToolChoice)
+
+	functionCall, ok := result["function_call"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "get_weather", functionCall["name"])
+	args, ok := functionCall["arguments"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "sf", args["location"])
+}
+
+func TestOllamaLLM_Functions_NativeModeUnsupported(t *testing.T) {
+	llm, err := NewOllamaLLM("llama3:8b", WithNativeAPI())
+	require.NoError(t, err)
+
+	_, err = llm.GenerateWithFunctions(context.Background(), "test", []map[string]interface{}{
+		{
+			"name": "noop",
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires OpenAI-compatible API mode")
 }
 
 func TestOllamaLLM_BatchEmbeddings(t *testing.T) {
@@ -850,32 +930,36 @@ func TestOllamaLLM_BatchEmbeddings(t *testing.T) {
 
 func TestOllamaLLM_CapabilityDetection(t *testing.T) {
 	tests := []struct {
-		name               string
-		modelID            string
-		useOpenAI          bool
-		expectedEmbedding  bool
-		expectedStreaming  bool
+		name                string
+		modelID             string
+		useOpenAI           bool
+		expectedEmbedding   bool
+		expectedStreaming   bool
+		expectedToolCalling bool
 	}{
 		{
-			name:              "Regular model OpenAI mode",
-			modelID:           "llama3:8b",
-			useOpenAI:         true,
-			expectedEmbedding: true,  // OpenAI mode supports embeddings
-			expectedStreaming: true,
+			name:                "Regular model OpenAI mode",
+			modelID:             "llama3:8b",
+			useOpenAI:           true,
+			expectedEmbedding:   true, // OpenAI mode supports embeddings
+			expectedStreaming:   true,
+			expectedToolCalling: true,
 		},
 		{
-			name:              "Regular model native mode",
-			modelID:           "llama3:8b",
-			useOpenAI:         false,
-			expectedEmbedding: false, // Native mode requires embedding model
-			expectedStreaming: true,
+			name:                "Regular model native mode",
+			modelID:             "llama3:8b",
+			useOpenAI:           false,
+			expectedEmbedding:   false, // Native mode requires embedding model
+			expectedStreaming:   true,
+			expectedToolCalling: false,
 		},
 		{
-			name:              "Embedding model native mode",
-			modelID:           "nomic-embed-text",
-			useOpenAI:         false,
-			expectedEmbedding: true,  // Embedding model in native mode
-			expectedStreaming: true,
+			name:                "Embedding model native mode",
+			modelID:             "nomic-embed-text",
+			useOpenAI:           false,
+			expectedEmbedding:   true, // Embedding model in native mode
+			expectedStreaming:   true,
+			expectedToolCalling: false,
 		},
 	}
 
@@ -903,6 +987,12 @@ func TestOllamaLLM_CapabilityDetection(t *testing.T) {
 				assert.Contains(t, capabilities, core.CapabilityStreaming)
 			} else {
 				assert.NotContains(t, capabilities, core.CapabilityStreaming)
+			}
+
+			if tt.expectedToolCalling {
+				assert.Contains(t, capabilities, core.CapabilityToolCalling)
+			} else {
+				assert.NotContains(t, capabilities, core.CapabilityToolCalling)
 			}
 
 			// All should have basic capabilities

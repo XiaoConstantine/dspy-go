@@ -3,16 +3,17 @@ package llms
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	errs "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 // AnthropicLLM implements the core.LLM interface for Anthropic's models.
@@ -34,16 +35,16 @@ var modelNameMapping = map[string]anthropic.Model{
 	"claude-3-sonnet":            anthropic.ModelClaudeSonnet4_5_20250929,
 	"claude-3-haiku":             anthropic.ModelClaude_3_Haiku_20240307,
 	// Opus 4.5 aliases
-	"opus-4.5":                     anthropic.ModelClaudeOpus4_5_20251101,
-	"opus-4-5":                     anthropic.ModelClaudeOpus4_5_20251101,
-	"claude-opus-4.5":              anthropic.ModelClaudeOpus4_5_20251101,
-	"claude-opus-4-5":              anthropic.ModelClaudeOpus4_5,
-	"claude-opus-4-5-20251101":     anthropic.ModelClaudeOpus4_5_20251101,
+	"opus-4.5":                 anthropic.ModelClaudeOpus4_5_20251101,
+	"opus-4-5":                 anthropic.ModelClaudeOpus4_5_20251101,
+	"claude-opus-4.5":          anthropic.ModelClaudeOpus4_5_20251101,
+	"claude-opus-4-5":          anthropic.ModelClaudeOpus4_5,
+	"claude-opus-4-5-20251101": anthropic.ModelClaudeOpus4_5_20251101,
 	// Sonnet 4.5 aliases
-	"sonnet-4.5":                   anthropic.ModelClaudeSonnet4_5_20250929,
-	"sonnet-4-5":                   anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-sonnet-4.5":            anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-sonnet-4-5":            anthropic.ModelClaudeSonnet4_5,
+	"sonnet-4.5":        anthropic.ModelClaudeSonnet4_5_20250929,
+	"sonnet-4-5":        anthropic.ModelClaudeSonnet4_5_20250929,
+	"claude-sonnet-4.5": anthropic.ModelClaudeSonnet4_5_20250929,
+	"claude-sonnet-4-5": anthropic.ModelClaudeSonnet4_5,
 }
 
 // normalizeModelName maps old model names to new official ones.
@@ -85,6 +86,7 @@ func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error
 		core.CapabilityChat,
 		core.CapabilityJSON,
 		core.CapabilityStreaming,
+		core.CapabilityToolCalling,
 	}
 
 	return &AnthropicLLM{
@@ -144,6 +146,7 @@ func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, 
 		core.CapabilityChat,
 		core.CapabilityJSON,
 		core.CapabilityStreaming,
+		core.CapabilityToolCalling,
 	}
 
 	return &AnthropicLLM{
@@ -253,7 +256,228 @@ func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, opti
 }
 
 func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
-	panic("Not implemented")
+	logger := logging.GetLogger()
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	if len(functions) == 0 {
+		return nil, errs.New(errs.InvalidInput, "at least one function schema is required")
+	}
+
+	tools, err := convertAnthropicFunctionSchemas(functions)
+	if err != nil {
+		return nil, err
+	}
+
+	normalizedModelID := normalizeModelName(a.ModelID())
+	params := anthropic.MessageNewParams{
+		Model: normalizedModelID,
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock(prompt),
+			),
+		},
+		MaxTokens:   int64(opts.MaxTokens),
+		Temperature: anthropic.Float(opts.Temperature),
+		TopP:        anthropic.Float(opts.TopP),
+		ToolChoice: anthropic.ToolChoiceUnionParam{
+			OfAuto: &anthropic.ToolChoiceAutoParam{},
+		},
+		Tools: tools,
+	}
+
+	if len(opts.Stop) > 0 {
+		params.StopSequences = opts.Stop
+	}
+
+	message, err := a.client.Messages.New(ctx, params)
+	if err != nil {
+		var apiErr *anthropic.Error
+		if errors.As(err, &apiErr) {
+			logger.Error(ctx, "Anthropic API error: status code %d", apiErr.StatusCode)
+		}
+		return nil, errs.WithFields(
+			errs.Wrap(err, errs.LLMGenerationFailed, "failed to generate response with functions"),
+			errs.Fields{
+				"model":      string(normalizedModelID),
+				"max_tokens": opts.MaxTokens,
+			})
+	}
+
+	if message == nil {
+		return nil, errs.New(errs.LLMGenerationFailed, "Received nil response from Anthropic API")
+	}
+
+	result := make(map[string]interface{})
+	textParts := make([]string, 0)
+
+	for _, block := range message.Content {
+		switch block.Type {
+		case "text":
+			textBlock := block.AsText()
+			if text := strings.TrimSpace(textBlock.Text); text != "" {
+				textParts = append(textParts, text)
+			}
+		case "tool_use":
+			if _, hasCall := result["function_call"]; hasCall {
+				continue
+			}
+			toolUse := block.AsToolUse()
+			arguments := map[string]interface{}{}
+			if len(toolUse.Input) > 0 {
+				if err := json.Unmarshal(toolUse.Input, &arguments); err != nil {
+					return nil, errs.WithFields(
+						errs.Wrap(err, errs.InvalidResponse, "failed to parse tool input"),
+						errs.Fields{
+							"tool_name": toolUse.Name,
+						},
+					)
+				}
+			}
+
+			result["function_call"] = map[string]interface{}{
+				"name":      toolUse.Name,
+				"arguments": arguments,
+			}
+		}
+	}
+
+	if len(textParts) > 0 {
+		result["content"] = strings.Join(textParts, " ")
+	}
+
+	if len(result) == 0 {
+		result["content"] = "No content or function call received from model"
+	}
+
+	result["_usage"] = &core.TokenInfo{
+		PromptTokens:     int(message.Usage.InputTokens),
+		CompletionTokens: int(message.Usage.OutputTokens),
+		TotalTokens:      int(message.Usage.InputTokens + message.Usage.OutputTokens),
+	}
+
+	return result, nil
+}
+
+func convertAnthropicFunctionSchemas(functions []map[string]interface{}) ([]anthropic.ToolUnionParam, error) {
+	tools := make([]anthropic.ToolUnionParam, 0, len(functions))
+
+	for _, function := range functions {
+		name, ok := function["name"].(string)
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, errs.New(errs.InvalidInput, "function schema missing non-empty 'name' field")
+		}
+
+		var parameters map[string]interface{}
+		if rawParameters, hasParameters := function["parameters"]; hasParameters && rawParameters != nil {
+			paramMap, ok := rawParameters.(map[string]interface{})
+			if !ok {
+				return nil, errs.WithFields(
+					errs.New(errs.InvalidInput, "function schema 'parameters' must be an object"),
+					errs.Fields{"function_name": name},
+				)
+			}
+			parameters = paramMap
+		} else {
+			parameters = map[string]interface{}{"type": "object"}
+		}
+
+		inputSchema, err := toAnthropicInputSchema(parameters, name)
+		if err != nil {
+			return nil, err
+		}
+
+		tool := anthropic.ToolParam{
+			Name:        name,
+			Type:        anthropic.ToolTypeCustom,
+			InputSchema: inputSchema,
+		}
+		if description, ok := function["description"].(string); ok && strings.TrimSpace(description) != "" {
+			tool.Description = anthropic.String(description)
+		}
+
+		tools = append(tools, anthropic.ToolUnionParam{
+			OfTool: &tool,
+		})
+	}
+
+	return tools, nil
+}
+
+func toAnthropicInputSchema(parameters map[string]interface{}, functionName string) (anthropic.ToolInputSchemaParam, error) {
+	schema := anthropic.ToolInputSchemaParam{
+		Type: "object",
+	}
+
+	if rawType, hasType := parameters["type"]; hasType {
+		typeValue, ok := rawType.(string)
+		if !ok || strings.TrimSpace(typeValue) == "" {
+			return anthropic.ToolInputSchemaParam{}, errs.WithFields(
+				errs.New(errs.InvalidInput, "function schema 'type' must be a non-empty string"),
+				errs.Fields{"function_name": functionName},
+			)
+		}
+		if typeValue != "object" {
+			return anthropic.ToolInputSchemaParam{}, errs.WithFields(
+				errs.New(errs.InvalidInput, "anthropic tool input schema must have type 'object'"),
+				errs.Fields{
+					"function_name": functionName,
+					"type":          typeValue,
+				},
+			)
+		}
+	}
+
+	if properties, ok := parameters["properties"]; ok {
+		schema.Properties = properties
+	}
+
+	if rawRequired, hasRequired := parameters["required"]; hasRequired {
+		required, err := normalizeRequiredFields(rawRequired)
+		if err != nil {
+			return anthropic.ToolInputSchemaParam{}, errs.WithFields(
+				errs.Wrap(err, errs.InvalidInput, "invalid function schema 'required' field"),
+				errs.Fields{"function_name": functionName},
+			)
+		}
+		schema.Required = required
+	}
+
+	extras := make(map[string]interface{})
+	for key, value := range parameters {
+		switch key {
+		case "type", "properties", "required":
+			continue
+		default:
+			extras[key] = value
+		}
+	}
+	if len(extras) > 0 {
+		schema.ExtraFields = extras
+	}
+
+	return schema, nil
+}
+
+func normalizeRequiredFields(raw interface{}) ([]string, error) {
+	switch required := raw.(type) {
+	case []string:
+		return required, nil
+	case []interface{}:
+		normalized := make([]string, 0, len(required))
+		for _, field := range required {
+			fieldName, ok := field.(string)
+			if !ok {
+				return nil, errs.New(errs.InvalidInput, "required field values must be strings")
+			}
+			normalized = append(normalized, fieldName)
+		}
+		return normalized, nil
+	default:
+		return nil, errs.New(errs.InvalidInput, "required field must be a string array")
+	}
 }
 
 func (a *AnthropicLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {

@@ -2,15 +2,18 @@ package llms
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	stdErr "errors"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -108,6 +111,7 @@ func TestAnthropicLLM_NewClient(t *testing.T) {
 				assert.Contains(t, llm.Capabilities(), core.CapabilityChat)
 				assert.Contains(t, llm.Capabilities(), core.CapabilityJSON)
 				assert.Contains(t, llm.Capabilities(), core.CapabilityStreaming)
+				assert.Contains(t, llm.Capabilities(), core.CapabilityToolCalling)
 			}
 		})
 	}
@@ -237,18 +241,124 @@ func TestAnthropicLLM_Embeddings(t *testing.T) {
 }
 
 func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
-	// Test the GenerateWithFunctions method which is just a stub that panics
+	var capturedRequest map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST", r.Method)
+		require.Equal(t, "/v1/messages", r.URL.Path)
+
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
+
+		response := map[string]interface{}{
+			"id":    "msg_123",
+			"type":  "message",
+			"role":  "assistant",
+			"model": "claude-sonnet-4-5",
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": "I'll use a tool to check that.",
+				},
+				{
+					"type":  "tool_use",
+					"id":    "toolu_123",
+					"name":  "get_weather",
+					"input": map[string]interface{}{"location": "New York", "unit": "celsius"},
+				},
+			},
+			"stop_reason":   "tool_use",
+			"stop_sequence": "",
+			"usage": map[string]interface{}{
+				"input_tokens":  14,
+				"output_tokens": 9,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(response))
+	}))
+	defer server.Close()
+
+	llm, err := NewAnthropicLLMFromConfig(context.Background(), core.ProviderConfig{
+		Name:   "anthropic",
+		APIKey: "test-key",
+		Endpoint: &core.EndpointConfig{
+			BaseURL: server.URL,
+		},
+	}, core.ModelID("claude-sonnet-4-5"))
+	require.NoError(t, err)
+
+	functions := []map[string]interface{}{
+		{
+			"name":        "get_weather",
+			"description": "Get weather by city",
+			"parameters": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"location": map[string]interface{}{"type": "string"},
+					"unit":     map[string]interface{}{"type": "string"},
+				},
+				"required": []interface{}{"location"},
+			},
+		},
+	}
+
+	result, err := llm.GenerateWithFunctions(context.Background(), "What's the weather?", functions)
+	require.NoError(t, err)
+
+	toolCall, ok := result["function_call"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "get_weather", toolCall["name"])
+
+	arguments, ok := toolCall["arguments"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "New York", arguments["location"])
+	assert.Equal(t, "celsius", arguments["unit"])
+
+	usage, ok := result["_usage"].(*core.TokenInfo)
+	require.True(t, ok)
+	assert.Equal(t, 14, usage.PromptTokens)
+	assert.Equal(t, 9, usage.CompletionTokens)
+
+	tools, ok := capturedRequest["tools"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, tools, 1)
+	toolDef, ok := tools[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "get_weather", toolDef["name"])
+	assert.Equal(t, "Get weather by city", toolDef["description"])
+
+	toolSchema, ok := toolDef["input_schema"].(map[string]interface{})
+	require.True(t, ok)
+	properties, ok := toolSchema["properties"].(map[string]interface{})
+	require.True(t, ok)
+	_, hasLocation := properties["location"]
+	assert.True(t, hasLocation)
+	_, hasUnit := properties["unit"]
+	assert.True(t, hasUnit)
+
+	toolChoice, ok := capturedRequest["tool_choice"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "auto", toolChoice["type"])
+}
+
+func TestAnthropicLLM_GenerateWithFunctions_Validation(t *testing.T) {
 	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
 	require.NoError(t, err)
 
-	ctx := context.Background()
+	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]interface{}{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one function schema is required")
 
-	// Test the panic
-	assert.Panics(t, func() {
-		if _, err := llm.GenerateWithFunctions(ctx, "test prompt", []map[string]interface{}{}); err != nil {
-			t.Fatalf("Failed to generate")
-		}
+	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]interface{}{
+		{
+			"name": "bad_tool",
+			"parameters": map[string]interface{}{
+				"type": "array",
+			},
+		},
 	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must have type 'object'")
 }
 
 func TestAnthropicLLM_StreamGenerate_ChunkHandling(t *testing.T) {

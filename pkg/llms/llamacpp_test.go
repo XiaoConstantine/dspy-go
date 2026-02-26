@@ -241,10 +241,9 @@ func TestLlamacppLLM_GenerateWithFunctions(t *testing.T) {
 	llm, err := NewLlamacppLLM("")
 	require.NoError(t, err)
 
-	// Test that the method panics as expected
-	assert.Panics(t, func() {
-		_, _ = llm.GenerateWithFunctions(context.Background(), "test prompt", nil)
-	})
+	_, err = llm.GenerateWithFunctions(context.Background(), "test prompt", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "function calling not yet implemented for llama.cpp provider")
 }
 
 func TestLlamacppLLM_CreateEmbedding(t *testing.T) {

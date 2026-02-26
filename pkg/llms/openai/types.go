@@ -4,6 +4,8 @@ package openai
 type ChatCompletionRequest struct {
 	Model            string                  `json:"model"`
 	Messages         []ChatCompletionMessage `json:"messages"`
+	Tools            []ChatCompletionTool    `json:"tools,omitempty"`
+	ToolChoice       interface{}             `json:"tool_choice,omitempty"`
 	Temperature      *float64                `json:"temperature,omitempty"`
 	MaxTokens        *int                    `json:"max_tokens,omitempty"`
 	Stream           bool                    `json:"stream,omitempty"`
@@ -17,8 +19,37 @@ type ChatCompletionRequest struct {
 
 // ChatCompletionMessage represents a message in the conversation.
 type ChatCompletionMessage struct {
-	Role    string `json:"role"` // "system", "user", "assistant"
-	Content string `json:"content"`
+	Role         string                           `json:"role"` // "system", "user", "assistant"
+	Content      string                           `json:"content"`
+	ToolCalls    []ChatCompletionToolCall         `json:"tool_calls,omitempty"`
+	FunctionCall *ChatCompletionFunctionCallDelta `json:"function_call,omitempty"` // Legacy field for compatibility
+}
+
+// ChatCompletionTool represents a function/tool definition for tool calling.
+type ChatCompletionTool struct {
+	Type     string                 `json:"type"` // "function"
+	Function ChatCompletionFunction `json:"function"`
+}
+
+// ChatCompletionFunction defines a callable function schema.
+type ChatCompletionFunction struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+}
+
+// ChatCompletionToolCall represents a tool call returned by the assistant.
+type ChatCompletionToolCall struct {
+	ID       string                          `json:"id"`
+	Type     string                          `json:"type"` // "function"
+	Function ChatCompletionFunctionCallDelta `json:"function"`
+}
+
+// ChatCompletionFunctionCallDelta represents a function call payload.
+// Arguments are encoded as a JSON string by OpenAI-compatible APIs.
+type ChatCompletionFunctionCallDelta struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ChatCompletionResponse represents a response from the Chat Completions API.

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -98,6 +99,7 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 		core.CapabilityJSON,
 		core.CapabilityStreaming,
 		core.CapabilityEmbedding,
+		core.CapabilityToolCalling,
 	}
 
 	baseLLM := core.NewBaseLLM("openai", modelID, capabilities, endpointCfg)
@@ -242,7 +244,6 @@ var validOpenAIModels = []core.ModelID{
 	core.ModelOpenAIGPT52Codex,
 }
 
-
 // isValidOpenAIModel checks if the model is a valid OpenAI model.
 func isValidOpenAIModel(modelID core.ModelID) bool {
 	return isValidModelInList(modelID, validOpenAIModels)
@@ -327,7 +328,158 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 
 // GenerateWithFunctions implements the core.LLM interface.
 func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return nil, errors.New(errors.UnsupportedOperation, "function calling not yet implemented for OpenAI provider")
+	if len(functions) == 0 {
+		return nil, errors.New(errors.InvalidInput, "at least one function schema is required")
+	}
+
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	tools, err := convertOpenAIFunctionSchemas(functions)
+	if err != nil {
+		return nil, err
+	}
+
+	request := &openai.ChatCompletionRequest{
+		Model: o.ModelID(),
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Tools:      tools,
+		ToolChoice: "auto",
+	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
+
+	response, err := o.makeRequest(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(response.Choices) == 0 {
+		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
+	}
+
+	choice := response.Choices[0]
+	result := map[string]interface{}{}
+
+	if content := strings.TrimSpace(choice.Message.Content); content != "" {
+		result["content"] = content
+	}
+
+	if len(choice.Message.ToolCalls) > 0 {
+		call := choice.Message.ToolCalls[0]
+		args, err := parseOpenAIFunctionArguments(call.Function.Arguments)
+		if err != nil {
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.InvalidResponse, "failed to parse tool call arguments"),
+				errors.Fields{
+					"tool_name": call.Function.Name,
+				},
+			)
+		}
+		result["function_call"] = map[string]interface{}{
+			"name":      call.Function.Name,
+			"arguments": args,
+		}
+	} else if choice.Message.FunctionCall != nil && choice.Message.FunctionCall.Name != "" {
+		args, err := parseOpenAIFunctionArguments(choice.Message.FunctionCall.Arguments)
+		if err != nil {
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.InvalidResponse, "failed to parse legacy function call arguments"),
+				errors.Fields{
+					"tool_name": choice.Message.FunctionCall.Name,
+				},
+			)
+		}
+		result["function_call"] = map[string]interface{}{
+			"name":      choice.Message.FunctionCall.Name,
+			"arguments": args,
+		}
+	}
+
+	if len(result) == 0 {
+		result["content"] = "No content or function call received from model"
+	}
+
+	result["_usage"] = &core.TokenInfo{
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+	}
+
+	return result, nil
+}
+
+func convertOpenAIFunctionSchemas(functions []map[string]interface{}) ([]openai.ChatCompletionTool, error) {
+	tools := make([]openai.ChatCompletionTool, 0, len(functions))
+
+	for _, function := range functions {
+		name, ok := function["name"].(string)
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, errors.New(errors.InvalidInput, "function schema missing non-empty 'name' field")
+		}
+
+		description, _ := function["description"].(string)
+
+		parameters := map[string]interface{}{"type": "object"}
+		if rawParameters, hasParameters := function["parameters"]; hasParameters && rawParameters != nil {
+			paramMap, ok := rawParameters.(map[string]interface{})
+			if !ok {
+				return nil, errors.WithFields(
+					errors.New(errors.InvalidInput, "function schema 'parameters' must be an object"),
+					errors.Fields{"function_name": name},
+				)
+			}
+
+			parameters = cloneMap(paramMap)
+			if _, hasType := parameters["type"]; !hasType {
+				parameters["type"] = "object"
+			}
+		}
+
+		tools = append(tools, openai.ChatCompletionTool{
+			Type: "function",
+			Function: openai.ChatCompletionFunction{
+				Name:        name,
+				Description: description,
+				Parameters:  parameters,
+			},
+		})
+	}
+
+	return tools, nil
+}
+
+func parseOpenAIFunctionArguments(raw string) (map[string]interface{}, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return map[string]interface{}{}, nil
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return nil, err
+	}
+
+	arguments, ok := parsed.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("function arguments must decode to a JSON object")
+	}
+
+	return arguments, nil
+}
+
+func cloneMap(in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // CreateEmbedding implements the core.LLM interface.
