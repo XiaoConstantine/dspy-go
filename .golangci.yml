@@ -8,6 +8,13 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+  settings:
+    staticcheck:
+      # QF1012 is a stylistic autofix suggestion ("Use fmt.Fprintf(...) instead of
+      # WriteString(fmt.Sprintf(...))"). Enabling it currently produces broad
+      # codebase-wide noise and blocks unrelated changes.
+      checks:
+        - -QF1012
   exclusions:
     generated: lax
     presets:
