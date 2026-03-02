@@ -1,20 +1,23 @@
 package openai
 
+import "strings"
+
 // ChatCompletionRequest represents a request to the OpenAI Chat Completions API.
 type ChatCompletionRequest struct {
-	Model            string                  `json:"model"`
-	Messages         []ChatCompletionMessage `json:"messages"`
-	Tools            []ChatCompletionTool    `json:"tools,omitempty"`
-	ToolChoice       interface{}             `json:"tool_choice,omitempty"`
-	Temperature      *float64                `json:"temperature,omitempty"`
-	MaxTokens        *int                    `json:"max_tokens,omitempty"`
-	Stream           bool                    `json:"stream,omitempty"`
-	ResponseFormat   *ResponseFormat         `json:"response_format,omitempty"`
-	TopP             *float64                `json:"top_p,omitempty"`
-	FrequencyPenalty *float64                `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64                `json:"presence_penalty,omitempty"`
-	Stop             []string                `json:"stop,omitempty"`
-	User             string                  `json:"user,omitempty"`
+	Model               string                  `json:"model"`
+	Messages            []ChatCompletionMessage `json:"messages"`
+	Tools               []ChatCompletionTool    `json:"tools,omitempty"`
+	ToolChoice          interface{}             `json:"tool_choice,omitempty"`
+	Temperature         *float64                `json:"temperature,omitempty"`
+	MaxTokens           *int                    `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                    `json:"max_completion_tokens,omitempty"`
+	Stream              bool                    `json:"stream,omitempty"`
+	ResponseFormat      *ResponseFormat         `json:"response_format,omitempty"`
+	TopP                *float64                `json:"top_p,omitempty"`
+	FrequencyPenalty    *float64                `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64                `json:"presence_penalty,omitempty"`
+	Stop                []string                `json:"stop,omitempty"`
+	User                string                  `json:"user,omitempty"`
 }
 
 // ChatCompletionMessage represents a message in the conversation.
@@ -153,7 +156,13 @@ func (r *ChatCompletionRequest) ApplyOptions(opts *GenerateOptions) {
 	}
 
 	if opts.MaxTokens > 0 {
-		r.MaxTokens = &opts.MaxTokens
+		if usesMaxCompletionTokens(r.Model) {
+			r.MaxTokens = nil
+			r.MaxCompletionTokens = &opts.MaxTokens
+		} else {
+			r.MaxCompletionTokens = nil
+			r.MaxTokens = &opts.MaxTokens
+		}
 	}
 	if opts.Temperature >= 0 {
 		r.Temperature = &opts.Temperature
@@ -170,6 +179,10 @@ func (r *ChatCompletionRequest) ApplyOptions(opts *GenerateOptions) {
 	if len(opts.Stop) > 0 {
 		r.Stop = opts.Stop
 	}
+}
+
+func usesMaxCompletionTokens(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-5")
 }
 
 // FromCoreOptions creates GenerateOptions from core.GenerateOptions values.

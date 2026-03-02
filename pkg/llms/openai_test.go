@@ -829,6 +829,9 @@ func TestOpenAILLM_GenerateWithOptions(t *testing.T) {
 		if req.MaxTokens == nil || *req.MaxTokens != 100 {
 			t.Errorf("expected max_tokens 100, got %v", req.MaxTokens)
 		}
+		if req.MaxCompletionTokens != nil {
+			t.Errorf("expected max_completion_tokens to be omitted for gpt-4, got %v", *req.MaxCompletionTokens)
+		}
 		if req.Temperature == nil || *req.Temperature != 0.8 {
 			t.Errorf("expected temperature 0.8, got %v", req.Temperature)
 		}
@@ -902,6 +905,74 @@ func TestOpenAILLM_GenerateWithOptions(t *testing.T) {
 
 	if response.Content != "Test response" {
 		t.Errorf("expected content 'Test response', got %s", response.Content)
+	}
+}
+
+func TestOpenAILLM_GenerateWithOptions_GPT5UsesMaxCompletionTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read request body: %v", err)
+		}
+
+		var req openai.ChatCompletionRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Errorf("failed to parse request body: %v", err)
+		}
+
+		if req.MaxCompletionTokens == nil || *req.MaxCompletionTokens != 123 {
+			t.Errorf("expected max_completion_tokens 123, got %v", req.MaxCompletionTokens)
+		}
+		if req.MaxTokens != nil {
+			t.Errorf("expected max_tokens to be omitted for gpt-5.x, got %v", *req.MaxTokens)
+		}
+
+		response := openai.ChatCompletionResponse{
+			ID:      "test-id",
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   "gpt-5.2",
+			Choices: []openai.ChatChoice{
+				{
+					Index: 0,
+					Message: openai.ChatCompletionMessage{
+						Role:    "assistant",
+						Content: "Test response",
+					},
+					FinishReason: "stop",
+				},
+			},
+			Usage: openai.CompletionUsage{
+				PromptTokens:     10,
+				CompletionTokens: 5,
+				TotalTokens:      15,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	config := core.ProviderConfig{
+		Name:   "openai",
+		APIKey: "test-api-key",
+		Endpoint: &core.EndpointConfig{
+			BaseURL:    server.URL,
+			TimeoutSec: 30,
+		},
+	}
+
+	ctx := context.Background()
+	llm, err := NewOpenAILLMFromConfig(ctx, config, core.ModelOpenAIGPT52)
+	if err != nil {
+		t.Fatalf("failed to create LLM: %v", err)
+	}
+
+	if _, err := llm.Generate(ctx, "Hello", core.WithMaxTokens(123)); err != nil {
+		t.Fatalf("failed to generate: %v", err)
 	}
 }
 
