@@ -468,6 +468,54 @@ import . "rlm/rlm"
 	return err
 }
 
+// InjectSymbols merges external symbols into the REPL's "rlm/rlm" namespace.
+// Call this after REPL creation and context loading, before Execute().
+func (r *YaegiREPL) InjectSymbols(symbols map[string]reflect.Value) error {
+	if len(symbols) == 0 {
+		return nil
+	}
+
+	for name := range symbols {
+		if r.isBuiltinName(name) {
+			return fmt.Errorf("inject symbols: %q collides with existing RLM builtin", name)
+		}
+	}
+
+	exports := interp.Exports{
+		"rlm/rlm": make(map[string]reflect.Value, len(symbols)),
+	}
+	for name, val := range symbols {
+		exports["rlm/rlm"][name] = val
+	}
+
+	if err := r.interp.Use(exports); err != nil {
+		return fmt.Errorf("inject symbols: failed to merge symbols: %w", err)
+	}
+
+	// Refresh dot-imported names so newly injected symbols are available
+	// as unqualified identifiers (e.g., Echo("...")) in subsequent Eval calls.
+	if _, err := r.interp.Eval(`import . "rlm/rlm"`); err != nil {
+		return fmt.Errorf("inject symbols: failed to refresh imports: %w", err)
+	}
+
+	return nil
+}
+
+func (r *YaegiREPL) isBuiltinName(name string) bool {
+	builtins := []string{
+		"Query", "QueryRaw", "QueryWith", "QueryBatched", "QueryBatchedRaw",
+		"QueryAsync", "QueryBatchedAsync", "WaitAsync", "AsyncReady", "AsyncResult",
+		"FINAL", "FINAL_VAR", "SUBMIT",
+		"FindRelevant", "GetChunk", "GetContext", "ChunkCount", "LineCount",
+	}
+	for _, builtin := range builtins {
+		if name == builtin {
+			return true
+		}
+	}
+	return false
+}
+
 // finalAnswer handles FINAL(value) calls from within code blocks.
 // It sets the state-verified completion fields and prints a marker.
 // This allows LLMs to signal completion from inside code, which is more natural.

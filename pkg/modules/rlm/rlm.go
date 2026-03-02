@@ -292,6 +292,13 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		return nil, fmt.Errorf("failed to load context: %w", err)
 	}
 
+	// Allow callers to extend the REPL before the iteration loop starts.
+	if r.config.REPLSetup != nil {
+		if err := r.config.REPLSetup(replEnv); err != nil {
+			return nil, fmt.Errorf("REPL setup hook failed: %w", err)
+		}
+	}
+
 	// Compute max iterations (adaptive or fixed)
 	contextSize := getContextSize(contextPayload)
 	maxIterations := r.computeMaxIterations(contextSize)
@@ -310,17 +317,6 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
-		}
-
-		// Report progress if handler is set
-		if r.config.OnProgress != nil {
-			r.config.OnProgress(IterationProgress{
-				CurrentIteration:  i + 1,
-				MaxIterations:     maxIterations,
-				ConfidenceSignals: confidenceSignals,
-				HasFinalAttempt:   false,
-				ContextSize:       contextSize,
-			})
 		}
 
 		if r.config.Verbose {
@@ -351,7 +347,19 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		// Strip language markers from code (handles LLM outputting "go\n" at start)
 		code = stripCodeLanguageMarker(code)
 
-		r.trackTokenUsage(ctx)
+		rootPromptTokens := r.trackTokenUsage(ctx, i+1)
+
+		// Report progress after the LLM call so per-iteration prompt tokens are available
+		if r.config.OnProgress != nil {
+			r.config.OnProgress(IterationProgress{
+				CurrentIteration:  i + 1,
+				MaxIterations:     maxIterations,
+				ConfidenceSignals: confidenceSignals,
+				HasFinalAttempt:   action == "final",
+				ContextSize:       contextSize,
+				RootPromptTokens:  rootPromptTokens,
+			})
+		}
 
 		if r.config.Verbose {
 			logger.Debug(ctx, "[RLM] Action: %s, Reasoning: %s", action, utils.TruncateString(reasoning, truncateLenShort))
@@ -767,7 +775,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 		subquery := extractStringOutput(outputs, "subquery")
 
 		code = stripCodeLanguageMarker(code)
-		subRLM.trackTokenUsage(ctx)
+		subRLM.trackTokenUsage(ctx, i+1)
 
 		action = strings.ToLower(strings.TrimSpace(action))
 
@@ -890,7 +898,7 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 		return nil, fmt.Errorf("default answer: module process failed: %w", err)
 	}
 
-	r.trackTokenUsage(ctx)
+	r.trackTokenUsage(ctx, 0)
 
 	// Extract the answer
 	answer := extractStringOutput(outputs, "answer")
@@ -1191,12 +1199,21 @@ func formatREPLStateRich(variables []REPLVariable, maxPreviewLen int) string {
 	return result.String()
 }
 
-func (r *RLM) trackTokenUsage(ctx context.Context) {
+// trackTokenUsage extracts token usage from the execution state and records it.
+// When iteration > 0, a per-iteration snapshot is recorded for context fill ratio analysis.
+// Returns the per-call prompt tokens reported by the provider (0 if unavailable).
+func (r *RLM) trackTokenUsage(ctx context.Context, iteration int) int {
 	if state := core.GetExecutionState(ctx); state != nil {
 		if usage := state.GetTokenUsage(); usage != nil {
-			r.tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+			if iteration > 0 {
+				r.tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
+			} else {
+				r.tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+			}
+			return usage.PromptTokens
 		}
 	}
+	return 0
 }
 
 // appendIterationHistory adds iteration info to the history string.

@@ -116,66 +116,14 @@ func supportsToolCalling(llm core.LLM) bool {
 // buildFunctionSchemas converts tools from the registry into function schemas
 // that can be passed to GenerateWithFunctions.
 func buildFunctionSchemas(config FunctionCallingConfig) ([]map[string]interface{}, error) {
-	var functions []map[string]interface{}
-
-	// Add tools from registry
-	if config.ToolRegistry != nil {
-		registeredTools := config.ToolRegistry.List()
-		for _, tool := range registeredTools {
-			schema := tool.InputSchema()
-
-			// Extract required fields from properties
-			var required []string
-			properties := make(map[string]interface{})
-			for name, paramSchema := range schema.Properties {
-				properties[name] = map[string]interface{}{
-					"type":        paramSchema.Type,
-					"description": paramSchema.Description,
-				}
-				if paramSchema.Required {
-					required = append(required, name)
-				}
-			}
-
-			function := map[string]interface{}{
-				"name":        tool.Name(),
-				"description": tool.Description(),
-				"parameters": map[string]interface{}{
-					"type":       schema.Type,
-					"properties": properties,
-					"required":   required,
-				},
-			}
-			functions = append(functions, function)
-		}
+	functions, err := tools.BuildFunctionSchemas(config.ToolRegistry)
+	if err != nil {
+		return nil, err
 	}
 
 	// Add Finish tool if configured
 	if config.IncludeFinishTool {
-		description := config.FinishToolDescription
-		if description == "" {
-			description = "Call this tool when you have completed the task and have the final answer."
-		}
-
-		finishTool := map[string]interface{}{
-			"name":        "Finish",
-			"description": description,
-			"parameters": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"answer": map[string]interface{}{
-						"type":        "string",
-						"description": "The final answer or result of the task",
-					},
-					"reasoning": map[string]interface{}{
-						"type":        "string",
-						"description": "Brief explanation of how the answer was derived",
-					},
-				},
-				"required": []string{"answer"},
-			},
-		}
-		functions = append(functions, finishTool)
+		functions = append(functions, tools.BuildFinishFunctionSchema(config.FinishToolDescription))
 	}
 
 	return functions, nil

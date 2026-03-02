@@ -2,7 +2,9 @@ package rlm
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -72,9 +74,9 @@ func (m *mockLLM) Capabilities() []core.Capability {
 
 // mockSubLLMClient implements SubLLMClient for testing.
 type mockSubLLMClient struct {
-	queryResponse        string
-	batchedResponses     []string
-	queryPromptTokens    int
+	queryResponse         string
+	batchedResponses      []string
+	queryPromptTokens     int
 	queryCompletionTokens int
 }
 
@@ -262,6 +264,43 @@ func TestTokenTracker(t *testing.T) {
 	assert.Equal(t, 0, totalUsage.TotalTokens)
 }
 
+// TestTokenTrackerPerIterationSnapshots tests per-iteration root prompt token capture.
+func TestTokenTrackerPerIterationSnapshots(t *testing.T) {
+	tracker := NewTokenTracker()
+
+	// Simulate 5 iterations with bounded prompt sizes (RLM thesis)
+	tracker.AddRootUsageForIteration(1, 4200, 500)
+	tracker.AddRootUsageForIteration(2, 4350, 520)
+	tracker.AddRootUsageForIteration(3, 4100, 480)
+	tracker.AddRootUsageForIteration(4, 4250, 510)
+	tracker.AddRootUsageForIteration(5, 4300, 490)
+
+	// Cumulative root usage should be the sum
+	rootUsage := tracker.GetRootUsage()
+	assert.Equal(t, 21200, rootUsage.PromptTokens)
+	assert.Equal(t, 2500, rootUsage.CompletionTokens)
+
+	// Snapshots should capture per-iteration values
+	snapshots := tracker.GetRootSnapshots()
+	assert.Len(t, snapshots, 5)
+	assert.Equal(t, 1, snapshots[0].Iteration)
+	assert.Equal(t, 4200, snapshots[0].PromptTokens)
+	assert.Equal(t, 5, snapshots[4].Iteration)
+	assert.Equal(t, 4300, snapshots[4].PromptTokens)
+
+	// Max should be the largest single prompt
+	assert.Equal(t, 4350, tracker.GetMaxRootPromptTokens())
+
+	// Mean should be average
+	assert.Equal(t, 4240, tracker.GetMeanRootPromptTokens())
+
+	// Reset clears snapshots
+	tracker.Reset()
+	assert.Len(t, tracker.GetRootSnapshots(), 0)
+	assert.Equal(t, 0, tracker.GetMaxRootPromptTokens())
+	assert.Equal(t, 0, tracker.GetMeanRootPromptTokens())
+}
+
 // TestConfig tests the configuration options.
 func TestConfig(t *testing.T) {
 	// Test default config
@@ -281,6 +320,10 @@ func TestConfig(t *testing.T) {
 	cfg = DefaultConfig()
 	WithTimeout(5 * time.Second)(&cfg)
 	assert.Equal(t, 5*time.Second, cfg.Timeout)
+
+	cfg = DefaultConfig()
+	WithREPLSetup(func(repl *YaegiREPL) error { return nil })(&cfg)
+	assert.NotNil(t, cfg.REPLSetup)
 }
 
 // TestRLMNew tests the RLM constructor.
@@ -447,8 +490,8 @@ func TestFormatExecutionResult(t *testing.T) {
 			expected: "output\n\nerror",
 		},
 		{
-			name: "empty result",
-			result: &ExecutionResult{},
+			name:     "empty result",
+			result:   &ExecutionResult{},
 			expected: "No output",
 		},
 	}
@@ -628,10 +671,10 @@ func TestComputeMaxIterations(t *testing.T) {
 	mockSub := &mockSubLLMClient{}
 
 	tests := []struct {
-		name         string
-		contextSize  int
-		config       Config
-		expectedMax  int
+		name        string
+		contextSize int
+		config      Config
+		expectedMax int
 	}{
 		{
 			name:        "adaptive disabled uses config max",
@@ -750,8 +793,8 @@ test4
 
 	// Should contain summary of iterations 1-2 and verbatim 3-4
 	assert.Contains(t, compressed, "[Previous iterations summary]")
-	assert.Contains(t, compressed, "--- Iteration 3 ---") // Verbatim
-	assert.Contains(t, compressed, "--- Iteration 4 ---") // Verbatim
+	assert.Contains(t, compressed, "--- Iteration 3 ---")          // Verbatim
+	assert.Contains(t, compressed, "--- Iteration 4 ---")          // Verbatim
 	assert.NotContains(t, compressed, "Looking at the first part") // Summarized
 }
 
@@ -969,6 +1012,71 @@ func TestPendingAsyncQueries(t *testing.T) {
 
 	// Should have no pending after wait
 	assert.Equal(t, 0, repl.PendingAsyncQueries())
+}
+
+func TestYaegiREPLInjectSymbols(t *testing.T) {
+	repl, err := NewYaegiREPL(&mockSubLLMClient{queryResponse: "ok"})
+	require.NoError(t, err)
+
+	err = repl.InjectSymbols(map[string]reflect.Value{
+		"Echo": reflect.ValueOf(func(s string) string { return "echo:" + s }),
+	})
+	require.NoError(t, err)
+
+	value, err := repl.interp.Eval(`Echo("hello")`)
+	require.NoError(t, err)
+	assert.Equal(t, "echo:hello", value.Interface())
+
+	err = repl.InjectSymbols(map[string]reflect.Value{
+		"Query": reflect.ValueOf(func(_ string) string { return "x" }),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "collides")
+}
+
+func TestRLMREPLSetupHook(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\n\nAnswer:\ncomplete",
+		},
+	}
+	mockSub := &mockSubLLMClient{queryResponse: "sub"}
+
+	var called bool
+	rlm := New(mockRoot, mockSub, WithREPLSetup(func(repl *YaegiREPL) error {
+		called = true
+		return repl.InjectSymbols(map[string]reflect.Value{
+			"Ping": reflect.ValueOf(func() string { return "pong" }),
+		})
+	}))
+
+	result, err := rlm.Process(context.Background(), map[string]any{
+		"context": "ctx",
+		"query":   "q",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "complete", result["answer"])
+	assert.True(t, called)
+}
+
+func TestRLMREPLSetupHookError(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\n\nAnswer:\ncomplete",
+		},
+	}
+	mockSub := &mockSubLLMClient{queryResponse: "sub"}
+
+	rlm := New(mockRoot, mockSub, WithREPLSetup(func(repl *YaegiREPL) error {
+		return errors.New("setup failed")
+	}))
+
+	_, err := rlm.Process(context.Background(), map[string]any{
+		"context": "ctx",
+		"query":   "q",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "REPL setup hook failed")
 }
 
 // slowMockSubLLMClient is a mock that introduces delay for testing async behavior.

@@ -27,6 +27,15 @@ type SubRLMCall struct {
 	CompletionTokens int           `json:"completion_tokens"`
 }
 
+// RootIterationSnapshot captures per-iteration root LLM prompt token counts.
+// This is the key data needed to prove that RLM context stays bounded:
+// if PromptTokens stays flat as iterations increase, context is not accumulating.
+type RootIterationSnapshot struct {
+	Iteration        int `json:"iteration"`         // 1-indexed iteration number
+	PromptTokens     int `json:"prompt_tokens"`     // Root LLM prompt tokens for this iteration
+	CompletionTokens int `json:"completion_tokens"` // Root LLM completion tokens for this iteration
+}
+
 // TokenTracker aggregates token usage across root LLM and sub-LLM calls.
 type TokenTracker struct {
 	mu sync.RWMutex
@@ -46,13 +55,17 @@ type TokenTracker struct {
 	// Detailed call history
 	subCalls    []LLMCall
 	subRLMCalls []SubRLMCall
+
+	// Per-iteration root LLM snapshots for context fill ratio analysis
+	rootSnapshots []RootIterationSnapshot
 }
 
 // NewTokenTracker creates a new token tracker.
 func NewTokenTracker() *TokenTracker {
 	return &TokenTracker{
-		subCalls:    make([]LLMCall, 0),
-		subRLMCalls: make([]SubRLMCall, 0),
+		subCalls:      make([]LLMCall, 0),
+		subRLMCalls:   make([]SubRLMCall, 0),
+		rootSnapshots: make([]RootIterationSnapshot, 0),
 	}
 }
 
@@ -62,6 +75,22 @@ func (t *TokenTracker) AddRootUsage(promptTokens, completionTokens int) {
 	defer t.mu.Unlock()
 	t.rootPromptTokens += promptTokens
 	t.rootCompletionTokens += completionTokens
+}
+
+// AddRootUsageForIteration adds token usage from a root LLM call and records
+// a per-iteration snapshot. The snapshot captures the exact PromptTokens the
+// provider reported for this single root call — not a cumulative delta.
+// This is the data needed to compute context_fill_ratio per iteration.
+func (t *TokenTracker) AddRootUsageForIteration(iteration, promptTokens, completionTokens int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rootPromptTokens += promptTokens
+	t.rootCompletionTokens += completionTokens
+	t.rootSnapshots = append(t.rootSnapshots, RootIterationSnapshot{
+		Iteration:        iteration,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+	})
 }
 
 // AddSubCall adds a sub-LLM call with its token usage.
@@ -164,6 +193,47 @@ func (t *TokenTracker) GetSubRLMUsage() core.TokenUsage {
 	}
 }
 
+// GetRootSnapshots returns a copy of all per-iteration root LLM snapshots.
+func (t *TokenTracker) GetRootSnapshots() []RootIterationSnapshot {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	snapshots := make([]RootIterationSnapshot, len(t.rootSnapshots))
+	copy(snapshots, t.rootSnapshots)
+	return snapshots
+}
+
+// GetMaxRootPromptTokens returns the largest single root prompt across all iterations.
+// Returns 0 if no snapshots have been recorded.
+func (t *TokenTracker) GetMaxRootPromptTokens() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	maxTokens := 0
+	for _, s := range t.rootSnapshots {
+		if s.PromptTokens > maxTokens {
+			maxTokens = s.PromptTokens
+		}
+	}
+	return maxTokens
+}
+
+// GetMeanRootPromptTokens returns the mean root prompt tokens across all iterations.
+// Returns 0 if no snapshots have been recorded.
+func (t *TokenTracker) GetMeanRootPromptTokens() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if len(t.rootSnapshots) == 0 {
+		return 0
+	}
+	total := 0
+	for _, s := range t.rootSnapshots {
+		total += s.PromptTokens
+	}
+	return total / len(t.rootSnapshots)
+}
+
 // ClearSubCalls clears the recorded sub-LLM calls but preserves the counts.
 func (t *TokenTracker) ClearSubCalls() {
 	t.mu.Lock()
@@ -184,4 +254,5 @@ func (t *TokenTracker) Reset() {
 	t.subRLMCompletionTokens = 0
 	t.subCalls = make([]LLMCall, 0)
 	t.subRLMCalls = make([]SubRLMCall, 0)
+	t.rootSnapshots = make([]RootIterationSnapshot, 0)
 }

@@ -40,6 +40,10 @@ type Config struct {
 	// OnProgress is called at the start of each iteration with progress info.
 	// Can be used to display progress to users or implement custom termination logic.
 	OnProgress func(progress IterationProgress)
+
+	// REPLSetup is called after REPL creation and context loading, but before
+	// the iteration loop starts. Use this to inject additional REPL symbols.
+	REPLSetup func(repl *YaegiREPL) error
 }
 
 // OutputTruncationConfig configures output truncation settings.
@@ -134,6 +138,12 @@ type IterationProgress struct {
 
 	// ContextSize is the size of the input context in bytes.
 	ContextSize int
+
+	// RootPromptTokens is the prompt token count for this iteration's root LLM call,
+	// as reported by the provider via LLMResponse.Usage.PromptTokens.
+	// This is the per-call value (not cumulative) — divide by context window size
+	// to get context_fill_ratio for this iteration.
+	RootPromptTokens int
 }
 
 // DefaultConfig returns the default RLM configuration.
@@ -240,6 +250,14 @@ func WithAdaptiveIterationConfig(cfg AdaptiveIterationConfig) Option {
 func WithProgressHandler(handler func(IterationProgress)) Option {
 	return func(c *Config) {
 		c.OnProgress = handler
+	}
+}
+
+// WithREPLSetup sets a callback that runs after REPL creation + context load
+// and before the iteration loop begins.
+func WithREPLSetup(fn func(repl *YaegiREPL) error) Option {
+	return func(c *Config) {
+		c.REPLSetup = fn
 	}
 }
 

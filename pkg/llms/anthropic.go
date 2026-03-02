@@ -227,11 +227,17 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 		return nil, errs.New(errs.LLMGenerationFailed, "Received empty content from Anthropic API")
 	}
 
-	// Extract text from response using union type methods
-	var responseText string
-	if block := message.Content[0]; block.Type == "text" {
-		responseText = block.Text
+	// Extract text from response - iterate all content blocks since Claude 4+
+	// models may return thinking blocks before the text block.
+	var textParts []string
+	for _, block := range message.Content {
+		if block.Type == "text" {
+			if text := strings.TrimSpace(block.Text); text != "" {
+				textParts = append(textParts, text)
+			}
+		}
 	}
+	responseText := strings.Join(textParts, "\n")
 
 	usage := &core.TokenInfo{
 		PromptTokens:     int(message.Usage.InputTokens),
@@ -615,11 +621,17 @@ func (a *AnthropicLLM) GenerateWithContent(ctx context.Context, content []core.C
 		return nil, errs.New(errs.LLMGenerationFailed, "Received empty response from Anthropic API")
 	}
 
-	// Extract text from response
-	var responseText string
-	if block := message.Content[0]; block.Type == "text" {
-		responseText = block.Text
+	// Extract text from response - iterate all content blocks since Claude 4+
+	// models may return thinking blocks before the text block.
+	var textParts []string
+	for _, block := range message.Content {
+		if block.Type == "text" {
+			if text := strings.TrimSpace(block.Text); text != "" {
+				textParts = append(textParts, text)
+			}
+		}
 	}
+	responseText := strings.Join(textParts, "\n")
 
 	usage := &core.TokenInfo{
 		PromptTokens:     int(message.Usage.InputTokens),
