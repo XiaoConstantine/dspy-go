@@ -10,6 +10,10 @@ type Config struct {
 	// MaxIterations is the maximum number of iteration loops (default: 30).
 	MaxIterations int
 
+	// MaxTokens is the maximum cumulative token budget across root, sub-LLM,
+	// and nested sub-RLM calls for a single completion. Zero disables the limit.
+	MaxTokens int
+
 	// Verbose enables verbose logging.
 	Verbose bool
 
@@ -20,6 +24,14 @@ type Config struct {
 	// TraceDir is the directory for RLM trace logs (JSONL format compatible with rlm-viewer).
 	// Empty string disables tracing.
 	TraceDir string
+
+	// UseIterationDemos enables few-shot demos for the iteration module.
+	// Disabled by default to avoid repeating large static prompt examples on every iteration.
+	UseIterationDemos bool
+
+	// CompactIterationInstructions uses a shorter runtime instruction for the
+	// iteration module. Enabled by default to reduce repeated prompt overhead.
+	CompactIterationInstructions bool
 
 	// HistoryCompression configures incremental history compression.
 	// When enabled, older iterations are summarized to reduce context size.
@@ -149,10 +161,14 @@ type IterationProgress struct {
 // DefaultConfig returns the default RLM configuration.
 func DefaultConfig() Config {
 	return Config{
-		MaxIterations: 30,
-		Verbose:       false,
-		Timeout:       0,
-		TraceDir:      "",
+		MaxIterations:                30,
+		MaxTokens:                    0,
+		Verbose:                      false,
+		Timeout:                      0,
+		TraceDir:                     "",
+		UseIterationDemos:            false,
+		CompactIterationInstructions: true,
+		OutputTruncation:             outputTruncationConfigPtr(DefaultOutputTruncationConfig()),
 	}
 }
 
@@ -165,6 +181,16 @@ func WithMaxIterations(n int) Option {
 	return func(c *Config) {
 		if n > 0 {
 			c.MaxIterations = n
+		}
+	}
+}
+
+// WithMaxTokens sets the maximum cumulative token budget for a completion.
+// Values <= 0 disable the budget.
+func WithMaxTokens(n int) Option {
+	return func(c *Config) {
+		if n > 0 {
+			c.MaxTokens = n
 		}
 	}
 }
@@ -188,6 +214,21 @@ func WithTimeout(d time.Duration) Option {
 func WithTraceDir(dir string) Option {
 	return func(c *Config) {
 		c.TraceDir = dir
+	}
+}
+
+// WithIterationDemos enables or disables runtime iteration demos.
+func WithIterationDemos(enabled bool) Option {
+	return func(c *Config) {
+		c.UseIterationDemos = enabled
+	}
+}
+
+// WithCompactIterationInstructions enables or disables the shorter runtime
+// iteration instruction.
+func WithCompactIterationInstructions(enabled bool) Option {
+	return func(c *Config) {
+		c.CompactIterationInstructions = enabled
 	}
 }
 
@@ -289,12 +330,7 @@ func WithSubRLMConfig(cfg SubRLMConfig) Option {
 // WithOutputTruncation enables output truncation with default configuration.
 func WithOutputTruncation() Option {
 	return func(c *Config) {
-		c.OutputTruncation = &OutputTruncationConfig{
-			Enabled:            true,
-			MaxOutputLen:       5000,
-			MaxVarPreviewLen:   100,
-			MaxHistoryEntryLen: 1000,
-		}
+		c.OutputTruncation = outputTruncationConfigPtr(DefaultOutputTruncationConfig())
 	}
 }
 
@@ -323,4 +359,8 @@ func DefaultOutputTruncationConfig() OutputTruncationConfig {
 		MaxVarPreviewLen:   100,
 		MaxHistoryEntryLen: 1000,
 	}
+}
+
+func outputTruncationConfigPtr(cfg OutputTruncationConfig) *OutputTruncationConfig {
+	return &cfg
 }

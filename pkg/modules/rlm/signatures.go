@@ -4,71 +4,40 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
-// =============================================================================
-// DSPy-Native Signature Definitions
-// =============================================================================
+const compactIterationInstruction = `You are exploring a large context using a Go REPL.
 
-// RLMSignature creates the main RLM module signature.
-// This is the outer interface: takes context + query, returns answer.
-func RLMSignature() core.Signature {
-	return core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("context",
-				core.WithDescription("The context data to analyze (can be very large)"),
-			)},
-			{Field: core.NewField("query",
-				core.WithDescription("The question to answer about the context"),
-			)},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("answer",
-				core.WithDescription("The final answer to the query"),
-			)},
-		},
-	).WithInstruction("Analyze the context using iterative code exploration to answer the query.")
-}
+Return these fields in order every time:
+- Reasoning:
+- Action:
+- Code:
+- SubQuery:
+- Answer:
 
-// IterationSignature defines the signature for each RLM iteration.
-// This powers the inner loop where the LLM decides what to do next.
-func IterationSignature() core.Signature {
-	return core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("context_info",
-				core.WithDescription("Summary of the context (type, size, preview)"),
-			)},
-			{Field: core.NewField("query",
-				core.WithDescription("The original question to answer"),
-			)},
-			{Field: core.NewField("history",
-				core.WithDescription("Previous code executions and their results"),
-			)},
-			{Field: core.NewField("repl_state",
-				core.WithDescription("Current REPL variable state"),
-			)},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("reasoning",
-				core.WithDescription("Step-by-step thinking about what to do next"),
-				core.WithCustomPrefix("Reasoning:"),
-			)},
-			{Field: core.NewField("action",
-				core.WithDescription("The action type: 'explore', 'query', 'compute', 'subrlm', or 'final'"),
-				core.WithCustomPrefix("Action:"),
-			)},
-			{Field: core.NewField("code",
-				core.WithDescription("Go code to execute (if action is explore/query/compute)"),
-				core.WithCustomPrefix("Code:"),
-			)},
-			{Field: core.NewField("subquery",
-				core.WithDescription("The query for the sub-RLM (if action is 'subrlm')"),
-				core.WithCustomPrefix("SubQuery:"),
-			)},
-			{Field: core.NewField("answer",
-				core.WithDescription("The final answer (if action is 'final')"),
-				core.WithCustomPrefix("Answer:"),
-			)},
-		},
-	).WithInstruction(`You are exploring a large context using a Go REPL.
+Actions:
+- explore: inspect structure or state
+- query: call Query/QueryRaw/QueryWith/QueryBatched/QueryBatchedRaw
+- compute: combine or transform existing results
+- subrlm: delegate a complex sub-task with SubQuery
+- final: provide the final answer
+
+Available functions:
+- Query(prompt string): asks a sub-LLM with the full context prepended; use only for small contexts
+- QueryRaw(prompt string): asks a sub-LLM with exactly the prompt you pass
+- QueryWith(contextSlice, prompt string): asks a sub-LLM with only the slice you provide
+- QueryBatched(prompts []string): parallel Query calls
+- QueryBatchedRaw(prompts []string): parallel QueryRaw calls
+- FindRelevant(query string, topK int): semantic search over the loaded context
+- GetChunk(id int), GetContext(startLine, endLine int), ChunkCount(), LineCount()
+- FINAL(value string), FINAL_VAR(varName string)
+
+Rules:
+- Large contexts: prefer FindRelevant + QueryWith or QueryRaw; avoid Query on large payloads
+- Write short executable Go statements only; no imports, no type declarations, no top-level funcs
+- Declare every variable before use
+- When you know the answer from code, call FINAL() or FINAL_VAR() immediately
+- Keep the answer field empty unless action=final`
+
+const fullIterationInstruction = `You are exploring a large context using a Go REPL.
 
 OUTPUT FORMAT (REQUIRED - you MUST follow this exact format):
 Each response MUST contain these fields in order:
@@ -154,7 +123,83 @@ When a sub-task is too complex for a single Query call, use action="subrlm" with
 The sub-RLM shares all REPL variables and can set new ones. Its result is stored in 'subrlm_result'.
 Example: SubQuery: "Find all authentication-related code sections and summarize their functionality"
 
-REMEMBER: You MUST start your response with "Reasoning:" and include all five fields.`)
+REMEMBER: You MUST start your response with "Reasoning:" and include all five fields.`
+
+// =============================================================================
+// DSPy-Native Signature Definitions
+// =============================================================================
+
+// RLMSignature creates the main RLM module signature.
+// This is the outer interface: takes context + query, returns answer.
+func RLMSignature() core.Signature {
+	return core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewField("context",
+				core.WithDescription("The context data to analyze (can be very large)"),
+			)},
+			{Field: core.NewField("query",
+				core.WithDescription("The question to answer about the context"),
+			)},
+		},
+		[]core.OutputField{
+			{Field: core.NewField("answer",
+				core.WithDescription("The final answer to the query"),
+			)},
+		},
+	).WithInstruction("Analyze the context using iterative code exploration to answer the query.")
+}
+
+// IterationSignature defines the signature for each RLM iteration.
+// This powers the inner loop where the LLM decides what to do next.
+func IterationSignature() core.Signature {
+	return iterationSignatureWithInstruction(fullIterationInstruction)
+}
+
+// CompactIterationSignature is a shorter runtime-oriented variant of IterationSignature.
+// It keeps the same schema but substantially reduces repeated static prompt overhead.
+func CompactIterationSignature() core.Signature {
+	return iterationSignatureWithInstruction(compactIterationInstruction)
+}
+
+func iterationSignatureWithInstruction(instruction string) core.Signature {
+	return core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewField("context_info",
+				core.WithDescription("Summary of the context (type, size, preview)"),
+			)},
+			{Field: core.NewField("query",
+				core.WithDescription("The original question to answer"),
+			)},
+			{Field: core.NewField("history",
+				core.WithDescription("Previous code executions and their results"),
+			)},
+			{Field: core.NewField("repl_state",
+				core.WithDescription("Current REPL variable state"),
+			)},
+		},
+		[]core.OutputField{
+			{Field: core.NewField("reasoning",
+				core.WithDescription("Step-by-step thinking about what to do next"),
+				core.WithCustomPrefix("Reasoning:"),
+			)},
+			{Field: core.NewField("action",
+				core.WithDescription("The action type: 'explore', 'query', 'compute', 'subrlm', or 'final'"),
+				core.WithCustomPrefix("Action:"),
+			)},
+			{Field: core.NewField("code",
+				core.WithDescription("Go code to execute (if action is explore/query/compute)"),
+				core.WithCustomPrefix("Code:"),
+			)},
+			{Field: core.NewField("subquery",
+				core.WithDescription("The query for the sub-RLM (if action is 'subrlm')"),
+				core.WithCustomPrefix("SubQuery:"),
+			)},
+			{Field: core.NewField("answer",
+				core.WithDescription("The final answer (if action is 'final')"),
+				core.WithCustomPrefix("Answer:"),
+			)},
+		},
+	).WithInstruction(instruction)
 }
 
 // SubQuerySignature defines the signature for sub-LLM queries.
@@ -453,4 +498,3 @@ func SubQueryDemos() []core.Example {
 		},
 	}
 }
-

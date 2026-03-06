@@ -24,8 +24,9 @@ const (
 )
 
 var (
-	ErrMissingContext = errors.New("missing required input: context")
-	ErrMissingQuery   = errors.New("missing or invalid required input: query")
+	ErrMissingContext      = errors.New("missing required input: context")
+	ErrMissingQuery        = errors.New("missing or invalid required input: query")
+	ErrTokenBudgetExceeded = errors.New("RLM token budget exceeded")
 )
 
 // CodeBlock represents an extracted and executed code block.
@@ -156,10 +157,7 @@ func New(rootLLM core.LLM, subLLMClient SubLLMClient, opts ...Option) *RLM {
 	baseModule := core.NewModule(signature)
 	baseModule.ModuleType = "RLM"
 
-	// Create iteration module with signature and demos
-	iterMod := modules.NewPredict(IterationSignature()).WithTextOutput()
-	iterMod.SetDemos(IterationDemos())
-	iterMod.SetLLM(rootLLM)
+	iterMod := buildIterationModule(rootLLM, cfg)
 
 	return &RLM{
 		BaseModule:      *baseModule,
@@ -176,6 +174,7 @@ func (r *RLM) WithOptions(opts ...Option) *RLM {
 	for _, opt := range opts {
 		opt(&r.config)
 	}
+	r.rebuildIterationModule()
 	return r
 }
 
@@ -183,9 +182,29 @@ func (r *RLM) WithOptions(opts ...Option) *RLM {
 func (r *RLM) SetLLM(llm core.LLM) {
 	r.rootLLM = llm
 	r.BaseModule.SetLLM(llm)
-	if r.iterationModule != nil {
-		r.iterationModule.SetLLM(llm)
+	r.rebuildIterationModule()
+}
+
+func buildIterationModule(rootLLM core.LLM, cfg Config) *modules.Predict {
+	signature := IterationSignature()
+	if cfg.CompactIterationInstructions {
+		signature = CompactIterationSignature()
 	}
+
+	iterMod := modules.NewPredict(signature).WithTextOutput()
+	if cfg.UseIterationDemos {
+		iterMod.SetDemos(IterationDemos())
+	}
+	iterMod.SetLLM(rootLLM)
+	return iterMod
+}
+
+func (r *RLM) rebuildIterationModule() {
+	if r.rootLLM == nil {
+		r.iterationModule = nil
+		return
+	}
+	r.iterationModule = buildIterationModule(r.rootLLM, r.config)
 }
 
 // ProcessWithInterceptors executes the RLM module's logic with interceptor support.
@@ -243,6 +262,8 @@ func (r *RLM) Process(ctx context.Context, inputs map[string]any, opts ...core.O
 func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*CompletionResult, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
+
+	ctx = core.WithExecutionState(ctx)
 
 	// Reset token tracker for this completion
 	r.tokenTracker.Reset()
@@ -318,6 +339,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			return nil, ctx.Err()
 		default:
 		}
+		if err := r.enforceTokenBudget(); err != nil {
+			return nil, err
+		}
 
 		if r.config.Verbose {
 			logger.Info(ctx, "[RLM] Iteration %d/%d", i+1, maxIterations)
@@ -328,7 +352,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			"context_info": replEnv.ContextInfo(),
 			"query":        query,
 			"history":      history.String(),
-			"repl_state":   formatREPLState(replEnv.GetLocals()),
+			"repl_state":   r.formatREPLStateInput(replEnv),
 		}
 
 		// Call the iteration module
@@ -348,6 +372,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		code = stripCodeLanguageMarker(code)
 
 		rootPromptTokens := r.trackTokenUsage(ctx, i+1)
+		if err := r.enforceTokenBudget(); err != nil {
+			return nil, err
+		}
 
 		// Report progress after the LLM call so per-iteration prompt tokens are available
 		if r.config.OnProgress != nil {
@@ -377,7 +404,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			} else {
 				// Store result in REPL variable for access in subsequent iterations
 				_ = replEnv.SetVariable("subrlm_result", subRLMResult)
-				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM completed: %s", utils.TruncateString(subRLMResult, truncateLenLong)))
+				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM completed: %s", subRLMResult))
 
 				if r.config.Verbose {
 					logger.Debug(ctx, "[RLM] Sub-RLM result: %s", utils.TruncateString(subRLMResult, truncateLenMedium))
@@ -457,9 +484,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				logger.Debug(ctx, "[RLM] Stderr: %s", utils.TruncateString(result.Stderr, truncateLenMedium))
 			}
 
-			// Collect sub-LLM calls for trace and add Query results to history
+			// Collect sub-LLM calls for trace and build compact history summaries.
 			var rlmCalls []logging.RLMCallEntry
-			var allOutput strings.Builder
+			fullExecOutput := FormatExecutionResult(result)
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
 				r.tokenTracker.AddSubCall(call)
@@ -470,19 +497,13 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 					CompletionTokens: call.CompletionTokens,
 					ExecutionTime:    call.Duration.Seconds(),
 				})
-
-				// CRITICAL FIX: Add Query results to output so the LLM can see them in subsequent iterations.
-				// Without this, Query() return values assigned to variables are invisible in history,
-				// causing the LLM to guess/hallucinate the answer in later iterations.
-				allOutput.WriteString(fmt.Sprintf("\n[Query] %s\n[Result] %s\n",
-					utils.TruncateString(call.Prompt, truncateLenMedium),
-					call.Response))
+				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
+			}
+			if err := r.enforceTokenBudget(); err != nil {
+				return nil, err
 			}
 
-			// Also capture execution stdout in allOutput for FINAL detection
-			if result.Stdout != "" {
-				allOutput.WriteString(result.Stdout)
-			}
+			callSummary := r.summarizeLLMCalls(llmCalls)
 
 			// State-verified completion check (Nightjar Algorithm 1 Gap 1)
 			// This is the PRIMARY completion detection - check REPL state first
@@ -522,8 +543,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			}
 
 			// Fallback: Check for FINAL in execution output via regex (deprecated, kept for backward compatibility)
-			outputStr := allOutput.String()
-			if final := FindFinalAnswer(outputStr); final != nil {
+			if final := FindFinalAnswer(fullExecOutput); final != nil {
 				resultResponse := final.Content
 
 				if r.config.Verbose {
@@ -578,10 +598,13 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				)
 			}
 
-			// Include Query results in history output
-			execOutput := FormatExecutionResult(result)
-			if allOutput.Len() > 0 {
-				execOutput = execOutput + allOutput.String()
+			execOutput := r.formatExecutionOutput(result)
+			if callSummary != "" {
+				if execOutput == "No output" {
+					execOutput = callSummary
+				} else {
+					execOutput = execOutput + "\n\n" + callSummary
+				}
 			}
 			r.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
 		} else if action != "final" {
@@ -748,6 +771,9 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			return nil, ctx.Err()
 		default:
 		}
+		if err := subRLM.enforceTokenBudget(); err != nil {
+			return nil, err
+		}
 
 		if subRLM.config.Verbose {
 			logger.Info(ctx, "[SubRLM] Iteration %d/%d (depth %d)", i+1, maxIterations, subRLM.config.SubRLM.CurrentDepth)
@@ -758,7 +784,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			"context_info": replEnv.ContextInfo(),
 			"query":        query,
 			"history":      history.String(),
-			"repl_state":   formatREPLState(replEnv.GetLocals()),
+			"repl_state":   subRLM.formatREPLStateInput(replEnv),
 		}
 
 		// Call the iteration module
@@ -776,6 +802,9 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		code = stripCodeLanguageMarker(code)
 		subRLM.trackTokenUsage(ctx, i+1)
+		if err := subRLM.enforceTokenBudget(); err != nil {
+			return nil, err
+		}
 
 		action = strings.ToLower(strings.TrimSpace(action))
 
@@ -787,7 +816,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM error: %v", err))
 			} else {
 				_ = replEnv.SetVariable("subrlm_result", nestedResult)
-				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM completed: %s", utils.TruncateString(nestedResult, truncateLenLong)))
+				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM completed: %s", nestedResult))
 			}
 			continue
 		}
@@ -830,16 +859,17 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			result, _ := replEnv.Execute(ctx, code)
 
 			// Collect sub-LLM calls
-			var allOutput strings.Builder
-			for _, call := range replEnv.GetLLMCalls() {
+			fullExecOutput := FormatExecutionResult(result)
+			llmCalls := replEnv.GetLLMCalls()
+			for _, call := range llmCalls {
 				subRLM.tokenTracker.AddSubCall(call)
-				allOutput.WriteString(fmt.Sprintf("\n[Query] %s\n[Result] %s\n",
-					utils.TruncateString(call.Prompt, truncateLenMedium),
-					call.Response))
+				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
-			if result.Stdout != "" {
-				allOutput.WriteString(result.Stdout)
+			if err := subRLM.enforceTokenBudget(); err != nil {
+				return nil, err
 			}
+
+			callSummary := subRLM.summarizeLLMCalls(llmCalls)
 
 			// Check for FINAL via state
 			if replEnv.HasFinal() {
@@ -852,7 +882,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			}
 
 			// Fallback regex check
-			if final := FindFinalAnswer(allOutput.String()); final != nil {
+			if final := FindFinalAnswer(fullExecOutput); final != nil {
 				return &CompletionResult{
 					Response:   final.Content,
 					Iterations: i + 1,
@@ -861,9 +891,13 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 				}, nil
 			}
 
-			execOutput := FormatExecutionResult(result)
-			if allOutput.Len() > 0 {
-				execOutput = execOutput + allOutput.String()
+			execOutput := subRLM.formatExecutionOutput(result)
+			if callSummary != "" {
+				if execOutput == "No output" {
+					execOutput = callSummary
+				} else {
+					execOutput = execOutput + "\n\n" + callSummary
+				}
 			}
 			subRLM.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
 		} else if action != "final" {
@@ -885,12 +919,16 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
 func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time, maxIterations int) (*CompletionResult, error) {
+	if err := r.enforceTokenBudget(); err != nil {
+		return nil, err
+	}
+
 	// Prepare inputs asking for a final answer
 	iterInputs := map[string]any{
 		"context_info": replEnv.ContextInfo(),
 		"query":        query,
 		"history":      history + "\n\nMAX ITERATIONS REACHED. You MUST provide a final answer now.",
-		"repl_state":   formatREPLState(replEnv.GetLocals()),
+		"repl_state":   r.formatREPLStateInput(replEnv),
 	}
 
 	outputs, err := r.iterationModule.Process(ctx, iterInputs)
@@ -899,6 +937,9 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 	}
 
 	r.trackTokenUsage(ctx, 0)
+	if err := r.enforceTokenBudget(); err != nil {
+		return nil, err
+	}
 
 	// Extract the answer
 	answer := extractStringOutput(outputs, "answer")
@@ -941,6 +982,98 @@ func (r *RLM) computeMaxIterations(contextSize int) int {
 		return cfg.MaxIterations
 	}
 	return computed
+}
+
+func (r *RLM) outputTruncationConfig() OutputTruncationConfig {
+	defaults := DefaultOutputTruncationConfig()
+	if r.config.OutputTruncation == nil {
+		return defaults
+	}
+	if !r.config.OutputTruncation.Enabled {
+		return OutputTruncationConfig{}
+	}
+
+	cfg := *r.config.OutputTruncation
+	if cfg.MaxOutputLen <= 0 {
+		cfg.MaxOutputLen = defaults.MaxOutputLen
+	}
+	if cfg.MaxVarPreviewLen <= 0 {
+		cfg.MaxVarPreviewLen = defaults.MaxVarPreviewLen
+	}
+	if cfg.MaxHistoryEntryLen <= 0 {
+		cfg.MaxHistoryEntryLen = defaults.MaxHistoryEntryLen
+	}
+	cfg.Enabled = true
+	return cfg
+}
+
+func (r *RLM) formatREPLStateInput(replEnv REPLEnvironment) string {
+	cfg := r.outputTruncationConfig()
+	if !cfg.Enabled {
+		return formatREPLStateRich(replEnv.GetVariableMetadata(), 0)
+	}
+	return formatREPLStateRich(replEnv.GetVariableMetadata(), cfg.MaxVarPreviewLen)
+}
+
+func (r *RLM) truncateHistoryOutput(output string) string {
+	cfg := r.outputTruncationConfig()
+	if !cfg.Enabled || cfg.MaxHistoryEntryLen <= 0 {
+		return output
+	}
+	return utils.TruncateString(output, cfg.MaxHistoryEntryLen)
+}
+
+func (r *RLM) formatExecutionOutput(result *ExecutionResult) string {
+	output := FormatExecutionResult(result)
+	cfg := r.outputTruncationConfig()
+	if !cfg.Enabled || cfg.MaxOutputLen <= 0 {
+		return output
+	}
+	return utils.TruncateString(output, cfg.MaxOutputLen)
+}
+
+func (r *RLM) llmCallPreviewLimit() int {
+	cfg := r.outputTruncationConfig()
+	if !cfg.Enabled {
+		return 0
+	}
+	if cfg.MaxVarPreviewLen > 0 {
+		return cfg.MaxVarPreviewLen * 2
+	}
+	return truncateLenMedium
+}
+
+func (r *RLM) summarizeLLMCalls(calls []LLMCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+
+	previewLen := r.llmCallPreviewLimit()
+	var summary strings.Builder
+	for i, call := range calls {
+		prompt := call.Prompt
+		response := call.Response
+		if previewLen > 0 {
+			prompt = utils.TruncateString(prompt, previewLen)
+			response = utils.TruncateString(response, previewLen)
+		}
+		fmt.Fprintf(&summary, "[LLM query %d] prompt=%q response=%q tokens=%d/%d\n",
+			i+1, prompt, response, call.PromptTokens, call.CompletionTokens)
+	}
+	return strings.TrimSuffix(summary.String(), "\n")
+}
+
+func (r *RLM) enforceTokenBudget() error {
+	if r.config.MaxTokens <= 0 {
+		return nil
+	}
+
+	usage := r.tokenTracker.GetTotalUsage()
+	if usage.TotalTokens <= r.config.MaxTokens {
+		return nil
+	}
+
+	return fmt.Errorf("%w: used %d tokens (limit %d)", ErrTokenBudgetExceeded, usage.TotalTokens, r.config.MaxTokens)
 }
 
 // getContextSize returns the size of the context payload in bytes.
@@ -1224,7 +1357,9 @@ func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, ac
 	fmt.Fprintf(history, "Action: %s\n", action)
 	if code != "" {
 		fmt.Fprintf(history, "Code:\n```go\n%s\n```\n", code)
-		fmt.Fprintf(history, "Output:\n%s\n", utils.TruncateString(output, truncateLenLong))
+	}
+	if output != "" {
+		fmt.Fprintf(history, "Output:\n%s\n", r.truncateHistoryOutput(output))
 	}
 }
 

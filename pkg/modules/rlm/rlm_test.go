@@ -20,21 +20,28 @@ import (
 type mockLLM struct {
 	responses []string
 	callCount int
+	prompts   []string
+	usages    []core.TokenInfo
 }
 
 func (m *mockLLM) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
 	if m.callCount >= len(m.responses) {
 		return nil, fmt.Errorf("no more mock responses")
 	}
+	m.prompts = append(m.prompts, prompt)
 	resp := m.responses[m.callCount]
+	usage := core.TokenInfo{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+	if m.callCount < len(m.usages) {
+		usage = m.usages[m.callCount]
+	}
 	m.callCount++
 	return &core.LLMResponse{
 		Content: resp,
-		Usage: &core.TokenInfo{
-			PromptTokens:     100,
-			CompletionTokens: 50,
-			TotalTokens:      150,
-		},
+		Usage:   &usage,
 	}, nil
 }
 
@@ -306,12 +313,21 @@ func TestConfig(t *testing.T) {
 	// Test default config
 	cfg := DefaultConfig()
 	assert.Equal(t, 30, cfg.MaxIterations)
+	assert.Equal(t, 0, cfg.MaxTokens)
 	assert.False(t, cfg.Verbose)
+	assert.False(t, cfg.UseIterationDemos)
+	assert.True(t, cfg.CompactIterationInstructions)
+	require.NotNil(t, cfg.OutputTruncation)
+	assert.Equal(t, DefaultOutputTruncationConfig(), *cfg.OutputTruncation)
 
 	// Test options
 	cfg = DefaultConfig()
 	WithMaxIterations(10)(&cfg)
 	assert.Equal(t, 10, cfg.MaxIterations)
+
+	cfg = DefaultConfig()
+	WithMaxTokens(1234)(&cfg)
+	assert.Equal(t, 1234, cfg.MaxTokens)
 
 	cfg = DefaultConfig()
 	WithVerbose(true)(&cfg)
@@ -320,6 +336,14 @@ func TestConfig(t *testing.T) {
 	cfg = DefaultConfig()
 	WithTimeout(5 * time.Second)(&cfg)
 	assert.Equal(t, 5*time.Second, cfg.Timeout)
+
+	cfg = DefaultConfig()
+	WithIterationDemos(true)(&cfg)
+	assert.True(t, cfg.UseIterationDemos)
+
+	cfg = DefaultConfig()
+	WithCompactIterationInstructions(false)(&cfg)
+	assert.False(t, cfg.CompactIterationInstructions)
 
 	cfg = DefaultConfig()
 	WithREPLSetup(func(repl *YaegiREPL) error { return nil })(&cfg)
@@ -335,11 +359,17 @@ func TestRLMNew(t *testing.T) {
 	assert.NotNil(t, rlm)
 	assert.Equal(t, "RLM", rlm.GetModuleType())
 	assert.Equal(t, 30, rlm.config.MaxIterations)
+	assert.Equal(t, CompactIterationSignature().Instruction, rlm.iterationModule.GetSignature().Instruction)
+	assert.Len(t, rlm.iterationModule.GetDemos(), 0)
 
 	// Test with options
 	rlm = New(mockRoot, mockSub, WithMaxIterations(5), WithVerbose(true))
 	assert.Equal(t, 5, rlm.config.MaxIterations)
 	assert.True(t, rlm.config.Verbose)
+
+	rlm = New(mockRoot, mockSub, WithIterationDemos(true), WithCompactIterationInstructions(false))
+	assert.Equal(t, IterationSignature().Instruction, rlm.iterationModule.GetSignature().Instruction)
+	assert.Len(t, rlm.iterationModule.GetDemos(), len(IterationDemos()))
 }
 
 // TestRLMProcess tests the main Process method.
@@ -428,6 +458,44 @@ func TestRLMMaxIterations(t *testing.T) {
 	assert.Equal(t, "forced answer", result.Response)
 }
 
+func TestRLMMaxTokens_StopsOnRootBudgetExceeded(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ncomplete",
+		},
+	}
+
+	rlm := New(mockRoot, &mockSubLLMClient{}, WithMaxTokens(100))
+
+	result, err := rlm.Complete(context.Background(), "ctx", "q")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
+	assert.Contains(t, err.Error(), "token budget")
+}
+
+func TestRLMMaxTokens_CountsSubLLMUsage(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nUse a sub-query and finish.\n\nAction:\nquery\n\nCode:\nanswer := QueryRaw(\"what is the answer?\")\nFINAL(answer)\n\nAnswer:\n",
+		},
+	}
+	mockSub := &mockSubLLMClient{
+		queryResponse:         "sub answer",
+		queryPromptTokens:     20,
+		queryCompletionTokens: 20,
+	}
+
+	rlm := New(mockRoot, mockSub, WithMaxTokens(180))
+
+	result, err := rlm.Complete(context.Background(), "ctx", "q")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
+	assert.Greater(t, rlm.GetTokenTracker().GetSubUsage().TotalTokens, 0)
+	assert.Greater(t, rlm.GetTokenTracker().GetTotalUsage().TotalTokens, 180)
+}
+
 // TestRLMContextCancellation tests that context cancellation works.
 func TestRLMContextCancellation(t *testing.T) {
 	mockRoot := &mockLLM{
@@ -502,6 +570,51 @@ func TestFormatExecutionResult(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestAppendIterationHistory_UsesConfiguredMaxHistoryEntryLen(t *testing.T) {
+	rlm := New(&mockLLM{}, &mockSubLLMClient{}, WithOutputTruncationConfig(OutputTruncationConfig{
+		MaxOutputLen:       128,
+		MaxVarPreviewLen:   32,
+		MaxHistoryEntryLen: 32,
+	}))
+
+	var history strings.Builder
+	longOutput := strings.Repeat("history-block-", 8)
+	rlm.appendIterationHistory(&history, 1, "explore", "", `fmt.Println("x")`, longOutput)
+
+	historyStr := history.String()
+	assert.Contains(t, historyStr, utils.TruncateString(longOutput, 32))
+	assert.NotContains(t, historyStr, longOutput)
+}
+
+func TestRLMComplete_UsesOutputTruncationConfigInIterationInputs(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nCreate a long variable and long output.\n\nAction:\nexplore\n\nCode:\nresult := strings.Repeat(\"VARMARK\", 20)\nfmt.Println(strings.Repeat(\"OUTMARK\", 20))\n\nAnswer:\n",
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ncomplete",
+		},
+	}
+
+	rlm := New(mockRoot, &mockSubLLMClient{}, WithOutputTruncationConfig(OutputTruncationConfig{
+		MaxOutputLen:       40,
+		MaxVarPreviewLen:   16,
+		MaxHistoryEntryLen: 60,
+	}))
+
+	result, err := rlm.Complete(context.Background(), "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, "complete", result.Response)
+	require.Len(t, mockRoot.prompts, 2)
+
+	secondPrompt := mockRoot.prompts[1]
+	fullOutput := strings.Repeat("OUTMARK", 20)
+	fullVarValue := strings.Repeat("VARMARK", 20)
+
+	assert.NotContains(t, secondPrompt, fullOutput)
+	assert.NotContains(t, secondPrompt, fullVarValue)
+	assert.Contains(t, secondPrompt, utils.TruncateString(fullOutput, 40))
+	assert.Contains(t, secondPrompt, utils.TruncateString(fullVarValue, 16))
 }
 
 // TestContextMetadata tests the context metadata helper.
