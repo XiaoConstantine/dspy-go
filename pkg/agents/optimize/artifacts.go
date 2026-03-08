@@ -45,6 +45,10 @@ func (a AgentArtifacts) Clone() AgentArtifacts {
 
 // OptimizableAgent is a parallel interface that exposes mutable artifacts
 // without widening the base agents.Agent contract.
+//
+// Implementations that also expose LastExecutionTrace() *agents.ExecutionTrace
+// allow evaluators to attach richer step-level side information without
+// forcing that method into the base interface.
 type OptimizableAgent interface {
 	agents.Agent
 
