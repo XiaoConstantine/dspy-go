@@ -58,7 +58,7 @@ func ExchangeCode(code, verifier string) (*TokenResponse, error) {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	resp, err := http.Post(TokenURL, "application/json", bytes.NewReader(body))
+	resp, err := httpPost(TokenURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -89,7 +89,7 @@ func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	resp, err := http.Post(TokenURL, "application/json", bytes.NewReader(body))
+	resp, err := httpPost(TokenURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}

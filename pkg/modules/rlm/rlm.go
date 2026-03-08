@@ -1276,23 +1276,6 @@ func stripCodeLanguageMarker(code string) string {
 	return code
 }
 
-// formatREPLState converts the REPL locals map to a readable string.
-func formatREPLState(locals map[string]any) string {
-	if len(locals) == 0 {
-		return "No variables defined"
-	}
-
-	var parts []string
-	for name, value := range locals {
-		valueStr := fmt.Sprintf("%v", value)
-		if len(valueStr) > 100 {
-			valueStr = valueStr[:100] + "..."
-		}
-		parts = append(parts, fmt.Sprintf("%s: %s", name, valueStr))
-	}
-	return strings.Join(parts, "\n")
-}
-
 // formatREPLStateRich converts variable metadata to a rich, informative string.
 // This provides type info, length, and preview for better LLM context.
 func formatREPLStateRich(variables []REPLVariable, maxPreviewLen int) string {

@@ -57,7 +57,7 @@ func ExchangeOpenAICode(code, verifier string) (*OpenAITokenResponse, error) {
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	resp, err := http.Post(OpenAITokenURL, "application/json", bytes.NewReader(body))
+	resp, err := httpPost(OpenAITokenURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -88,7 +88,7 @@ func RefreshOpenAIAccessToken(refreshToken string) (*OpenAITokenResponse, error)
 		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	resp, err := http.Post(OpenAITokenURL, "application/json", bytes.NewReader(body))
+	resp, err := httpPost(OpenAITokenURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}

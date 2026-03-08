@@ -3,32 +3,46 @@ package oauth
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 )
 
+var (
+	pkceGenerator                    = GeneratePKCE
+	anthropicAuthURL                 = GetAuthorizationURL
+	anthropicCodeExchanger           = ExchangeCode
+	openAIAuthURL                    = GetOpenAIAuthorizationURL
+	openAICodeExchanger              = ExchangeOpenAICode
+	browserOpener                    = openBrowser
+	currentGOOS                      = runtime.GOOS
+	execCommand                      = exec.Command
+	commandStarter                   = func(cmd *exec.Cmd) error { return cmd.Start() }
+	loginInputReader       io.Reader = os.Stdin
+)
+
 // LoginAnthropic performs interactive OAuth login for Claude Max/Pro subscriptions.
 // It opens a browser for authentication and returns the access token.
 func LoginAnthropic() (*TokenResponse, error) {
 	// Generate PKCE
-	verifier, challenge, err := GeneratePKCE()
+	verifier, challenge, err := pkceGenerator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate PKCE: %w", err)
 	}
 
 	// Get authorization URL
-	authURL := GetAuthorizationURL(verifier, challenge)
+	authURL := anthropicAuthURL(verifier, challenge)
 
 	// Open browser
 	fmt.Println("Opening browser for Claude authentication...")
 	fmt.Printf("If browser doesn't open, visit:\n%s\n\n", authURL)
-	openBrowser(authURL)
+	browserOpener(authURL)
 
 	// Prompt for code
 	fmt.Print("After authorizing, paste the code from the redirect URL: ")
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(loginInputReader)
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
@@ -40,7 +54,7 @@ func LoginAnthropic() (*TokenResponse, error) {
 
 	// Exchange for token
 	fmt.Println("Exchanging code for token...")
-	tokens, err := ExchangeCode(code, verifier)
+	tokens, err := anthropicCodeExchanger(code, verifier)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -80,22 +94,22 @@ func extractCode(input string) string {
 // It opens a browser for authentication and returns the access token.
 func LoginOpenAI() (*OpenAITokenResponse, error) {
 	// Generate PKCE
-	verifier, challenge, err := GeneratePKCE()
+	verifier, challenge, err := pkceGenerator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate PKCE: %w", err)
 	}
 
 	// Get authorization URL
-	authURL := GetOpenAIAuthorizationURL(verifier, challenge)
+	authURL := openAIAuthURL(verifier, challenge)
 
 	// Open browser
 	fmt.Println("Opening browser for OpenAI authentication...")
 	fmt.Printf("If browser doesn't open, visit:\n%s\n\n", authURL)
-	openBrowser(authURL)
+	browserOpener(authURL)
 
 	// Prompt for code
 	fmt.Print("After authorizing, paste the code from the redirect URL: ")
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(loginInputReader)
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
@@ -107,7 +121,7 @@ func LoginOpenAI() (*OpenAITokenResponse, error) {
 
 	// Exchange for token
 	fmt.Println("Exchanging code for token...")
-	tokens, err := ExchangeOpenAICode(code, verifier)
+	tokens, err := openAICodeExchanger(code, verifier)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
@@ -121,15 +135,15 @@ func LoginOpenAI() (*OpenAITokenResponse, error) {
 
 func openBrowser(url string) {
 	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	switch currentGOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = execCommand("open", url)
 	case "linux":
-		cmd = exec.Command("xdg-open", url)
+		cmd = execCommand("xdg-open", url)
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = execCommand("rundll32", "url.dll,FileProtocolHandler", url)
 	}
 	if cmd != nil {
-		_ = cmd.Start()
+		_ = commandStarter(cmd)
 	}
 }
