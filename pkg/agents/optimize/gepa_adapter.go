@@ -19,6 +19,7 @@ const (
 	gepaMetadataArtifactKeysKey    = "artifact_keys"
 	gepaMetadataPrimaryArtifactKey = "primary_artifact"
 	gepaMetadataTraceSummaryKey    = "rich_trace_summary"
+	maxTraceSummarySteps           = 5
 )
 
 // GEPAAdapterConfig configures the agent-to-GEPA bridge layer.
@@ -688,8 +689,8 @@ func summarizeAgentTrace(trace *agents.ExecutionTrace) string {
 	}
 
 	stepLimit := len(trace.Steps)
-	if stepLimit > 5 {
-		stepLimit = 5
+	if stepLimit > maxTraceSummarySteps {
+		stepLimit = maxTraceSummarySteps
 	}
 	for i := 0; i < stepLimit; i++ {
 		step := trace.Steps[i]
