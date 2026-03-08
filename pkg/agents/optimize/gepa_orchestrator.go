@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
@@ -201,15 +200,23 @@ func (o *GEPAAgentOptimizer) evaluateCurrentPopulation(ctx context.Context, engi
 
 func (o *GEPAAgentOptimizer) evaluatePopulationCandidates(ctx context.Context, candidates []*optimizers.GEPACandidate, examples []AgentExample) ([]*GEPACandidateEvaluation, error) {
 	evaluations := make([]*GEPACandidateEvaluation, len(candidates))
-	evaluationPool := pool.New().WithContext(ctx).WithCancelOnError().WithMaxGoroutines(o.config.EvalConcurrency)
+	evaluationPool := pool.New().WithContext(ctx).WithMaxGoroutines(o.config.EvalConcurrency)
 
 	for idx, candidate := range candidates {
 		idx := idx
 		candidate := candidate
 		evaluationPool.Go(func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			evaluation, err := o.EvaluateCandidate(ctx, candidate, examples)
 			if err != nil {
-				return fmt.Errorf("optimize: evaluate GEPA candidate %s: %w", candidate.ID, err)
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				evaluations[idx] = failedCandidateEvaluation(candidate, examples, err)
+				return nil
 			}
 			evaluations[idx] = evaluation
 			return nil
@@ -232,43 +239,40 @@ func (o *GEPAAgentOptimizer) selectBestCandidate(ctx context.Context, state *opt
 		return nil, nil, fmt.Errorf("optimize: no GEPA candidates available for final selection")
 	}
 
+	candidateSet := dedupeCandidates(candidates)
+	validationCandidates := make([]*optimizers.GEPACandidate, 0, len(candidateSet))
+	originalByID := make(map[string]*optimizers.GEPACandidate, len(candidateSet))
+	for _, candidate := range candidateSet {
+		validationCandidates = append(validationCandidates, optimizers.CloneCandidate(candidate))
+		originalByID[candidate.ID] = candidate
+	}
+
+	evaluations, err := o.evaluatePopulationCandidates(ctx, validationCandidates, validationExamples)
+	if err != nil {
+		return nil, nil, fmt.Errorf("optimize: evaluate GEPA validation candidates: %w", err)
+	}
+
 	var bestCandidate *optimizers.GEPACandidate
 	var bestEvaluation *GEPACandidateEvaluation
-
-	for _, candidate := range dedupeCandidates(candidates) {
-		evaluation, err := o.EvaluateCandidate(ctx, cloneCandidate(candidate), validationExamples)
-		if err != nil {
-			return nil, nil, fmt.Errorf("optimize: evaluate candidate %s on validation set: %w", candidate.ID, err)
+	for _, evaluation := range evaluations {
+		if evaluation == nil || evaluation.Candidate == nil || evaluation.Fitness == nil {
+			continue
 		}
 		if bestEvaluation == nil || evaluation.Fitness.WeightedScore > bestEvaluation.Fitness.WeightedScore {
-			bestCandidate = candidate
+			bestCandidate = originalByID[evaluation.Candidate.ID]
 			bestEvaluation = evaluation
 		}
+	}
+
+	if bestCandidate == nil || bestEvaluation == nil {
+		return nil, nil, fmt.Errorf("optimize: no successful GEPA validation evaluation found")
 	}
 
 	return bestCandidate, bestEvaluation, nil
 }
 
 func recordCandidateFitness(state *optimizers.GEPAState, candidate *optimizers.GEPACandidate, fitness *optimizers.MultiObjectiveFitness, averageScore float64) {
-	metrics, exists := state.CandidateMetrics[candidate.ID]
-	if !exists {
-		metrics = &optimizers.CandidateMetrics{
-			ExecutionTimes: make([]time.Duration, 0),
-			ErrorCounts:    make(map[string]int),
-			Metadata:       make(map[string]interface{}),
-		}
-		state.CandidateMetrics[candidate.ID] = metrics
-	}
-	if metrics.Metadata == nil {
-		metrics.Metadata = make(map[string]interface{})
-	}
-
-	metrics.AverageFitness = candidate.Fitness
-	if candidate.Fitness > metrics.BestFitness {
-		metrics.BestFitness = candidate.Fitness
-	}
-	metrics.Metadata["multi_objective_fitness"] = fitness
-	metrics.Metadata["average_score"] = averageScore
+	state.RecordCandidateFitness(candidate, fitness, averageScore)
 }
 
 func recordCandidateTraces(state *optimizers.GEPAState, traces []optimizers.ExecutionTrace) {
@@ -294,32 +298,34 @@ func dedupeCandidates(candidates []*optimizers.GEPACandidate) []*optimizers.GEPA
 	return deduped
 }
 
-func cloneCandidate(candidate *optimizers.GEPACandidate) *optimizers.GEPACandidate {
-	if candidate == nil {
-		return nil
+func failedCandidateEvaluation(candidate *optimizers.GEPACandidate, examples []AgentExample, err error) *GEPACandidateEvaluation {
+	run := &HarnessRunResult{
+		Results:           make([]HarnessExampleResult, 0, len(examples)),
+		AverageScore:      0,
+		PassedExamples:    0,
+		FailedExamples:    len(examples),
+		CompletedExamples: len(examples),
+		EvaluationErrors:  len(examples),
 	}
 
-	cloned := &optimizers.GEPACandidate{
-		ID:          candidate.ID,
-		ModuleName:  candidate.ModuleName,
-		Instruction: candidate.Instruction,
-		Generation:  candidate.Generation,
-		Fitness:     candidate.Fitness,
-		CreatedAt:   candidate.CreatedAt,
+	failureResult := evaluationFailureResult(err)
+	traces := make([]optimizers.ExecutionTrace, 0, len(examples))
+	for _, example := range examples {
+		run.Results = append(run.Results, HarnessExampleResult{
+			ExampleID: example.ID,
+			Result:    failureResult,
+		})
+		traces = append(traces, buildGEPATrace(candidate, example, failureResult, 1.0))
 	}
 
-	if len(candidate.ParentIDs) > 0 {
-		cloned.ParentIDs = append([]string(nil), candidate.ParentIDs...)
-	}
-	if len(candidate.Demonstrations) > 0 {
-		cloned.Demonstrations = append([]core.Example(nil), candidate.Demonstrations...)
-	}
-	if candidate.Metadata != nil {
-		cloned.Metadata = make(map[string]interface{}, len(candidate.Metadata))
-		for key, value := range candidate.Metadata {
-			cloned.Metadata[key] = value
-		}
-	}
+	zeroFitness := &optimizers.MultiObjectiveFitness{}
+	candidate.Fitness = 0
 
-	return cloned
+	return &GEPACandidateEvaluation{
+		Candidate:    candidate,
+		Run:          run,
+		Fitness:      zeroFitness,
+		Traces:       traces,
+		AverageScore: 0,
+	}
 }

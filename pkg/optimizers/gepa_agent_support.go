@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
@@ -25,6 +26,13 @@ func (g *GEPA) BootstrapPopulationFromSeed(ctx context.Context, seed *GEPACandid
 	logger.Info(ctx, "Bootstrapping GEPA population from seed candidate: module=%s, population_size=%d",
 		seed.ModuleName,
 		g.config.PopulationSize)
+
+	g.state.mu.Lock()
+	if len(g.state.PopulationHistory) > 0 {
+		g.state.mu.Unlock()
+		return fmt.Errorf("optimizers: GEPA population has already been initialized")
+	}
+	g.state.mu.Unlock()
 
 	variations, err := g.generateInitialVariations(ctx, seed.Instruction, seedModuleName(seed), g.config.PopulationSize)
 	if err != nil {
@@ -63,8 +71,11 @@ func (g *GEPA) BootstrapPopulationFromSeed(ctx context.Context, seed *GEPACandid
 	}
 
 	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
+	if len(g.state.PopulationHistory) > 0 {
+		return fmt.Errorf("optimizers: GEPA population has already been initialized")
+	}
 	g.state.PopulationHistory = []*Population{population}
-	g.state.mu.Unlock()
 
 	return nil
 }
@@ -112,6 +123,9 @@ func (g *GEPA) candidateFromSeed(seed *GEPACandidate, instruction string, genera
 }
 
 func (g *GEPA) ensureCandidateMetrics(candidateID string) {
+	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
+
 	if _, exists := g.state.CandidateMetrics[candidateID]; exists {
 		return
 	}
@@ -125,6 +139,63 @@ func (g *GEPA) ensureCandidateMetrics(candidateID string) {
 		ErrorCounts:      make(map[string]int),
 		Metadata:         make(map[string]interface{}),
 	}
+}
+
+// RecordCandidateFitness updates the stored fitness/metadata for a candidate.
+func (s *GEPAState) RecordCandidateFitness(candidate *GEPACandidate, fitness *MultiObjectiveFitness, averageScore float64) {
+	if s == nil || candidate == nil || fitness == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	metrics, exists := s.CandidateMetrics[candidate.ID]
+	if !exists {
+		metrics = &CandidateMetrics{
+			ExecutionTimes: make([]time.Duration, 0),
+			ErrorCounts:    make(map[string]int),
+			Metadata:       make(map[string]interface{}),
+		}
+		s.CandidateMetrics[candidate.ID] = metrics
+	}
+	if metrics.Metadata == nil {
+		metrics.Metadata = make(map[string]interface{})
+	}
+
+	metrics.AverageFitness = candidate.Fitness
+	if candidate.Fitness > metrics.BestFitness {
+		metrics.BestFitness = candidate.Fitness
+	}
+	metrics.Metadata["multi_objective_fitness"] = fitness
+	metrics.Metadata["average_score"] = averageScore
+}
+
+// CloneCandidate returns a deep copy of the candidate so callers can evaluate
+// or mutate it without affecting the original lineage record.
+func CloneCandidate(candidate *GEPACandidate) *GEPACandidate {
+	if candidate == nil {
+		return nil
+	}
+
+	cloned := &GEPACandidate{
+		ID:          candidate.ID,
+		ModuleName:  candidate.ModuleName,
+		Instruction: candidate.Instruction,
+		Generation:  candidate.Generation,
+		Fitness:     candidate.Fitness,
+		CreatedAt:   candidate.CreatedAt,
+	}
+
+	if len(candidate.ParentIDs) > 0 {
+		cloned.ParentIDs = append([]string(nil), candidate.ParentIDs...)
+	}
+	if len(candidate.Demonstrations) > 0 {
+		cloned.Demonstrations = append([]core.Example(nil), candidate.Demonstrations...)
+	}
+	cloned.Metadata = cloneCandidateMetadata(candidate.Metadata)
+
+	return cloned
 }
 
 func seedModuleName(seed *GEPACandidate) string {
@@ -144,6 +215,8 @@ func cloneCandidateMetadata(source map[string]interface{}) map[string]interface{
 
 func mergeCandidateMetadata(extra map[string]interface{}, sources ...map[string]interface{}) map[string]interface{} {
 	merged := make(map[string]interface{})
+	// Earlier sources win for conflicting inherited keys; the explicit extra
+	// metadata for the new candidate overwrites inherited values last.
 	for _, source := range sources {
 		for key, value := range source {
 			if _, exists := merged[key]; !exists {

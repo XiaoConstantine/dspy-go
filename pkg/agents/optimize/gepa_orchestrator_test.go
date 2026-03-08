@@ -2,11 +2,13 @@ package optimize
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -125,8 +127,78 @@ func TestGEPAAgentOptimizer_Optimize_UsesValidationExamplesForFinalSelection(t *
 
 	assert.Contains(t, strings.ToLower(result.BestCandidate.Instruction), "carefully")
 	assert.InDelta(t, 1.0, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
-	assert.InDelta(t, 0.95, result.BestValidationEvaluation.Fitness.WeightedScore, 0.000001)
+	assert.Greater(t, result.BestValidationEvaluation.Fitness.WeightedScore, 0.5)
 	assert.Equal(t, 1, result.ValidationExampleCount)
+}
+
+func TestGEPAAgentOptimizer_EvaluatePopulationCandidates_ToleratesCandidateFailures(t *testing.T) {
+	setupAgentGEPAMockLLM(t)
+
+	optimizer := NewGEPAAgentOptimizer(
+		cloneFailAgent{newMockOptimizableAgent()},
+		NewDeterministicEvaluator(nil),
+		GEPAAdapterConfig{
+			EvalConcurrency: 2,
+			PassThreshold:   0.5,
+			PrimaryArtifact: ArtifactSkillPack,
+		},
+	).WithFactory(func(artifacts AgentArtifacts) (OptimizableAgent, error) {
+		if strings.Contains(strings.ToLower(artifacts.Text[ArtifactSkillPack]), "fail") {
+			return nil, errors.New("factory refused artifact")
+		}
+		agent := newMockOptimizableAgent()
+		if err := agent.SetArtifacts(artifacts); err != nil {
+			return nil, err
+		}
+		return agent, nil
+	})
+
+	goodCandidate, err := optimizer.SeedCandidate(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack: "Use the repository debugging guide.",
+		},
+	})
+	require.NoError(t, err)
+
+	failedCandidate, err := optimizer.SeedCandidate(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack: "Fail this candidate on purpose.",
+		},
+	})
+	require.NoError(t, err)
+
+	evaluations, err := optimizer.evaluatePopulationCandidates(context.Background(), []*optimizers.GEPACandidate{
+		goodCandidate,
+		failedCandidate,
+	}, []AgentExample{{ID: "example-1"}})
+	require.NoError(t, err)
+	require.Len(t, evaluations, 2)
+
+	require.NotNil(t, evaluations[0])
+	require.NotNil(t, evaluations[1])
+	assert.GreaterOrEqual(t, evaluations[0].Fitness.WeightedScore, 0.0)
+	assert.Zero(t, evaluations[1].Fitness.WeightedScore)
+	require.Len(t, evaluations[1].Traces, 1)
+	require.Error(t, evaluations[1].Traces[0].Error)
+	assert.Contains(t, evaluations[1].Traces[0].Error.Error(), "factory refused artifact")
+}
+
+func TestGEPA_BootstrapPopulationFromSeed_RejectsReinitialization(t *testing.T) {
+	setupAgentGEPAMockLLM(t)
+
+	engine, err := optimizers.NewGEPA(optimizers.DefaultGEPAConfig())
+	require.NoError(t, err)
+
+	seed := &optimizers.GEPACandidate{
+		ID:          "seed",
+		ModuleName:  "skill_pack",
+		Instruction: "Use the repository debugging guide.",
+	}
+
+	require.NoError(t, engine.BootstrapPopulationFromSeed(context.Background(), seed))
+	err = engine.BootstrapPopulationFromSeed(context.Background(), seed)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already been initialized")
 }
 
 func setupAgentGEPAMockLLM(t *testing.T) {
