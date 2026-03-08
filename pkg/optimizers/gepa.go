@@ -3638,10 +3638,10 @@ func (g *GEPA) createMutatedCandidate(original *GEPACandidate) *GEPACandidate {
 		Fitness:     0.0,
 		ParentIDs:   []string{original.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"mutation_type": "prefix_addition",
 			"parent_id":     original.ID,
-		},
+		}, original.Metadata),
 	}
 }
 
@@ -4032,11 +4032,11 @@ Offspring:`,
 		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
 		ParentIDs:   []string{parent1.ID, parent2.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type":  "semantic",
 			"parent1_fitness": parent1.Fitness,
 			"parent2_fitness": parent2.Fitness,
-		},
+		}, parent1.Metadata, parent2.Metadata),
 	}
 
 	child2 := &GEPACandidate{
@@ -4046,11 +4046,11 @@ Offspring:`,
 		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
 		ParentIDs:   []string{parent1.ID, parent2.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type":  "semantic",
 			"parent1_fitness": parent1.Fitness,
 			"parent2_fitness": parent2.Fitness,
-		},
+		}, parent1.Metadata, parent2.Metadata),
 	}
 
 	return child1, child2
@@ -4076,9 +4076,9 @@ func (g *GEPA) fallbackCrossover(parent1, parent2 *GEPACandidate) (*GEPACandidat
 		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
 		ParentIDs:   []string{parent1.ID, parent2.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type": "structural_fallback",
-		},
+		}, parent1.Metadata, parent2.Metadata),
 	}
 
 	child2 := &GEPACandidate{
@@ -4088,9 +4088,9 @@ func (g *GEPA) fallbackCrossover(parent1, parent2 *GEPACandidate) (*GEPACandidat
 		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
 		ParentIDs:   []string{parent1.ID, parent2.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type": "structural_fallback",
-		},
+		}, parent1.Metadata, parent2.Metadata),
 	}
 
 	return child1, child2
@@ -4176,10 +4176,10 @@ Generate a mutated version that maintains the core intent while applying the spe
 		Generation:  candidate.Generation + 1,
 		ParentIDs:   []string{candidate.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"mutation_type":  mutationType,
 			"parent_fitness": candidate.Fitness,
-		},
+		}, candidate.Metadata),
 	}
 }
 
@@ -4265,19 +4265,16 @@ func (g *GEPA) fallbackMutation(candidate *GEPACandidate) *GEPACandidate {
 		Generation:  candidate.Generation + 1,
 		ParentIDs:   []string{candidate.ID},
 		CreatedAt:   time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"mutation_type":  "fallback",
 			"parent_fitness": candidate.Fitness,
-		},
+		}, candidate.Metadata),
 	}
 }
 
 // copyCandidate creates a deep copy of a candidate.
 func (g *GEPA) copyCandidate(original *GEPACandidate) *GEPACandidate {
-	metadata := make(map[string]interface{})
-	for k, v := range original.Metadata {
-		metadata[k] = v
-	}
+	metadata := cloneCandidateMetadata(original.Metadata)
 
 	parentIDs := make([]string, len(original.ParentIDs))
 	copy(parentIDs, original.ParentIDs)
