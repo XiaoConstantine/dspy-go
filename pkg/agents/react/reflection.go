@@ -180,9 +180,9 @@ func (sr *SelfReflector) reflectOnStrategy(ctx context.Context, record Execution
 		if count > 3 {
 			logger.Debug(ctx, "Detected repeated use of tool %s (%d times)", tool, count)
 			return &Reflection{
-				Type:       ReflectionTypeStrategy,
-				Insight:    fmt.Sprintf("Tool '%s' was used %d times, suggesting potential inefficiency", tool, count),
-				Confidence: 0.7,
+				Type:           ReflectionTypeStrategy,
+				Insight:        fmt.Sprintf("Tool '%s' was used %d times, suggesting potential inefficiency", tool, count),
+				Confidence:     0.7,
 				Recommendation: "Consider caching results or using a more powerful tool for complex queries",
 				Evidence: []string{
 					fmt.Sprintf("Tool used %d times in single execution", count),
@@ -196,9 +196,9 @@ func (sr *SelfReflector) reflectOnStrategy(ctx context.Context, record Execution
 	// Analyze success patterns
 	if record.Success && len(record.Actions) < 3 {
 		return &Reflection{
-			Type:       ReflectionTypeStrategy,
-			Insight:    "Task completed efficiently with minimal tool usage",
-			Confidence: 0.9,
+			Type:           ReflectionTypeStrategy,
+			Insight:        "Task completed efficiently with minimal tool usage",
+			Confidence:     0.9,
 			Recommendation: "Current strategy is effective for this task type",
 			Evidence: []string{
 				fmt.Sprintf("Completed in %d actions", len(record.Actions)),
@@ -230,9 +230,9 @@ func (sr *SelfReflector) reflectOnPerformance(ctx context.Context, record Execut
 	// Check if performance is degrading
 	if successRate < sr.successRateThreshold {
 		return &Reflection{
-			Type:       ReflectionTypePerformance,
-			Insight:    fmt.Sprintf("Success rate is below threshold: %.2f%%", successRate*100),
-			Confidence: 0.85,
+			Type:           ReflectionTypePerformance,
+			Insight:        fmt.Sprintf("Success rate is below threshold: %.2f%%", successRate*100),
+			Confidence:     0.85,
 			Recommendation: "increase_max_iterations",
 			Evidence: []string{
 				fmt.Sprintf("Success rate: %.2f%%", successRate*100),
@@ -245,9 +245,9 @@ func (sr *SelfReflector) reflectOnPerformance(ctx context.Context, record Execut
 	// Check iteration efficiency
 	if averageIterations > 7 {
 		return &Reflection{
-			Type:       ReflectionTypePerformance,
-			Insight:    "Average iteration count is high, suggesting complex problem solving",
-			Confidence: 0.75,
+			Type:           ReflectionTypePerformance,
+			Insight:        "Average iteration count is high, suggesting complex problem solving",
+			Confidence:     0.75,
 			Recommendation: "use_rewoo_for_structured_tasks",
 			Evidence: []string{
 				fmt.Sprintf("Average iterations: %.2f", averageIterations),
@@ -278,10 +278,14 @@ func (sr *SelfReflector) reflectOnLearning(ctx context.Context, record Execution
 
 		// Thread-safe access to patterns map
 		sr.mu.Lock()
+		var occurrences int
+		var successRate float64
 		if pattern, exists := sr.patterns[patternKey]; exists {
 			pattern.Occurrences++
 			pattern.LastSeen = time.Now()
 			pattern.SuccessRate = (pattern.SuccessRate*float64(pattern.Occurrences-1) + 1.0) / float64(pattern.Occurrences)
+			occurrences = pattern.Occurrences
+			successRate = pattern.SuccessRate
 		} else {
 			sr.patterns[patternKey] = &Pattern{
 				Name:        patternKey,
@@ -290,20 +294,20 @@ func (sr *SelfReflector) reflectOnLearning(ctx context.Context, record Execution
 				LastSeen:    time.Now(),
 				Context:     record.Input,
 			}
+			occurrences = 1
+			successRate = 1.0
 		}
-
-		occurrences := sr.patterns[patternKey].Occurrences
 		sr.mu.Unlock()
 
 		if occurrences > 2 {
 			return &Reflection{
-				Type:       ReflectionTypeLearning,
-				Insight:    fmt.Sprintf("Identified successful pattern: %s", patternKey),
-				Confidence: 0.8,
+				Type:           ReflectionTypeLearning,
+				Insight:        fmt.Sprintf("Identified successful pattern: %s", patternKey),
+				Confidence:     0.8,
 				Recommendation: "Cache this pattern for similar tasks",
 				Evidence: []string{
-					fmt.Sprintf("Pattern seen %d times", sr.patterns[patternKey].Occurrences),
-					fmt.Sprintf("Success rate: %.2f%%", sr.patterns[patternKey].SuccessRate*100),
+					fmt.Sprintf("Pattern seen %d times", occurrences),
+					fmt.Sprintf("Success rate: %.2f%%", successRate*100),
 				},
 				Timestamp: time.Now(),
 			}
@@ -330,12 +334,12 @@ func (sr *SelfReflector) reflectOnError(ctx context.Context, record ExecutionRec
 	// Check if this is a recurring error
 	if errorCount > 2 {
 		return &Reflection{
-			Type:       ReflectionTypeError,
-			Insight:    fmt.Sprintf("Recurring error detected: %s", errorStr),
-			Confidence: 0.9,
+			Type:           ReflectionTypeError,
+			Insight:        fmt.Sprintf("Recurring error detected: %s", errorStr),
+			Confidence:     0.9,
 			Recommendation: "Add specific error handling or retry logic",
 			Evidence: []string{
-				fmt.Sprintf("Error occurred %d times", sr.metrics.ErrorPatterns[errorStr]),
+				fmt.Sprintf("Error occurred %d times", errorCount),
 				fmt.Sprintf("Last occurrence: %v", record.Timestamp),
 			},
 			Timestamp: time.Now(),
@@ -352,9 +356,9 @@ func (sr *SelfReflector) reflectOnError(ctx context.Context, record ExecutionRec
 
 	if len(failedTools) > 0 {
 		return &Reflection{
-			Type:       ReflectionTypeError,
-			Insight:    fmt.Sprintf("Tools failed during execution: %v", failedTools),
-			Confidence: 0.75,
+			Type:           ReflectionTypeError,
+			Insight:        fmt.Sprintf("Tools failed during execution: %v", failedTools),
+			Confidence:     0.75,
 			Recommendation: "Consider alternative tools or improve error handling",
 			Evidence: []string{
 				fmt.Sprintf("Failed tools: %v", failedTools),
@@ -490,7 +494,27 @@ func (sr *SelfReflector) GetTopReflections(n int) []Reflection {
 
 // GetMetrics returns current performance metrics.
 func (sr *SelfReflector) GetMetrics() *PerformanceMetrics {
-	return sr.metrics
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+
+	toolUsageStats := make(map[string]*ToolStats, len(sr.metrics.ToolUsageStats))
+	for key, value := range sr.metrics.ToolUsageStats {
+		if value == nil {
+			continue
+		}
+		statsCopy := *value
+		toolUsageStats[key] = &statsCopy
+	}
+
+	errorPatterns := make(map[string]int, len(sr.metrics.ErrorPatterns))
+	for key, value := range sr.metrics.ErrorPatterns {
+		errorPatterns[key] = value
+	}
+
+	metricsCopy := *sr.metrics
+	metricsCopy.ToolUsageStats = toolUsageStats
+	metricsCopy.ErrorPatterns = errorPatterns
+	return &metricsCopy
 }
 
 // GetPatterns returns identified patterns (thread-safe).
@@ -501,7 +525,11 @@ func (sr *SelfReflector) GetPatterns() map[string]*Pattern {
 	// Return a copy of the patterns map to avoid concurrent access
 	patterns := make(map[string]*Pattern)
 	for k, v := range sr.patterns {
-		patterns[k] = v
+		if v == nil {
+			continue
+		}
+		patternCopy := *v
+		patterns[k] = &patternCopy
 	}
 	return patterns
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -22,7 +23,7 @@ import (
 type ReAct struct {
 	core.BaseModule
 	Predict   *Predict
-	Extract   *ChainOfThought                // Fallback extraction module for when loop ends without Finish
+	Extract   *ChainOfThought // Fallback extraction module for when loop ends without Finish
 	Registry  *tools.InMemoryToolRegistry
 	MaxIters  int
 	XMLConfig *interceptors.XMLConfig // Optional XML config for enhanced parsing
@@ -134,10 +135,22 @@ func (r *ReAct) SetLLM(llm core.LLM) {
 
 // Process executes the ReAct loop.
 func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	outputs, _, err := r.ProcessWithTrace(ctx, inputs, opts...)
+	return outputs, err
+}
+
+// ProcessWithTrace executes the ReAct loop and returns a structured execution trace.
+func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, *ReActTrace, error) {
 	ctx, span := core.StartSpan(ctx, "ReAct")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
 	span.WithAnnotation("initial_inputs", inputs)
+	startTime := time.Now()
+
+	trace := &ReActTrace{
+		Input: core.ShallowCopyMap(inputs),
+		Steps: make([]ReActTraceStep, 0, r.MaxIters),
+	}
 
 	// Create working state that we'll update through iterations
 	state := make(map[string]interface{})
@@ -167,16 +180,27 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		if err != nil {
 			logger.Error(ctx, "Prediction error in iteration %d: %v", i+1, err)
 			span.WithError(err)
-			return nil, fmt.Errorf("error in Predict step (iteration %d): %w", i, err)
+			trace.ProcessingTime = time.Since(startTime)
+			trace.TerminationCause = "predict_error"
+			trace.Error = err.Error()
+			return nil, trace, fmt.Errorf("error in Predict step (iteration %d): %w", i, err)
 		}
 
 		logger.Debug(ctx, "Received prediction in iteration %d: %v", i+1, prediction)
+		step := ReActTraceStep{
+			Index:   i + 1,
+			Thought: stringifyPredictionField(prediction, "thought"),
+		}
 
 		// Extract and verify action field
 		actionField, ok := prediction["action"]
 		if !ok {
 			logger.Error(ctx, "Missing action field in iteration %d", i+1)
 			state["observation"] = "Error: Prediction was missing the 'action' field."
+			step.ActionRaw = "MISSING"
+			step.Observation = state["observation"].(string)
+			step.Error = step.Observation
+			trace.Steps = append(trace.Steps, step)
 
 			// Update conversation context for next iteration
 			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: MISSING\nObservation: Error: missing action field\n",
@@ -188,12 +212,16 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		// Process action based on type - handle both structured and string formats
 		var parsedToolName string
 		var parsedArgsMap map[string]interface{}
+		step.ActionRaw = stringifyActionField(actionField)
 
 		// With XML-by-default, action field can be structured or string
 		parsedToolName, parsedArgsMap, err = r.parseActionField(ctx, actionField)
 		if err != nil {
 			logger.Error(ctx, "Action parsing failed in iteration %d: %v", i+1, err)
 			state["observation"] = fmt.Sprintf("Error: Action parsing failed: %s", err.Error())
+			step.Observation = state["observation"].(string)
+			step.Error = err.Error()
+			trace.Steps = append(trace.Steps, step)
 
 			// Update conversation context
 			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %v\nObservation: Error: action parsing failed\n",
@@ -201,20 +229,32 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 
 			continue
 		}
+		step.Tool = parsedToolName
+		step.Arguments = core.ShallowCopyMap(parsedArgsMap)
 
 		// Check if this is a finish action
 		if strings.ToLower(parsedToolName) == "finish" {
 			logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
-			return prediction, nil // End with success
+			step.Success = true
+			trace.Steps = append(trace.Steps, step)
+			trace.Output = core.ShallowCopyMap(prediction)
+			trace.ProcessingTime = time.Since(startTime)
+			trace.TerminationCause = "finish"
+			return prediction, trace, nil // End with success
 		}
 
 		// Execute the tool
 		logger.Info(ctx, "Executing tool '%s' in iteration %d", parsedToolName, i+1)
+		toolStart := time.Now()
 		toolResult, err := r.executeToolByName(ctx, parsedToolName, parsedArgsMap)
+		step.Duration = time.Since(toolStart)
 		if err != nil {
 			logger.Error(ctx, "Tool execution failed in iteration %d: %v", i+1, err)
 			errorObservation := fmt.Sprintf("Error executing tool '%s': %s", parsedToolName, err.Error())
 			state["observation"] = errorObservation
+			step.Observation = errorObservation
+			step.Error = err.Error()
+			trace.Steps = append(trace.Steps, step)
 
 			// Update conversation context
 			conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %v\nObservation: %s\n",
@@ -227,6 +267,9 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 		observation := formatToolResult(toolResult)
 		state["observation"] = observation
 		logger.Info(ctx, "Tool executed successfully in iteration %d, observation set", i+1)
+		step.Observation = observation
+		step.Success = true
+		trace.Steps = append(trace.Steps, step)
 
 		// Update conversation context for next iteration
 		conversationContext += fmt.Sprintf("\nIteration %d:\nThought: %s\nAction: %v\nObservation: %s\n",
@@ -237,7 +280,15 @@ func (r *ReAct) Process(ctx context.Context, inputs map[string]any, opts ...core
 	// Use fallback extraction to produce an answer from the gathered trajectory
 	logger.Warn(ctx, "Max iterations (%d) reached without 'Finish' action, using fallback extraction", r.MaxIters)
 
-	return r.extractFromTrajectory(ctx, inputs, conversationContext, opts...)
+	result, err := r.extractFromTrajectory(ctx, inputs, conversationContext, opts...)
+	trace.ProcessingTime = time.Since(startTime)
+	trace.TerminationCause = "max_iterations"
+	if err != nil {
+		trace.Error = err.Error()
+		return nil, trace, err
+	}
+	trace.Output = core.ShallowCopyMap(result)
+	return result, trace, nil
 }
 
 // extractFromTrajectory uses the Extract module to produce an answer from the accumulated trajectory.
@@ -352,6 +403,40 @@ func (r *ReAct) Clone() core.Module {
 		MaxIters:   r.MaxIters,
 		XMLConfig:  r.XMLConfig, // Share the XML config (it's read-only)
 	}
+}
+
+// GetSignature returns the live ReAct prediction signature.
+func (r *ReAct) GetSignature() core.Signature {
+	return r.Predict.GetSignature()
+}
+
+// SetSignature updates the ReAct signature used by the Predict module.
+func (r *ReAct) SetSignature(signature core.Signature) {
+	r.BaseModule.SetSignature(signature)
+	r.Predict.SetSignature(signature)
+}
+
+func stringifyPredictionField(prediction map[string]interface{}, key string) string {
+	if prediction == nil {
+		return ""
+	}
+	value, ok := prediction[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
+func stringifyActionField(actionField interface{}) string {
+	switch action := actionField.(type) {
+	case string:
+		return strings.TrimSpace(action)
+	case map[string]interface{}:
+		if data, err := json.Marshal(action); err == nil {
+			return string(data)
+		}
+	}
+	return fmt.Sprint(actionField)
 }
 
 // appendReActFields adds the standard ReAct fields (thought, action, observation)

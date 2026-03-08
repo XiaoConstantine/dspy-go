@@ -2,10 +2,12 @@ package react
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -17,11 +19,11 @@ import (
 
 func TestNewReActAgent(t *testing.T) {
 	tests := []struct {
-		name     string
-		id       string
+		name      string
+		id        string
 		agentName string
-		opts     []Option
-		expected func(*ReActAgent) bool
+		opts      []Option
+		expected  func(*ReActAgent) bool
 	}{
 		{
 			name:      "default configuration",
@@ -159,6 +161,12 @@ result: Task completed successfully
 	history := agent.GetExecutionHistory()
 	assert.Len(t, history, 1)
 	assert.True(t, history[0].Success)
+	require.Len(t, history[0].Actions, 2)
+	require.NotNil(t, history[0].Trace)
+	assert.Len(t, history[0].Trace.Steps, 2)
+	assert.Equal(t, "test_tool", history[0].Actions[0].Tool)
+	assert.Contains(t, history[0].Actions[0].Observation, "Tool executed successfully")
+	assert.Equal(t, "finish", history[0].Actions[1].Tool)
 }
 
 func TestReActAgent_Execute_WithReflection(t *testing.T) {
@@ -199,6 +207,133 @@ result: Task completed
 	history := agent.GetExecutionHistory()
 	assert.Len(t, history, 1)
 	assert.True(t, history[0].Success)
+}
+
+func TestReActAgent_SetArtifacts_InjectsPromptSections(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	resp := &core.LLMResponse{Content: `
+thought: I can finish directly
+action: <action><tool_name>Finish</tool_name></action>
+result: complete
+`}
+
+	mockLLM.On(
+		"Generate",
+		mock.Anything,
+		mock.MatchedBy(func(prompt string) bool {
+			return strings.Contains(prompt, "SKILL PACK") &&
+				strings.Contains(prompt, "<agent_artifact key=\"skill_pack\">") &&
+				strings.Contains(prompt, "Prefer concise repo-aware reasoning.") &&
+				strings.Contains(prompt, "TOOL POLICY") &&
+				strings.Contains(prompt, "Avoid unnecessary tool calls.") &&
+				strings.Contains(prompt, "SELF-REFLECTION GUIDANCE") &&
+				strings.Contains(prompt, "Double-check the final answer before finishing.") &&
+				strings.Contains(prompt, artifactInstructionPreamble)
+		}),
+		mock.AnythingOfType("[]core.GenerateOption"),
+	).Return(resp, nil).Once()
+
+	agent := NewReActAgent("test-agent", "Test Agent")
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+	)
+
+	require.NoError(t, agent.Initialize(mockLLM, signature))
+	require.NoError(t, agent.SetArtifacts(optimize.AgentArtifacts{
+		Text: map[optimize.ArtifactKey]string{
+			optimize.ArtifactSkillPack:        "Prefer concise repo-aware reasoning.",
+			optimize.ArtifactToolPolicy:       "Avoid unnecessary tool calls.",
+			optimize.ArtifactReflectionPrompt: "Double-check the final answer before finishing.",
+		},
+	}))
+
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "Summarize the task"})
+	require.NoError(t, err)
+
+	artifacts := agent.GetArtifacts()
+	assert.Equal(t, "Prefer concise repo-aware reasoning.", artifacts.Text[optimize.ArtifactSkillPack])
+	assert.Equal(t, "Avoid unnecessary tool calls.", artifacts.Text[optimize.ArtifactToolPolicy])
+}
+
+func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+	)
+
+	agent := NewReActAgent("test-agent", "Test Agent")
+	require.NoError(t, agent.Initialize(mockLLM, signature))
+	require.NoError(t, agent.SetArtifacts(optimize.AgentArtifacts{
+		Text: map[optimize.ArtifactKey]string{
+			optimize.ArtifactSkillPack:  "Use focused task decomposition.",
+			optimize.ArtifactToolPolicy: "Prefer deterministic tools first.",
+		},
+	}))
+
+	clonedAgent, err := agent.Clone()
+	require.NoError(t, err)
+
+	cloned, ok := clonedAgent.(*ReActAgent)
+	require.True(t, ok)
+	assert.NotSame(t, agent, cloned)
+	assert.NotNil(t, cloned.module)
+	assert.Equal(t, agent.GetArtifacts(), cloned.GetArtifacts())
+	assert.Empty(t, cloned.GetExecutionHistory())
+	assert.NotSame(t, agent.GetMemory(), cloned.GetMemory())
+}
+
+func TestReActAgent_Execute_HybridMode_PreservesReActTrace(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	mockTool := testutil.NewMockTool("lookup")
+
+	mockTool.On("Name").Return("lookup")
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	mockTool.On("Execute", mock.Anything, mock.AnythingOfType("map[string]interface {}")).Return(
+		core.ToolResult{Data: "lookup result"}, nil,
+	)
+
+	resp1 := &core.LLMResponse{Content: `
+thought: I should use the lookup tool
+action: <action><tool_name>lookup</tool_name><arguments><arg key="query">test</arg></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought: I have enough information
+action: <action><tool_name>Finish</tool_name></action>
+result: done
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	agent := NewReActAgent("test-agent", "Test Agent", WithExecutionMode(ModeHybrid))
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+	)
+
+	require.NoError(t, agent.Initialize(mockLLM, signature))
+	require.NoError(t, agent.RegisterTool(mockTool))
+
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "short task"})
+	require.NoError(t, err)
+
+	history := agent.GetExecutionHistory()
+	require.Len(t, history, 1)
+	require.NotNil(t, history[0].Trace)
+	assert.Len(t, history[0].Trace.Steps, 2)
+	assert.Len(t, history[0].Actions, 2)
+}
+
+func TestReActAgent_UpdateAvgProcessingTime_UsesExpectedEMA(t *testing.T) {
+	agent := NewReActAgent("test-agent", "Test Agent")
+	agent.totalExecutions = 2
+	agent.avgProcessingTime = 100 * time.Millisecond
+
+	updated := agent.updateAvgProcessingTime(200 * time.Millisecond)
+
+	assert.Equal(t, 110*time.Millisecond, updated)
 }
 
 func TestReActAgent_Execute_Timeout(t *testing.T) {
