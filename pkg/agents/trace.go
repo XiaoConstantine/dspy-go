@@ -85,10 +85,10 @@ func (t *ExecutionTrace) Clone() *ExecutionTrace {
 		TerminationCause: t.TerminationCause,
 	}
 
-	if len(t.Steps) > 0 {
-		cloned.Steps = make([]TraceStep, 0, len(t.Steps))
-		for _, step := range t.Steps {
-			cloned.Steps = append(cloned.Steps, step.Clone())
+	if t.Steps != nil {
+		cloned.Steps = make([]TraceStep, len(t.Steps))
+		for i, step := range t.Steps {
+			cloned.Steps[i] = step.Clone()
 		}
 	}
 
