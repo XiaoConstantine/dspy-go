@@ -1046,6 +1046,20 @@ func (r *ReActAgent) GetExecutionHistory() []ExecutionRecord {
 	return history
 }
 
+// LastExecutionTrace returns a copy of the most recent execution trace, if available.
+func (r *ReActAgent) LastExecutionTrace() *agents.ExecutionTrace {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := len(r.executionHistory) - 1; i >= 0; i-- {
+		if trace := r.executionHistory[i].Trace; trace != nil {
+			return trace.Clone()
+		}
+	}
+
+	return nil
+}
+
 // Context Engineering helper methods
 
 // buildOptimizedContext creates highly optimized context using all Manus patterns.

@@ -1,6 +1,10 @@
 package agents
 
-import "time"
+import (
+	"time"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
+)
 
 // TraceStatus captures the high-level outcome of an agent trace.
 type TraceStatus string
@@ -41,4 +45,52 @@ type ExecutionTrace struct {
 	ToolUsageCount   map[string]int
 	ContextMetadata  map[string]interface{}
 	TerminationCause string
+}
+
+// Clone returns a deep copy of the trace step so callers can safely retain it.
+func (s TraceStep) Clone() TraceStep {
+	return TraceStep{
+		Index:       s.Index,
+		Thought:     s.Thought,
+		ActionRaw:   s.ActionRaw,
+		Tool:        s.Tool,
+		Arguments:   core.ShallowCopyMap(s.Arguments),
+		Observation: s.Observation,
+		Duration:    s.Duration,
+		Success:     s.Success,
+		Error:       s.Error,
+	}
+}
+
+// Clone returns a deep copy of the execution trace.
+func (t *ExecutionTrace) Clone() *ExecutionTrace {
+	if t == nil {
+		return nil
+	}
+
+	cloned := &ExecutionTrace{
+		AgentID:          t.AgentID,
+		AgentType:        t.AgentType,
+		Task:             t.Task,
+		Input:            core.ShallowCopyMap(t.Input),
+		Output:           core.ShallowCopyMap(t.Output),
+		Status:           t.Status,
+		Error:            t.Error,
+		StartedAt:        t.StartedAt,
+		CompletedAt:      t.CompletedAt,
+		ProcessingTime:   t.ProcessingTime,
+		TokenUsage:       core.ShallowCopyMap(t.TokenUsage),
+		ToolUsageCount:   core.ShallowCopyMap(t.ToolUsageCount),
+		ContextMetadata:  core.ShallowCopyMap(t.ContextMetadata),
+		TerminationCause: t.TerminationCause,
+	}
+
+	if len(t.Steps) > 0 {
+		cloned.Steps = make([]TraceStep, 0, len(t.Steps))
+		for _, step := range t.Steps {
+			cloned.Steps = append(cloned.Steps, step.Clone())
+		}
+	}
+
+	return cloned
 }
