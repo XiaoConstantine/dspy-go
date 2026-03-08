@@ -2693,60 +2693,65 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 
 	// Install interceptors on the program
 	optimizedProgram := g.installInterceptors(program)
+	err := RunEvolutionLoop(ctx, EvolutionLoopConfig{
+		MaxGenerations: g.config.MaxGenerations,
+		ReflectionFreq: g.config.ReflectionFreq,
+		PhaseName:      "GEPA Evolution",
+	}, EvolutionLoopHooks{
+		Initialize: func(ctx context.Context) error {
+			if err := g.initializePopulation(ctx, optimizedProgram); err != nil {
+				return fmt.Errorf("failed to initialize population: %w", err)
+			}
+			return nil
+		},
+		BeforeGeneration: func(ctx context.Context, generation int) error {
+			g.state.CurrentGeneration = generation
+			logger.Info(ctx, "Starting generation %d", generation)
+			return nil
+		},
+		EvaluateGeneration: func(ctx context.Context, generation int) error {
+			multiObjFitnessMap, err := g.evaluatePopulation(ctx, optimizedProgram, dataset, metric)
+			if err != nil {
+				return fmt.Errorf("evaluation failed at generation %d: %w", generation, err)
+			}
 
-	// Initialize population
-	err := g.initializePopulation(ctx, optimizedProgram)
+			g.setCurrentMultiObjectiveFitnessMap(multiObjFitnessMap)
+			return nil
+		},
+		AfterEvaluation: func(ctx context.Context, generation int) error {
+			currentPop := g.getCurrentPopulation()
+			if currentPop != nil {
+				g.state.UpdateParetoArchive(currentPop.Candidates, g.getCurrentMultiObjectiveFitnessMap())
+			}
+			return nil
+		},
+		Reflect: func(ctx context.Context, generation int) error {
+			return g.performReflection(ctx, generation)
+		},
+		OnNonFatalError: func(ctx context.Context, stage string, generation int, err error) {
+			logger.Error(ctx, "%s failed at generation %d: %v", stage, generation, err)
+		},
+		HasConverged: func(ctx context.Context, generation int) bool {
+			if g.hasConverged() {
+				logger.Info(ctx, "Convergence achieved at generation %d", generation)
+				return true
+			}
+			return false
+		},
+		Evolve: func(ctx context.Context, generation int) error {
+			if err := g.evolvePopulation(ctx); err != nil {
+				return fmt.Errorf("evolution failed at generation %d: %w", generation, err)
+			}
+			return nil
+		},
+		ReportProgress: func(phase string, current, total int) {
+			if g.progressReporter != nil {
+				g.progressReporter.Report(phase, current, total)
+			}
+		},
+	})
 	if err != nil {
-		return program, fmt.Errorf("failed to initialize population: %w", err)
-	}
-
-	// Main evolutionary loop
-	for generation := 0; generation < g.config.MaxGenerations; generation++ {
-		g.state.CurrentGeneration = generation
-
-		logger.Info(ctx, "Starting generation %d", generation)
-
-		// Evaluate current population and get multi-objective fitness map
-		multiObjFitnessMap, err := g.evaluatePopulation(ctx, optimizedProgram, dataset, metric)
-		if err != nil {
-			return program, fmt.Errorf("evaluation failed at generation %d: %w", generation, err)
-		}
-
-		// Store multi-objective fitness map for this generation
-		g.setCurrentMultiObjectiveFitnessMap(multiObjFitnessMap)
-
-		// Update Pareto archive with elite solutions
-		currentPop := g.getCurrentPopulation()
-		if currentPop != nil {
-			g.state.UpdateParetoArchive(currentPop.Candidates, multiObjFitnessMap)
-		}
-
-		// Periodic reflection
-		if generation%g.config.ReflectionFreq == 0 && generation > 0 {
-			err = g.performReflection(ctx, generation)
-			if err != nil {
-				logger.Error(ctx, "Reflection failed at generation %d: %v", generation, err)
-			}
-		}
-
-		// Check convergence
-		if g.hasConverged() {
-			logger.Info(ctx, "Convergence achieved at generation %d", generation)
-			break
-		}
-
-		// Create next generation (skip for last generation)
-		if generation < g.config.MaxGenerations-1 {
-			err = g.evolvePopulation(ctx)
-			if err != nil {
-				return program, fmt.Errorf("evolution failed at generation %d: %w", generation, err)
-			}
-		}
-
-		// Report progress
-		if g.progressReporter != nil {
-			g.progressReporter.Report("GEPA Evolution", generation+1, g.config.MaxGenerations)
-		}
+		return program, err
 	}
 
 	// Apply best candidate to program
@@ -5371,7 +5376,6 @@ func (g *GEPA) batchSelfCritique(ctx context.Context, candidates []*GEPACandidat
 	return results, nil
 }
 
-
 // performIndividualReflection performs reflection on individual candidates.
 func (g *GEPA) performIndividualReflection(ctx context.Context) error {
 	if len(g.state.PopulationHistory) == 0 {
@@ -5409,8 +5413,6 @@ func (g *GEPA) performIndividualReflection(ctx context.Context) error {
 	return nil
 }
 
-
-
 // Supporting structures for multi-level reflection
 
 type IndividualReflectionInsights struct {
@@ -5421,7 +5423,6 @@ type IndividualReflectionInsights struct {
 	ImprovementThemes      []string       `json:"improvement_themes"`
 	ConfidenceDistribution map[string]int `json:"confidence_distribution"`
 }
-
 
 // Implementation of helper methods for multi-level reflection
 
@@ -5723,17 +5724,7 @@ func (g *GEPA) analyzePopulationPatterns() *PopulationInsights {
 	return insights
 }
 
-
-
-
-
 // Placeholder implementations for remaining methods (to be expanded as needed)
-
-
-
-
-
-
 
 func (g *GEPA) extractCommonPatterns(candidates []*GEPACandidate) []string {
 	patterns := make([]string, 0)
