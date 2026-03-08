@@ -457,17 +457,26 @@ func NewMockTool(name string) *MockTool {
 }
 
 func (m *MockTool) Name() string {
+	if !m.hasExpectation("Name") {
+		return m.name
+	}
 	args := m.Called()
 	return args.String(0)
 }
 
 func (m *MockTool) Description() string {
+	if !m.hasExpectation("Description") {
+		return m.description
+	}
 	args := m.Called()
 	return args.String(0)
 }
 
 // Metadata implements the Tool interface.
 func (m *MockTool) Metadata() *core.ToolMetadata {
+	if !m.hasExpectation("Metadata") {
+		return m.metadata
+	}
 	args := m.Called()
 	if ret := args.Get(0); ret != nil {
 		return ret.(*core.ToolMetadata)
@@ -519,8 +528,20 @@ func (m *MockTool) Validate(params map[string]interface{}) error {
 }
 
 func (m *MockTool) InputSchema() models.InputSchema {
+	if !m.hasExpectation("InputSchema") {
+		return m.metadata.InputSchema
+	}
 	args := m.Called()
 	return args.Get(0).(models.InputSchema)
+}
+
+func (m *MockTool) hasExpectation(method string) bool {
+	for _, call := range m.ExpectedCalls {
+		if call.Method == method {
+			return true
+		}
+	}
+	return false
 }
 
 // Ensure MockTool implements core.Tool.

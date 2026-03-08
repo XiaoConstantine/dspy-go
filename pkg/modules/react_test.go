@@ -27,9 +27,9 @@ func TestReAct(t *testing.T) {
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
 			"question": {
-				Type: "string",
+				Type:        "string",
 				Description: "The question to ask the tool",
-				Required: true,
+				Required:    true,
 			},
 		},
 	})
@@ -93,6 +93,75 @@ func TestReAct(t *testing.T) {
 	assert.Equal(t, "Predict (Predict)", spans[3].Operation)
 }
 
+func TestReAct_ProcessWithTrace(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	mockTool := testutil.NewMockTool("test_tool")
+	mockTool.On("Name").Return("test_tool")
+	mockTool.On("Description").Return("A test tool for ReAct trace testing")
+	mockTool.On("InputSchema").Return(models.InputSchema{
+		Type: "object",
+		Properties: map[string]models.ParameterSchema{
+			"question": {
+				Type:        "string",
+				Description: "The question to ask the tool",
+				Required:    true,
+			},
+		},
+	})
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	expectedArgs := map[string]interface{}{"question": "What is the meaning of life?"}
+	mockTool.On("Execute", mock.Anything, expectedArgs).Return(core.ToolResult{Data: "Tool execution result"}, nil)
+
+	resp1 := &core.LLMResponse{Content: `
+thought:
+I should use the tool
+
+action:
+<action><tool_name>test_tool</tool_name><arguments><arg key="question">What is the meaning of life?</arg></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought:
+I have the answer
+
+action:
+<action><tool_name>Finish</tool_name></action>
+
+answer:
+42
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(mockTool)
+	require.NoError(t, err)
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	react := NewReAct(signature, registry, 2)
+	react.SetLLM(mockLLM)
+
+	outputs, trace, err := react.ProcessWithTrace(context.Background(), map[string]any{
+		"question": "What is the meaning of life?",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, outputs)
+	require.NotNil(t, trace)
+	assert.Equal(t, "42", outputs["answer"])
+	assert.Equal(t, "finish", trace.TerminationCause)
+	require.Len(t, trace.Steps, 2)
+	assert.Equal(t, "test_tool", trace.Steps[0].Tool)
+	assert.Equal(t, expectedArgs, trace.Steps[0].Arguments)
+	assert.True(t, trace.Steps[0].Success)
+	assert.Contains(t, trace.Steps[0].Observation, "Tool execution result")
+	assert.Equal(t, "finish", trace.Steps[1].Tool)
+	assert.True(t, trace.Steps[1].Success)
+}
+
 func TestReAct_WithErroredTool(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
 
@@ -126,9 +195,9 @@ func TestReAct_WithErroredTool(t *testing.T) {
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
 			"location": {
-				Type: "string",
+				Type:        "string",
 				Description: "The location to check weather for",
-				Required: true,
+				Required:    true,
 			},
 		},
 	})
@@ -371,9 +440,9 @@ func TestReAct_ToolValidationError(t *testing.T) {
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
 			"location": {
-				Type: "string",
+				Type:        "string",
 				Description: "Location to check weather for",
-				Required: true,
+				Required:    true,
 			},
 		},
 	})
@@ -438,9 +507,9 @@ func TestReAct_Clone(t *testing.T) {
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
 			"input": {
-				Type: "string",
+				Type:        "string",
 				Description: "Test input parameter",
-				Required: false,
+				Required:    false,
 			},
 		},
 	})
@@ -1016,8 +1085,8 @@ func main() {
 </action>`,
 		},
 		{
-			name: "Action without closing tag - return from start",
-			input: `<action><tool_name>incomplete`,
+			name:     "Action without closing tag - return from start",
+			input:    `<action><tool_name>incomplete`,
 			expected: `<action><tool_name>incomplete`,
 		},
 	}

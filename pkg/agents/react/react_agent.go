@@ -10,6 +10,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
 	contextmgmt "github.com/XiaoConstantine/dspy-go/pkg/agents/context"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -62,8 +63,8 @@ type ReActAgentConfig struct {
 	EnablePlanning   bool
 
 	// Tool settings
-	ToolTimeout   time.Duration
-	ParallelTools bool
+	ToolTimeout    time.Duration
+	ParallelTools  bool
 	MaxToolRetries int
 
 	// Interceptor settings
@@ -78,38 +79,38 @@ type ReActAgentConfig struct {
 	FunctionCallingConfig       *interceptors.FunctionCallingConfig
 
 	// Context Engineering settings (Manus-inspired patterns)
-	EnableContextEngineering bool                             `json:"enable_context_engineering"`
-	ContextConfig           contextmgmt.Config               `json:"context_config,omitempty"`
-	ContextBaseDir          string                           `json:"context_base_dir"`
-	AutoTodoManagement      bool                             `json:"auto_todo_management"`
-	AutoErrorLearning       bool                             `json:"auto_error_learning"`
-	ContextOptLevel         contextmgmt.CompressionPriority  `json:"context_optimization_level"`
-	MaxContextTokens        int                              `json:"max_context_tokens"`
-	CacheEfficiencyTarget   float64                          `json:"cache_efficiency_target"`
+	EnableContextEngineering bool                            `json:"enable_context_engineering"`
+	ContextConfig            contextmgmt.Config              `json:"context_config,omitempty"`
+	ContextBaseDir           string                          `json:"context_base_dir"`
+	AutoTodoManagement       bool                            `json:"auto_todo_management"`
+	AutoErrorLearning        bool                            `json:"auto_error_learning"`
+	ContextOptLevel          contextmgmt.CompressionPriority `json:"context_optimization_level"`
+	MaxContextTokens         int                             `json:"max_context_tokens"`
+	CacheEfficiencyTarget    float64                         `json:"cache_efficiency_target"`
 
 	// ACE (Agentic Context Engineering) settings
-	EnableACE   bool       `json:"enable_ace"`
-	ACEConfig   ace.Config `json:"ace_config,omitempty"`
+	EnableACE bool       `json:"enable_ace"`
+	ACEConfig ace.Config `json:"ace_config,omitempty"`
 }
 
 // DefaultReActAgentConfig returns sensible defaults.
 func DefaultReActAgentConfig() ReActAgentConfig {
 	return ReActAgentConfig{
-		MaxIterations:      10,
-		ExecutionMode:      ModeReAct,
-		Timeout:            5 * time.Minute,
-		MemoryRetention:    24 * time.Hour,
-		ForgetThreshold:    0.3,
-		EnableMemoryOpt:    true,
-		EnableReflection:   true,
-		ReflectionDepth:    3,
-		ReflectionDelay:    100 * time.Millisecond,
-		PlanningStrategy:   Interleaved,
-		MaxPlanDepth:       5,
-		EnablePlanning:     true,
-		ToolTimeout:        30 * time.Second,
-		ParallelTools:      true,
-		MaxToolRetries:     3,
+		MaxIterations:               10,
+		ExecutionMode:               ModeReAct,
+		Timeout:                     5 * time.Minute,
+		MemoryRetention:             24 * time.Hour,
+		ForgetThreshold:             0.3,
+		EnableMemoryOpt:             true,
+		EnableReflection:            true,
+		ReflectionDepth:             3,
+		ReflectionDelay:             100 * time.Millisecond,
+		PlanningStrategy:            Interleaved,
+		MaxPlanDepth:                5,
+		EnablePlanning:              true,
+		ToolTimeout:                 30 * time.Second,
+		ParallelTools:               true,
+		MaxToolRetries:              3,
 		EnableInterceptors:          true,
 		EnableXMLParsing:            false, // Disabled by default for backward compatibility
 		XMLConfig:                   nil,
@@ -117,12 +118,12 @@ func DefaultReActAgentConfig() ReActAgentConfig {
 		FunctionCallingConfig:       nil,
 		// Context Engineering defaults
 		EnableContextEngineering: false, // Opt-in for backward compatibility
-		ContextBaseDir:          "./agent_memory",
-		AutoTodoManagement:      true,
-		AutoErrorLearning:       true,
-		ContextOptLevel:         contextmgmt.PriorityMedium,
-		MaxContextTokens:        8192,
-		CacheEfficiencyTarget:   0.85,
+		ContextBaseDir:           "./agent_memory",
+		AutoTodoManagement:       true,
+		AutoErrorLearning:        true,
+		ContextOptLevel:          contextmgmt.PriorityMedium,
+		MaxContextTokens:         8192,
+		CacheEfficiencyTarget:    0.85,
 	}
 }
 
@@ -149,6 +150,12 @@ type ReActAgent struct {
 	toolRegistry *tools.InMemoryToolRegistry
 	memory       agents.Memory
 	llm          core.LLM
+	artifacts    optimize.AgentArtifacts
+
+	// Initialization state retained for optimizer-friendly cloning and prompt mutation.
+	taskSignature      core.Signature
+	baseReActSignature core.Signature
+	baseExtractSig     core.Signature
 
 	// Modern patterns
 	Reflector *SelfReflector
@@ -185,6 +192,8 @@ type ReActAgent struct {
 	mu sync.RWMutex
 }
 
+var _ optimize.OptimizableAgent = (*ReActAgent)(nil)
+
 // ExecutionRecord tracks execution history for reflection.
 type ExecutionRecord struct {
 	Timestamp   time.Time
@@ -196,11 +205,11 @@ type ExecutionRecord struct {
 	Reflections []string
 
 	// Context Engineering metrics
-	ContextVersion      int64                        `json:"context_version,omitempty"`
-	ContextResponse     *contextmgmt.ContextResponse `json:"context_response,omitempty"`
-	OptimizationsApplied []string                    `json:"optimizations_applied,omitempty"`
-	CostSavings         float64                      `json:"cost_savings,omitempty"`
-	ProcessingTime      time.Duration                `json:"processing_time,omitempty"`
+	ContextVersion       int64                        `json:"context_version,omitempty"`
+	ContextResponse      *contextmgmt.ContextResponse `json:"context_response,omitempty"`
+	OptimizationsApplied []string                     `json:"optimizations_applied,omitempty"`
+	CostSavings          float64                      `json:"cost_savings,omitempty"`
+	ProcessingTime       time.Duration                `json:"processing_time,omitempty"`
 }
 
 // ActionRecord tracks individual actions taken.
@@ -223,6 +232,10 @@ func NewReActAgent(id, name string, opts ...Option) *ReActAgent {
 		opt(&config)
 	}
 
+	return newReActAgentWithConfig(id, name, config)
+}
+
+func newReActAgentWithConfig(id, name string, config ReActAgentConfig) *ReActAgent {
 	// Initialize memory if not provided
 	memory := agents.NewInMemoryStore()
 
@@ -240,6 +253,7 @@ func NewReActAgent(id, name string, opts ...Option) *ReActAgent {
 		capabilities:     make([]core.Tool, 0),
 		executionHistory: make([]ExecutionRecord, 0),
 		contextVersion:   1,
+		artifacts:        optimize.AgentArtifacts{},
 	}
 
 	// Initialize context engineering if enabled
@@ -416,26 +430,9 @@ func (r *ReActAgent) Initialize(llm core.LLM, signature core.Signature) error {
 	defer r.mu.Unlock()
 
 	r.llm = llm
+	r.taskSignature = signature
 
-	// Create ReAct module with the signature
-	r.module = modules.NewReAct(signature, r.toolRegistry, r.config.MaxIterations)
-	r.module.SetLLM(llm)
-
-	// Enable XML parsing if configured
-	if r.config.EnableXMLParsing && r.config.XMLConfig != nil {
-		r.module.WithXMLParsing(*r.config.XMLConfig)
-	}
-
-	// Enable native function calling if configured
-	// Note: This takes precedence over XML parsing as they serve similar purposes
-	if r.config.EnableNativeFunctionCalling && r.config.FunctionCallingConfig != nil {
-		r.module.WithNativeFunctionCallingConfig(*r.config.FunctionCallingConfig)
-	} else if r.config.EnableNativeFunctionCalling {
-		// Use default config with the agent's tool registry
-		r.module.WithNativeFunctionCalling()
-	}
-
-	return nil
+	return r.initializeModuleLocked(signature)
 }
 
 // EnableXMLParsing enables XML interceptor-based parsing on an already initialized agent.
@@ -489,7 +486,66 @@ func (r *ReActAgent) RegisterTool(tool core.Tool) error {
 	}
 
 	r.capabilities = append(r.capabilities, tool)
+
+	if r.module != nil {
+		if err := r.initializeModuleLocked(r.taskSignature); err != nil {
+			return fmt.Errorf("failed to refresh react module after tool registration: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// GetArtifacts returns a deep copy of the agent's mutable artifacts.
+func (r *ReActAgent) GetArtifacts() optimize.AgentArtifacts {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.artifacts.Clone()
+}
+
+// SetArtifacts updates the mutable artifact set and reapplies prompt-backed artifacts
+// to any initialized runtime modules.
+func (r *ReActAgent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.artifacts = artifacts.Clone()
+	return r.applyArtifactsLocked()
+}
+
+// Clone creates a fresh agent instance with the same configuration, tools, interceptors,
+// and artifacts, but without shared execution history or mutable runtime state.
+func (r *ReActAgent) Clone() (optimize.OptimizableAgent, error) {
+	r.mu.RLock()
+	config := r.config
+	id := r.id
+	name := r.name
+	llm := r.llm
+	taskSignature := r.taskSignature
+	artifacts := r.artifacts.Clone()
+	initialized := r.module != nil
+	capabilities := append([]core.Tool(nil), r.capabilities...)
+	interceptors := append([]core.AgentInterceptor(nil), r.interceptors...)
+	r.mu.RUnlock()
+
+	cloned := newReActAgentWithConfig(id, name, config)
+	cloned.artifacts = artifacts.Clone()
+	cloned.SetInterceptors(interceptors)
+
+	for _, tool := range capabilities {
+		if err := cloned.RegisterTool(tool); err != nil {
+			return nil, fmt.Errorf("failed to clone tool %q: %w", tool.Name(), err)
+		}
+	}
+
+	if initialized {
+		if err := cloned.Initialize(llm, taskSignature); err != nil {
+			return nil, fmt.Errorf("failed to initialize cloned agent: %w", err)
+		}
+	}
+
+	return cloned, nil
 }
 
 // Execute runs the agent's task with given input.
@@ -570,22 +626,23 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 
 	// STEP 3: Execute using standard ReAct flow but with optimized context
 	var result map[string]interface{}
+	var reactTrace *modules.ReActTrace
 	var err error
 
 	switch r.config.ExecutionMode {
 	case ModeReAct:
-		result, err = r.executeReAct(ctx, optimizedInput)
+		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
 	case ModeReWOO:
 		result, err = r.executeReWOO(ctx, optimizedInput)
 	case ModeHybrid:
 		result, err = r.executeHybrid(ctx, optimizedInput)
 	default:
-		result, err = r.executeReAct(ctx, optimizedInput)
+		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
 	}
 
 	// STEP 4: Create enhanced execution record
 	processingTime := time.Since(startTime)
-	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, processingTime)
+	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, reactTrace, processingTime)
 
 	// ACE: Record steps from execution record using the recorder handle
 	if aceRecorder != nil {
@@ -654,13 +711,13 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 }
 
 // executeReAct performs classic ReAct execution.
-func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]interface{}) (map[string]interface{}, *modules.ReActTrace, error) {
 	if r.module == nil {
-		return nil, fmt.Errorf("agent not initialized")
+		return nil, nil, fmt.Errorf("agent not initialized")
 	}
 
-	// Use the ReAct module directly
-	return r.module.Process(ctx, input)
+	// Use the traced ReAct path so agent reflection and ACE can consume structured actions.
+	return r.module.ProcessWithTrace(ctx, input)
 }
 
 // executeReWOO performs plan-then-execute execution.
@@ -713,7 +770,8 @@ func (r *ReActAgent) executeHybrid(ctx context.Context, input map[string]interfa
 	}
 
 	// Simple or interactive task: use ReAct for flexibility
-	return r.executeReAct(ctx, input)
+	result, _, err := r.executeReAct(ctx, input)
+	return result, err
 }
 
 // analyzeTaskComplexity estimates task complexity.
@@ -1020,11 +1078,11 @@ func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string
 	// Replace or enhance with optimized context
 	optimizedInput["optimized_context"] = contextResponse.Context
 	optimizedInput["context_metadata"] = map[string]interface{}{
-		"version":         contextResponse.ContextVersion,
-		"token_count":     contextResponse.TokenCount,
-		"cache_hit_rate":  contextResponse.CacheHitRate,
-		"cost_savings":    contextResponse.CostSavings,
-		"optimizations":   contextResponse.OptimizationsApplied,
+		"version":        contextResponse.ContextVersion,
+		"token_count":    contextResponse.TokenCount,
+		"cache_hit_rate": contextResponse.CacheHitRate,
+		"cost_savings":   contextResponse.CostSavings,
+		"optimizations":  contextResponse.OptimizationsApplied,
 	}
 
 	logger.Debug(ctx, "Built optimized context: %d tokens (%.1f%% cache hit rate)",
@@ -1119,18 +1177,19 @@ func (r *ReActAgent) assessErrorSeverity(err error) contextmgmt.ErrorSeverity {
 }
 
 // createEnhancedExecutionRecord creates a comprehensive execution record.
-func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]interface{}, result map[string]interface{}, err error, contextResponse *contextmgmt.ContextResponse, processingTime time.Duration) ExecutionRecord {
+func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]interface{}, result map[string]interface{}, err error, contextResponse *contextmgmt.ContextResponse, reactTrace *modules.ReActTrace, processingTime time.Duration) ExecutionRecord {
 	// Thread-safe access to contextVersion
 	r.mu.RLock()
 	contextVersion := r.contextVersion
 	r.mu.RUnlock()
 
 	record := ExecutionRecord{
-		Timestamp: time.Now(),
-		Input:     input,
-		Output:    result,
-		Success:   err == nil,
-		Error:     err,
+		Timestamp:      time.Now(),
+		Input:          input,
+		Output:         result,
+		Actions:        actionRecordsFromTrace(reactTrace),
+		Success:        err == nil,
+		Error:          err,
 		ContextVersion: contextVersion,
 		ProcessingTime: processingTime,
 	}
@@ -1142,6 +1201,39 @@ func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map
 	}
 
 	return record
+}
+
+func actionRecordsFromTrace(trace *modules.ReActTrace) []ActionRecord {
+	if trace == nil || len(trace.Steps) == 0 {
+		return nil
+	}
+
+	records := make([]ActionRecord, 0, len(trace.Steps))
+	for _, step := range trace.Steps {
+		records = append(records, ActionRecord{
+			Thought:     step.Thought,
+			Action:      step.ActionRaw,
+			Tool:        step.Tool,
+			Arguments:   copyMap(step.Arguments),
+			Observation: step.Observation,
+			Success:     step.Success,
+			Duration:    step.Duration,
+		})
+	}
+
+	return records
+}
+
+func copyMap(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{}, len(input))
+	for k, v := range input {
+		result[k] = v
+	}
+	return result
 }
 
 // extractObservations extracts observations from input.
@@ -1226,17 +1318,86 @@ func (r *ReActAgent) getContextSavingsOrDefault(contextResponse *contextmgmt.Con
 	return 0.0
 }
 
+func (r *ReActAgent) initializeModuleLocked(signature core.Signature) error {
+	r.module = modules.NewReAct(signature, r.toolRegistry, r.config.MaxIterations)
+	r.module.SetLLM(r.llm)
+
+	if r.config.EnableXMLParsing && r.config.XMLConfig != nil {
+		r.module.WithXMLParsing(*r.config.XMLConfig)
+	}
+
+	// Native function calling takes precedence over XML parsing as they both
+	// govern how actions are emitted and parsed.
+	if r.config.EnableNativeFunctionCalling && r.config.FunctionCallingConfig != nil {
+		r.module.WithNativeFunctionCallingConfig(*r.config.FunctionCallingConfig)
+	} else if r.config.EnableNativeFunctionCalling {
+		r.module.WithNativeFunctionCalling()
+	}
+
+	r.baseReActSignature = r.module.GetSignature()
+	if r.module.Extract != nil {
+		r.baseExtractSig = r.module.Extract.GetSignature()
+	}
+
+	return r.applyArtifactsLocked()
+}
+
+func (r *ReActAgent) applyArtifactsLocked() error {
+	if r.module == nil {
+		return nil
+	}
+
+	reactSig := r.baseReActSignature
+	reactSig.Instruction = composeArtifactInstruction(reactSig.Instruction, r.artifacts)
+	r.module.SetSignature(reactSig)
+
+	if r.module.Extract != nil {
+		extractSig := r.baseExtractSig
+		extractSig.Instruction = composeArtifactInstruction(extractSig.Instruction, r.artifacts)
+		r.module.Extract.SetSignature(extractSig)
+	}
+
+	return nil
+}
+
+func composeArtifactInstruction(base string, artifacts optimize.AgentArtifacts) string {
+	sections := make([]string, 0, 4)
+
+	appendArtifact := func(key optimize.ArtifactKey, heading string) {
+		if artifacts.Text == nil {
+			return
+		}
+		content := strings.TrimSpace(artifacts.Text[key])
+		if content == "" {
+			return
+		}
+		sections = append(sections, heading+":\n"+content)
+	}
+
+	appendArtifact(optimize.ArtifactSkillPack, "SKILL PACK")
+	appendArtifact(optimize.ArtifactToolPolicy, "TOOL POLICY")
+	appendArtifact(optimize.ArtifactReflectionPrompt, "SELF-REFLECTION GUIDANCE")
+	appendArtifact(optimize.ArtifactPlannerPrompt, "PLANNING GUIDANCE")
+
+	base = strings.TrimSpace(base)
+	if base != "" {
+		sections = append(sections, base)
+	}
+
+	return strings.Join(sections, "\n\n")
+}
+
 // GetContextPerformanceMetrics returns comprehensive context management metrics.
 func (r *ReActAgent) GetContextPerformanceMetrics() map[string]interface{} {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	metrics := map[string]interface{}{
-		"total_executions":      r.totalExecutions,
-		"context_version":       r.contextVersion,
-		"context_savings":       r.contextSavings,
-		"avg_processing_time":   r.avgProcessingTime.Milliseconds(),
-		"context_mgmt_enabled":  r.config.EnableContextEngineering,
+		"total_executions":     r.totalExecutions,
+		"context_version":      r.contextVersion,
+		"context_savings":      r.contextSavings,
+		"avg_processing_time":  r.avgProcessingTime.Milliseconds(),
+		"context_mgmt_enabled": r.config.EnableContextEngineering,
 	}
 
 	// Add context manager metrics if available
@@ -1252,7 +1413,7 @@ func (r *ReActAgent) GetContextPerformanceMetrics() map[string]interface{} {
 func (r *ReActAgent) GetContextHealthStatus() map[string]interface{} {
 	if !r.config.EnableContextEngineering || r.contextManager == nil {
 		return map[string]interface{}{
-			"status": "disabled",
+			"status":  "disabled",
 			"message": "Context management is disabled",
 		}
 	}
