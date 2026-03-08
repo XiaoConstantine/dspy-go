@@ -162,6 +162,8 @@ result: Task completed successfully
 	assert.Len(t, history, 1)
 	assert.True(t, history[0].Success)
 	require.Len(t, history[0].Actions, 2)
+	require.NotNil(t, history[0].Trace)
+	assert.Len(t, history[0].Trace.Steps, 2)
 	assert.Equal(t, "test_tool", history[0].Actions[0].Tool)
 	assert.Contains(t, history[0].Actions[0].Observation, "Tool executed successfully")
 	assert.Equal(t, "finish", history[0].Actions[1].Tool)
@@ -278,6 +280,58 @@ func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
 	assert.Equal(t, agent.GetArtifacts(), cloned.GetArtifacts())
 	assert.Empty(t, cloned.GetExecutionHistory())
 	assert.NotSame(t, agent.GetMemory(), cloned.GetMemory())
+}
+
+func TestReActAgent_Execute_HybridMode_PreservesReActTrace(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	mockTool := testutil.NewMockTool("lookup")
+
+	mockTool.On("Name").Return("lookup")
+	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
+	mockTool.On("Execute", mock.Anything, mock.AnythingOfType("map[string]interface {}")).Return(
+		core.ToolResult{Data: "lookup result"}, nil,
+	)
+
+	resp1 := &core.LLMResponse{Content: `
+thought: I should use the lookup tool
+action: <action><tool_name>lookup</tool_name><arguments><arg key="query">test</arg></arguments></action>
+`}
+	resp2 := &core.LLMResponse{Content: `
+thought: I have enough information
+action: <action><tool_name>Finish</tool_name></action>
+result: done
+`}
+
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp1, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).Return(resp2, nil).Once()
+
+	agent := NewReActAgent("test-agent", "Test Agent", WithExecutionMode(ModeHybrid))
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+	)
+
+	require.NoError(t, agent.Initialize(mockLLM, signature))
+	require.NoError(t, agent.RegisterTool(mockTool))
+
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "short task"})
+	require.NoError(t, err)
+
+	history := agent.GetExecutionHistory()
+	require.Len(t, history, 1)
+	require.NotNil(t, history[0].Trace)
+	assert.Len(t, history[0].Trace.Steps, 2)
+	assert.Len(t, history[0].Actions, 2)
+}
+
+func TestReActAgent_UpdateAvgProcessingTime_UsesExpectedEMA(t *testing.T) {
+	agent := NewReActAgent("test-agent", "Test Agent")
+	agent.totalExecutions = 2
+	agent.avgProcessingTime = 100 * time.Millisecond
+
+	updated := agent.updateAvgProcessingTime(200 * time.Millisecond)
+
+	assert.Equal(t, 110*time.Millisecond, updated)
 }
 
 func TestReActAgent_Execute_Timeout(t *testing.T) {

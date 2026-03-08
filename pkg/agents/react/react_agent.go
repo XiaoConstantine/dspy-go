@@ -200,6 +200,7 @@ type ExecutionRecord struct {
 	Input       map[string]interface{}
 	Output      map[string]interface{}
 	Actions     []ActionRecord
+	Trace       *agents.ExecutionTrace
 	Success     bool
 	Error       error
 	Reflections []string
@@ -253,7 +254,11 @@ func newReActAgentWithConfig(id, name string, config ReActAgentConfig) *ReActAge
 		capabilities:     make([]core.Tool, 0),
 		executionHistory: make([]ExecutionRecord, 0),
 		contextVersion:   1,
-		artifacts:        optimize.AgentArtifacts{},
+		artifacts: optimize.AgentArtifacts{
+			Text: make(map[optimize.ArtifactKey]string),
+			Int:  make(map[string]int),
+			Bool: make(map[string]bool),
+		},
 	}
 
 	// Initialize context engineering if enabled
@@ -530,7 +535,7 @@ func (r *ReActAgent) Clone() (optimize.OptimizableAgent, error) {
 	r.mu.RUnlock()
 
 	cloned := newReActAgentWithConfig(id, name, config)
-	cloned.artifacts = artifacts.Clone()
+	cloned.artifacts = artifacts
 	cloned.SetInterceptors(interceptors)
 
 	for _, tool := range capabilities {
@@ -627,22 +632,23 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 	// STEP 3: Execute using standard ReAct flow but with optimized context
 	var result map[string]interface{}
 	var reactTrace *modules.ReActTrace
+	var executionActions []ActionRecord
 	var err error
 
 	switch r.config.ExecutionMode {
 	case ModeReAct:
 		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
 	case ModeReWOO:
-		result, err = r.executeReWOO(ctx, optimizedInput)
+		result, executionActions, err = r.executeReWOOWithActions(ctx, optimizedInput)
 	case ModeHybrid:
-		result, err = r.executeHybrid(ctx, optimizedInput)
+		result, reactTrace, executionActions, err = r.executeHybridWithTrace(ctx, optimizedInput)
 	default:
 		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
 	}
 
 	// STEP 4: Create enhanced execution record
 	processingTime := time.Since(startTime)
-	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, reactTrace, processingTime)
+	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, reactTrace, executionActions, processingTime)
 
 	// ACE: Record steps from execution record using the recorder handle
 	if aceRecorder != nil {
@@ -722,16 +728,21 @@ func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]interfac
 
 // executeReWOO performs plan-then-execute execution.
 func (r *ReActAgent) executeReWOO(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	results, _, err := r.executeReWOOWithActions(ctx, input)
+	return results, err
+}
+
+func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[string]interface{}) (map[string]interface{}, []ActionRecord, error) {
 	logger := logging.GetLogger()
 
 	// First, create a plan
 	if r.Planner == nil {
-		return nil, fmt.Errorf("planner not initialized for ReWOO mode")
+		return nil, nil, fmt.Errorf("planner not initialized for ReWOO mode")
 	}
 
 	plan, err := r.Planner.CreatePlan(ctx, input, r.capabilities)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create plan: %w", err)
+		return nil, nil, fmt.Errorf("failed to create plan: %w", err)
 	}
 
 	r.mu.Lock()
@@ -742,13 +753,24 @@ func (r *ReActAgent) executeReWOO(ctx context.Context, input map[string]interfac
 
 	// Execute plan steps
 	results := make(map[string]interface{})
+	actions := make([]ActionRecord, 0, len(plan.Steps))
 	for i, step := range plan.Steps {
+		stepStart := time.Now()
 		stepResult, err := r.executePlanStep(ctx, step, results)
+		actions = append(actions, ActionRecord{
+			Thought:     step.Description,
+			Action:      step.Description,
+			Tool:        step.Tool,
+			Arguments:   copyMap(step.Arguments),
+			Observation: formatPlanObservation(stepResult, err),
+			Success:     planStepSucceeded(stepResult, err),
+			Duration:    time.Since(stepStart),
+		})
 		if err != nil {
 			logger.Error(ctx, "Step %d failed: %v", i, err)
 			// In ReWOO mode, we might want to continue or fail fast
 			if step.Critical {
-				return nil, fmt.Errorf("critical step %d failed: %w", i, err)
+				return nil, actions, fmt.Errorf("critical step %d failed: %w", i, err)
 			}
 		}
 
@@ -756,22 +778,22 @@ func (r *ReActAgent) executeReWOO(ctx context.Context, input map[string]interfac
 		results[fmt.Sprintf("step_%d", i)] = stepResult
 	}
 
-	return results, nil
+	return results, actions, nil
 }
 
-// executeHybrid adaptively chooses between ReAct and ReWOO.
-func (r *ReActAgent) executeHybrid(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (r *ReActAgent) executeHybridWithTrace(ctx context.Context, input map[string]interface{}) (map[string]interface{}, *modules.ReActTrace, []ActionRecord, error) {
 	// Analyze task complexity to choose mode
 	complexity := r.analyzeTaskComplexity(input)
 
 	if complexity > 0.7 {
 		// Complex task: use ReWOO for efficiency
-		return r.executeReWOO(ctx, input)
+		result, actions, err := r.executeReWOOWithActions(ctx, input)
+		return result, nil, actions, err
 	}
 
 	// Simple or interactive task: use ReAct for flexibility
-	result, _, err := r.executeReAct(ctx, input)
-	return result, err
+	result, trace, err := r.executeReAct(ctx, input)
+	return result, trace, nil, err
 }
 
 // analyzeTaskComplexity estimates task complexity.
@@ -1177,17 +1199,23 @@ func (r *ReActAgent) assessErrorSeverity(err error) contextmgmt.ErrorSeverity {
 }
 
 // createEnhancedExecutionRecord creates a comprehensive execution record.
-func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]interface{}, result map[string]interface{}, err error, contextResponse *contextmgmt.ContextResponse, reactTrace *modules.ReActTrace, processingTime time.Duration) ExecutionRecord {
+func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]interface{}, result map[string]interface{}, err error, contextResponse *contextmgmt.ContextResponse, reactTrace *modules.ReActTrace, actions []ActionRecord, processingTime time.Duration) ExecutionRecord {
 	// Thread-safe access to contextVersion
 	r.mu.RLock()
 	contextVersion := r.contextVersion
 	r.mu.RUnlock()
 
+	completedAt := time.Now()
+	if len(actions) == 0 {
+		actions = actionRecordsFromTrace(reactTrace)
+	}
+
 	record := ExecutionRecord{
-		Timestamp:      time.Now(),
+		Timestamp:      completedAt,
 		Input:          input,
 		Output:         result,
-		Actions:        actionRecordsFromTrace(reactTrace),
+		Actions:        cloneActionRecords(actions),
+		Trace:          r.buildExecutionTrace(input, result, err, reactTrace, actions, contextResponse, completedAt, processingTime),
 		Success:        err == nil,
 		Error:          err,
 		ContextVersion: contextVersion,
@@ -1222,6 +1250,27 @@ func actionRecordsFromTrace(trace *modules.ReActTrace) []ActionRecord {
 	}
 
 	return records
+}
+
+func cloneActionRecords(actions []ActionRecord) []ActionRecord {
+	if len(actions) == 0 {
+		return nil
+	}
+
+	cloned := make([]ActionRecord, 0, len(actions))
+	for _, action := range actions {
+		cloned = append(cloned, ActionRecord{
+			Thought:     action.Thought,
+			Action:      action.Action,
+			Tool:        action.Tool,
+			Arguments:   copyMap(action.Arguments),
+			Observation: action.Observation,
+			Success:     action.Success,
+			Duration:    action.Duration,
+		})
+	}
+
+	return cloned
 }
 
 func copyMap(input map[string]interface{}) map[string]interface{} {
@@ -1307,7 +1356,7 @@ func (r *ReActAgent) updateAvgProcessingTime(newTime time.Duration) time.Duratio
 
 	// Exponential moving average
 	alpha := 0.1
-	return time.Duration(float64(r.avgProcessingTime)*alpha + float64(newTime)*(1.0-alpha))
+	return time.Duration(float64(r.avgProcessingTime)*(1.0-alpha) + float64(newTime)*alpha)
 }
 
 // getContextSavingsOrDefault returns context savings or default value.
@@ -1385,6 +1434,124 @@ func composeArtifactInstruction(base string, artifacts optimize.AgentArtifacts) 
 	}
 
 	return strings.Join(sections, "\n\n")
+}
+
+func planStepSucceeded(stepResult interface{}, err error) bool {
+	if err != nil {
+		return false
+	}
+
+	resultMap, ok := stepResult.(map[string]interface{})
+	if !ok {
+		return true
+	}
+
+	success, ok := resultMap["success"].(bool)
+	if ok {
+		return success
+	}
+
+	return true
+}
+
+func formatPlanObservation(stepResult interface{}, err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	if stepResult == nil {
+		return ""
+	}
+	return fmt.Sprint(stepResult)
+}
+
+func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result map[string]interface{}, err error, reactTrace *modules.ReActTrace, actions []ActionRecord, contextResponse *contextmgmt.ContextResponse, completedAt time.Time, processingTime time.Duration) *agents.ExecutionTrace {
+	steps := make([]agents.TraceStep, 0)
+	if reactTrace != nil && len(reactTrace.Steps) > 0 {
+		steps = make([]agents.TraceStep, 0, len(reactTrace.Steps))
+		for _, step := range reactTrace.Steps {
+			steps = append(steps, agents.TraceStep{
+				Index:       step.Index,
+				Thought:     step.Thought,
+				ActionRaw:   step.ActionRaw,
+				Tool:        step.Tool,
+				Arguments:   copyMap(step.Arguments),
+				Observation: step.Observation,
+				Duration:    step.Duration,
+				Success:     step.Success,
+				Error:       step.Error,
+			})
+		}
+	} else if len(actions) > 0 {
+		steps = make([]agents.TraceStep, 0, len(actions))
+		for idx, action := range actions {
+			steps = append(steps, agents.TraceStep{
+				Index:       idx + 1,
+				Thought:     action.Thought,
+				ActionRaw:   action.Action,
+				Tool:        action.Tool,
+				Arguments:   copyMap(action.Arguments),
+				Observation: action.Observation,
+				Duration:    action.Duration,
+				Success:     action.Success,
+			})
+		}
+	}
+
+	toolUsageCount := make(map[string]int)
+	for _, step := range steps {
+		if step.Tool != "" {
+			toolUsageCount[step.Tool]++
+		}
+	}
+
+	status := agents.TraceStatusSuccess
+	if err != nil {
+		status = agents.TraceStatusFailure
+	} else {
+		for _, action := range actions {
+			if !action.Success {
+				status = agents.TraceStatusPartial
+				break
+			}
+		}
+	}
+
+	contextMetadata := make(map[string]interface{})
+	if contextResponse != nil {
+		contextMetadata["optimizations_applied"] = append([]string(nil), contextResponse.OptimizationsApplied...)
+		contextMetadata["cost_savings"] = contextResponse.CostSavings
+		contextMetadata["compression_ratio"] = contextResponse.CompressionRatio
+		contextMetadata["cache_hit_rate"] = contextResponse.CacheHitRate
+	}
+
+	terminationCause := "completed"
+	if reactTrace != nil && reactTrace.TerminationCause != "" {
+		terminationCause = reactTrace.TerminationCause
+	} else if err != nil {
+		terminationCause = "error"
+	}
+
+	trace := &agents.ExecutionTrace{
+		AgentID:          r.id,
+		AgentType:        r.GetAgentType(),
+		Task:             r.extractCurrentTask(input),
+		Input:            copyMap(input),
+		Output:           copyMap(result),
+		Steps:            steps,
+		Status:           status,
+		StartedAt:        completedAt.Add(-processingTime),
+		CompletedAt:      completedAt,
+		ProcessingTime:   processingTime,
+		ToolUsageCount:   toolUsageCount,
+		ContextMetadata:  contextMetadata,
+		TerminationCause: terminationCause,
+	}
+
+	if err != nil {
+		trace.Error = err.Error()
+	}
+
+	return trace
 }
 
 // GetContextPerformanceMetrics returns comprehensive context management metrics.
