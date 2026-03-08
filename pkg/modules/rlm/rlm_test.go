@@ -580,12 +580,37 @@ func TestAppendIterationHistory_UsesConfiguredMaxHistoryEntryLen(t *testing.T) {
 	}))
 
 	var history strings.Builder
+	longCode := strings.Repeat(`fmt.Println("history-block")`+"\n", 4)
 	longOutput := strings.Repeat("history-block-", 8)
-	rlm.appendIterationHistory(&history, 1, "explore", "", `fmt.Println("x")`, longOutput)
+	rlm.appendIterationHistory(&history, 1, "explore", "", longCode, longOutput)
 
 	historyStr := history.String()
+	assert.Contains(t, historyStr, utils.TruncateString(longCode, 32))
+	assert.NotContains(t, historyStr, longCode)
 	assert.Contains(t, historyStr, utils.TruncateString(longOutput, 32))
 	assert.NotContains(t, historyStr, longOutput)
+}
+
+func TestRLMSubRLMUsesCompactIterationPromptByDefault(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nUse a sub-RLM.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nfind the answer\n\nAnswer:\n",
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\nsub answer",
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\ncomplete",
+		},
+	}
+
+	rlm := New(mockRoot, &mockSubLLMClient{})
+
+	result, err := rlm.Complete(context.Background(), "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, "complete", result.Response)
+	require.GreaterOrEqual(t, len(mockRoot.prompts), 3)
+
+	for _, prompt := range mockRoot.prompts {
+		assert.NotContains(t, prompt, "OUTPUT FORMAT (REQUIRED - you MUST follow this exact format):")
+		assert.NotContains(t, prompt, "What is the secret code?")
+	}
 }
 
 func TestRLMComplete_UsesOutputTruncationConfigInIterationInputs(t *testing.T) {
@@ -1830,6 +1855,39 @@ func TestGetVariableMetadata(t *testing.T) {
 	require.NotNil(t, resultVar)
 	assert.Equal(t, "string", resultVar.Type)
 	assert.True(t, resultVar.IsImportant) // result is marked as important
+}
+
+func TestContextInfoString(t *testing.T) {
+	client := &mockSubLLMClient{queryResponse: "test"}
+	repl, err := NewYaegiREPL(client)
+	require.NoError(t, err)
+
+	err = repl.LoadContext("alpha\nbeta\ngamma")
+	require.NoError(t, err)
+
+	info := repl.ContextInfo()
+
+	assert.Contains(t, info, "type=string")
+	assert.Contains(t, info, "chars=16")
+	assert.Contains(t, info, "lines=3")
+	assert.Contains(t, info, "chunks=1")
+	assert.Contains(t, info, `preview="alpha beta gamma"`)
+}
+
+func TestContextInfoStructured(t *testing.T) {
+	payload := map[string]any{
+		"items":   []string{"one", "two"},
+		"enabled": true,
+	}
+	idx := NewContextIndex(fmt.Sprintf("%v", payload), DefaultChunkConfig())
+
+	info := formatContextInfo(payload, idx)
+
+	assert.Contains(t, info, "type=map[string]interface {}")
+	assert.Contains(t, info, "entries=2")
+	assert.Contains(t, info, "chunks=1")
+	assert.Contains(t, info, `preview=`)
+	assert.NotContains(t, info, "lines=")
 }
 
 // TestImmutableHistory tests the immutable history structure.

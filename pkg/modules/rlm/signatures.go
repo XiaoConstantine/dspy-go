@@ -165,7 +165,7 @@ func iterationSignatureWithInstruction(instruction string) core.Signature {
 	return core.NewSignature(
 		[]core.InputField{
 			{Field: core.NewField("context_info",
-				core.WithDescription("Summary of the context (type, size, preview)"),
+				core.WithDescription("Summary of the context (type, size, structure, preview)"),
 			)},
 			{Field: core.NewField("query",
 				core.WithDescription("The original question to answer"),

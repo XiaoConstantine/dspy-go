@@ -81,6 +81,8 @@ type REPLVariable struct {
 	IsImportant bool   // True for key variables (result, answer, etc.)
 }
 
+const contextInfoPreviewLen = 160
+
 // OutputFieldSpec defines expected type and validation for SUBMIT output fields.
 type OutputFieldSpec struct {
 	Type        string // Expected type: "string", "int", "float", "bool", "[]string", "map"
@@ -754,10 +756,8 @@ func getTypeName(val any) string {
 		return "float"
 	case reflect.Bool:
 		return "bool"
-	case reflect.Slice:
-		return fmt.Sprintf("[]%s", t.Elem().Name())
-	case reflect.Map:
-		return fmt.Sprintf("map[%s]%s", t.Key().Name(), t.Elem().Name())
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return t.String()
 	default:
 		return t.String()
 	}
@@ -797,6 +797,48 @@ func getValuePreview(val any, maxLen int) string {
 		return preview[:maxLen] + "..."
 	}
 	return preview
+}
+
+func formatContextInfo(val any, idx *ContextIndex) string {
+	parts := []string{fmt.Sprintf("type=%s", getTypeName(val))}
+
+	rv := reflect.ValueOf(val)
+	if rv.IsValid() {
+		switch rv.Kind() {
+		case reflect.String:
+			parts = append(parts, fmt.Sprintf("chars=%d", rv.Len()))
+			if idx != nil {
+				parts = append(parts, fmt.Sprintf("lines=%d", idx.LineCount()))
+			}
+		case reflect.Slice, reflect.Array:
+			parts = append(parts, fmt.Sprintf("items=%d", rv.Len()))
+		case reflect.Map:
+			parts = append(parts, fmt.Sprintf("entries=%d", rv.Len()))
+		}
+	}
+
+	if idx != nil {
+		parts = append(parts, fmt.Sprintf("chunks=%d", idx.ChunkCount()))
+	}
+
+	preview := normalizeContextPreview(getValuePreview(val, contextInfoPreviewLen))
+	if preview != "" {
+		parts = append(parts, fmt.Sprintf("preview=%q", preview))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+func normalizeContextPreview(preview string) string {
+	if preview == "" {
+		return ""
+	}
+
+	normalized := strings.Join(strings.Fields(preview), " ")
+	if len(normalized) > contextInfoPreviewLen {
+		return normalized[:contextInfoPreviewLen] + "..."
+	}
+	return normalized
 }
 
 // SetVariable sets a variable in the interpreter that can be accessed in subsequent code executions.
@@ -1215,12 +1257,7 @@ func (r *YaegiREPL) ContextInfo() string {
 		return "context not loaded"
 	}
 
-	switch ctx := v.Interface().(type) {
-	case string:
-		return fmt.Sprintf("type=string, len=%d", len(ctx))
-	default:
-		return fmt.Sprintf("type=%T", ctx)
-	}
+	return formatContextInfo(v.Interface(), r.contextIndex)
 }
 
 // FormatExecutionResult formats an execution result for display.

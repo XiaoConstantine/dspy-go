@@ -697,10 +697,8 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 	}
 	subConfig.MaxIterations = maxSubIterations
 
-	// Create sub-RLM iteration module
-	subIterMod := modules.NewPredict(IterationSignature()).WithTextOutput()
-	subIterMod.SetDemos(IterationDemos())
-	subIterMod.SetLLM(r.rootLLM)
+	// Create sub-RLM iteration module using the same prompt/demos policy as the parent config.
+	subIterMod := buildIterationModule(r.rootLLM, subConfig)
 
 	// Create sub-RLM instance
 	subRLM := &RLM{
@@ -1015,12 +1013,12 @@ func (r *RLM) formatREPLStateInput(replEnv REPLEnvironment) string {
 	return formatREPLStateRich(replEnv.GetVariableMetadata(), cfg.MaxVarPreviewLen)
 }
 
-func (r *RLM) truncateHistoryOutput(output string) string {
+func (r *RLM) truncateHistoryEntryText(text string) string {
 	cfg := r.outputTruncationConfig()
 	if !cfg.Enabled || cfg.MaxHistoryEntryLen <= 0 {
-		return output
+		return text
 	}
-	return utils.TruncateString(output, cfg.MaxHistoryEntryLen)
+	return utils.TruncateString(text, cfg.MaxHistoryEntryLen)
 }
 
 func (r *RLM) formatExecutionOutput(result *ExecutionResult) string {
@@ -1356,10 +1354,10 @@ func (r *RLM) appendIterationHistory(history *strings.Builder, iteration int, ac
 	fmt.Fprintf(history, "\n--- Iteration %d ---\n", iteration)
 	fmt.Fprintf(history, "Action: %s\n", action)
 	if code != "" {
-		fmt.Fprintf(history, "Code:\n```go\n%s\n```\n", code)
+		fmt.Fprintf(history, "Code:\n```go\n%s\n```\n", r.truncateHistoryEntryText(code))
 	}
 	if output != "" {
-		fmt.Fprintf(history, "Output:\n%s\n", r.truncateHistoryOutput(output))
+		fmt.Fprintf(history, "Output:\n%s\n", r.truncateHistoryEntryText(output))
 	}
 }
 
