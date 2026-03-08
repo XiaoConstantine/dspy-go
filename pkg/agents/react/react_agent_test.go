@@ -222,11 +222,13 @@ result: complete
 		mock.Anything,
 		mock.MatchedBy(func(prompt string) bool {
 			return strings.Contains(prompt, "SKILL PACK") &&
+				strings.Contains(prompt, "<agent_artifact key=\"skill_pack\">") &&
 				strings.Contains(prompt, "Prefer concise repo-aware reasoning.") &&
 				strings.Contains(prompt, "TOOL POLICY") &&
 				strings.Contains(prompt, "Avoid unnecessary tool calls.") &&
 				strings.Contains(prompt, "SELF-REFLECTION GUIDANCE") &&
-				strings.Contains(prompt, "Double-check the final answer before finishing.")
+				strings.Contains(prompt, "Double-check the final answer before finishing.") &&
+				strings.Contains(prompt, artifactInstructionPreamble)
 		}),
 		mock.AnythingOfType("[]core.GenerateOption"),
 	).Return(resp, nil).Once()

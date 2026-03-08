@@ -148,7 +148,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 	startTime := time.Now()
 
 	trace := &ReActTrace{
-		Input: shallowCopyMap(inputs),
+		Input: core.ShallowCopyMap(inputs),
 		Steps: make([]ReActTraceStep, 0, r.MaxIters),
 	}
 
@@ -230,14 +230,14 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 			continue
 		}
 		step.Tool = parsedToolName
-		step.Arguments = shallowCopyMap(parsedArgsMap)
+		step.Arguments = core.ShallowCopyMap(parsedArgsMap)
 
 		// Check if this is a finish action
 		if strings.ToLower(parsedToolName) == "finish" {
 			logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
 			step.Success = true
 			trace.Steps = append(trace.Steps, step)
-			trace.Output = shallowCopyMap(prediction)
+			trace.Output = core.ShallowCopyMap(prediction)
 			trace.ProcessingTime = time.Since(startTime)
 			trace.TerminationCause = "finish"
 			return prediction, trace, nil // End with success
@@ -287,7 +287,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 		trace.Error = err.Error()
 		return nil, trace, err
 	}
-	trace.Output = shallowCopyMap(result)
+	trace.Output = core.ShallowCopyMap(result)
 	return result, trace, nil
 }
 
@@ -414,17 +414,6 @@ func (r *ReAct) GetSignature() core.Signature {
 func (r *ReAct) SetSignature(signature core.Signature) {
 	r.BaseModule.SetSignature(signature)
 	r.Predict.SetSignature(signature)
-}
-
-func shallowCopyMap[V any](input map[string]V) map[string]V {
-	if input == nil {
-		return nil
-	}
-	result := make(map[string]V, len(input))
-	for k, v := range input {
-		result[k] = v
-	}
-	return result
 }
 
 func stringifyPredictionField(prediction map[string]interface{}, key string) string {
