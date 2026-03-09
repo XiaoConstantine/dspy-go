@@ -22,7 +22,7 @@ const (
 	gepaMetadataTraceSummaryKey    = "rich_trace_summary"
 	gepaMetadataTraceEvidenceKey   = "rich_trace_evidence"
 	maxTraceSummarySteps           = 5
-	maxTraceEvidenceItems          = 8
+	maxTraceEvidenceItems          = 12
 	maxFailedStepEvidence          = 4
 )
 
@@ -687,6 +687,12 @@ func summarizeAgentTrace(trace *agents.ExecutionTrace) string {
 		builder.WriteString("termination=")
 		builder.WriteString(trace.TerminationCause)
 	}
+	if trace.ContextMetadata != nil {
+		appendSummaryInt(&builder, "subllm", trace.ContextMetadata["sub_llm_call_count"])
+		appendSummaryInt(&builder, "subrlm", trace.ContextMetadata["sub_rlm_call_count"])
+		appendSummaryInt(&builder, "signals", trace.ContextMetadata["confidence_signals"])
+		appendSummaryInt(&builder, "compressions", trace.ContextMetadata["history_compressions"])
+	}
 
 	stepLimit := len(trace.Steps)
 	if stepLimit > maxTraceSummarySteps {
@@ -744,6 +750,7 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 				failedStepCount++
 			}
 		}
+		evidence = append(evidence, contextMetadataEvidence(trace.ContextMetadata)...)
 	}
 
 	if sideInfo != nil {
@@ -770,6 +777,87 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 	}
 
 	return utils.DedupeStrings(evidence, maxTraceEvidenceItems)
+}
+
+func contextMetadataEvidence(metadata map[string]interface{}) []string {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	evidence := make([]string, 0, 8)
+	if enabled, ok := metadata["adaptive_iteration_enabled"].(bool); ok && enabled {
+		evidence = append(evidence, "adaptive_iteration=enabled")
+	}
+	if value := positiveIntEvidence("sub_llm_calls", metadata["sub_llm_call_count"]); value != "" {
+		evidence = append(evidence, value)
+	}
+	if value := positiveIntEvidence("sub_rlm_calls", metadata["sub_rlm_call_count"]); value != "" {
+		evidence = append(evidence, value)
+	}
+	if value := positiveIntEvidence("confidence_signals", metadata["confidence_signals"]); value != "" {
+		evidence = append(evidence, value)
+	}
+	if value := positiveIntEvidence("history_compressions", metadata["history_compressions"]); value != "" {
+		evidence = append(evidence, value)
+	}
+	if value := positiveIntEvidence("root_prompt_mean_tokens", metadata["root_prompt_mean_tokens"]); value != "" {
+		evidence = append(evidence, value)
+	}
+	if value := positiveIntEvidence("root_prompt_max_tokens", metadata["root_prompt_max_tokens"]); value != "" {
+		evidence = append(evidence, value)
+	}
+	if base, ok := extractPositiveInt(metadata["adaptive_base_iterations"]); ok {
+		if maxIterations, ok := extractPositiveInt(metadata["adaptive_max_iterations"]); ok {
+			evidence = append(evidence, fmt.Sprintf("adaptive_window=%d/%d", base, maxIterations))
+		}
+	}
+	if threshold, ok := extractPositiveInt(metadata["adaptive_confidence_threshold"]); ok {
+		evidence = append(evidence, fmt.Sprintf("adaptive_confidence_threshold=%d", threshold))
+	}
+
+	return evidence
+}
+
+func appendSummaryInt(builder *strings.Builder, label string, raw interface{}) {
+	if builder == nil {
+		return
+	}
+	value, ok := extractPositiveInt(raw)
+	if !ok {
+		return
+	}
+	if builder.Len() > 0 {
+		builder.WriteString("; ")
+	}
+	builder.WriteString(label)
+	builder.WriteString("=")
+	builder.WriteString(strconv.Itoa(value))
+}
+
+func positiveIntEvidence(label string, raw interface{}) string {
+	value, ok := extractPositiveInt(raw)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s=%d", label, value)
+}
+
+func extractPositiveInt(raw interface{}) (int, bool) {
+	switch value := raw.(type) {
+	case int:
+		if value > 0 {
+			return value, true
+		}
+	case int64:
+		if value > 0 {
+			return int(value), true
+		}
+	case float64:
+		if value > 0 {
+			return int(value), true
+		}
+	}
+	return 0, false
 }
 
 // detectToolLoopEvidence intentionally captures only consecutive same-tool runs.

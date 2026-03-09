@@ -75,6 +75,30 @@ func (f testAgentEvaluator) Evaluate(ctx context.Context, agent optimize.Optimiz
 	return f(ctx, agent, ex)
 }
 
+type testSubLLMClient struct {
+	response string
+}
+
+func (c *testSubLLMClient) Query(context.Context, string) (modrlm.QueryResponse, error) {
+	return modrlm.QueryResponse{
+		Response:         c.response,
+		PromptTokens:     25,
+		CompletionTokens: 10,
+	}, nil
+}
+
+func (c *testSubLLMClient) QueryBatched(ctx context.Context, prompts []string) ([]modrlm.QueryResponse, error) {
+	results := make([]modrlm.QueryResponse, len(prompts))
+	for i := range prompts {
+		result, err := c.Query(ctx, prompts[i])
+		if err != nil {
+			return nil, err
+		}
+		results[i] = result
+	}
+	return results, nil
+}
+
 func TestAgentExecute_RecordsTraceAndOutput(t *testing.T) {
 	module := modrlm.NewFromLLM(&testLLM{
 		responses: []string{
@@ -101,6 +125,36 @@ func TestAgentExecute_RecordsTraceAndOutput(t *testing.T) {
 	assert.Equal(t, "final", trace.Steps[0].ActionRaw)
 }
 
+func TestAgentExecute_RecordsRLMNativeMetadata(t *testing.T) {
+	module := modrlm.New(
+		&testLLM{
+			responses: []string{
+				"Reasoning:\nI'll query the helper and then finish.\n\nAction:\nquery\n\nCode:\nanswer := QueryRaw(\"what is the answer?\")\nFINAL(answer)\n\nAnswer:\n",
+			},
+		},
+		&testSubLLMClient{response: "42"},
+		modrlm.WithAdaptiveIteration(),
+	)
+
+	agent := NewAgent("adaptive-rlm", module)
+	output, err := agent.Execute(context.Background(), map[string]interface{}{
+		"context": "ctx",
+		"query":   "what is the answer?",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "42", output["answer"])
+
+	trace := agent.LastExecutionTrace()
+	require.NotNil(t, trace)
+	assert.Equal(t, 1, trace.ContextMetadata["sub_llm_call_count"])
+	assert.Equal(t, 0, trace.ContextMetadata["sub_rlm_call_count"])
+	assert.Equal(t, 100, trace.ContextMetadata["root_prompt_mean_tokens"])
+	assert.Equal(t, 100, trace.ContextMetadata["root_prompt_max_tokens"])
+	assert.Equal(t, 10, trace.ContextMetadata["adaptive_base_iterations"])
+	assert.Equal(t, 50, trace.ContextMetadata["adaptive_max_iterations"])
+	assert.Equal(t, 1, trace.ContextMetadata["adaptive_confidence_threshold"])
+}
+
 func TestAgentExecute_NilReceiverReturnsError(t *testing.T) {
 	var agent *Agent
 	_, err := agent.Execute(context.Background(), map[string]interface{}{
@@ -125,8 +179,11 @@ func TestAgentSetArtifacts_AppliesRLMConfig(t *testing.T) {
 			optimize.ArtifactRLMIterationPrompt: "Custom iteration prompt.",
 		},
 		Int: map[string]int{
-			ArtifactMaxIterations: 7,
-			ArtifactMaxTokens:     900,
+			ArtifactMaxIterations:               7,
+			ArtifactMaxTokens:                   900,
+			ArtifactAdaptiveBaseIterations:      5,
+			ArtifactAdaptiveMaxIterations:       9,
+			ArtifactAdaptiveConfidenceThreshold: 3,
 		},
 		Bool: map[string]bool{
 			ArtifactUseIterationDemos:        true,
@@ -144,6 +201,9 @@ func TestAgentSetArtifacts_AppliesRLMConfig(t *testing.T) {
 	assert.True(t, cfg.UseIterationDemos)
 	require.NotNil(t, cfg.AdaptiveIteration)
 	assert.True(t, cfg.AdaptiveIteration.Enabled)
+	assert.Equal(t, 5, cfg.AdaptiveIteration.BaseIterations)
+	assert.Equal(t, 9, cfg.AdaptiveIteration.MaxIterations)
+	assert.Equal(t, 3, cfg.AdaptiveIteration.ConfidenceThreshold)
 }
 
 func TestGEPAAgentOptimizer_Optimize_RLMIterationPrompt(t *testing.T) {

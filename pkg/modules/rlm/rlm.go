@@ -304,7 +304,8 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			"context": contextPayload,
 			"query":   query,
 		},
-		StartedAt: start,
+		StartedAt:    start,
+		tokenTracker: r.tokenTracker,
 	}
 
 	ctx = core.WithExecutionState(ctx)
@@ -701,6 +702,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		// Detect confidence signals for adaptive early termination
 		if r.detectConfidence(reasoning) {
 			confidenceSignals++
+			trace.ConfidenceSignals = confidenceSignals
 			if r.config.Verbose {
 				logger.Debug(ctx, "[RLM] Confidence signal detected (total: %d)", confidenceSignals)
 			}
@@ -724,6 +726,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			if compressedHistory != historyStr {
 				history.Reset()
 				history.WriteString(compressedHistory)
+				trace.CompressionCount++
 				if r.config.Verbose {
 					logger.Debug(ctx, "[RLM] History compressed: %d -> %d chars", len(historyStr), len(compressedHistory))
 				}
@@ -1427,6 +1430,14 @@ func finalizeRLMTrace(trace *RLMTrace, result *CompletionResult, terminationCaus
 		}
 		trace.Iterations = result.Iterations
 		trace.Usage = result.Usage
+	}
+	if tokenTracker := trace.tokenTracker; tokenTracker != nil {
+		trace.RootUsage = tokenTracker.GetRootUsage()
+		trace.SubUsage = tokenTracker.GetSubUsage()
+		trace.SubRLMUsage = tokenTracker.GetSubRLMUsage()
+		trace.RootSnapshots = tokenTracker.GetRootSnapshots()
+		trace.SubLLMCallCount = len(tokenTracker.GetSubCalls())
+		trace.SubRLMCallCount = len(tokenTracker.GetSubRLMCalls())
 	}
 
 	if err != nil {
