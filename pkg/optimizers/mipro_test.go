@@ -14,6 +14,38 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+type instructionModule struct {
+	core.BaseModule
+}
+
+func newInstructionModule(name, instruction string) *instructionModule {
+	return &instructionModule{
+		BaseModule: core.BaseModule{
+			Signature: core.NewSignature(
+				[]core.InputField{{Field: core.Field{Name: "input"}}},
+				[]core.OutputField{{Field: core.Field{Name: "output"}}},
+			).WithInstruction(instruction),
+			DisplayName: name,
+			ModuleType:  "test",
+		},
+	}
+}
+
+func (m *instructionModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	return map[string]any{"output": "ok"}, nil
+}
+
+func (m *instructionModule) Clone() core.Module {
+	return &instructionModule{
+		BaseModule: core.BaseModule{
+			Signature:   m.Signature,
+			LLM:         m.LLM,
+			DisplayName: m.DisplayName,
+			ModuleType:  m.ModuleType,
+		},
+	}
+}
+
 // TestMIPRO contains all tests for the MIPRO optimizer.
 func TestMIPRO(t *testing.T) {
 	t.Run("Constructor and Configuration", func(t *testing.T) {
@@ -401,6 +433,40 @@ func TestMIPROOptions(t *testing.T) {
 
 	assert.Equal(t, LightMode, mipro.config.Mode)
 	assert.Equal(t, 10, mipro.config.NumTrials)
+}
+
+func TestMIPROCreateCandidateProgram_UsesDeterministicModuleOrder(t *testing.T) {
+	mipro := createTestMIPRO(t)
+	baseProgram := core.NewProgramWithForwardFactory(
+		map[string]core.Module{
+			"beta":  newInstructionModule("beta", "beta base"),
+			"alpha": newInstructionModule("alpha", "alpha base"),
+		},
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return map[string]interface{}{"output": "ok"}, nil
+			}
+		},
+	)
+
+	candidate := mipro.createCandidateProgram(
+		baseProgram,
+		map[string]interface{}{
+			"module_0_instruction": float64(0),
+			"module_1_instruction": float64(0),
+		},
+		nil,
+		map[int][]string{
+			0: {"alpha tuned"},
+			1: {"beta tuned"},
+		},
+	)
+
+	modules := candidate.GetModules()
+	if assert.Len(t, modules, 2) {
+		assert.Equal(t, "alpha tuned", modules[0].GetSignature().Instruction)
+		assert.Equal(t, "beta tuned", modules[1].GetSignature().Instruction)
+	}
 }
 
 // MockTPEOptimizer implements a simplified version of Tree-structured Parzen Estimators for testing.
