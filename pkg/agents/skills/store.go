@@ -76,8 +76,8 @@ func (s *MemoryStore) Load(ctx context.Context, domain string) ([]Skill, error) 
 		return []Skill{}, nil
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return filterAndSortSkills(s.skills, normalizedDomain), nil
 }
@@ -153,8 +153,8 @@ func (s *FileStore) Load(ctx context.Context, domain string) ([]Skill, error) {
 		return []Skill{}, nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	skills, err := s.readAllLocked()
 	if err != nil {
