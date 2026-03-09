@@ -4,6 +4,8 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
+const defaultOuterInstruction = "Analyze the context using iterative code exploration to answer the query."
+
 const compactIterationInstruction = `You are exploring a large context using a Go REPL.
 
 Return these fields in order every time:
@@ -132,6 +134,15 @@ REMEMBER: You MUST start your response with "Reasoning:" and include all five fi
 // RLMSignature creates the main RLM module signature.
 // This is the outer interface: takes context + query, returns answer.
 func RLMSignature() core.Signature {
+	return RLMSignatureWithInstruction(defaultOuterInstruction)
+}
+
+// RLMSignatureWithInstruction creates the outer RLM signature with an explicit instruction override.
+func RLMSignatureWithInstruction(instruction string) core.Signature {
+	if instruction == "" {
+		instruction = defaultOuterInstruction
+	}
+
 	return core.NewSignature(
 		[]core.InputField{
 			{Field: core.NewField("context",
@@ -146,7 +157,7 @@ func RLMSignature() core.Signature {
 				core.WithDescription("The final answer to the query"),
 			)},
 		},
-	).WithInstruction("Analyze the context using iterative code exploration to answer the query.")
+	).WithInstruction(instruction)
 }
 
 // IterationSignature defines the signature for each RLM iteration.
@@ -159,6 +170,19 @@ func IterationSignature() core.Signature {
 // It keeps the same schema but substantially reduces repeated static prompt overhead.
 func CompactIterationSignature() core.Signature {
 	return iterationSignatureWithInstruction(compactIterationInstruction)
+}
+
+// DefaultOuterInstruction returns the built-in outer RLM instruction.
+func DefaultOuterInstruction() string {
+	return defaultOuterInstruction
+}
+
+// DefaultIterationInstruction returns the built-in iteration instruction for the given mode.
+func DefaultIterationInstruction(compact bool) string {
+	if compact {
+		return compactIterationInstruction
+	}
+	return fullIterationInstruction
 }
 
 func iterationSignatureWithInstruction(instruction string) core.Signature {

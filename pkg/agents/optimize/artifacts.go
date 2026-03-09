@@ -6,12 +6,14 @@ import "github.com/XiaoConstantine/dspy-go/pkg/agents"
 type ArtifactKey string
 
 const (
-	ArtifactSkillPack        ArtifactKey = "skill_pack"
-	ArtifactPlannerPrompt    ArtifactKey = "planner_prompt"
-	ArtifactToolPolicy       ArtifactKey = "tool_policy"
-	ArtifactMemoryTemplate   ArtifactKey = "memory_template"
-	ArtifactReflectionPrompt ArtifactKey = "reflection_prompt"
-	ArtifactContextPolicy    ArtifactKey = "context_policy"
+	ArtifactSkillPack          ArtifactKey = "skill_pack"
+	ArtifactPlannerPrompt      ArtifactKey = "planner_prompt"
+	ArtifactToolPolicy         ArtifactKey = "tool_policy"
+	ArtifactMemoryTemplate     ArtifactKey = "memory_template"
+	ArtifactReflectionPrompt   ArtifactKey = "reflection_prompt"
+	ArtifactContextPolicy      ArtifactKey = "context_policy"
+	ArtifactRLMOuterPrompt     ArtifactKey = "rlm_outer_prompt"
+	ArtifactRLMIterationPrompt ArtifactKey = "rlm_iteration_prompt"
 )
 
 // AgentArtifacts groups mutable agent configuration surfaced to optimizers.
