@@ -7,6 +7,14 @@ import "time"
 
 // Config holds RLM configuration.
 type Config struct {
+	// OuterInstruction overrides the top-level RLM module instruction.
+	// Empty string uses the default outer instruction.
+	OuterInstruction string
+
+	// IterationInstruction overrides the iteration module instruction.
+	// Empty string uses the compact/full built-in instruction based on config.
+	IterationInstruction string
+
 	// MaxIterations is the maximum number of iteration loops (default: 30).
 	MaxIterations int
 
@@ -161,6 +169,8 @@ type IterationProgress struct {
 // DefaultConfig returns the default RLM configuration.
 func DefaultConfig() Config {
 	return Config{
+		OuterInstruction:             "",
+		IterationInstruction:         "",
 		MaxIterations:                30,
 		MaxTokens:                    0,
 		Verbose:                      false,
@@ -170,6 +180,39 @@ func DefaultConfig() Config {
 		CompactIterationInstructions: true,
 		OutputTruncation:             outputTruncationConfigPtr(DefaultOutputTruncationConfig()),
 	}
+}
+
+// DefaultAdaptiveIterationConfig returns the built-in adaptive iteration policy.
+func DefaultAdaptiveIterationConfig() AdaptiveIterationConfig {
+	return AdaptiveIterationConfig{
+		Enabled:                true,
+		BaseIterations:         10,
+		MaxIterations:          50,
+		ContextScaleFactor:     100000,
+		EnableEarlyTermination: true,
+		ConfidenceThreshold:    1,
+	}
+}
+
+func cloneConfig(cfg Config) Config {
+	cloned := cfg
+	if cfg.HistoryCompression != nil {
+		history := *cfg.HistoryCompression
+		cloned.HistoryCompression = &history
+	}
+	if cfg.AdaptiveIteration != nil {
+		adaptive := *cfg.AdaptiveIteration
+		cloned.AdaptiveIteration = &adaptive
+	}
+	if cfg.SubRLM != nil {
+		sub := *cfg.SubRLM
+		cloned.SubRLM = &sub
+	}
+	if cfg.OutputTruncation != nil {
+		output := *cfg.OutputTruncation
+		cloned.OutputTruncation = &output
+	}
+	return cloned
 }
 
 // Option configures the RLM.
@@ -256,14 +299,8 @@ func WithHistoryCompression(verbatimIterations, maxSummaryTokens int) Option {
 // early termination when the model signals confidence.
 func WithAdaptiveIteration() Option {
 	return func(c *Config) {
-		c.AdaptiveIteration = &AdaptiveIterationConfig{
-			Enabled:                true,
-			BaseIterations:         10,
-			MaxIterations:          50,
-			ContextScaleFactor:     100000, // 100KB per additional iteration
-			EnableEarlyTermination: true,
-			ConfidenceThreshold:    1,
-		}
+		cfg := DefaultAdaptiveIterationConfig()
+		c.AdaptiveIteration = &cfg
 	}
 }
 

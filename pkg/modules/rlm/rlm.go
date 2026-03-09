@@ -150,9 +150,10 @@ func New(rootLLM core.LLM, subLLMClient SubLLMClient, opts ...Option) *RLM {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	cfg = cloneConfig(cfg)
 
 	// Create the main RLM signature using the DSPy-native signature
-	signature := RLMSignature()
+	signature := RLMSignatureWithInstruction(resolveOuterInstruction(cfg))
 
 	baseModule := core.NewModule(signature)
 	baseModule.ModuleType = "RLM"
@@ -171,10 +172,11 @@ func New(rootLLM core.LLM, subLLMClient SubLLMClient, opts ...Option) *RLM {
 
 // WithOptions applies additional options to the RLM module.
 func (r *RLM) WithOptions(opts ...Option) *RLM {
+	cfg := cloneConfig(r.config)
 	for _, opt := range opts {
-		opt(&r.config)
+		opt(&cfg)
 	}
-	r.rebuildIterationModule()
+	r.SetConfig(cfg)
 	return r
 }
 
@@ -185,11 +187,26 @@ func (r *RLM) SetLLM(llm core.LLM) {
 	r.rebuildIterationModule()
 }
 
-func buildIterationModule(rootLLM core.LLM, cfg Config) *modules.Predict {
-	signature := IterationSignature()
-	if cfg.CompactIterationInstructions {
-		signature = CompactIterationSignature()
+// Config returns a defensive copy of the current RLM configuration.
+func (r *RLM) Config() Config {
+	if r == nil {
+		return DefaultConfig()
 	}
+	return cloneConfig(r.config)
+}
+
+// SetConfig applies a new RLM configuration and rebuilds prompt-bearing internals.
+func (r *RLM) SetConfig(cfg Config) {
+	if r == nil {
+		return
+	}
+	r.config = cloneConfig(cfg)
+	r.BaseModule.SetSignature(RLMSignatureWithInstruction(resolveOuterInstruction(r.config)))
+	r.rebuildIterationModule()
+}
+
+func buildIterationModule(rootLLM core.LLM, cfg Config) *modules.Predict {
+	signature := iterationSignatureWithInstruction(resolveIterationInstruction(cfg))
 
 	iterMod := modules.NewPredict(signature).WithTextOutput()
 	if cfg.UseIterationDemos {
@@ -205,6 +222,20 @@ func (r *RLM) rebuildIterationModule() {
 		return
 	}
 	r.iterationModule = buildIterationModule(r.rootLLM, r.config)
+}
+
+func resolveOuterInstruction(cfg Config) string {
+	if cfg.OuterInstruction != "" {
+		return cfg.OuterInstruction
+	}
+	return DefaultOuterInstruction()
+}
+
+func resolveIterationInstruction(cfg Config) string {
+	if cfg.IterationInstruction != "" {
+		return cfg.IterationInstruction
+	}
+	return DefaultIterationInstruction(cfg.CompactIterationInstructions)
 }
 
 // ProcessWithInterceptors executes the RLM module's logic with interceptor support.
@@ -233,7 +264,7 @@ func (r *RLM) Process(ctx context.Context, inputs map[string]any, opts ...core.O
 	logger.Debug(ctx, "Starting RLM completion with query: %s", query)
 
 	// Run the completion
-	result, err := r.Complete(ctx, contextPayload, query)
+	result, _, err := r.CompleteWithTrace(ctx, contextPayload, query)
 	if err != nil {
 		span.WithError(err)
 		return nil, err
@@ -260,8 +291,21 @@ func (r *RLM) Process(ctx context.Context, inputs map[string]any, opts ...core.O
 // contextPayload is the context data (string, map, or slice).
 // query is the user's question.
 func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*CompletionResult, error) {
+	result, _, err := r.CompleteWithTrace(ctx, contextPayload, query)
+	return result, err
+}
+
+// CompleteWithTrace runs an RLM completion and returns a structured trace of the execution.
+func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query string) (*CompletionResult, *RLMTrace, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
+	trace := &RLMTrace{
+		Input: map[string]any{
+			"context": contextPayload,
+			"query":   query,
+		},
+		StartedAt: start,
+	}
 
 	ctx = core.WithExecutionState(ctx)
 
@@ -305,18 +349,23 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 	// Create REPL environment
 	replEnv, err := NewYaegiREPL(r.subLLMClient)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create REPL: %w", err)
+		finalizeRLMTrace(trace, nil, "repl_create_error", fmt.Errorf("failed to create REPL: %w", err))
+		return nil, trace, fmt.Errorf("failed to create REPL: %w", err)
 	}
 
 	// Load context into REPL
 	if err := replEnv.LoadContext(contextPayload); err != nil {
-		return nil, fmt.Errorf("failed to load context: %w", err)
+		loadErr := fmt.Errorf("failed to load context: %w", err)
+		finalizeRLMTrace(trace, nil, "context_load_error", loadErr)
+		return nil, trace, loadErr
 	}
 
 	// Allow callers to extend the REPL before the iteration loop starts.
 	if r.config.REPLSetup != nil {
 		if err := r.config.REPLSetup(replEnv); err != nil {
-			return nil, fmt.Errorf("REPL setup hook failed: %w", err)
+			setupErr := fmt.Errorf("REPL setup hook failed: %w", err)
+			finalizeRLMTrace(trace, nil, "repl_setup_error", setupErr)
+			return nil, trace, setupErr
 		}
 	}
 
@@ -336,11 +385,19 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			trace.CompletedAt = time.Now()
+			trace.ProcessingTime = time.Since(start)
+			trace.TerminationCause = "context_canceled"
+			trace.Error = ctx.Err().Error()
+			return nil, trace, ctx.Err()
 		default:
 		}
 		if err := r.enforceTokenBudget(); err != nil {
-			return nil, err
+			trace.CompletedAt = time.Now()
+			trace.ProcessingTime = time.Since(start)
+			trace.TerminationCause = "token_budget_exceeded"
+			trace.Error = err.Error()
+			return nil, trace, err
 		}
 
 		if r.config.Verbose {
@@ -358,7 +415,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 		// Call the iteration module
 		outputs, err := r.iterationModule.Process(ctx, iterInputs)
 		if err != nil {
-			return nil, fmt.Errorf("iteration %d: module process failed: %w", i, err)
+			processErr := fmt.Errorf("iteration %d: module process failed: %w", i, err)
+			finalizeRLMTrace(trace, nil, "iteration_process_error", processErr)
+			return nil, trace, processErr
 		}
 
 		// Extract structured outputs
@@ -373,7 +432,8 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 
 		rootPromptTokens := r.trackTokenUsage(ctx, i+1)
 		if err := r.enforceTokenBudget(); err != nil {
-			return nil, err
+			finalizeRLMTrace(trace, nil, "token_budget_exceeded", err)
+			return nil, trace, err
 		}
 
 		// Report progress after the LLM call so per-iteration prompt tokens are available
@@ -401,10 +461,12 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			if err != nil {
 				logger.Warn(ctx, "[RLM] Sub-RLM execution error: %v", err)
 				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM error: %v", err))
+				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, "", fmt.Sprintf("Sub-RLM error: %v", err), time.Since(iterStart), false, err))
 			} else {
 				// Store result in REPL variable for access in subsequent iterations
 				_ = replEnv.SetVariable("subrlm_result", subRLMResult)
 				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM completed: %s", subRLMResult))
+				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, fmt.Sprintf("Sub-RLM completed: %s", subRLMResult), "", time.Since(iterStart), true, nil))
 
 				if r.config.Verbose {
 					logger.Debug(ctx, "[RLM] Sub-RLM result: %s", utils.TruncateString(subRLMResult, truncateLenMedium))
@@ -454,13 +516,16 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 						time.Since(iterStart),
 					)
 				}
+				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, code, subquery, finalAnswer, "", time.Since(iterStart), true, nil))
 
-				return &CompletionResult{
+				result := &CompletionResult{
 					Response:   finalAnswer,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
 					Usage:      r.tokenTracker.GetTotalUsage(),
-				}, nil
+				}
+				finalizeRLMTrace(trace, result, "final_answer", nil)
+				return result, trace, nil
 			}
 		}
 
@@ -500,7 +565,11 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
 			if err := r.enforceTokenBudget(); err != nil {
-				return nil, err
+				trace.CompletedAt = time.Now()
+				trace.ProcessingTime = time.Since(start)
+				trace.TerminationCause = "token_budget_exceeded"
+				trace.Error = err.Error()
+				return nil, trace, err
 			}
 
 			callSummary := r.summarizeLLMCalls(llmCalls)
@@ -533,13 +602,16 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 						time.Since(iterStart),
 					)
 				}
+				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, code, subquery, resultResponse, "", time.Since(iterStart), execErr == nil, execErr))
 
-				return &CompletionResult{
+				completion := &CompletionResult{
 					Response:   resultResponse,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
 					Usage:      r.tokenTracker.GetTotalUsage(),
-				}, nil
+				}
+				finalizeRLMTrace(trace, completion, "state_final", nil)
+				return completion, trace, nil
 			}
 
 			// Fallback: Check for FINAL in execution output via regex (deprecated, kept for backward compatibility)
@@ -568,13 +640,16 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 						time.Since(iterStart),
 					)
 				}
+				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, code, subquery, resultResponse, "", time.Since(iterStart), execErr == nil, execErr))
 
-				return &CompletionResult{
+				completion := &CompletionResult{
 					Response:   resultResponse,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
 					Usage:      r.tokenTracker.GetTotalUsage(),
-				}, nil
+				}
+				finalizeRLMTrace(trace, completion, "regex_final", nil)
+				return completion, trace, nil
 			}
 
 			// Log iteration to trace
@@ -607,6 +682,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				}
 			}
 			r.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
+			trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, code, subquery, execOutput, "", time.Since(iterStart), execErr == nil, execErr))
 		} else if action != "final" {
 			// Log non-code iteration to trace
 			if traceSession != nil {
@@ -619,6 +695,7 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 				)
 			}
 			r.appendIterationHistory(&history, i+1, action, reasoning, "", "")
+			trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, "", "", time.Since(iterStart), true, nil))
 		}
 
 		// Detect confidence signals for adaptive early termination
@@ -635,7 +712,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 			if r.config.Verbose {
 				logger.Info(ctx, "[RLM] Early termination triggered (confidence signals: %d)", confidenceSignals)
 			}
-			return r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+			result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+			finalizeRLMTrace(trace, result, "early_termination", err)
+			return result, trace, err
 		}
 
 		// Apply history compression if enabled
@@ -653,7 +732,9 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 	}
 
 	// Max iterations exhausted - force final answer
-	return r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+	result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+	finalizeRLMTrace(trace, result, "max_iterations", err)
+	return result, trace, err
 }
 
 // executeSubRLM spawns a nested RLM loop that shares REPL state with the parent.
@@ -702,7 +783,7 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 
 	// Create sub-RLM instance
 	subRLM := &RLM{
-		BaseModule:      *core.NewModule(RLMSignature()),
+		BaseModule:      *core.NewModule(RLMSignatureWithInstruction(resolveOuterInstruction(subConfig))),
 		config:          subConfig,
 		rootLLM:         r.rootLLM,
 		subLLMClient:    r.subLLMClient,
@@ -1225,7 +1306,7 @@ func (r *RLM) Clone() core.Module {
 
 	return &RLM{
 		BaseModule:      *r.BaseModule.Clone().(*core.BaseModule),
-		config:          r.config,
+		config:          cloneConfig(r.config),
 		rootLLM:         r.rootLLM,
 		subLLMClient:    r.subLLMClient,
 		tokenTracker:    NewTokenTracker(),
@@ -1311,6 +1392,46 @@ func formatREPLStateRich(variables []REPLVariable, maxPreviewLen int) string {
 	}
 
 	return result.String()
+}
+
+func newRLMTraceStep(index int, thought, action, code, subquery, observation, errorText string, duration time.Duration, success bool, err error) RLMTraceStep {
+	step := RLMTraceStep{
+		Index:       index,
+		Thought:     thought,
+		Action:      action,
+		Code:        code,
+		SubQuery:    subquery,
+		Observation: observation,
+		Duration:    duration,
+		Success:     success,
+		Error:       errorText,
+	}
+	if err != nil && step.Error == "" {
+		step.Error = err.Error()
+	}
+	return step
+}
+
+func finalizeRLMTrace(trace *RLMTrace, result *CompletionResult, terminationCause string, err error) {
+	if trace == nil {
+		return
+	}
+
+	trace.CompletedAt = time.Now()
+	trace.ProcessingTime = trace.CompletedAt.Sub(trace.StartedAt)
+	trace.TerminationCause = terminationCause
+
+	if result != nil {
+		trace.Output = map[string]any{
+			"answer": result.Response,
+		}
+		trace.Iterations = result.Iterations
+		trace.Usage = result.Usage
+	}
+
+	if err != nil {
+		trace.Error = err.Error()
+	}
 }
 
 // trackTokenUsage extracts token usage from the execution state and records it.
