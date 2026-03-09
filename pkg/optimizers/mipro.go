@@ -670,18 +670,15 @@ func (m *MIPRO) createCandidateProgram(
 	demos []core.Example,
 	instructions map[int][]string,
 ) core.Program {
-	// newProgram := baseProgram.Clone()
-	// modules := newProgram.GetModules() // Get ordered slice of modules
 	newModules := make(map[string]core.Module)
 	for name, module := range baseProgram.Modules {
 		newModules[name] = module.Clone()
 	}
 
+	newProgram := baseProgram.RebindModules(newModules)
+
 	// Update modules with parameters
-	modules := make([]core.Module, 0, len(newModules))
-	for _, m := range newModules {
-		modules = append(modules, m)
-	}
+	modules := newProgram.GetModules()
 	for i, module := range modules {
 		// Check if we have instructions for this module
 		if moduleInstructions, ok := instructions[i]; ok && len(moduleInstructions) > 0 {
@@ -721,12 +718,7 @@ func (m *MIPRO) createCandidateProgram(
 		}
 	}
 
-	//	return newProgram
-	// Create new program with updated modules but PRESERVE the forward function
-	return core.NewProgram(
-		newModules,
-		baseProgram.Forward, // This is the critical line
-	)
+	return newProgram
 }
 
 // evaluateCandidate evaluates a candidate program.

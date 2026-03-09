@@ -7,10 +7,16 @@ import (
 	"sort"
 )
 
+// ForwardFactory rebuilds a program forward function against a specific module map.
+// Programs created with a factory can safely rebind their forward logic during Clone().
+type ForwardFactory func(modules map[string]Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error)
+
 // Program represents a complete DSPy pipeline or workflow.
 type Program struct {
 	Modules map[string]Module
 	Forward func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error)
+
+	forwardFactory ForwardFactory
 }
 
 // NewProgram creates a new Program with the given modules and forward function.
@@ -19,6 +25,19 @@ func NewProgram(modules map[string]Module, forward func(context.Context, map[str
 		Modules: modules,
 		Forward: forward,
 	}
+}
+
+// NewProgramWithForwardFactory creates a program whose forward function can be
+// safely rebound against cloned or replaced modules.
+func NewProgramWithForwardFactory(modules map[string]Module, factory ForwardFactory) Program {
+	program := Program{
+		Modules:        modules,
+		forwardFactory: factory,
+	}
+	if factory != nil {
+		program.Forward = factory(modules)
+	}
+	return program
 }
 
 // Execute runs the program with the given inputs.
@@ -69,10 +88,23 @@ func (p Program) Clone() Program {
 		modulesCopy[name] = module.Clone()
 	}
 
-	return Program{
-		Modules: modulesCopy,
-		Forward: p.Forward, // Note: We're copying the pointer to the forward function
+	return p.RebindModules(modulesCopy)
+}
+
+// RebindModules returns a new program with the provided module map.
+// When a forward factory is available, the returned program rebuilds its forward
+// function against the supplied modules; otherwise it preserves the original
+// forward function pointer.
+func (p Program) RebindModules(modules map[string]Module) Program {
+	rebound := Program{
+		Modules:        modules,
+		Forward:        p.Forward,
+		forwardFactory: p.forwardFactory,
 	}
+	if p.forwardFactory != nil {
+		rebound.Forward = p.forwardFactory(modules)
+	}
+	return rebound
 }
 
 // Equal checks if two Programs are equivalent.
@@ -103,6 +135,17 @@ func (p *Program) AddModule(name string, module Module) {
 // SetForward sets the forward function for the Program.
 func (p *Program) SetForward(forward func(context.Context, map[string]interface{}) (map[string]interface{}, error)) {
 	p.Forward = forward
+	p.forwardFactory = nil
+}
+
+// SetForwardFactory sets a clone-safe forward factory for the Program.
+func (p *Program) SetForwardFactory(factory ForwardFactory) {
+	p.forwardFactory = factory
+	if factory != nil {
+		p.Forward = factory(p.Modules)
+	} else {
+		p.Forward = nil
+	}
 }
 
 // GetModules returns all modules in deterministic alphabetical order by name.

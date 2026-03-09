@@ -1532,11 +1532,14 @@ func createSIMBATestProgram() core.Program {
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	).WithInstruction("Answer the question"))
 
-	forwardFunc := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-		return predict.Process(ctx, inputs)
-	}
-
-	return core.NewProgram(map[string]core.Module{"predict": predict}, forwardFunc)
+	return core.NewProgramWithForwardFactory(
+		map[string]core.Module{"predict": predict},
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return modules["predict"].Process(ctx, inputs)
+			}
+		},
+	)
 }
 
 func createSIMBATestDataset() core.Dataset {
