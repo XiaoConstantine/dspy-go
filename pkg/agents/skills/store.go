@@ -113,8 +113,8 @@ func (s *FileStore) Save(ctx context.Context, skill Skill) error {
 		return err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	skills, err := s.readAllLocked()
 	if err != nil {
