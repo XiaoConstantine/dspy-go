@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -125,9 +126,10 @@ type CompletionResult struct {
 type RLM struct {
 	core.BaseModule
 	config          Config
-	rootLLM         core.LLM         // Root LLM for orchestration
-	subLLMClient    SubLLMClient     // Client for sub-LLM calls from REPL
-	tokenTracker    *TokenTracker    // Tracks token usage across all calls
+	rootLLM         core.LLM     // Root LLM for orchestration
+	subLLMClient    SubLLMClient // Client for sub-LLM calls from REPL
+	tokenTrackerMu  sync.RWMutex
+	tokenTracker    *TokenTracker    // Snapshot of the most recently completed request
 	iterationModule *modules.Predict // Internal Predict module for iterations
 }
 
@@ -299,19 +301,18 @@ func (r *RLM) Complete(ctx context.Context, contextPayload any, query string) (*
 func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query string) (*CompletionResult, *RLMTrace, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
+	tokenTracker := NewTokenTracker()
 	trace := &RLMTrace{
 		Input: map[string]any{
 			"context": contextPayload,
 			"query":   query,
 		},
 		StartedAt:    start,
-		tokenTracker: r.tokenTracker,
+		tokenTracker: tokenTracker,
 	}
+	defer r.setTokenTracker(tokenTracker)
 
 	ctx = core.WithExecutionState(ctx)
-
-	// Reset token tracker for this completion
-	r.tokenTracker.Reset()
 
 	// Apply timeout if configured
 	if r.config.Timeout > 0 {
@@ -393,7 +394,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			return nil, trace, ctx.Err()
 		default:
 		}
-		if err := r.enforceTokenBudget(); err != nil {
+		if err := r.enforceTokenBudget(tokenTracker); err != nil {
 			trace.CompletedAt = time.Now()
 			trace.ProcessingTime = time.Since(start)
 			trace.TerminationCause = "token_budget_exceeded"
@@ -431,8 +432,8 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		// Strip language markers from code (handles LLM outputting "go\n" at start)
 		code = stripCodeLanguageMarker(code)
 
-		rootPromptTokens := r.trackTokenUsage(ctx, i+1)
-		if err := r.enforceTokenBudget(); err != nil {
+		rootPromptTokens := r.trackTokenUsage(ctx, tokenTracker, i+1)
+		if err := r.enforceTokenBudget(tokenTracker); err != nil {
 			finalizeRLMTrace(trace, nil, "token_budget_exceeded", err)
 			return nil, trace, err
 		}
@@ -458,7 +459,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 
 		// Check for subrlm action (nested RLM loop)
 		if action == "subrlm" {
-			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start)
+			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start, tokenTracker)
 			if err != nil {
 				logger.Warn(ctx, "[RLM] Sub-RLM execution error: %v", err)
 				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM error: %v", err))
@@ -523,7 +524,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					Response:   finalAnswer,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
-					Usage:      r.tokenTracker.GetTotalUsage(),
+					Usage:      tokenTracker.GetTotalUsage(),
 				}
 				finalizeRLMTrace(trace, result, "final_answer", nil)
 				return result, trace, nil
@@ -555,7 +556,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			fullExecOutput := FormatExecutionResult(result)
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
-				r.tokenTracker.AddSubCall(call)
+				tokenTracker.AddSubCall(call)
 				rlmCalls = append(rlmCalls, logging.RLMCallEntry{
 					Prompt:           call.Prompt,
 					Response:         call.Response,
@@ -565,7 +566,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 				})
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
-			if err := r.enforceTokenBudget(); err != nil {
+			if err := r.enforceTokenBudget(tokenTracker); err != nil {
 				trace.CompletedAt = time.Now()
 				trace.ProcessingTime = time.Since(start)
 				trace.TerminationCause = "token_budget_exceeded"
@@ -609,7 +610,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					Response:   resultResponse,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
-					Usage:      r.tokenTracker.GetTotalUsage(),
+					Usage:      tokenTracker.GetTotalUsage(),
 				}
 				finalizeRLMTrace(trace, completion, "state_final", nil)
 				return completion, trace, nil
@@ -647,7 +648,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					Response:   resultResponse,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
-					Usage:      r.tokenTracker.GetTotalUsage(),
+					Usage:      tokenTracker.GetTotalUsage(),
 				}
 				finalizeRLMTrace(trace, completion, "regex_final", nil)
 				return completion, trace, nil
@@ -714,7 +715,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			if r.config.Verbose {
 				logger.Info(ctx, "[RLM] Early termination triggered (confidence signals: %d)", confidenceSignals)
 			}
-			result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+			result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations, tokenTracker)
 			finalizeRLMTrace(trace, result, "early_termination", err)
 			return result, trace, err
 		}
@@ -735,14 +736,14 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 	}
 
 	// Max iterations exhausted - force final answer
-	result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+	result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations, tokenTracker)
 	finalizeRLMTrace(trace, result, "max_iterations", err)
 	return result, trace, err
 }
 
 // executeSubRLM spawns a nested RLM loop that shares REPL state with the parent.
 // It respects depth limits to prevent infinite recursion.
-func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time) (string, error) {
+func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time, parentTracker *TokenTracker) (string, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
 
@@ -796,14 +797,16 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 	subRLM.ModuleType = "SubRLM"
 
 	// Execute sub-RLM using the SHARED REPL environment
-	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery)
+	subTracker := NewTokenTracker()
+	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery, subTracker)
 	if err != nil {
 		return "", fmt.Errorf("sub-RLM execution failed: %w", err)
 	}
+	subRLM.setTokenTracker(subTracker)
 
 	// Track sub-RLM token usage
-	subUsage := subRLM.tokenTracker.GetTotalUsage()
-	r.tokenTracker.AddSubRLMCall(SubRLMCall{
+	subUsage := subTracker.GetTotalUsage()
+	parentTracker.AddSubRLMCall(SubRLMCall{
 		Query:            subquery,
 		Result:           result.Response,
 		Iterations:       result.Iterations,
@@ -822,12 +825,9 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 
 // completeWithSharedREPL runs an RLM completion loop using an existing REPL environment.
 // This allows sub-RLMs to share state with their parent.
-func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *YaegiREPL, query string) (*CompletionResult, error) {
+func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *YaegiREPL, query string, tokenTracker *TokenTracker) (*CompletionResult, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
-
-	// Reset sub-RLM's token tracker
-	subRLM.tokenTracker.Reset()
 
 	// Apply timeout if configured
 	if subRLM.config.Timeout > 0 {
@@ -853,7 +853,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			return nil, ctx.Err()
 		default:
 		}
-		if err := subRLM.enforceTokenBudget(); err != nil {
+		if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
 			return nil, err
 		}
 
@@ -883,8 +883,8 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 		subquery := extractStringOutput(outputs, "subquery")
 
 		code = stripCodeLanguageMarker(code)
-		subRLM.trackTokenUsage(ctx, i+1)
-		if err := subRLM.enforceTokenBudget(); err != nil {
+		subRLM.trackTokenUsage(ctx, tokenTracker, i+1)
+		if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
 			return nil, err
 		}
 
@@ -892,7 +892,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		// Handle nested subrlm action
 		if action == "subrlm" {
-			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start)
+			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start, tokenTracker)
 			if err != nil {
 				logger.Warn(ctx, "[SubRLM] Nested sub-RLM error: %v", err)
 				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM error: %v", err))
@@ -931,7 +931,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 					Response:   finalAnswer,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
-					Usage:      subRLM.tokenTracker.GetTotalUsage(),
+					Usage:      tokenTracker.GetTotalUsage(),
 				}, nil
 			}
 		}
@@ -944,10 +944,10 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			fullExecOutput := FormatExecutionResult(result)
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
-				subRLM.tokenTracker.AddSubCall(call)
+				tokenTracker.AddSubCall(call)
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
-			if err := subRLM.enforceTokenBudget(); err != nil {
+			if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
 				return nil, err
 			}
 
@@ -959,7 +959,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 					Response:   replEnv.Final(),
 					Iterations: i + 1,
 					Duration:   time.Since(start),
-					Usage:      subRLM.tokenTracker.GetTotalUsage(),
+					Usage:      tokenTracker.GetTotalUsage(),
 				}, nil
 			}
 
@@ -969,7 +969,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 					Response:   final.Content,
 					Iterations: i + 1,
 					Duration:   time.Since(start),
-					Usage:      subRLM.tokenTracker.GetTotalUsage(),
+					Usage:      tokenTracker.GetTotalUsage(),
 				}, nil
 			}
 
@@ -996,12 +996,12 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 	}
 
 	// Max iterations exhausted - force final answer
-	return subRLM.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations)
+	return subRLM.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations, tokenTracker)
 }
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
-func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time, maxIterations int) (*CompletionResult, error) {
-	if err := r.enforceTokenBudget(); err != nil {
+func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time, maxIterations int, tokenTracker *TokenTracker) (*CompletionResult, error) {
+	if err := r.enforceTokenBudget(tokenTracker); err != nil {
 		return nil, err
 	}
 
@@ -1018,8 +1018,8 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 		return nil, fmt.Errorf("default answer: module process failed: %w", err)
 	}
 
-	r.trackTokenUsage(ctx, 0)
-	if err := r.enforceTokenBudget(); err != nil {
+	r.trackTokenUsage(ctx, tokenTracker, 0)
+	if err := r.enforceTokenBudget(tokenTracker); err != nil {
 		return nil, err
 	}
 
@@ -1046,7 +1046,7 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 		Response:   answer,
 		Iterations: maxIterations,
 		Duration:   time.Since(start),
-		Usage:      r.tokenTracker.GetTotalUsage(),
+		Usage:      tokenTracker.GetTotalUsage(),
 	}, nil
 }
 
@@ -1145,12 +1145,18 @@ func (r *RLM) summarizeLLMCalls(calls []LLMCall) string {
 	return strings.TrimSuffix(summary.String(), "\n")
 }
 
-func (r *RLM) enforceTokenBudget() error {
+func (r *RLM) enforceTokenBudget(tokenTracker *TokenTracker) error {
 	if r.config.MaxTokens <= 0 {
 		return nil
 	}
 
-	usage := r.tokenTracker.GetTotalUsage()
+	if tokenTracker == nil {
+		tokenTracker = r.GetTokenTracker()
+	}
+	if tokenTracker == nil {
+		return nil
+	}
+	usage := tokenTracker.GetTotalUsage()
 	if usage.TotalTokens <= r.config.MaxTokens {
 		return nil
 	}
@@ -1319,6 +1325,11 @@ func (r *RLM) Clone() core.Module {
 
 // GetTokenTracker returns the token tracker for inspecting usage.
 func (r *RLM) GetTokenTracker() *TokenTracker {
+	if r == nil {
+		return nil
+	}
+	r.tokenTrackerMu.RLock()
+	defer r.tokenTrackerMu.RUnlock()
 	return r.tokenTracker
 }
 
@@ -1448,18 +1459,33 @@ func finalizeRLMTrace(trace *RLMTrace, result *CompletionResult, terminationCaus
 // trackTokenUsage extracts token usage from the execution state and records it.
 // When iteration > 0, a per-iteration snapshot is recorded for context fill ratio analysis.
 // Returns the per-call prompt tokens reported by the provider (0 if unavailable).
-func (r *RLM) trackTokenUsage(ctx context.Context, iteration int) int {
+func (r *RLM) trackTokenUsage(ctx context.Context, tokenTracker *TokenTracker, iteration int) int {
+	if tokenTracker == nil {
+		tokenTracker = r.GetTokenTracker()
+	}
+	if tokenTracker == nil {
+		return 0
+	}
 	if state := core.GetExecutionState(ctx); state != nil {
 		if usage := state.GetTokenUsage(); usage != nil {
 			if iteration > 0 {
-				r.tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
+				tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
 			} else {
-				r.tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+				tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
 			}
 			return usage.PromptTokens
 		}
 	}
 	return 0
+}
+
+func (r *RLM) setTokenTracker(tokenTracker *TokenTracker) {
+	if r == nil {
+		return
+	}
+	r.tokenTrackerMu.Lock()
+	defer r.tokenTrackerMu.Unlock()
+	r.tokenTracker = tokenTracker
 }
 
 // appendIterationHistory adds iteration info to the history string.

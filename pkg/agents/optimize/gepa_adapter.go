@@ -11,6 +11,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	modrlm "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
@@ -688,10 +689,10 @@ func summarizeAgentTrace(trace *agents.ExecutionTrace) string {
 		builder.WriteString(trace.TerminationCause)
 	}
 	if trace.ContextMetadata != nil {
-		appendSummaryInt(&builder, "subllm", trace.ContextMetadata["sub_llm_call_count"])
-		appendSummaryInt(&builder, "subrlm", trace.ContextMetadata["sub_rlm_call_count"])
-		appendSummaryInt(&builder, "signals", trace.ContextMetadata["confidence_signals"])
-		appendSummaryInt(&builder, "compressions", trace.ContextMetadata["history_compressions"])
+		appendSummaryCount(&builder, "subllm", trace.ContextMetadata[modrlm.TraceMetadataSubLLMCallCount])
+		appendSummaryCount(&builder, "subrlm", trace.ContextMetadata[modrlm.TraceMetadataSubRLMCallCount])
+		appendSummaryCount(&builder, "signals", trace.ContextMetadata[modrlm.TraceMetadataConfidenceSignals])
+		appendSummaryCount(&builder, "compressions", trace.ContextMetadata[modrlm.TraceMetadataHistoryCompressions])
 	}
 
 	stepLimit := len(trace.Steps)
@@ -785,44 +786,44 @@ func contextMetadataEvidence(metadata map[string]interface{}) []string {
 	}
 
 	evidence := make([]string, 0, 8)
-	if enabled, ok := metadata["adaptive_iteration_enabled"].(bool); ok && enabled {
+	if enabled, ok := metadata[modrlm.TraceMetadataAdaptiveIterationEnabled].(bool); ok && enabled {
 		evidence = append(evidence, "adaptive_iteration=enabled")
 	}
-	if value := positiveIntEvidence("sub_llm_calls", metadata["sub_llm_call_count"]); value != "" {
+	if value := nonNegativeIntEvidence("sub_llm_calls", metadata[modrlm.TraceMetadataSubLLMCallCount]); value != "" {
 		evidence = append(evidence, value)
 	}
-	if value := positiveIntEvidence("sub_rlm_calls", metadata["sub_rlm_call_count"]); value != "" {
+	if value := nonNegativeIntEvidence("sub_rlm_calls", metadata[modrlm.TraceMetadataSubRLMCallCount]); value != "" {
 		evidence = append(evidence, value)
 	}
-	if value := positiveIntEvidence("confidence_signals", metadata["confidence_signals"]); value != "" {
+	if value := nonNegativeIntEvidence("confidence_signals", metadata[modrlm.TraceMetadataConfidenceSignals]); value != "" {
 		evidence = append(evidence, value)
 	}
-	if value := positiveIntEvidence("history_compressions", metadata["history_compressions"]); value != "" {
+	if value := nonNegativeIntEvidence("history_compressions", metadata[modrlm.TraceMetadataHistoryCompressions]); value != "" {
 		evidence = append(evidence, value)
 	}
-	if value := positiveIntEvidence("root_prompt_mean_tokens", metadata["root_prompt_mean_tokens"]); value != "" {
+	if value := nonNegativeIntEvidence("root_prompt_mean_tokens", metadata[modrlm.TraceMetadataRootPromptMeanTokens]); value != "" {
 		evidence = append(evidence, value)
 	}
-	if value := positiveIntEvidence("root_prompt_max_tokens", metadata["root_prompt_max_tokens"]); value != "" {
+	if value := nonNegativeIntEvidence("root_prompt_max_tokens", metadata[modrlm.TraceMetadataRootPromptMaxTokens]); value != "" {
 		evidence = append(evidence, value)
 	}
-	if base, ok := extractPositiveInt(metadata["adaptive_base_iterations"]); ok {
-		if maxIterations, ok := extractPositiveInt(metadata["adaptive_max_iterations"]); ok {
+	if base, ok := extractPositiveInt(metadata[modrlm.TraceMetadataAdaptiveBaseIterations]); ok {
+		if maxIterations, ok := extractPositiveInt(metadata[modrlm.TraceMetadataAdaptiveMaxIterations]); ok {
 			evidence = append(evidence, fmt.Sprintf("adaptive_window=%d/%d", base, maxIterations))
 		}
 	}
-	if threshold, ok := extractPositiveInt(metadata["adaptive_confidence_threshold"]); ok {
+	if threshold, ok := extractPositiveInt(metadata[modrlm.TraceMetadataAdaptiveConfidenceThreshold]); ok {
 		evidence = append(evidence, fmt.Sprintf("adaptive_confidence_threshold=%d", threshold))
 	}
 
 	return evidence
 }
 
-func appendSummaryInt(builder *strings.Builder, label string, raw interface{}) {
+func appendSummaryCount(builder *strings.Builder, label string, raw interface{}) {
 	if builder == nil {
 		return
 	}
-	value, ok := extractPositiveInt(raw)
+	value, ok := extractNonNegativeInt(raw)
 	if !ok {
 		return
 	}
@@ -834,12 +835,30 @@ func appendSummaryInt(builder *strings.Builder, label string, raw interface{}) {
 	builder.WriteString(strconv.Itoa(value))
 }
 
-func positiveIntEvidence(label string, raw interface{}) string {
-	value, ok := extractPositiveInt(raw)
+func nonNegativeIntEvidence(label string, raw interface{}) string {
+	value, ok := extractNonNegativeInt(raw)
 	if !ok {
 		return ""
 	}
 	return fmt.Sprintf("%s=%d", label, value)
+}
+
+func extractNonNegativeInt(raw interface{}) (int, bool) {
+	switch value := raw.(type) {
+	case int:
+		if value >= 0 {
+			return value, true
+		}
+	case int64:
+		if value >= 0 {
+			return int(value), true
+		}
+	case float64:
+		if value >= 0 {
+			return int(value), true
+		}
+	}
+	return 0, false
 }
 
 func extractPositiveInt(raw interface{}) (int, bool) {

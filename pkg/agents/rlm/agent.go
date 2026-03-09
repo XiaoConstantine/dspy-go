@@ -218,22 +218,22 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 	}
 
 	contextMetadata := map[string]interface{}{
-		"iterations":                     trace.Iterations,
-		"termination_cause":              trace.TerminationCause,
-		"adaptive_iteration_enabled":     a.artifacts.Bool[ArtifactAdaptiveIterationEnabled],
-		"compact_iteration_instructions": a.artifacts.Bool[ArtifactCompactIterationPrompt],
-		"use_iteration_demos":            a.artifacts.Bool[ArtifactUseIterationDemos],
-		"max_iterations":                 a.artifacts.Int[ArtifactMaxIterations],
-		"max_tokens":                     a.artifacts.Int[ArtifactMaxTokens],
-		"adaptive_base_iterations":       a.artifacts.Int[ArtifactAdaptiveBaseIterations],
-		"adaptive_max_iterations":        a.artifacts.Int[ArtifactAdaptiveMaxIterations],
-		"adaptive_confidence_threshold":  a.artifacts.Int[ArtifactAdaptiveConfidenceThreshold],
-		"sub_llm_call_count":             trace.SubLLMCallCount,
-		"sub_rlm_call_count":             trace.SubRLMCallCount,
-		"confidence_signals":             trace.ConfidenceSignals,
-		"history_compressions":           trace.CompressionCount,
-		"root_prompt_mean_tokens":        meanPromptTokens(trace.RootSnapshots),
-		"root_prompt_max_tokens":         maxPromptTokens(trace.RootSnapshots),
+		modrlm.TraceMetadataIterations:                   trace.Iterations,
+		modrlm.TraceMetadataTerminationCause:             trace.TerminationCause,
+		modrlm.TraceMetadataAdaptiveIterationEnabled:     a.artifacts.Bool[ArtifactAdaptiveIterationEnabled],
+		modrlm.TraceMetadataCompactIterationInstructions: a.artifacts.Bool[ArtifactCompactIterationPrompt],
+		modrlm.TraceMetadataUseIterationDemos:            a.artifacts.Bool[ArtifactUseIterationDemos],
+		modrlm.TraceMetadataMaxIterations:                a.artifacts.Int[ArtifactMaxIterations],
+		modrlm.TraceMetadataMaxTokens:                    a.artifacts.Int[ArtifactMaxTokens],
+		modrlm.TraceMetadataAdaptiveBaseIterations:       a.artifacts.Int[ArtifactAdaptiveBaseIterations],
+		modrlm.TraceMetadataAdaptiveMaxIterations:        a.artifacts.Int[ArtifactAdaptiveMaxIterations],
+		modrlm.TraceMetadataAdaptiveConfidenceThreshold:  a.artifacts.Int[ArtifactAdaptiveConfidenceThreshold],
+		modrlm.TraceMetadataSubLLMCallCount:              trace.SubLLMCallCount,
+		modrlm.TraceMetadataSubRLMCallCount:              trace.SubRLMCallCount,
+		modrlm.TraceMetadataConfidenceSignals:            trace.ConfidenceSignals,
+		modrlm.TraceMetadataHistoryCompressions:          trace.CompressionCount,
+		modrlm.TraceMetadataRootPromptMeanTokens:         meanPromptTokens(trace.RootSnapshots),
+		modrlm.TraceMetadataRootPromptMaxTokens:          maxPromptTokens(trace.RootSnapshots),
 	}
 
 	executionTrace := &agents.ExecutionTrace{

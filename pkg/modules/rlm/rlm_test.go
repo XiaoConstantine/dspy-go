@@ -1770,7 +1770,7 @@ func TestSubRLMDepthLimit(t *testing.T) {
 
 	// Try to execute sub-RLM at max depth
 	ctx := context.Background()
-	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now())
+	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now(), NewTokenTracker())
 
 	// Should fail due to depth limit
 	require.Error(t, err)

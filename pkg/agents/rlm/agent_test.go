@@ -146,13 +146,13 @@ func TestAgentExecute_RecordsRLMNativeMetadata(t *testing.T) {
 
 	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
-	assert.Equal(t, 1, trace.ContextMetadata["sub_llm_call_count"])
-	assert.Equal(t, 0, trace.ContextMetadata["sub_rlm_call_count"])
-	assert.Equal(t, 100, trace.ContextMetadata["root_prompt_mean_tokens"])
-	assert.Equal(t, 100, trace.ContextMetadata["root_prompt_max_tokens"])
-	assert.Equal(t, 10, trace.ContextMetadata["adaptive_base_iterations"])
-	assert.Equal(t, 50, trace.ContextMetadata["adaptive_max_iterations"])
-	assert.Equal(t, 1, trace.ContextMetadata["adaptive_confidence_threshold"])
+	assert.Equal(t, 1, trace.ContextMetadata[modrlm.TraceMetadataSubLLMCallCount])
+	assert.Equal(t, 0, trace.ContextMetadata[modrlm.TraceMetadataSubRLMCallCount])
+	assert.Equal(t, 100, trace.ContextMetadata[modrlm.TraceMetadataRootPromptMeanTokens])
+	assert.Equal(t, 100, trace.ContextMetadata[modrlm.TraceMetadataRootPromptMaxTokens])
+	assert.Equal(t, 10, trace.ContextMetadata[modrlm.TraceMetadataAdaptiveBaseIterations])
+	assert.Equal(t, 50, trace.ContextMetadata[modrlm.TraceMetadataAdaptiveMaxIterations])
+	assert.Equal(t, 1, trace.ContextMetadata[modrlm.TraceMetadataAdaptiveConfidenceThreshold])
 }
 
 func TestAgentExecute_NilReceiverReturnsError(t *testing.T) {
