@@ -11,6 +11,10 @@ import (
 )
 
 // GEPAOptimizeRequest configures one end-to-end GEPA optimization run for an agent artifact set.
+//
+// SeedArtifacts and examples are treated as trusted harness inputs. They may be
+// embedded into model prompts during optimization, so callers should source them
+// from trusted corpora or explicitly sanitize them before invoking Optimize.
 type GEPAOptimizeRequest struct {
 	SeedArtifacts      AgentArtifacts
 	TrainingExamples   []AgentExample
