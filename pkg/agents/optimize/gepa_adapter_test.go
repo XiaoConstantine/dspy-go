@@ -133,6 +133,8 @@ func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T
 	assert.False(t, evaluation.Traces[1].Success)
 	assert.Equal(t, "first", evaluation.Traces[0].ContextData["example_id"])
 	assert.Contains(t, evaluation.Traces[0].ContextData, gepaMetadataTraceSummaryKey)
+	assert.Contains(t, evaluation.Traces[0].ContextData, gepaMetadataTraceEvidenceKey)
+	assert.Contains(t, evaluation.Traces[1].ContextData[gepaMetadataTraceEvidenceKey], "failed_test=output:answer")
 	assert.Contains(t, evaluation.Traces[1].ContextData, "diagnostics")
 }
 

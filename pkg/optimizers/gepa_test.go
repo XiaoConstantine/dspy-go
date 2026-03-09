@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -707,6 +708,51 @@ func TestReflectionEngine(t *testing.T) {
 	reflection, err := gepa.reflectOnCandidate(ctx, candidate, traces)
 	require.NoError(t, err)
 	assert.Equal(t, candidate.ID, reflection.CandidateID)
+}
+
+func TestReflectionEngine_UsesRichTraceEvidence(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	gepa, err := NewGEPA(DefaultGEPAConfig())
+	require.NoError(t, err)
+
+	candidate := &GEPACandidate{
+		ID:          "rich-trace-candidate",
+		ModuleName:  "skill_pack",
+		Instruction: "Use the repository debugging guide.",
+		Fitness:     0.6,
+		Generation:  1,
+	}
+
+	traces := []ExecutionTrace{
+		{
+			CandidateID: candidate.ID,
+			Success:     false,
+			Duration:    150 * time.Millisecond,
+			Error:       fmt.Errorf("comparison failed"),
+			ContextData: map[string]interface{}{
+				"rich_trace_evidence": []string{
+					"termination=max_iterations",
+					"failed_test=output:answer",
+				},
+				"termination_cause": "max_iterations",
+				"failed_tests":      []string{"output:answer"},
+			},
+		},
+	}
+
+	patterns := gepa.analyzeExecutionPatterns(traces)
+	require.NotNil(t, patterns)
+	assert.Len(t, patterns.RichTraceEvidence, 2)
+	assert.Contains(t, patterns.RichTraceEvidence, "termination=max_iterations (seen 1x)")
+	assert.Contains(t, patterns.RichTraceEvidence, "failed_test=output:answer (seen 1x)")
+
+	prompt := gepa.buildReflectionPrompt(candidate, patterns)
+	assert.Contains(t, prompt, "RICH TRACE EVIDENCE:")
+	assert.Contains(t, prompt, "termination=max_iterations (seen 1x)")
+	assert.Contains(t, prompt, "failed_test=output:answer (seen 1x)")
 }
 
 func TestSelfCritiqueSystem(t *testing.T) {
