@@ -157,6 +157,8 @@ type ReActAgent struct {
 	memory       agents.Memory
 	llm          core.LLM
 	artifacts    optimize.AgentArtifacts
+	loadedSkill  *skills.Skill
+	skillLoadErr error
 
 	// Initialization state retained for optimizer-friendly cloning and prompt mutation.
 	taskSignature      core.Signature
@@ -269,7 +271,12 @@ func newReActAgentWithConfig(id, name string, config ReActAgentConfig) *ReActAge
 
 	if config.SkillStore != nil && config.SkillDomain != "" {
 		injector := skills.NewInjector(config.SkillStore)
-		if _, err := injector.InjectBest(context.Background(), agent, config.SkillDomain); err != nil {
+		// Construction is intentionally best-effort: agent setup has no caller context yet,
+		// so persisted skill loading uses a background context and falls back to an unskilled agent on failure.
+		appliedSkill, err := injector.InjectBest(context.Background(), agent, config.SkillDomain)
+		agent.loadedSkill = appliedSkill
+		agent.skillLoadErr = err
+		if err != nil {
 			logger := logging.GetLogger()
 			logger.Warn(context.Background(), "Failed to load skill for agent %s and domain %s: %v", id, config.SkillDomain, err)
 		}
@@ -535,6 +542,27 @@ func (r *ReActAgent) GetArtifacts() optimize.AgentArtifacts {
 	defer r.mu.RUnlock()
 
 	return r.artifacts.Clone()
+}
+
+// GetLoadedSkill returns the constructor-loaded persisted skill, if one was applied.
+func (r *ReActAgent) GetLoadedSkill() *skills.Skill {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.loadedSkill == nil {
+		return nil
+	}
+
+	cloned := r.loadedSkill.Clone()
+	return &cloned
+}
+
+// GetSkillLoadError returns the last constructor-time persisted skill load error.
+func (r *ReActAgent) GetSkillLoadError() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.skillLoadErr
 }
 
 // SetArtifacts updates the mutable artifact set and reapplies prompt-backed artifacts

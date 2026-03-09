@@ -18,7 +18,8 @@ func NewInjector(store Store) *Injector {
 }
 
 // InjectBest loads the best skill for a domain and writes it into the agent's skill pack artifact.
-// When no skill exists for the domain, the agent is left unchanged and nil is returned.
+// Nil injectors, nil stores, empty domains, and missing persisted skills are all treated as
+// no-op configuration and return (nil, nil).
 func (i *Injector) InjectBest(ctx context.Context, agent optimize.OptimizableAgent, domain string) (*Skill, error) {
 	if i == nil || i.Store == nil {
 		return nil, nil

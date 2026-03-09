@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 var (
@@ -22,6 +20,8 @@ var (
 )
 
 // Store persists versioned skills by domain.
+// Best selects the highest published version for a domain, so callers should
+// treat version numbers as the canonical ordering of deployable skill quality.
 type Store interface {
 	Save(ctx context.Context, skill Skill) error
 	Load(ctx context.Context, domain string) ([]Skill, error)
@@ -82,7 +82,7 @@ func (s *MemoryStore) Load(ctx context.Context, domain string) ([]Skill, error) 
 	return filterAndSortSkills(s.skills, normalizedDomain), nil
 }
 
-// Best returns the highest-version skill for the domain, or nil when none exist.
+// Best returns the highest-version published skill for the domain, or nil when none exist.
 func (s *MemoryStore) Best(ctx context.Context, domain string) (*Skill, error) {
 	skills, err := s.Load(ctx, domain)
 	if err != nil {
@@ -99,7 +99,7 @@ func (s *MemoryStore) Best(ctx context.Context, domain string) (*Skill, error) {
 // FileStore persists skills as JSON on disk.
 type FileStore struct {
 	Path string
-	mu   sync.Mutex
+	mu   sync.RWMutex
 }
 
 // NewFileStore creates a file-backed skill store for the given path.
@@ -118,8 +118,8 @@ func (s *FileStore) Save(ctx context.Context, skill Skill) error {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	skills, err := s.readAllLocked()
 	if err != nil {
@@ -164,7 +164,7 @@ func (s *FileStore) Load(ctx context.Context, domain string) ([]Skill, error) {
 	return filterAndSortSkills(skills, normalizedDomain), nil
 }
 
-// Best returns the highest-version skill for the domain, or nil when none exist.
+// Best returns the highest-version published skill for the domain, or nil when none exist.
 func (s *FileStore) Best(ctx context.Context, domain string) (*Skill, error) {
 	skills, err := s.Load(ctx, domain)
 	if err != nil {
@@ -254,7 +254,6 @@ func cloneSkills(skills []Skill) []Skill {
 	cloned := make([]Skill, len(skills))
 	for i := range skills {
 		cloned[i] = skills[i].Clone()
-		cloned[i].Metadata = core.ShallowCopyMap(skills[i].Metadata)
 	}
 	return cloned
 }

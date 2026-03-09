@@ -111,6 +111,62 @@ func TestFileStore_Save_ReplacesMatchingSkillVersion(t *testing.T) {
 	assert.Equal(t, first.CreatedAt, loaded[0].CreatedAt)
 }
 
+func TestMemoryStore_Save_RejectsInvalidSkills(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	tests := []struct {
+		name  string
+		skill Skill
+		err   error
+	}{
+		{
+			name: "empty name",
+			skill: Skill{
+				Domain:  "repo:test",
+				Content: "valid content",
+				Version: 1,
+			},
+			err: ErrInvalidSkillName,
+		},
+		{
+			name: "empty domain",
+			skill: Skill{
+				Name:    "repo-skill",
+				Content: "valid content",
+				Version: 1,
+			},
+			err: ErrInvalidSkillDomain,
+		},
+		{
+			name: "empty content",
+			skill: Skill{
+				Name:    "repo-skill",
+				Domain:  "repo:test",
+				Version: 1,
+			},
+			err: ErrInvalidSkillContent,
+		},
+		{
+			name: "invalid version",
+			skill: Skill{
+				Name:    "repo-skill",
+				Domain:  "repo:test",
+				Content: "valid content",
+				Version: 0,
+			},
+			err: ErrInvalidSkillVersion,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := store.Save(ctx, tt.skill)
+			require.ErrorIs(t, err, tt.err)
+		})
+	}
+}
+
 func TestInjector_InjectBest_AppliesSkillPackToAgent(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

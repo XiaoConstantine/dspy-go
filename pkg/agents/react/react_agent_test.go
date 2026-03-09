@@ -2,6 +2,7 @@ package react
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -298,9 +299,25 @@ result: complete
 
 	artifacts := agent.GetArtifacts()
 	assert.Equal(t, "Prefer repository-specific debugging heuristics.", artifacts.Text[optimize.ArtifactSkillPack])
+	loadedSkill := agent.GetLoadedSkill()
+	require.NotNil(t, loadedSkill)
+	assert.Equal(t, "repo:test", loadedSkill.Domain)
+	assert.NoError(t, agent.GetSkillLoadError())
 
 	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "Summarize the task"})
 	require.NoError(t, err)
+}
+
+func TestNewReActAgent_RecordsSkillLoadFailure(t *testing.T) {
+	agent := NewReActAgent(
+		"test-agent",
+		"Test Agent",
+		WithSkillStore(errorSkillStore{err: errors.New("load failed")}),
+		WithSkillDomain("repo:test"),
+	)
+
+	assert.Nil(t, agent.GetLoadedSkill())
+	require.EqualError(t, agent.GetSkillLoadError(), "load failed")
 }
 
 func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
@@ -330,6 +347,16 @@ func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
 	assert.Empty(t, cloned.GetExecutionHistory())
 	assert.NotSame(t, agent.GetMemory(), cloned.GetMemory())
 }
+
+type errorSkillStore struct {
+	err error
+}
+
+func (s errorSkillStore) Save(context.Context, skills.Skill) error { return s.err }
+
+func (s errorSkillStore) Load(context.Context, string) ([]skills.Skill, error) { return nil, s.err }
+
+func (s errorSkillStore) Best(context.Context, string) (*skills.Skill, error) { return nil, s.err }
 
 func TestReActAgent_Execute_HybridMode_PreservesReActTrace(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
