@@ -2,11 +2,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -203,7 +205,7 @@ func TestParallelExecutor_Retries(t *testing.T) {
 	assert.Len(t, results, 1)
 
 	result := results[0]
-	assert.Error(t, result.Error) // Should still fail after retries
+	assert.Error(t, result.Error)      // Should still fail after retries
 	assert.Equal(t, 3, result.Retries) // Should have attempted 3 retries
 }
 
@@ -351,20 +353,17 @@ func TestBatchExecutor(t *testing.T) {
 
 	calls := []ToolCall{
 		{
-			ToolName: "parser",
-			Input:    map[string]interface{}{"data": "test1"},
+			ToolCall: core.ToolCall{Name: "parser", Arguments: map[string]interface{}{"data": "test1"}},
 			Priority: 1,
 			Timeout:  1 * time.Second,
 		},
 		{
-			ToolName: "validator",
-			Input:    map[string]interface{}{"data": "test2"},
+			ToolCall: core.ToolCall{Name: "validator", Arguments: map[string]interface{}{"data": "test2"}},
 			Priority: 2,
 			Timeout:  1 * time.Second,
 		},
 		{
-			ToolName: "transformer",
-			Input:    map[string]interface{}{"data": "test3"},
+			ToolCall: core.ToolCall{Name: "transformer", Arguments: map[string]interface{}{"data": "test3"}},
 			Priority: 3,
 			Timeout:  1 * time.Second,
 		},
@@ -380,6 +379,105 @@ func TestBatchExecutor(t *testing.T) {
 		assert.NoError(t, result.Error)
 		assert.Contains(t, result.TaskID, "batch_")
 	}
+}
+
+func TestBatchExecutor_LegacyToolCallFields(t *testing.T) {
+	registry := createTestRegistry()
+	parallelExecutor := NewParallelExecutor(registry, 2)
+	batchExecutor := NewBatchExecutor(parallelExecutor, &PriorityScheduler{})
+
+	// Legacy fields must continue to work for backwards compatibility.
+	calls := []ToolCall{
+		{
+			ToolName: "parser",
+			Input:    map[string]interface{}{"data": "legacy"},
+			Priority: 1,
+			Timeout:  1 * time.Second,
+		},
+	}
+
+	ctx := context.Background()
+	results, err := batchExecutor.ExecuteBatch(ctx, calls)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.NoError(t, results[0].Error)
+}
+
+func TestBatchExecutor_PrefersEmbeddedCoreToolCallFields(t *testing.T) {
+	registry := createTestRegistry()
+	parallelExecutor := NewParallelExecutor(registry, 1)
+	batchExecutor := NewBatchExecutor(parallelExecutor, &PriorityScheduler{})
+
+	calls := []ToolCall{
+		{
+			ToolCall: core.ToolCall{
+				Name:      "parser",
+				Arguments: map[string]interface{}{"data": "preferred"},
+			},
+			ToolName: "error_tool",
+			Input:    map[string]interface{}{"data": "deprecated"},
+			Priority: 1,
+			Timeout:  1 * time.Second,
+		},
+	}
+
+	results, err := batchExecutor.ExecuteBatch(context.Background(), calls)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Error)
+
+	data, ok := results[0].Result.Data.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "parser", data["processed_by"])
+	assert.Equal(t, "preferred", data["data"])
+}
+
+func TestToolCallJSONRoundTripUsesCanonicalFields(t *testing.T) {
+	call := ToolCall{
+		ToolCall: core.ToolCall{
+			ID:        "call-1",
+			Name:      "parser",
+			Arguments: map[string]interface{}{"data": "preferred"},
+		},
+		ToolName: "validator",
+		Input:    map[string]interface{}{"data": "deprecated"},
+		Priority: 2,
+		Timeout:  time.Second,
+		Retries:  3,
+	}
+
+	encoded, err := json.Marshal(call)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "tool_name")
+	assert.NotContains(t, string(encoded), "\"input\"")
+	assert.Contains(t, string(encoded), "\"name\":\"parser\"")
+	assert.Contains(t, string(encoded), "\"arguments\":{\"data\":\"preferred\"}")
+
+	var roundTripped map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &roundTripped))
+	assert.Equal(t, "parser", roundTripped["name"])
+	assert.NotContains(t, roundTripped, "tool_name")
+	assert.NotContains(t, roundTripped, "input")
+}
+
+func TestToolCallJSONUnmarshalAcceptsLegacyFields(t *testing.T) {
+	payload := []byte(`{"id":"call-2","tool_name":"parser","input":{"data":"legacy"},"priority":1,"timeout":1000000000,"retries":1}`)
+
+	var call ToolCall
+	require.NoError(t, json.Unmarshal(payload, &call))
+
+	assert.Equal(t, "parser", call.Name)
+	assert.Equal(t, "parser", call.effectiveName())
+	assert.Equal(t, "legacy", call.Arguments["data"])
+	assert.Equal(t, "legacy", call.effectiveArguments()["data"])
+
+	reEncoded, err := json.Marshal(call)
+	require.NoError(t, err)
+	assert.NotContains(t, string(reEncoded), "tool_name")
+	assert.NotContains(t, string(reEncoded), "\"input\"")
+	assert.Contains(t, string(reEncoded), "\"name\":\"parser\"")
 }
 
 func TestParallelPipelineExecutor(t *testing.T) {

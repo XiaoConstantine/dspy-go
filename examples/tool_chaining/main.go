@@ -532,32 +532,27 @@ func demonstrateBatchExecution(registry core.ToolRegistry) {
 	// Create batch of tool calls
 	calls := []tools.ToolCall{
 		{
-			ToolName: "data_extractor",
-			Input:    map[string]interface{}{"raw_data": "Batch item 1"},
+			ToolCall: core.ToolCall{Name: "data_extractor", Arguments: map[string]interface{}{"raw_data": "Batch item 1"}},
 			Priority: 1,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolName: "data_extractor",
-			Input:    map[string]interface{}{"raw_data": "Batch item 2"},
+			ToolCall: core.ToolCall{Name: "data_extractor", Arguments: map[string]interface{}{"raw_data": "Batch item 2"}},
 			Priority: 1,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolName: "data_validator",
-			Input:    map[string]interface{}{"confidence": 0.85},
+			ToolCall: core.ToolCall{Name: "data_validator", Arguments: map[string]interface{}{"confidence": 0.85}},
 			Priority: 2,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolName: "data_enricher",
-			Input:    map[string]interface{}{"status": "ready"},
+			ToolCall: core.ToolCall{Name: "data_enricher", Arguments: map[string]interface{}{"status": "ready"}},
 			Priority: 1,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolName: "data_transformer",
-			Input:    map[string]interface{}{"status": "enriched"},
+			ToolCall: core.ToolCall{Name: "data_transformer", Arguments: map[string]interface{}{"status": "enriched"}},
 			Priority: 3,
 			Timeout:  5 * time.Second,
 		},

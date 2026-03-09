@@ -524,48 +524,6 @@ func TestGetEnhancedInstructionTemplates(t *testing.T) {
 	}
 }
 
-func TestVaryInstruction(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
-
-	tests := []struct {
-		name         string
-		instruction  string
-		temperature  float64
-		expectChange bool
-	}{
-		{
-			name:         "Empty instruction",
-			instruction:  "",
-			temperature:  1.0,
-			expectChange: true,
-		},
-		{
-			name:         "High temperature",
-			instruction:  "Base instruction",
-			temperature:  1.5,
-			expectChange: true,
-		},
-		{
-			name:         "Low temperature",
-			instruction:  "Base instruction",
-			temperature:  0.5,
-			expectChange: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := copro.varyInstruction(tt.instruction, tt.temperature)
-			assert.NotEmpty(t, result)
-
-			if tt.expectChange && tt.instruction != "" {
-				// May or may not change due to randomness, but should be valid
-				assert.NotEmpty(t, result)
-			}
-		})
-	}
-}
-
 func TestRefineInstruction(t *testing.T) {
 	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
 

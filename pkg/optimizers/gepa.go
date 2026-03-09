@@ -34,6 +34,39 @@ const (
 	executionPhaseKey contextKey = "execution_phase"
 )
 
+const (
+	objectiveSuccess        = "success"
+	objectiveQuality        = "quality"
+	objectiveEfficiency     = "efficiency"
+	objectiveRobustness     = "robustness"
+	objectiveGeneralization = "generalization"
+	objectiveDiversity      = "diversity"
+	objectiveInnovation     = "innovation"
+)
+
+var multiObjectiveNames = []string{
+	objectiveSuccess,
+	objectiveQuality,
+	objectiveEfficiency,
+	objectiveRobustness,
+	objectiveGeneralization,
+	objectiveDiversity,
+	objectiveInnovation,
+}
+
+// DefaultMultiObjectiveWeights returns a fresh copy of the baseline GEPA objective weights.
+func DefaultMultiObjectiveWeights() map[string]float64 {
+	return map[string]float64{
+		objectiveSuccess:        0.25,
+		objectiveQuality:        0.20,
+		objectiveEfficiency:     0.15,
+		objectiveRobustness:     0.15,
+		objectiveGeneralization: 0.15,
+		objectiveDiversity:      0.05,
+		objectiveInnovation:     0.05,
+	}
+}
+
 // GEPAConfig contains configuration options for GEPA optimizer.
 type GEPAConfig struct {
 	// Evolutionary parameters
@@ -108,7 +141,6 @@ type Population struct {
 	Generation    int              `json:"generation"`
 	BestFitness   float64          `json:"best_fitness"`
 	BestCandidate *GEPACandidate   `json:"best_candidate"`
-	Size          int              `json:"size"`
 }
 
 // ExecutionTrace tracks the execution of a module for reflection analysis.
@@ -442,9 +474,7 @@ func (s *GEPAState) calculateCrowdingDistances(candidates []*GEPACandidate, fitn
 	}
 
 	// Calculate for each objective
-	objectives := []string{"success", "quality", "efficiency", "robustness", "generalization", "diversity", "innovation"}
-
-	for _, objective := range objectives {
+	for _, objective := range multiObjectiveNames {
 		// Sort candidates by this objective
 		sortedCandidates := make([]*GEPACandidate, len(candidates))
 		copy(sortedCandidates, candidates)
@@ -490,25 +520,7 @@ func (s *GEPAState) getObjectiveValue(candidate *GEPACandidate, objective string
 	if !exists {
 		return 0.0
 	}
-
-	switch objective {
-	case "success":
-		return fitness.SuccessRate
-	case "quality":
-		return fitness.OutputQuality
-	case "efficiency":
-		return fitness.Efficiency
-	case "robustness":
-		return fitness.Robustness
-	case "generalization":
-		return fitness.Generalization
-	case "diversity":
-		return fitness.Diversity
-	case "innovation":
-		return fitness.Innovation
-	default:
-		return 0.0
-	}
+	return fitness.ObjectiveValue(objective)
 }
 
 // GetParetoArchive returns the current Pareto archive of elite solutions.
@@ -571,8 +583,6 @@ type GEPA struct {
 
 	// System monitoring
 	concurrentTaskCounter int64
-	lastMemStats          runtime.MemStats
-	memStatsLock          sync.RWMutex
 }
 
 // MultiObjectiveFitness represents fitness across multiple objectives for Pareto-based selection.
@@ -590,6 +600,47 @@ type MultiObjectiveFitness struct {
 
 	// Aggregated score for backward compatibility
 	WeightedScore float64 `json:"weighted_score"`
+}
+
+// ObjectiveValue returns the named objective value from the fitness vector.
+func (f *MultiObjectiveFitness) ObjectiveValue(objective string) float64 {
+	if f == nil {
+		return 0.0
+	}
+
+	switch objective {
+	case objectiveSuccess:
+		return f.SuccessRate
+	case objectiveQuality:
+		return f.OutputQuality
+	case objectiveEfficiency:
+		return f.Efficiency
+	case objectiveRobustness:
+		return f.Robustness
+	case objectiveGeneralization:
+		return f.Generalization
+	case objectiveDiversity:
+		return f.Diversity
+	case objectiveInnovation:
+		return f.Innovation
+	default:
+		return 0.0
+	}
+}
+
+// ComputeWeightedScore aggregates the objective vector using the supplied weights.
+func (f *MultiObjectiveFitness) ComputeWeightedScore(weights map[string]float64) float64 {
+	if weights == nil {
+		weights = DefaultMultiObjectiveWeights()
+	}
+
+	return f.SuccessRate*weights[objectiveSuccess] +
+		f.OutputQuality*weights[objectiveQuality] +
+		f.Efficiency*weights[objectiveEfficiency] +
+		f.Robustness*weights[objectiveRobustness] +
+		f.Generalization*weights[objectiveGeneralization] +
+		f.Diversity*weights[objectiveDiversity] +
+		f.Innovation*weights[objectiveInnovation]
 }
 
 // ParetoFront represents a Pareto front for multi-objective optimization.
@@ -697,24 +748,8 @@ func (g *GEPA) calculateMultiObjectiveFitness(candidateID string, inputs, output
 	fitness.Innovation = g.assessInnovation(candidateID, outputs)
 
 	// Calculate weighted score for backward compatibility
-	weights := map[string]float64{
-		"success":        0.25,
-		"quality":        0.20,
-		"efficiency":     0.15,
-		"robustness":     0.15,
-		"generalization": 0.15,
-		"diversity":      0.05,
-		"innovation":     0.05,
-	}
-
-	fitness.WeightedScore =
-		fitness.SuccessRate*weights["success"] +
-			fitness.OutputQuality*weights["quality"] +
-			fitness.Efficiency*weights["efficiency"] +
-			fitness.Robustness*weights["robustness"] +
-			fitness.Generalization*weights["generalization"] +
-			fitness.Diversity*weights["diversity"] +
-			fitness.Innovation*weights["innovation"]
+	weights := DefaultMultiObjectiveWeights()
+	fitness.WeightedScore = fitness.ComputeWeightedScore(weights)
 
 	return fitness
 }
@@ -875,7 +910,7 @@ func (g *GEPA) assessDiversityContribution(candidateID string) float64 {
 
 	for _, other := range currentPop.Candidates {
 		if other.ID != candidateID {
-			similarity := g.calculateInstructionSimilarity(targetCandidate.Instruction, other.Instruction)
+			similarity := g.calculateHotPathInstructionSimilarity(targetCandidate.Instruction, other.Instruction)
 			similarities = append(similarities, similarity)
 		}
 	}
@@ -944,70 +979,9 @@ func (g *GEPA) createInputPattern(inputs map[string]any) string {
 	return pattern
 }
 
-// calculateInstructionSimilarity calculates similarity between two instructions using LLM-based semantic analysis.
-func (g *GEPA) calculateInstructionSimilarity(inst1, inst2 string) float64 {
-	if inst1 == inst2 {
-		return 1.0
-	}
-
-	// First try LLM-based semantic similarity for better accuracy
-	if g.reflectionLLM != nil {
-		if semanticSim := g.calculateSemanticSimilarity(inst1, inst2); semanticSim >= 0 {
-			return semanticSim
-		}
-	}
-
-	// Fallback to improved lexical similarity
+// calculateHotPathInstructionSimilarity keeps pairwise diversity loops off the LLM path.
+func (g *GEPA) calculateHotPathInstructionSimilarity(inst1, inst2 string) float64 {
 	return g.calculateLexicalSimilarity(inst1, inst2)
-}
-
-// calculateSemanticSimilarity uses LLM to assess semantic similarity between instructions.
-func (g *GEPA) calculateSemanticSimilarity(inst1, inst2 string) float64 {
-	ctx := context.Background()
-
-	prompt := fmt.Sprintf(`Compare the semantic similarity between these two instructions and rate on a scale of 0.0-1.0:
-
-Instruction 1: "%s"
-Instruction 2: "%s"
-
-Consider:
-- Core intent and purpose
-- Task complexity and scope
-- Semantic meaning beyond word overlap
-- Functional equivalence
-
-Respond with ONLY a decimal number between 0.0 and 1.0, where:
-- 0.0 = completely different purposes
-- 0.5 = related but distinct tasks
-- 1.0 = functionally equivalent
-
-Similarity score:`, inst1, inst2)
-
-	response, err := g.reflectionLLM.Generate(ctx, prompt)
-
-	if err != nil {
-		return -1 // Signal fallback needed
-	}
-
-	// Parse similarity score from response
-	responseText := strings.TrimSpace(response.Content)
-	if score, err := strconv.ParseFloat(responseText, 64); err == nil {
-		if score >= 0.0 && score <= 1.0 {
-			return score
-		}
-	}
-
-	// Try to extract number from longer response
-	words := strings.Fields(responseText)
-	for _, word := range words {
-		if score, err := strconv.ParseFloat(word, 64); err == nil {
-			if score >= 0.0 && score <= 1.0 {
-				return score
-			}
-		}
-	}
-
-	return -1 // Signal fallback needed
 }
 
 // calculateLexicalSimilarity provides enhanced word-based similarity as fallback.
@@ -1430,7 +1404,7 @@ func (g *GEPA) createPerformanceContext(candidateID string, inputs, outputs map[
 	if len(g.state.PopulationHistory) > 0 {
 		currentPop := g.state.PopulationHistory[len(g.state.PopulationHistory)-1]
 		if currentPop != nil {
-			perfContext.PopulationSize = currentPop.Size
+			perfContext.PopulationSize = len(currentPop.Candidates)
 			// Calculate selection pressure based on population diversity
 			perfContext.SelectionPressure = g.calculateSelectionPressure(currentPop)
 		}
@@ -2011,10 +1985,7 @@ func (g *GEPA) calculateCrowdingDistance(candidates []*GEPACandidate, fitnessMap
 	}
 
 	// Objective names for easier processing
-	objectiveNames := []string{
-		"SuccessRate", "OutputQuality", "Efficiency", "Robustness",
-		"Generalization", "Diversity", "Innovation",
-	}
+	objectiveNames := multiObjectiveNames
 
 	// Calculate crowding distance for each objective
 	for _, objectiveName := range objectiveNames {
@@ -2090,28 +2061,7 @@ func (g *GEPA) buildMultiObjectiveFitnessMap(candidates []*GEPACandidate) map[st
 
 // getObjectiveValue extracts objective value by name from fitness struct.
 func (g *GEPA) getObjectiveValue(fitness *MultiObjectiveFitness, objectiveName string) float64 {
-	if fitness == nil {
-		return 0.0
-	}
-
-	switch objectiveName {
-	case "SuccessRate":
-		return fitness.SuccessRate
-	case "OutputQuality":
-		return fitness.OutputQuality
-	case "Efficiency":
-		return fitness.Efficiency
-	case "Robustness":
-		return fitness.Robustness
-	case "Generalization":
-		return fitness.Generalization
-	case "Diversity":
-		return fitness.Diversity
-	case "Innovation":
-		return fitness.Innovation
-	default:
-		return 0.0
-	}
+	return fitness.ObjectiveValue(objectiveName)
 }
 
 // adaptiveWeightedSelection provides fallback selection when Pareto optimization is not suitable.
@@ -2128,16 +2078,7 @@ func (g *GEPA) adaptiveWeightedSelection(candidates []*GEPACandidate, fitnessMap
 	for _, candidate := range candidates {
 		fitness := fitnessMap[candidate.ID]
 		if fitness != nil {
-			score :=
-				fitness.SuccessRate*weights["success"] +
-					fitness.OutputQuality*weights["quality"] +
-					fitness.Efficiency*weights["efficiency"] +
-					fitness.Robustness*weights["robustness"] +
-					fitness.Generalization*weights["generalization"] +
-					fitness.Diversity*weights["diversity"] +
-					fitness.Innovation*weights["innovation"]
-
-			weightedScores[candidate.ID] = score
+			weightedScores[candidate.ID] = fitness.ComputeWeightedScore(weights)
 		}
 	}
 
@@ -2381,7 +2322,7 @@ func (g *GEPA) calculateInstructionSpaceDiversity(candidates []*GEPACandidate) f
 
 	for i := 0; i < len(candidates); i++ {
 		for j := i + 1; j < len(candidates); j++ {
-			similarity := g.calculateInstructionSimilarity(candidates[i].Instruction, candidates[j].Instruction)
+			similarity := g.calculateHotPathInstructionSimilarity(candidates[i].Instruction, candidates[j].Instruction)
 			totalSimilarity += similarity
 			pairCount++
 		}
@@ -2403,7 +2344,7 @@ func (g *GEPA) calculateInstructionDiversityScore(candidate *GEPACandidate, comp
 
 	totalSimilarity := 0.0
 	for _, other := range compareSet {
-		similarity := g.calculateInstructionSimilarity(candidate.Instruction, other.Instruction)
+		similarity := g.calculateHotPathInstructionSimilarity(candidate.Instruction, other.Instruction)
 		totalSimilarity += similarity
 	}
 
@@ -2456,7 +2397,7 @@ func (g *GEPA) calculateObjectiveStatistics(fitnessMap map[string]*MultiObjectiv
 	}
 
 	stats := make(map[string]ObjectiveStats)
-	objectiveNames := []string{"SuccessRate", "OutputQuality", "Efficiency", "Robustness", "Generalization", "Diversity", "Innovation"}
+	objectiveNames := multiObjectiveNames
 
 	for _, objName := range objectiveNames {
 		values := make([]float64, 0, len(fitnessMap))
@@ -2542,46 +2483,38 @@ func (g *GEPA) calculateMax(values []float64) float64 {
 
 // calculateAdaptiveWeights calculates adaptive weights based on generation and population state.
 func (g *GEPA) calculateAdaptiveWeights(generation int, candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) map[string]float64 {
-	weights := map[string]float64{
-		"success":        0.25,
-		"quality":        0.20,
-		"efficiency":     0.15,
-		"robustness":     0.15,
-		"generalization": 0.15,
-		"diversity":      0.05,
-		"innovation":     0.05,
-	}
+	weights := DefaultMultiObjectiveWeights()
 
 	maxGenerations := float64(g.config.MaxGenerations)
 	progress := float64(generation) / maxGenerations
 
 	// Early generations: prioritize exploration (diversity + innovation)
 	if progress < 0.3 {
-		weights["diversity"] = 0.15
-		weights["innovation"] = 0.15
-		weights["success"] = 0.20
-		weights["quality"] = 0.15
-		weights["efficiency"] = 0.10
-		weights["robustness"] = 0.15
-		weights["generalization"] = 0.10
+		weights[objectiveDiversity] = 0.15
+		weights[objectiveInnovation] = 0.15
+		weights[objectiveSuccess] = 0.20
+		weights[objectiveQuality] = 0.15
+		weights[objectiveEfficiency] = 0.10
+		weights[objectiveRobustness] = 0.15
+		weights[objectiveGeneralization] = 0.10
 	} else if progress < 0.7 {
 		// Middle generations: balanced approach
-		weights["success"] = 0.25
-		weights["quality"] = 0.20
-		weights["efficiency"] = 0.15
-		weights["robustness"] = 0.15
-		weights["generalization"] = 0.15
-		weights["diversity"] = 0.05
-		weights["innovation"] = 0.05
+		weights[objectiveSuccess] = 0.25
+		weights[objectiveQuality] = 0.20
+		weights[objectiveEfficiency] = 0.15
+		weights[objectiveRobustness] = 0.15
+		weights[objectiveGeneralization] = 0.15
+		weights[objectiveDiversity] = 0.05
+		weights[objectiveInnovation] = 0.05
 	} else {
 		// Late generations: prioritize exploitation (success + quality)
-		weights["success"] = 0.35
-		weights["quality"] = 0.25
-		weights["efficiency"] = 0.15
-		weights["robustness"] = 0.15
-		weights["generalization"] = 0.10
-		weights["diversity"] = 0.00
-		weights["innovation"] = 0.00
+		weights[objectiveSuccess] = 0.35
+		weights[objectiveQuality] = 0.25
+		weights[objectiveEfficiency] = 0.15
+		weights[objectiveRobustness] = 0.15
+		weights[objectiveGeneralization] = 0.10
+		weights[objectiveDiversity] = 0.00
+		weights[objectiveInnovation] = 0.00
 	}
 
 	// Adjust based on population diversity
@@ -2602,15 +2535,15 @@ func (g *GEPA) calculateAdaptiveWeights(generation int, candidates []*GEPACandid
 			// If diversity is low, increase diversity weight
 			if avgDiversity < 0.3 {
 				diversityBoost := 0.1
-				weights["diversity"] += diversityBoost
+				weights[objectiveDiversity] += diversityBoost
 				// Reduce other weights proportionally
 				reduction := diversityBoost / 6.0
-				weights["success"] -= reduction
-				weights["quality"] -= reduction
-				weights["efficiency"] -= reduction
-				weights["robustness"] -= reduction
-				weights["generalization"] -= reduction
-				weights["innovation"] -= reduction
+				weights[objectiveSuccess] -= reduction
+				weights[objectiveQuality] -= reduction
+				weights[objectiveEfficiency] -= reduction
+				weights[objectiveRobustness] -= reduction
+				weights[objectiveGeneralization] -= reduction
+				weights[objectiveInnovation] -= reduction
 			}
 		}
 	}
@@ -2968,13 +2901,12 @@ func (g *GEPA) getCurrentSystemLoad() float64 {
 
 // getCurrentMemoryUsage gets current memory usage for context-aware tracking.
 func (g *GEPA) getCurrentMemoryUsage() float64 {
-	g.memStatsLock.Lock()
-	runtime.ReadMemStats(&g.lastMemStats)
-	g.memStatsLock.Unlock()
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
 
 	// Calculate memory usage ratio (heap in use / total allocated)
-	heapInUse := float64(g.lastMemStats.HeapInuse)
-	heapSys := float64(g.lastMemStats.HeapSys)
+	heapInUse := float64(memStats.HeapInuse)
+	heapSys := float64(memStats.HeapSys)
 
 	if heapSys == 0 {
 		return 0.0
@@ -3503,7 +3435,6 @@ func (g *GEPA) initializePopulation(ctx context.Context, program core.Program) e
 		Generation:    0,
 		BestFitness:   0.0,
 		BestCandidate: nil,
-		Size:          len(candidates),
 	}
 
 	g.state.mu.Lock()
@@ -3766,7 +3697,6 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 		Generation:    currentPop.Generation + 1,
 		BestFitness:   0.0,
 		BestCandidate: nil,
-		Size:          len(offspring),
 	}
 
 	// Add to population history
@@ -4731,7 +4661,7 @@ func extractRichTraceEvidence(trace ExecutionTrace) []string {
 	}
 
 	if raw, ok := trace.ContextData["rich_trace_evidence"]; ok {
-		if evidence := dedupeEvidenceLines(evidenceFromValue(raw)); len(evidence) > 0 {
+		if evidence := utils.DedupeStrings(evidenceFromValue(raw), 0); len(evidence) > 0 {
 			return evidence
 		}
 	}
@@ -4763,7 +4693,7 @@ func extractRichTraceEvidence(trace ExecutionTrace) []string {
 		}
 	}
 
-	return dedupeEvidenceLines(evidence)
+	return utils.DedupeStrings(evidence, 0)
 }
 
 func evidenceFromValue(raw interface{}) []string {
@@ -4815,27 +4745,6 @@ func topRichTraceEvidence(counts map[string]int, limit int) []string {
 	result := make([]string, 0, len(items))
 	for _, item := range items {
 		result = append(result, fmt.Sprintf("%s (seen %dx)", item.evidence, item.count))
-	}
-	return result
-}
-
-func dedupeEvidenceLines(lines []string) []string {
-	if len(lines) == 0 {
-		return nil
-	}
-
-	result := make([]string, 0, len(lines))
-	seen := make(map[string]struct{}, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if _, exists := seen[line]; exists {
-			continue
-		}
-		seen[line] = struct{}{}
-		result = append(result, line)
 	}
 	return result
 }
@@ -5652,7 +5561,7 @@ func (g *GEPA) selectDiverseCandidates(candidates []*GEPACandidate, count int) [
 		for i, candidate := range remaining {
 			minSimilarity := 1.0
 			for _, selectedCandidate := range selected {
-				similarity := g.calculateInstructionSimilarity(candidate.Instruction, selectedCandidate.Instruction)
+				similarity := g.calculateHotPathInstructionSimilarity(candidate.Instruction, selectedCandidate.Instruction)
 				if similarity < minSimilarity {
 					minSimilarity = similarity
 				}

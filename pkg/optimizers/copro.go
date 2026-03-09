@@ -573,7 +573,7 @@ Return EXACTLY %d instructions, one per line, no numbering:`,
 
 	// If we didn't get enough valid instructions, add some fallbacks
 	if len(validInstructions) < breadth {
-		fallbacks := lpg.getFallbackInstructions(taskDescription)
+		fallbacks := lpg.getFallbackInstructions()
 		for i := len(validInstructions); i < breadth && i < len(fallbacks); i++ {
 			validInstructions = append(validInstructions, fallbacks[i])
 		}
@@ -647,7 +647,7 @@ Return ONLY the improved instructions, one per line.`,
 }
 
 // getFallbackInstructions provides sophisticated fallback instructions.
-func (lpg *LLMPromptGenerator) getFallbackInstructions(taskDescription string) []string {
+func (lpg *LLMPromptGenerator) getFallbackInstructions() []string {
 	return []string{
 		"Answer the question directly with accurate, factual information.",
 		"Provide a clear, concise response based on the given question.",
@@ -721,32 +721,6 @@ func (c *COPRO) computeTextSimilarity(text1, text2 string) float64 {
 	}
 
 	return float64(intersection) / float64(union)
-}
-
-// varyInstruction creates sophisticated variations using LLM assistance.
-func (c *COPRO) varyInstruction(baseInstruction string, temperature float64) string {
-	if baseInstruction == "" {
-		return "Please provide a clear and accurate response to the given input."
-	}
-
-	// Enhanced variation strategies
-	variations := []string{
-		"Think step-by-step and " + strings.ToLower(baseInstruction),
-		baseInstruction + " Ensure your response is comprehensive and well-reasoned.",
-		"Carefully analyze the information, then " + strings.ToLower(baseInstruction),
-		baseInstruction + " Provide clear justification for your answer.",
-		"Consider all relevant factors and " + strings.ToLower(baseInstruction),
-		"Systematically evaluate the input and " + strings.ToLower(baseInstruction),
-		baseInstruction + " Support your response with logical reasoning.",
-	}
-
-	// Temperature-based selection with enhanced randomness
-	if temperature > 0.8 {
-		idx := rand.Intn(len(variations))
-		return variations[idx]
-	}
-
-	return baseInstruction
 }
 
 // refineInstruction applies sophisticated refinement strategies.

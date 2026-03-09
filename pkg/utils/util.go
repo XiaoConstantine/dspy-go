@@ -64,6 +64,33 @@ func TruncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// DedupeStrings trims, de-duplicates, and preserves first-seen order.
+// If limit is positive, the returned slice is capped at that many items.
+func DedupeStrings(items []string, limit int) []string {
+	if len(items) == 0 {
+		return nil
+	}
+
+	deduped := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		deduped = append(deduped, item)
+		if limit > 0 && len(deduped) >= limit {
+			break
+		}
+	}
+
+	return deduped
+}
+
 // Max returns the maximum of two integers.
 func Max(a, b int) int {
 	if a > b {

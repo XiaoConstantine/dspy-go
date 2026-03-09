@@ -182,6 +182,43 @@ func TestTruncateString(t *testing.T) {
 	}
 }
 
+func TestDedupeStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		limit    int
+		expected []string
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			limit:    0,
+			expected: nil,
+		},
+		{
+			name:     "dedupes and trims",
+			input:    []string{" alpha ", "", "beta", "alpha", "beta ", "gamma"},
+			limit:    0,
+			expected: []string{"alpha", "beta", "gamma"},
+		},
+		{
+			name:     "respects limit",
+			input:    []string{"alpha", "beta", "alpha", "gamma"},
+			limit:    2,
+			expected: []string{"alpha", "beta"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := DedupeStrings(tt.input, tt.limit)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("DedupeStrings() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestMax(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -582,11 +619,11 @@ func TestConvertToInt(t *testing.T) {
 		{"float32", float32(42.0), 42, true},
 		{"float64", float64(42.0), 42, true},
 		{"float32 max safe value", float32(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64 as float32
-		{"float32 overflow positive", float32(1e20), 0, false},                             // Large positive float32, should fail
-		{"float32 overflow negative", float32(-1e20), 0, false},                            // Large negative float32, should fail
+		{"float32 overflow positive", float32(1e20), 0, false},                              // Large positive float32, should fail
+		{"float32 overflow negative", float32(-1e20), 0, false},                             // Large negative float32, should fail
 		{"float64 max safe value", float64(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64 as float64
-		{"float64 overflow positive", float64(1e20), 0, false},                             // Large positive float64, should fail
-		{"float64 overflow negative", float64(-1e20), 0, false},                            // Large negative float64, should fail
+		{"float64 overflow positive", float64(1e20), 0, false},                              // Large positive float64, should fail
+		{"float64 overflow negative", float64(-1e20), 0, false},                             // Large negative float64, should fail
 		{"string number", "42", 42, true},
 		{"string with whitespace", "  42  ", 42, true},
 		{"string partial number (strconv improvement)", "42abc", 0, false}, // strconv.ParseInt is stricter than fmt.Sscanf
@@ -595,9 +632,9 @@ func TestConvertToInt(t *testing.T) {
 		{"bool", true, 0, false},
 		{"nil", nil, 0, false},
 		{"uint64 max safe value", uint64(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64
-		{"uint64 overflow value", uint64(18446744073709551615), 0, false},                // math.MaxUint64, should fail
-		{"uint max safe value", uint(9223372036854775807), 9223372036854775807, true},    // math.MaxInt64 as uint
-		{"uint overflow value", uint(18446744073709551615), 0, false},                   // math.MaxUint64 as uint, should fail
+		{"uint64 overflow value", uint64(18446744073709551615), 0, false},                 // math.MaxUint64, should fail
+		{"uint max safe value", uint(9223372036854775807), 9223372036854775807, true},     // math.MaxInt64 as uint
+		{"uint overflow value", uint(18446744073709551615), 0, false},                     // math.MaxUint64 as uint, should fail
 	}
 
 	for _, tt := range tests {
@@ -778,11 +815,11 @@ func TestConvertLegacyOutputsToTypedWithPointer(t *testing.T) {
 
 func TestSetFieldValueEdgeCases(t *testing.T) {
 	type TestStruct struct {
-		StringField string
-		IntField    int
-		BoolField   bool
-		FloatField  float64
-		Int8Field   int8   // For overflow testing
+		StringField  string
+		IntField     int
+		BoolField    bool
+		FloatField   float64
+		Int8Field    int8    // For overflow testing
 		Float32Field float32 // For overflow testing
 	}
 

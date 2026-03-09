@@ -12,6 +12,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
+	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
 const (
@@ -450,15 +451,7 @@ func buildMultiObjectiveFitness(run *HarnessRunResult) *optimizers.MultiObjectiv
 	// computes real cross-candidate diversity and novelty signals.
 	fitness.Diversity = 0.5
 	fitness.Innovation = 0.5
-
-	fitness.WeightedScore =
-		fitness.SuccessRate*0.25 +
-			fitness.OutputQuality*0.20 +
-			fitness.Efficiency*0.15 +
-			fitness.Robustness*0.15 +
-			fitness.Generalization*0.15 +
-			fitness.Diversity*0.05 +
-			fitness.Innovation*0.05
+	fitness.WeightedScore = fitness.ComputeWeightedScore(optimizers.DefaultMultiObjectiveWeights())
 
 	return fitness
 }
@@ -647,8 +640,9 @@ func buildGEPATrace(candidate *optimizers.GEPACandidate, example AgentExample, r
 		trace.ContextData[gepaMetadataTraceEvidenceKey] = evidence
 	}
 
-	trace.Success = result.Score >= passThreshold && extractEvalError(sideInfo) == nil
-	trace.Error = extractEvalError(sideInfo)
+	evalErr := extractEvalError(sideInfo)
+	trace.Success = result.Score >= passThreshold && evalErr == nil
+	trace.Error = evalErr
 	return trace
 }
 
@@ -775,7 +769,7 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 		}
 	}
 
-	return dedupeEvidence(evidence, maxTraceEvidenceItems)
+	return utils.DedupeStrings(evidence, maxTraceEvidenceItems)
 }
 
 // detectToolLoopEvidence intentionally captures only consecutive same-tool runs.
@@ -814,31 +808,6 @@ func detectToolLoopEvidence(steps []agents.TraceStep) []string {
 	flush()
 
 	return evidence
-}
-
-func dedupeEvidence(evidence []string, limit int) []string {
-	if len(evidence) == 0 {
-		return nil
-	}
-
-	deduped := make([]string, 0, len(evidence))
-	seen := make(map[string]struct{}, len(evidence))
-	for _, item := range evidence {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, exists := seen[item]; exists {
-			continue
-		}
-		seen[item] = struct{}{}
-		deduped = append(deduped, item)
-		if limit > 0 && len(deduped) >= limit {
-			break
-		}
-	}
-
-	return deduped
 }
 
 func truncateString(value string, limit int) string {

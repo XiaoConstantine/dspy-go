@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"sync"
@@ -13,10 +14,10 @@ import (
 
 // ParallelExecutor manages parallel execution of tools with advanced scheduling.
 type ParallelExecutor struct {
-	registry     core.ToolRegistry
-	maxWorkers   int
-	workerPool   chan struct{} // Semaphore for worker management
-	metrics      *ExecutorMetrics
+	registry   core.ToolRegistry
+	maxWorkers int
+	workerPool chan struct{} // Semaphore for worker management
+	metrics    *ExecutorMetrics
 }
 
 // ExecutorMetrics tracks parallel execution statistics.
@@ -31,26 +32,26 @@ type ExecutorMetrics struct {
 
 // ParallelTask represents a task to be executed in parallel.
 type ParallelTask struct {
-	ID          string                 // Unique task identifier
-	ToolName    string                 // Tool to execute
-	Input       map[string]interface{} // Input parameters
-	Priority    int                    // Task priority (higher = more urgent)
-	Timeout     time.Duration          // Task-specific timeout
-	Retries     int                    // Number of retries on failure
-	Context     context.Context        // Task-specific context
-	ResultChan  chan ParallelResult    // Channel to receive results
-	SubmitTime  time.Time              // When the task was submitted
+	ID         string                 // Unique task identifier
+	ToolName   string                 // Tool to execute
+	Input      map[string]interface{} // Input parameters
+	Priority   int                    // Task priority (higher = more urgent)
+	Timeout    time.Duration          // Task-specific timeout
+	Retries    int                    // Number of retries on failure
+	Context    context.Context        // Task-specific context
+	ResultChan chan ParallelResult    // Channel to receive results
+	SubmitTime time.Time              // When the task was submitted
 }
 
 // ParallelResult contains the result of parallel task execution.
 type ParallelResult struct {
-	TaskID      string          // Task identifier
-	Result      core.ToolResult // Tool execution result
-	Error       error           // Execution error
-	Duration    time.Duration   // Execution duration
-	WaitTime    time.Duration   // Time spent waiting for execution
-	WorkerID    int             // ID of worker that executed the task
-	Retries     int             // Number of retries performed
+	TaskID   string          // Task identifier
+	Result   core.ToolResult // Tool execution result
+	Error    error           // Execution error
+	Duration time.Duration   // Execution duration
+	WaitTime time.Duration   // Time spent waiting for execution
+	WorkerID int             // ID of worker that executed the task
+	Retries  int             // Number of retries performed
 }
 
 // TaskScheduler defines the interface for task scheduling algorithms.
@@ -76,7 +77,7 @@ func (ps *PriorityScheduler) Schedule(tasks []*ParallelTask) []*ParallelTask {
 		for j := i + 1; j < len(scheduled); j++ {
 			if scheduled[i].Priority < scheduled[j].Priority ||
 				(scheduled[i].Priority == scheduled[j].Priority &&
-				 scheduled[i].SubmitTime.After(scheduled[j].SubmitTime)) {
+					scheduled[i].SubmitTime.After(scheduled[j].SubmitTime)) {
 				scheduled[i], scheduled[j] = scheduled[j], scheduled[i]
 			}
 		}
@@ -141,7 +142,7 @@ func NewParallelExecutor(registry core.ToolRegistry, maxWorkers int) *ParallelEx
 		registry:   registry,
 		maxWorkers: maxWorkers,
 		workerPool: make(chan struct{}, maxWorkers),
-		metrics: &ExecutorMetrics{},
+		metrics:    &ExecutorMetrics{},
 	}
 }
 
@@ -381,8 +382,8 @@ func (pe *ParallelExecutor) GetMetrics() ExecutorMetrics {
 // GetWorkerPoolStatus returns current worker pool status.
 func (pe *ParallelExecutor) GetWorkerPoolStatus() (total, active, available int) {
 	total = pe.maxWorkers
-	active = len(pe.workerPool)  // Number of workers currently in use
-	available = total - active   // Number of available workers
+	active = len(pe.workerPool) // Number of workers currently in use
+	available = total - active  // Number of available workers
 	return
 }
 
@@ -408,11 +409,15 @@ func NewBatchExecutor(executor *ParallelExecutor, scheduler TaskScheduler) *Batc
 func (be *BatchExecutor) ExecuteBatch(ctx context.Context, calls []ToolCall) ([]ParallelResult, error) {
 	tasks := make([]*ParallelTask, len(calls))
 
-	for i, call := range calls {
+	for i := range calls {
+		call := &calls[i]
+		toolName := call.effectiveName()
+		toolArgs := call.effectiveArguments()
+
 		tasks[i] = &ParallelTask{
-			ID:         fmt.Sprintf("batch_%d_%s", i, call.ToolName),
-			ToolName:   call.ToolName,
-			Input:      call.Input,
+			ID:         fmt.Sprintf("batch_%d_%s", i, toolName),
+			ToolName:   toolName,
+			Input:      toolArgs,
 			Priority:   call.Priority,
 			Timeout:    call.Timeout,
 			Retries:    call.Retries,
@@ -425,12 +430,86 @@ func (be *BatchExecutor) ExecuteBatch(ctx context.Context, calls []ToolCall) ([]
 }
 
 // ToolCall represents a tool call for batch execution.
+// Embeds core.ToolCall for the common LLM-originated fields (ID, Name, Arguments)
+// and adds scheduling metadata for parallel execution.
 type ToolCall struct {
-	ToolName string                 `json:"tool_name"`
-	Input    map[string]interface{} `json:"input"`
-	Priority int                    `json:"priority"`
-	Timeout  time.Duration          `json:"timeout"`
-	Retries  int                    `json:"retries"`
+	core.ToolCall
+
+	// Deprecated: kept for backward compatibility with existing callers.
+	ToolName string `json:"tool_name,omitempty"`
+	// Deprecated: kept for backward compatibility with existing callers.
+	Input map[string]interface{} `json:"input,omitempty"`
+
+	Priority int           `json:"priority"`
+	Timeout  time.Duration `json:"timeout"`
+	Retries  int           `json:"retries"`
+}
+
+func (c *ToolCall) effectiveName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.ToolName
+}
+
+func (c *ToolCall) effectiveArguments() map[string]interface{} {
+	if c.Arguments != nil {
+		return c.Arguments
+	}
+	return c.Input
+}
+
+type toolCallJSON struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+	ToolName  string                 `json:"tool_name,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	Priority  int                    `json:"priority"`
+	Timeout   time.Duration          `json:"timeout"`
+	Retries   int                    `json:"retries"`
+}
+
+// MarshalJSON emits only the canonical core.ToolCall field names while still
+// allowing deprecated fields to be used as inputs to the wrapper.
+func (c ToolCall) MarshalJSON() ([]byte, error) {
+	return json.Marshal(toolCallJSON{
+		ID:        c.ID,
+		Name:      c.effectiveName(),
+		Arguments: c.effectiveArguments(),
+		Priority:  c.Priority,
+		Timeout:   c.Timeout,
+		Retries:   c.Retries,
+	})
+}
+
+// UnmarshalJSON accepts both canonical and deprecated field names. When both
+// are present, the embedded core.ToolCall fields take precedence.
+func (c *ToolCall) UnmarshalJSON(data []byte) error {
+	var decoded toolCallJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	c.ToolCall = core.ToolCall{
+		ID:        decoded.ID,
+		Name:      decoded.Name,
+		Arguments: decoded.Arguments,
+	}
+	c.ToolName = decoded.ToolName
+	c.Input = decoded.Input
+	c.Priority = decoded.Priority
+	c.Timeout = decoded.Timeout
+	c.Retries = decoded.Retries
+
+	if c.Name == "" {
+		c.Name = c.ToolName
+	}
+	if c.Arguments == nil && c.Input != nil {
+		c.Arguments = c.Input
+	}
+
+	return nil
 }
 
 // ParallelPipelineExecutor combines pipeline execution with parallel capabilities.

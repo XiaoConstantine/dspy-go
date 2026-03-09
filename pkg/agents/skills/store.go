@@ -76,8 +76,8 @@ func (s *MemoryStore) Load(ctx context.Context, domain string) ([]Skill, error) 
 		return []Skill{}, nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	return filterAndSortSkills(s.skills, normalizedDomain), nil
 }
@@ -88,12 +88,7 @@ func (s *MemoryStore) Best(ctx context.Context, domain string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(skills) == 0 {
-		return nil, nil
-	}
-
-	best := skills[0].Clone()
-	return &best, nil
+	return bestFromLoaded(skills), nil
 }
 
 // FileStore persists skills as JSON on disk.
@@ -170,12 +165,7 @@ func (s *FileStore) Best(ctx context.Context, domain string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(skills) == 0 {
-		return nil, nil
-	}
-
-	best := skills[0].Clone()
-	return &best, nil
+	return bestFromLoaded(skills), nil
 }
 
 func (s *FileStore) readAllLocked() ([]Skill, error) {
@@ -226,6 +216,15 @@ func preserveCreatedAt(existing Skill, fallback time.Time) time.Time {
 		return existing.CreatedAt
 	}
 	return fallback
+}
+
+func bestFromLoaded(skills []Skill) *Skill {
+	if len(skills) == 0 {
+		return nil
+	}
+
+	best := skills[0].Clone()
+	return &best
 }
 
 func filterAndSortSkills(skills []Skill, domain string) []Skill {

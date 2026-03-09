@@ -183,8 +183,11 @@ func (o *GEPAAgentOptimizer) evaluateCurrentPopulation(ctx context.Context, engi
 		}
 
 		fitnessMap[evaluation.Candidate.ID] = evaluation.Fitness
-		recordCandidateFitness(state, evaluation.Candidate, evaluation.Fitness, evaluation.AverageScore)
-		recordCandidateTraces(state, evaluation.Traces)
+		state.RecordCandidateFitness(evaluation.Candidate, evaluation.Fitness, evaluation.AverageScore)
+		for _, trace := range evaluation.Traces {
+			trace := trace
+			state.AddTrace(&trace)
+		}
 
 		if evaluation.Candidate.Fitness > bestFitness {
 			bestFitness = evaluation.Candidate.Fitness
@@ -274,18 +277,6 @@ func (o *GEPAAgentOptimizer) selectBestCandidate(ctx context.Context, state *opt
 
 	return bestCandidate, bestEvaluation, nil
 }
-
-func recordCandidateFitness(state *optimizers.GEPAState, candidate *optimizers.GEPACandidate, fitness *optimizers.MultiObjectiveFitness, averageScore float64) {
-	state.RecordCandidateFitness(candidate, fitness, averageScore)
-}
-
-func recordCandidateTraces(state *optimizers.GEPAState, traces []optimizers.ExecutionTrace) {
-	for _, trace := range traces {
-		trace := trace
-		state.AddTrace(&trace)
-	}
-}
-
 func dedupeCandidates(candidates []*optimizers.GEPACandidate) []*optimizers.GEPACandidate {
 	seen := make(map[string]struct{}, len(candidates))
 	deduped := make([]*optimizers.GEPACandidate, 0, len(candidates))

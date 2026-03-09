@@ -90,6 +90,55 @@ func mockMetric(expected, actual map[string]interface{}) float64 {
 	return 0.0
 }
 
+type countingLLM struct {
+	generateCalls int
+}
+
+func (c *countingLLM) Generate(context.Context, string, ...core.GenerateOption) (*core.LLMResponse, error) {
+	c.generateCalls++
+	return &core.LLMResponse{Content: "0.5"}, nil
+}
+
+func (c *countingLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) CreateEmbedding(context.Context, string, ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) CreateEmbeddings(context.Context, []string, ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) StreamGenerate(context.Context, string, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) GenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.LLMResponse, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) StreamGenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (c *countingLLM) ProviderName() string {
+	return "counting"
+}
+
+func (c *countingLLM) ModelID() string {
+	return "counting"
+}
+
+func (c *countingLLM) Capabilities() []core.Capability {
+	return []core.Capability{core.CapabilityCompletion}
+}
+
 func TestNewGEPA(t *testing.T) {
 	// Set up mock LLM
 	mockLLM := &testutil.MockLLM{}
@@ -124,6 +173,21 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 0.1, config.ElitismRate)
 	assert.Equal(t, 2, config.ReflectionFreq)
 	assert.Equal(t, 3, config.TournamentSize)
+}
+
+func TestDefaultMultiObjectiveWeights(t *testing.T) {
+	weights := DefaultMultiObjectiveWeights()
+	require.Len(t, weights, len(multiObjectiveNames))
+	assert.Equal(t, 0.25, weights[objectiveSuccess])
+	assert.Equal(t, 0.20, weights[objectiveQuality])
+	assert.Equal(t, 0.15, weights[objectiveEfficiency])
+	assert.Equal(t, 0.15, weights[objectiveRobustness])
+	assert.Equal(t, 0.15, weights[objectiveGeneralization])
+	assert.Equal(t, 0.05, weights[objectiveDiversity])
+	assert.Equal(t, 0.05, weights[objectiveInnovation])
+
+	weights[objectiveSuccess] = 0
+	assert.Equal(t, 0.25, DefaultMultiObjectiveWeights()[objectiveSuccess])
 }
 
 func TestGenerateInitialVariations_UsesDelimitedInstructionData(t *testing.T) {
@@ -282,7 +346,6 @@ func TestEvolutionaryOperators(t *testing.T) {
 		Generation:    0,
 		BestFitness:   0.8,
 		BestCandidate: candidates[0],
-		Size:          len(candidates),
 	}
 
 	// Test tournament selection
@@ -636,7 +699,6 @@ func TestAdvancedSelectionStrategies(t *testing.T) {
 
 	population := &Population{
 		Candidates: candidates,
-		Size:       len(candidates),
 	}
 
 	// Test roulette selection
@@ -843,7 +905,6 @@ func TestMultiLevelReflectionSystem(t *testing.T) {
 	population := &Population{
 		Candidates: candidates,
 		Generation: 1,
-		Size:       len(candidates),
 	}
 
 	gepa.state.PopulationHistory = []*Population{population}
@@ -880,7 +941,6 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 	// Test with empty population
 	emptyPopulation := &Population{
 		Candidates: []*GEPACandidate{},
-		Size:       0,
 	}
 
 	// Test selection with empty population - should not panic
@@ -1059,7 +1119,6 @@ func TestEvolutionOperationsAdvanced(t *testing.T) {
 	population := &Population{
 		Candidates: candidates,
 		Generation: 0,
-		Size:       len(candidates),
 	}
 
 	gepa.state.PopulationHistory = []*Population{population}
@@ -1110,7 +1169,6 @@ func TestPatternAnalysisAndSimilarity(t *testing.T) {
 			{Fitness: 0.7},
 			{Fitness: 0.5},
 		},
-		Size: 3,
 	}
 
 	pressure := gepa.calculateSelectionPressure(population)
@@ -1146,6 +1204,38 @@ func TestAdvancedDiversityAndInnovation(t *testing.T) {
 	generalization := gepa.assessGeneralization(candidateID, inputs, outputs)
 	assert.GreaterOrEqual(t, generalization, 0.0)
 	assert.LessOrEqual(t, generalization, 1.0)
+}
+
+func TestDiversityHotPathsAvoidSemanticSimilarityCalls(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	gepa, err := NewGEPA(DefaultGEPAConfig())
+	require.NoError(t, err)
+
+	counter := &countingLLM{}
+	gepa.reflectionLLM = counter
+
+	candidates := []*GEPACandidate{
+		{ID: "a", Instruction: "Answer carefully with factual details."},
+		{ID: "b", Instruction: "Respond carefully with accurate facts."},
+		{ID: "c", Instruction: "Provide a direct, specific answer."},
+	}
+	gepa.state.PopulationHistory = []*Population{{Candidates: candidates}}
+
+	diversity := gepa.assessDiversityContribution("a")
+	assert.GreaterOrEqual(t, diversity, 0.0)
+
+	spaceDiversity := gepa.calculateInstructionSpaceDiversity(candidates)
+	assert.GreaterOrEqual(t, spaceDiversity, 0.0)
+
+	score := gepa.calculateInstructionDiversityScore(candidates[0], candidates[1:])
+	assert.GreaterOrEqual(t, score, 0.0)
+
+	selected := gepa.selectDiverseCandidates(candidates, 2)
+	assert.Len(t, selected, 2)
+	assert.Zero(t, counter.generateCalls)
 }
 
 func TestPerformanceLogging(t *testing.T) {

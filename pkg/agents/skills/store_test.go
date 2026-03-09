@@ -52,6 +52,38 @@ func TestMemoryStore_SaveLoadAndBest(t *testing.T) {
 	assert.Equal(t, "Use the updated repository runbook.", best.Content)
 }
 
+func TestMemoryStore_Best_ReturnsCloneAndNilWhenMissing(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	best, err := store.Best(ctx, "repo:missing")
+	require.NoError(t, err)
+	assert.Nil(t, best)
+
+	require.NoError(t, store.Save(ctx, Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Use repo-aware search first.",
+		Version: 3,
+		Metadata: map[string]string{
+			"source": "seed",
+		},
+	}))
+
+	best, err = store.Best(ctx, "repo:test")
+	require.NoError(t, err)
+	require.NotNil(t, best)
+
+	best.Content = "mutated"
+	best.Metadata["source"] = "caller"
+
+	loaded, err := store.Load(ctx, "repo:test")
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Use repo-aware search first.", loaded[0].Content)
+	assert.Equal(t, "seed", loaded[0].Metadata["source"])
+}
+
 func TestFileStore_PersistsAcrossHandles(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "skills.json")
@@ -80,6 +112,39 @@ func TestFileStore_PersistsAcrossHandles(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, best)
 	assert.Equal(t, 3, best.Version)
+}
+
+func TestFileStore_Best_ReturnsCloneAndNilWhenMissing(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "skills.json")
+	store := NewFileStore(path)
+
+	best, err := store.Best(ctx, "repo:missing")
+	require.NoError(t, err)
+	assert.Nil(t, best)
+
+	require.NoError(t, store.Save(ctx, Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Use repo-aware search first.",
+		Version: 4,
+		Metadata: map[string]string{
+			"source": "seed",
+		},
+	}))
+
+	best, err = store.Best(ctx, "repo:test")
+	require.NoError(t, err)
+	require.NotNil(t, best)
+
+	best.Content = "mutated"
+	best.Metadata["source"] = "caller"
+
+	loaded, err := store.Load(ctx, "repo:test")
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Use repo-aware search first.", loaded[0].Content)
+	assert.Equal(t, "seed", loaded[0].Metadata["source"])
 }
 
 func TestFileStore_Save_ReplacesMatchingSkillVersion(t *testing.T) {

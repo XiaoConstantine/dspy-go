@@ -67,7 +67,6 @@ func (g *GEPA) BootstrapPopulationFromSeed(ctx context.Context, seed *GEPACandid
 		Generation:    0,
 		BestFitness:   0.0,
 		BestCandidate: nil,
-		Size:          len(candidates),
 	}
 
 	g.state.mu.Lock()
