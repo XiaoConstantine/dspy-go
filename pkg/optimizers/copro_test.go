@@ -366,6 +366,31 @@ func TestRefineCandidates(t *testing.T) {
 	}
 }
 
+func TestRefineCandidates_DeterministicFallbackStillGeneratesCandidates(t *testing.T) {
+	setupTestMockLLM(t)
+	copro := NewCOPRO(
+		func(expected, actual map[string]interface{}) float64 { return 1.0 },
+		WithBreadth(4),
+		WithInitTemperature(0),
+	)
+	predictor := modules.NewPredict(core.Signature{})
+	ctx := context.Background()
+
+	topCandidates := []PromptCandidate{
+		{Instruction: "Test instruction 1", Score: 0.9, Generation: 1},
+		{Instruction: "Test instruction 2", Score: 0.8, Generation: 1},
+	}
+
+	refined := copro.refineCandidates(ctx, predictor, topCandidates, 2)
+
+	require.NotEmpty(t, refined)
+	for _, candidate := range refined {
+		assert.NotEmpty(t, candidate.Instruction)
+		assert.NotEqual(t, "Test instruction 1", candidate.Instruction)
+		assert.NotEqual(t, "Test instruction 2", candidate.Instruction)
+	}
+}
+
 func TestEvaluateCandidate(t *testing.T) {
 	metric := func(expected, actual map[string]interface{}) float64 {
 		if expected["answer"] == actual["answer"] {
@@ -590,7 +615,6 @@ func TestApplyPromptToPredictor(t *testing.T) {
 	newSignature := predictor.GetSignature()
 	assert.Equal(t, "New instruction", newSignature.Instruction)
 }
-
 
 func TestHelperFunctions(t *testing.T) {
 	// Test built-in min function
