@@ -6,12 +6,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
 )
 
 // OptimizerConfig holds configuration for running an optimizer
@@ -24,21 +24,21 @@ type OptimizerConfig struct {
 	BaseURL       string
 	MaxExamples   int
 	Verbose       bool
-	SuppressLogs  bool // Suppress console output for TUI mode
+	SuppressLogs  bool                   // Suppress console output for TUI mode
 	Parameters    map[string]interface{} // Optimizer-specific parameters
 }
 
 // RunResult holds the results of an optimizer run
 type RunResult struct {
-	OptimizerName    string
-	DatasetName      string
-	InitialAccuracy  float64
-	FinalAccuracy    float64
-	ImprovementPct   float64
-	Duration         time.Duration
-	ExamplesUsed     int
-	Success          bool
-	ErrorMessage     string
+	OptimizerName   string
+	DatasetName     string
+	InitialAccuracy float64
+	FinalAccuracy   float64
+	ImprovementPct  float64
+	Duration        time.Duration
+	ExamplesUsed    int
+	Success         bool
+	ErrorMessage    string
 }
 
 // RunOptimizer eliminates all boilerplate and runs an optimizer with sample data
@@ -125,33 +125,38 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 		).WithInstruction("Extract the final numerical answer from the reasoning.")
 		extractor := modules.NewChainOfThought(extractorSignature)
 
-		program = core.NewProgram(
+		program = core.NewProgramWithForwardFactory(
 			map[string]core.Module{
 				"cot":       module,
 				"extractor": extractor,
 			},
-			func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-				// First run chain of thought
-				cotResult, err := module.Process(ctx, inputs)
-				if err != nil {
-					return nil, fmt.Errorf("chain of thought failed: %w", err)
-				}
+			func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+				return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+					cot := modules["cot"]
+					extractor := modules["extractor"]
 
-				extractorInput := map[string]interface{}{
-					"prompt": cotResult["completion"],
-				}
+					cotResult, err := cot.Process(ctx, inputs)
+					if err != nil {
+						return nil, fmt.Errorf("chain of thought failed: %w", err)
+					}
 
-				// Then extract the answer
-				return extractor.Process(ctx, extractorInput)
+					extractorInput := map[string]interface{}{
+						"prompt": cotResult["completion"],
+					}
+
+					return extractor.Process(ctx, extractorInput)
+				}
 			},
 		)
 	} else {
-		program = core.NewProgram(
+		program = core.NewProgramWithForwardFactory(
 			map[string]core.Module{
 				"main": module,
 			},
-			func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-				return module.Process(ctx, inputs)
+			func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+				return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+					return modules["main"].Process(ctx, inputs)
+				}
 			},
 		)
 	}
@@ -167,8 +172,8 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 
 	// Run optimization
 	logger := logging.GetLogger()
-	logger.Info(ctx, fmt.Sprintf("Starting %s optimization with %d training examples...",
-		config.OptimizerName, len(trainExamples)))
+	logger.Info(ctx, "Starting %s optimization with %d training examples...",
+		config.OptimizerName, len(trainExamples))
 
 	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
 	if err != nil {
@@ -206,7 +211,7 @@ func setupLogging(verbose bool, suppressLogs bool) {
 	// If suppressing logs (TUI mode), use a no-op logger
 	if suppressLogs {
 		logger := logging.NewLogger(logging.Config{
-			Severity: logging.ERROR, // Only show critical errors
+			Severity: logging.ERROR,      // Only show critical errors
 			Outputs:  []logging.Output{}, // No outputs
 		})
 		logging.SetLogger(logger)

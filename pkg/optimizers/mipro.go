@@ -721,12 +721,7 @@ func (m *MIPRO) createCandidateProgram(
 		}
 	}
 
-	//	return newProgram
-	// Create new program with updated modules but PRESERVE the forward function
-	return core.NewProgram(
-		newModules,
-		baseProgram.Forward, // This is the critical line
-	)
+	return baseProgram.RebindModules(newModules)
 }
 
 // evaluateCandidate evaluates a candidate program.

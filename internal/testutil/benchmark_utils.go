@@ -106,12 +106,14 @@ func CreateBenchmarkDatasets() map[string]BenchmarkDataset {
 // CreateBenchmarkProgram creates a standard program for benchmarking optimizers.
 // The predictor parameter should be a modules.Predict instance to avoid import cycles.
 func CreateBenchmarkProgram(predictor core.Module) core.Program {
-	return core.NewProgram(
+	return core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return modules["predictor"].Process(ctx, inputs)
+			}
 		},
 	)
 }

@@ -201,12 +201,14 @@ func createCOPROTestProgram() core.Program {
 	)
 	predictor := modules.NewPredict(signature)
 
-	return core.NewProgram(
+	return core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return modules["predictor"].Process(ctx, inputs)
+			}
 		},
 	)
 }
@@ -897,12 +899,14 @@ func TestCOPROCompile_EmptyInstruction(t *testing.T) {
 	// Don't set instruction - keep it empty
 	predictor := modules.NewPredict(signature)
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return modules["predictor"].Process(ctx, inputs)
+			}
 		},
 	)
 

@@ -358,21 +358,18 @@ func createTestProgram() core.Program {
 	mockModule.On("GetSignature").Return(signature).Maybe()
 	mockModule.On("Clone").Return(mockModule).Maybe()
 
-	// Define the modules map first
-	modules := map[string]core.Module{"test": mockModule}
-
-	program := core.NewProgram(
-		modules, // Pass the map here
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			modInstance, ok := modules["test"] // Use the captured 'modules' map
-			if !ok {
-				return nil, fmt.Errorf("module 'test' not found in program")
+	return core.NewProgramWithForwardFactory(
+		map[string]core.Module{"test": mockModule},
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				modInstance, ok := modules["test"]
+				if !ok {
+					return nil, fmt.Errorf("module 'test' not found in program")
+				}
+				return modInstance.Process(ctx, inputs)
 			}
-			// Note: We already know this is a core.Module from the map definition, so no need to check type
-			return modInstance.Process(ctx, inputs)
 		},
 	)
-	return program
 }
 
 func createTestDataset() core.Dataset {

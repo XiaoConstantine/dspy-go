@@ -14,28 +14,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func createProgram() core.Program {
 	predict := modules.NewPredict(core.NewSignature(
 		[]core.InputField{{Field: core.Field{Name: "question"}}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	))
 
-	forwardFunc := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-
-		ctx, span := core.StartSpan(ctx, "Forward")
-		defer core.EndSpan(ctx)
-		span.WithAnnotation("inputs", inputs)
-		outputs, err := predict.Process(ctx, inputs)
-		if err != nil {
-			span.WithError(err)
-			return nil, err
-		}
-		span.WithAnnotation("outputs", outputs)
-		return outputs, nil
-	}
-
-	return core.NewProgram(map[string]core.Module{"predict": predict}, forwardFunc)
+	return core.NewProgramWithForwardFactory(
+		map[string]core.Module{"predict": predict},
+		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				ctx, span := core.StartSpan(ctx, "Forward")
+				defer core.EndSpan(ctx)
+				span.WithAnnotation("inputs", inputs)
+				outputs, err := modules["predict"].Process(ctx, inputs)
+				if err != nil {
+					span.WithError(err)
+					return nil, err
+				}
+				span.WithAnnotation("outputs", outputs)
+				return outputs, nil
+			}
+		},
+	)
 }
 
 func TestBootstrapFewShot(t *testing.T) {

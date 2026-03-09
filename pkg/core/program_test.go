@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -137,11 +138,8 @@ func TestProgram(t *testing.T) {
 
 		// Create and configure the original mock module
 		mockOriginal := new(MockModule)
-		// GetSignature gets called three times on original:
-		// 1. When we test GetSignature explicitly
-		// 2. During the cloning process itself
-		// 3. When setting up the new program's signature after cloning
-		mockOriginal.On("GetSignature").Return(expectedSig).Times(3)
+		// GetSignature gets called once directly on the original program.
+		mockOriginal.On("GetSignature").Return(expectedSig).Once()
 
 		// Create and configure the cloned mock module
 		mockCloned := new(MockModule)
@@ -151,19 +149,21 @@ func TestProgram(t *testing.T) {
 		// Set up the Clone expectation
 		mockOriginal.On("Clone").Return(mockCloned)
 
-		// Create a test forward function
-		forward := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{"test": "value"}, nil
-		}
+		mockOriginal.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"test": "original"}, nil).Once()
+		mockCloned.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"test": "clone"}, nil).Once()
 
-		// Create the original program
-		original := NewProgram(map[string]Module{"test": mockOriginal}, forward)
+		// Create the original program using a clone-safe forward factory.
+		original := NewProgramWithForwardFactory(map[string]Module{"test": mockOriginal}, func(modules map[string]Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return modules["test"].Process(ctx, inputs)
+			}
+		})
 
 		// Test GetSignature (first call)
 		sig := original.GetSignature()
 		assert.Equal(t, expectedSig, sig)
 
-		// Clone the program (triggers second and third calls during cloning process)
+		// Clone the program
 		clone := original.Clone()
 
 		// Get signature from clone (triggers call on cloned module)
@@ -181,12 +181,27 @@ func TestProgram(t *testing.T) {
 		originalResult, originalErr := original.Forward(ctx, map[string]interface{}{"input": "test"})
 		cloneResult, cloneErr := clone.Forward(ctx, map[string]interface{}{"input": "test"})
 
-		// Verify forward function results match
-		assert.Equal(t, originalResult, cloneResult)
+		// Verify the clone's forward function rebinds to the cloned module.
+		assert.Equal(t, map[string]interface{}{"test": "original"}, originalResult)
+		assert.Equal(t, map[string]interface{}{"test": "clone"}, cloneResult)
 		assert.Equal(t, originalErr, cloneErr)
 
 		// Verify all mock expectations were met
+		mockOriginal.AssertExpectations(t)
 		mockCloned.AssertExpectations(t)
+	})
+
+	t.Run("RebindModules preserves plain forward when no factory exists", func(t *testing.T) {
+		mockModule := new(MockModule)
+		forward := func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return map[string]interface{}{"ok": true}, nil
+		}
+
+		program := NewProgram(map[string]Module{"test": mockModule}, forward)
+		rebound := program.RebindModules(map[string]Module{"test": mockModule})
+
+		assert.NotNil(t, rebound.Forward)
+		assert.Equal(t, reflect.ValueOf(program.Forward).Pointer(), reflect.ValueOf(rebound.Forward).Pointer())
 	})
 
 	t.Run("Equal with identical programs", func(t *testing.T) {
@@ -254,5 +269,22 @@ func TestProgram(t *testing.T) {
 		}
 		program.SetForward(forward)
 		assert.NotNil(t, program.Forward)
+	})
+
+	t.Run("SetForwardFactory", func(t *testing.T) {
+		mockModule := new(MockModule)
+		mockModule.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"result": "ok"}, nil).Once()
+
+		program := NewProgram(map[string]Module{"test": mockModule}, nil)
+		program.SetForwardFactory(func(modules map[string]Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return modules["test"].Process(ctx, inputs)
+			}
+		})
+
+		output, err := program.Execute(context.Background(), map[string]interface{}{"input": "x"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]interface{}{"result": "ok"}, output)
+		mockModule.AssertExpectations(t)
 	})
 }
