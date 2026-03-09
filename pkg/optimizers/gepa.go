@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -131,6 +132,7 @@ type ExecutionPatterns struct {
 	AverageResponseTime time.Duration  `json:"average_response_time"`
 	CommonFailures      []string       `json:"common_failures"`
 	QualityIndicators   []string       `json:"quality_indicators"`
+	RichTraceEvidence   []string       `json:"rich_trace_evidence"`
 	ErrorDistribution   map[string]int `json:"error_distribution"`
 	PerformanceTrends   []float64      `json:"performance_trends"`
 }
@@ -4521,16 +4523,19 @@ func (g *GEPA) analyzeExecutionPatterns(traces []ExecutionTrace) *ExecutionPatte
 		return &ExecutionPatterns{
 			ErrorDistribution: make(map[string]int),
 			PerformanceTrends: make([]float64, 0),
+			RichTraceEvidence: make([]string, 0),
 		}
 	}
 
 	patterns := &ExecutionPatterns{
 		ErrorDistribution: make(map[string]int),
 		PerformanceTrends: make([]float64, 0),
+		RichTraceEvidence: make([]string, 0),
 	}
 
 	totalDuration := time.Duration(0)
 	successCount := 0
+	evidenceCounts := make(map[string]int)
 
 	for _, trace := range traces {
 		totalDuration += trace.Duration
@@ -4544,6 +4549,10 @@ func (g *GEPA) analyzeExecutionPatterns(traces []ExecutionTrace) *ExecutionPatte
 				patterns.ErrorDistribution[errorType]++
 			}
 		}
+
+		for _, evidence := range extractRichTraceEvidence(trace) {
+			evidenceCounts[evidence]++
+		}
 	}
 
 	patterns.TotalExecutions = len(traces)
@@ -4552,12 +4561,18 @@ func (g *GEPA) analyzeExecutionPatterns(traces []ExecutionTrace) *ExecutionPatte
 	patterns.AverageResponseTime = totalDuration / time.Duration(len(traces))
 	patterns.CommonFailures = g.identifyCommonFailures(patterns.ErrorDistribution)
 	patterns.QualityIndicators = g.identifyQualityIndicators(patterns.PerformanceTrends)
+	patterns.RichTraceEvidence = topRichTraceEvidence(evidenceCounts, 6)
 
 	return patterns
 }
 
 // buildReflectionPrompt creates a reflection prompt for a candidate.
 func (g *GEPA) buildReflectionPrompt(candidate *GEPACandidate, patterns *ExecutionPatterns) string {
+	richTraceEvidence := "none recorded"
+	if len(patterns.RichTraceEvidence) > 0 {
+		richTraceEvidence = "- " + strings.Join(patterns.RichTraceEvidence, "\n- ")
+	}
+
 	return fmt.Sprintf(`As an expert prompt engineer, critically analyze this instruction and its performance:
 
 INSTRUCTION: "%s"
@@ -4571,11 +4586,14 @@ EXECUTION PATTERNS:
 - Common Failure Modes: %s
 - Quality Indicators: %s
 
+RICH TRACE EVIDENCE:
+%s
+
 Please provide a detailed self-reflection covering:
 
 1. STRENGTHS: What aspects of this instruction work well?
-2. WEAKNESSES: What specific issues limit its effectiveness?
-3. IMPROVEMENT SUGGESTIONS: Concrete ways to enhance this instruction
+2. WEAKNESSES: What specific issues limit its effectiveness? Use the rich trace evidence section to ground concrete failure modes, loops, mismatches, and termination behavior.
+3. IMPROVEMENT SUGGESTIONS: Concrete ways to enhance this instruction based on the execution patterns and rich trace evidence.
 4. CONFIDENCE: Rate your confidence in this analysis (0.0-1.0)
 
 Format your response as:
@@ -4601,7 +4619,8 @@ CONFIDENCE: [0.0-1.0]`,
 		patterns.TotalExecutions,
 		patterns.AverageResponseTime,
 		strings.Join(patterns.CommonFailures, ", "),
-		strings.Join(patterns.QualityIndicators, ", "))
+		strings.Join(patterns.QualityIndicators, ", "),
+		richTraceEvidence)
 }
 
 // parseReflectionResponse parses the LLM reflection response.
@@ -4690,6 +4709,10 @@ func (g *GEPA) createFallbackReflection(candidate *GEPACandidate, patterns *Exec
 		weaknesses = append(weaknesses, fmt.Sprintf("Common failures: %s", strings.Join(patterns.CommonFailures, ", ")))
 		suggestions = append(suggestions, "Address the common failure modes identified")
 	}
+	if len(patterns.RichTraceEvidence) > 0 {
+		weaknesses = append(weaknesses, fmt.Sprintf("Trace evidence: %s", strings.Join(patterns.RichTraceEvidence, "; ")))
+		suggestions = append(suggestions, "Use the trace evidence to target repeated failure loops, mismatches, and termination issues")
+	}
 
 	return &ReflectionResult{
 		CandidateID:     candidate.ID,
@@ -4700,6 +4723,131 @@ func (g *GEPA) createFallbackReflection(candidate *GEPACandidate, patterns *Exec
 		Timestamp:       time.Now(),
 		ReflectionDepth: 1,
 	}
+}
+
+func extractRichTraceEvidence(trace ExecutionTrace) []string {
+	if trace.ContextData == nil {
+		return nil
+	}
+
+	if raw, ok := trace.ContextData["rich_trace_evidence"]; ok {
+		if evidence := dedupeEvidenceLines(evidenceFromValue(raw)); len(evidence) > 0 {
+			return evidence
+		}
+	}
+
+	evidence := make([]string, 0, 8)
+	if termination, ok := trace.ContextData["termination_cause"].(string); ok && strings.TrimSpace(termination) != "" {
+		evidence = append(evidence, "termination="+termination)
+	}
+	if status, ok := trace.ContextData["trace_status"].(string); ok && strings.TrimSpace(status) != "" {
+		evidence = append(evidence, "trace_status="+status)
+	}
+	if failedTests, ok := trace.ContextData["failed_tests"]; ok {
+		for _, item := range evidenceFromValue(failedTests) {
+			evidence = append(evidence, "failed_test="+item)
+		}
+	}
+	if diagnostics, ok := trace.ContextData["diagnostics"].(map[string]interface{}); ok {
+		for _, key := range []string{"evaluation_error", "execution_error", "comparison_error"} {
+			if raw, exists := diagnostics[key]; exists {
+				if message, ok := raw.(string); ok && strings.TrimSpace(message) != "" {
+					evidence = append(evidence, fmt.Sprintf("%s=%s", key, truncateEvidence(message, 100)))
+				}
+			}
+		}
+	}
+	if len(evidence) == 0 {
+		if summary, ok := trace.ContextData["rich_trace_summary"].(string); ok && strings.TrimSpace(summary) != "" {
+			evidence = append(evidence, truncateEvidence(summary, 160))
+		}
+	}
+
+	return dedupeEvidenceLines(evidence)
+}
+
+func evidenceFromValue(raw interface{}) []string {
+	switch value := raw.(type) {
+	case []string:
+		return append([]string(nil), value...)
+	case []interface{}:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			if str, ok := item.(string); ok && strings.TrimSpace(str) != "" {
+				result = append(result, str)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func topRichTraceEvidence(counts map[string]int, limit int) []string {
+	if len(counts) == 0 {
+		return []string{}
+	}
+
+	type countedEvidence struct {
+		evidence string
+		count    int
+	}
+
+	items := make([]countedEvidence, 0, len(counts))
+	for evidence, count := range counts {
+		if strings.TrimSpace(evidence) == "" {
+			continue
+		}
+		items = append(items, countedEvidence{evidence: evidence, count: count})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count == items[j].count {
+			return items[i].evidence < items[j].evidence
+		}
+		return items[i].count > items[j].count
+	})
+
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, fmt.Sprintf("%s (seen %dx)", item.evidence, item.count))
+	}
+	return result
+}
+
+func dedupeEvidenceLines(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(lines))
+	seen := make(map[string]struct{}, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if _, exists := seen[line]; exists {
+			continue
+		}
+		seen[line] = struct{}{}
+		result = append(result, line)
+	}
+	return result
+}
+
+func truncateEvidence(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
 }
 
 // Helper methods for reflection analysis

@@ -19,7 +19,10 @@ const (
 	gepaMetadataArtifactKeysKey    = "artifact_keys"
 	gepaMetadataPrimaryArtifactKey = "primary_artifact"
 	gepaMetadataTraceSummaryKey    = "rich_trace_summary"
+	gepaMetadataTraceEvidenceKey   = "rich_trace_evidence"
 	maxTraceSummarySteps           = 5
+	maxTraceEvidenceItems          = 8
+	maxFailedStepEvidence          = 4
 )
 
 // GEPAAdapterConfig configures the agent-to-GEPA bridge layer.
@@ -640,6 +643,9 @@ func buildGEPATrace(candidate *optimizers.GEPACandidate, example AgentExample, r
 	trace.ContextData["passed_tests"] = append([]string(nil), sideInfo.PassedTests...)
 	trace.ContextData["failed_tests"] = append([]string(nil), sideInfo.FailedTests...)
 	trace.ContextData["tokens"] = core.ShallowCopyMap(sideInfo.Tokens)
+	if evidence := buildRichTraceEvidence(sideInfo.Trace, sideInfo); len(evidence) > 0 {
+		trace.ContextData[gepaMetadataTraceEvidenceKey] = evidence
+	}
 
 	trace.Success = result.Score >= passThreshold && extractEvalError(sideInfo) == nil
 	trace.Error = extractEvalError(sideInfo)
@@ -713,11 +719,139 @@ func summarizeAgentTrace(trace *agents.ExecutionTrace) string {
 	return builder.String()
 }
 
+func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []string {
+	evidence := make([]string, 0, maxTraceEvidenceItems)
+
+	if trace != nil {
+		if trace.TerminationCause != "" {
+			evidence = append(evidence, "termination="+trace.TerminationCause)
+		}
+		if trace.Status != "" {
+			evidence = append(evidence, "trace_status="+string(trace.Status))
+		}
+		if len(trace.Steps) > 0 {
+			evidence = append(evidence, fmt.Sprintf("step_count=%d", len(trace.Steps)))
+			evidence = append(evidence, detectToolLoopEvidence(trace.Steps)...)
+			failedStepCount := 0
+			for _, step := range trace.Steps {
+				if step.Success && step.Error == "" {
+					continue
+				}
+				if failedStepCount >= maxFailedStepEvidence {
+					break
+				}
+				entry := fmt.Sprintf("step%d tool=%s success=%t", step.Index, step.Tool, step.Success)
+				if step.Error != "" {
+					entry += " error=" + truncateString(step.Error, 80)
+				} else if step.Observation != "" {
+					entry += " obs=" + truncateString(step.Observation, 80)
+				}
+				evidence = append(evidence, entry)
+				failedStepCount++
+			}
+		}
+	}
+
+	if sideInfo != nil {
+		for _, failedTest := range sideInfo.FailedTests {
+			evidence = append(evidence, "failed_test="+failedTest)
+		}
+		if sideInfo.Diagnostics != nil {
+			for _, key := range []string{"evaluation_error", "execution_error", "comparison_error"} {
+				if raw, ok := sideInfo.Diagnostics[key]; ok {
+					if message, ok := raw.(string); ok && message != "" {
+						evidence = append(evidence, key+"="+truncateString(message, 80))
+					}
+				}
+			}
+			if mismatches, ok := sideInfo.Diagnostics["mismatches"].(map[string]interface{}); ok && len(mismatches) > 0 {
+				keys := make([]string, 0, len(mismatches))
+				for key := range mismatches {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				evidence = append(evidence, "mismatch_keys="+strings.Join(keys, ","))
+			}
+		}
+	}
+
+	return dedupeEvidence(evidence, maxTraceEvidenceItems)
+}
+
+// detectToolLoopEvidence intentionally captures only consecutive same-tool runs.
+// More complex alternating loops are possible, but this cheap heuristic already
+// surfaces a common failure pattern without full sequence mining.
+func detectToolLoopEvidence(steps []agents.TraceStep) []string {
+	if len(steps) < 2 {
+		return nil
+	}
+
+	evidence := make([]string, 0, 2)
+	currentTool := ""
+	runLength := 0
+
+	flush := func() {
+		if currentTool != "" && runLength >= 2 {
+			evidence = append(evidence, fmt.Sprintf("tool_loop=%sx%d", currentTool, runLength))
+		}
+	}
+
+	for _, step := range steps {
+		if step.Tool == "" {
+			flush()
+			currentTool = ""
+			runLength = 0
+			continue
+		}
+		if step.Tool != currentTool {
+			flush()
+			currentTool = step.Tool
+			runLength = 1
+			continue
+		}
+		runLength++
+	}
+	flush()
+
+	return evidence
+}
+
+func dedupeEvidence(evidence []string, limit int) []string {
+	if len(evidence) == 0 {
+		return nil
+	}
+
+	deduped := make([]string, 0, len(evidence))
+	seen := make(map[string]struct{}, len(evidence))
+	for _, item := range evidence {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		deduped = append(deduped, item)
+		if limit > 0 && len(deduped) >= limit {
+			break
+		}
+	}
+
+	return deduped
+}
+
 func truncateString(value string, limit int) string {
-	if limit <= 0 || len(value) <= limit {
+	if limit <= 0 {
+		return ""
+	}
+	if len(value) <= limit {
 		return value
 	}
-	return value[:limit] + "..."
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
 }
 
 func clamp01(value float64) float64 {
