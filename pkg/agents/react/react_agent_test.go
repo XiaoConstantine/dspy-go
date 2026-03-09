@@ -8,6 +8,7 @@ import (
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -254,6 +255,52 @@ result: complete
 	artifacts := agent.GetArtifacts()
 	assert.Equal(t, "Prefer concise repo-aware reasoning.", artifacts.Text[optimize.ArtifactSkillPack])
 	assert.Equal(t, "Avoid unnecessary tool calls.", artifacts.Text[optimize.ArtifactToolPolicy])
+}
+
+func TestNewReActAgent_LoadsPersistedSkillPack(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	resp := &core.LLMResponse{Content: `
+thought: I can finish directly
+action: <action><tool_name>Finish</tool_name></action>
+result: complete
+`}
+
+	store := skills.NewMemoryStore()
+	require.NoError(t, store.Save(context.Background(), skills.Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Prefer repository-specific debugging heuristics.",
+		Version: 2,
+	}))
+
+	mockLLM.On(
+		"Generate",
+		mock.Anything,
+		mock.MatchedBy(func(prompt string) bool {
+			return strings.Contains(prompt, "SKILL PACK") &&
+				strings.Contains(prompt, "Prefer repository-specific debugging heuristics.")
+		}),
+		mock.AnythingOfType("[]core.GenerateOption"),
+	).Return(resp, nil).Once()
+
+	agent := NewReActAgent(
+		"test-agent",
+		"Test Agent",
+		WithSkillStore(store),
+		WithSkillDomain("repo:test"),
+	)
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+	)
+
+	require.NoError(t, agent.Initialize(mockLLM, signature))
+
+	artifacts := agent.GetArtifacts()
+	assert.Equal(t, "Prefer repository-specific debugging heuristics.", artifacts.Text[optimize.ArtifactSkillPack])
+
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "Summarize the task"})
+	require.NoError(t, err)
 }
 
 func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {

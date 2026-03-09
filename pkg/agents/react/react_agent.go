@@ -12,6 +12,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
 	contextmgmt "github.com/XiaoConstantine/dspy-go/pkg/agents/context"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -92,6 +93,10 @@ type ReActAgentConfig struct {
 	// ACE (Agentic Context Engineering) settings
 	EnableACE bool       `json:"enable_ace"`
 	ACEConfig ace.Config `json:"ace_config,omitempty"`
+
+	// Skill injection settings
+	SkillDomain string       `json:"skill_domain,omitempty"`
+	SkillStore  skills.Store `json:"-"`
 }
 
 // DefaultReActAgentConfig returns sensible defaults.
@@ -262,6 +267,14 @@ func newReActAgentWithConfig(id, name string, config ReActAgentConfig) *ReActAge
 		},
 	}
 
+	if config.SkillStore != nil && config.SkillDomain != "" {
+		injector := skills.NewInjector(config.SkillStore)
+		if _, err := injector.InjectBest(context.Background(), agent, config.SkillDomain); err != nil {
+			logger := logging.GetLogger()
+			logger.Warn(context.Background(), "Failed to load skill for agent %s and domain %s: %v", id, config.SkillDomain, err)
+		}
+	}
+
 	// Initialize context engineering if enabled
 	if config.EnableContextEngineering {
 		contextConfig := config.ContextConfig
@@ -427,6 +440,20 @@ func WithACE(config ace.Config) Option {
 	return func(c *ReActAgentConfig) {
 		c.EnableACE = true
 		c.ACEConfig = config
+	}
+}
+
+// WithSkillDomain configures the persisted skill domain to load during agent construction.
+func WithSkillDomain(domain string) Option {
+	return func(c *ReActAgentConfig) {
+		c.SkillDomain = domain
+	}
+}
+
+// WithSkillStore configures the persisted skill store used during agent construction.
+func WithSkillStore(store skills.Store) Option {
+	return func(c *ReActAgentConfig) {
+		c.SkillStore = store
 	}
 }
 
