@@ -2,12 +2,14 @@ package react
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -256,6 +258,68 @@ result: complete
 	assert.Equal(t, "Avoid unnecessary tool calls.", artifacts.Text[optimize.ArtifactToolPolicy])
 }
 
+func TestNewReActAgent_LoadsPersistedSkillPack(t *testing.T) {
+	mockLLM := new(testutil.MockLLM)
+	resp := &core.LLMResponse{Content: `
+thought: I can finish directly
+action: <action><tool_name>Finish</tool_name></action>
+result: complete
+`}
+
+	store := skills.NewMemoryStore()
+	require.NoError(t, store.Save(context.Background(), skills.Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Prefer repository-specific debugging heuristics.",
+		Version: 2,
+	}))
+
+	mockLLM.On(
+		"Generate",
+		mock.Anything,
+		mock.MatchedBy(func(prompt string) bool {
+			return strings.Contains(prompt, "SKILL PACK") &&
+				strings.Contains(prompt, "Prefer repository-specific debugging heuristics.")
+		}),
+		mock.AnythingOfType("[]core.GenerateOption"),
+	).Return(resp, nil).Once()
+
+	agent := NewReActAgent(
+		"test-agent",
+		"Test Agent",
+		WithSkillStore(store),
+		WithSkillDomain("repo:test"),
+	)
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+	)
+
+	require.NoError(t, agent.Initialize(mockLLM, signature))
+
+	artifacts := agent.GetArtifacts()
+	assert.Equal(t, "Prefer repository-specific debugging heuristics.", artifacts.Text[optimize.ArtifactSkillPack])
+	loadedSkill := agent.GetLoadedSkill()
+	require.NotNil(t, loadedSkill)
+	assert.Equal(t, "repo:test", loadedSkill.Domain)
+	assert.NoError(t, agent.GetSkillLoadError())
+
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "Summarize the task"})
+	require.NoError(t, err)
+}
+
+func TestNewReActAgent_RecordsSkillLoadFailure(t *testing.T) {
+	agent := NewReActAgent(
+		"test-agent",
+		"Test Agent",
+		WithSkillStore(errorSkillStore{err: errors.New("load failed")}),
+		WithSkillDomain("repo:test"),
+	)
+
+	assert.Nil(t, agent.GetLoadedSkill())
+	require.EqualError(t, agent.GetSkillLoadError(), "load failed")
+}
+
 func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
 	signature := core.NewSignature(
@@ -283,6 +347,16 @@ func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
 	assert.Empty(t, cloned.GetExecutionHistory())
 	assert.NotSame(t, agent.GetMemory(), cloned.GetMemory())
 }
+
+type errorSkillStore struct {
+	err error
+}
+
+func (s errorSkillStore) Save(context.Context, skills.Skill) error { return s.err }
+
+func (s errorSkillStore) Load(context.Context, string) ([]skills.Skill, error) { return nil, s.err }
+
+func (s errorSkillStore) Best(context.Context, string) (*skills.Skill, error) { return nil, s.err }
 
 func TestReActAgent_Execute_HybridMode_PreservesReActTrace(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)

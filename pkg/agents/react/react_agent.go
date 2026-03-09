@@ -12,6 +12,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/ace"
 	contextmgmt "github.com/XiaoConstantine/dspy-go/pkg/agents/context"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -92,6 +93,10 @@ type ReActAgentConfig struct {
 	// ACE (Agentic Context Engineering) settings
 	EnableACE bool       `json:"enable_ace"`
 	ACEConfig ace.Config `json:"ace_config,omitempty"`
+
+	// Skill injection settings
+	SkillDomain string       `json:"skill_domain,omitempty"`
+	SkillStore  skills.Store `json:"-"`
 }
 
 // DefaultReActAgentConfig returns sensible defaults.
@@ -152,6 +157,8 @@ type ReActAgent struct {
 	memory       agents.Memory
 	llm          core.LLM
 	artifacts    optimize.AgentArtifacts
+	loadedSkill  *skills.Skill
+	skillLoadErr error
 
 	// Initialization state retained for optimizer-friendly cloning and prompt mutation.
 	taskSignature      core.Signature
@@ -260,6 +267,19 @@ func newReActAgentWithConfig(id, name string, config ReActAgentConfig) *ReActAge
 			Int:  make(map[string]int),
 			Bool: make(map[string]bool),
 		},
+	}
+
+	if config.SkillStore != nil && config.SkillDomain != "" {
+		injector := skills.NewInjector(config.SkillStore)
+		// Construction is intentionally best-effort: agent setup has no caller context yet,
+		// so persisted skill loading uses a background context and falls back to an unskilled agent on failure.
+		appliedSkill, err := injector.InjectBest(context.Background(), agent, config.SkillDomain)
+		agent.loadedSkill = appliedSkill
+		agent.skillLoadErr = err
+		if err != nil {
+			logger := logging.GetLogger()
+			logger.Warn(context.Background(), "Failed to load skill for agent %s and domain %s: %v", id, config.SkillDomain, err)
+		}
 	}
 
 	// Initialize context engineering if enabled
@@ -430,6 +450,20 @@ func WithACE(config ace.Config) Option {
 	}
 }
 
+// WithSkillDomain configures the persisted skill domain to load during agent construction.
+func WithSkillDomain(domain string) Option {
+	return func(c *ReActAgentConfig) {
+		c.SkillDomain = domain
+	}
+}
+
+// WithSkillStore configures the persisted skill store used during agent construction.
+func WithSkillStore(store skills.Store) Option {
+	return func(c *ReActAgentConfig) {
+		c.SkillStore = store
+	}
+}
+
 // Initialize sets up the agent with an LLM and creates the ReAct module.
 func (r *ReActAgent) Initialize(llm core.LLM, signature core.Signature) error {
 	r.mu.Lock()
@@ -508,6 +542,27 @@ func (r *ReActAgent) GetArtifacts() optimize.AgentArtifacts {
 	defer r.mu.RUnlock()
 
 	return r.artifacts.Clone()
+}
+
+// GetLoadedSkill returns the constructor-loaded persisted skill, if one was applied.
+func (r *ReActAgent) GetLoadedSkill() *skills.Skill {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.loadedSkill == nil {
+		return nil
+	}
+
+	cloned := r.loadedSkill.Clone()
+	return &cloned
+}
+
+// GetSkillLoadError returns the last constructor-time persisted skill load error.
+func (r *ReActAgent) GetSkillLoadError() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.skillLoadErr
 }
 
 // SetArtifacts updates the mutable artifact set and reapplies prompt-backed artifacts

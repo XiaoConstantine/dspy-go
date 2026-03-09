@@ -186,7 +186,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	}
 
 	// Split examples into train/validation to prevent overfitting
-	trainSize := len(examples) * 2 / 3  // Use 2/3 for training
+	trainSize := len(examples) * 2 / 3 // Use 2/3 for training
 	if trainSize < 1 {
 		trainSize = 1
 	}
@@ -381,16 +381,19 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 			temp := c.InitTemperature * math.Pow(0.8, float64(depth))
 			refinedInstruction := c.refineInstruction(candidate.Instruction, temp)
 
-			// Ensure we're creating meaningful variations
-			if refinedInstruction != candidate.Instruction {
-				refinedCandidate := PromptCandidate{
-					Instruction: refinedInstruction,
-					Prefix:      candidate.Prefix,
-					Generation:  depth + 1,
-					AttemptID:   fmt.Sprintf("basic_refined_%d_%d", depth, i),
-				}
-				refined = append(refined, refinedCandidate)
+			// The fallback strategy must always generate at least some candidate
+			// variation; otherwise COPRO can stall on a generation and tests become flaky.
+			if refinedInstruction == candidate.Instruction {
+				refinedInstruction = c.forceRefineInstruction(candidate.Instruction, depth+i)
 			}
+
+			refinedCandidate := PromptCandidate{
+				Instruction: refinedInstruction,
+				Prefix:      candidate.Prefix,
+				Generation:  depth + 1,
+				AttemptID:   fmt.Sprintf("basic_refined_%d_%d", depth, i),
+			}
+			refined = append(refined, refinedCandidate)
 		}
 	}
 
@@ -483,7 +486,6 @@ func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modul
 
 	wg.Wait()
 }
-
 
 // LLMPromptGenerator handles sophisticated prompt generation using LLM assistance.
 type LLMPromptGenerator struct {
@@ -749,8 +751,22 @@ func (c *COPRO) varyInstruction(baseInstruction string, temperature float64) str
 
 // refineInstruction applies sophisticated refinement strategies.
 func (c *COPRO) refineInstruction(instruction string, temperature float64) string {
-	// Enhanced refinement strategies with context awareness
-	refinements := []string{
+	refinements := coproRefinements()
+
+	if temperature > 0.4 && rand.Float64() < temperature {
+		return applyInstructionRefinement(instruction, refinements[rand.Intn(len(refinements))])
+	}
+
+	return instruction
+}
+
+func (c *COPRO) forceRefineInstruction(instruction string, seed int) string {
+	refinements := coproRefinements()
+	return applyInstructionRefinement(instruction, refinements[seed%len(refinements)])
+}
+
+func coproRefinements() []string {
+	return []string{
 		"with methodical analysis",
 		"using step-by-step reasoning",
 		"with comprehensive evaluation",
@@ -760,27 +776,18 @@ func (c *COPRO) refineInstruction(instruction string, temperature float64) strin
 		"with thorough examination",
 		"through logical analysis",
 	}
+}
 
-	// Context-aware refinement placement
-	if temperature > 0.4 && rand.Float64() < temperature {
-		refinement := refinements[rand.Intn(len(refinements))]
-
-		// Intelligent refinement insertion
-		if strings.Contains(instruction, ".") {
-			// Insert before final period
-			lastDot := strings.LastIndex(instruction, ".")
-			return instruction[:lastDot] + " " + refinement + instruction[lastDot:]
-		} else if strings.Contains(instruction, ",") {
-			// Insert after first comma
-			firstComma := strings.Index(instruction, ",")
-			return instruction[:firstComma+1] + " " + refinement + "," + instruction[firstComma+1:]
-		} else {
-			// Append to end
-			return instruction + " " + refinement + "."
-		}
+func applyInstructionRefinement(instruction, refinement string) string {
+	if strings.Contains(instruction, ".") {
+		lastDot := strings.LastIndex(instruction, ".")
+		return instruction[:lastDot] + " " + refinement + instruction[lastDot:]
 	}
-
-	return instruction
+	if strings.Contains(instruction, ",") {
+		firstComma := strings.Index(instruction, ",")
+		return instruction[:firstComma+1] + " " + refinement + "," + instruction[firstComma+1:]
+	}
+	return instruction + " " + refinement + "."
 }
 
 func (c *COPRO) applyPromptToPredictor(predictor *modules.Predict, candidate PromptCandidate) {
@@ -800,7 +807,6 @@ func (c *COPRO) truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
-
 
 // getFieldNames extracts field names from InputField or OutputField slices.
 func getFieldNames(fields interface{}) []string {
