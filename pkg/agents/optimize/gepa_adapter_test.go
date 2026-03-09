@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	modrlm "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -212,6 +214,68 @@ func TestBuildGEPATrace_PreservesExpectedOutputsSeparately(t *testing.T) {
 	assert.Nil(t, trace.Outputs)
 	assert.Equal(t, map[string]interface{}{"answer": "42"}, trace.ContextData["expected_outputs"])
 	assert.Equal(t, 25*time.Millisecond, trace.Duration)
+}
+
+func TestBuildRichTraceEvidence_IncludesRLMContextMetadata(t *testing.T) {
+	evidence := buildRichTraceEvidence(&agents.ExecutionTrace{
+		Status:           agents.TraceStatusPartial,
+		TerminationCause: "early_termination",
+		ContextMetadata: map[string]interface{}{
+			modrlm.TraceMetadataAdaptiveIterationEnabled:    true,
+			modrlm.TraceMetadataSubLLMCallCount:             3,
+			modrlm.TraceMetadataSubRLMCallCount:             1,
+			modrlm.TraceMetadataConfidenceSignals:           2,
+			modrlm.TraceMetadataHistoryCompressions:         1,
+			modrlm.TraceMetadataRootPromptMeanTokens:        120,
+			modrlm.TraceMetadataRootPromptMaxTokens:         180,
+			modrlm.TraceMetadataAdaptiveBaseIterations:      5,
+			modrlm.TraceMetadataAdaptiveMaxIterations:       9,
+			modrlm.TraceMetadataAdaptiveConfidenceThreshold: 2,
+		},
+	}, nil)
+
+	assert.Contains(t, evidence, "adaptive_iteration=enabled")
+	assert.Contains(t, evidence, "sub_llm_calls=3")
+	assert.Contains(t, evidence, "sub_rlm_calls=1")
+	assert.Contains(t, evidence, "confidence_signals=2")
+	assert.Contains(t, evidence, "history_compressions=1")
+	assert.Contains(t, evidence, "root_prompt_mean_tokens=120")
+	assert.Contains(t, evidence, "root_prompt_max_tokens=180")
+	assert.Contains(t, evidence, "adaptive_window=5/9")
+	assert.Contains(t, evidence, "adaptive_confidence_threshold=2")
+}
+
+func TestBuildRichTraceEvidence_PreservesZeroValuedRLMMetadata(t *testing.T) {
+	evidence := buildRichTraceEvidence(&agents.ExecutionTrace{
+		ContextMetadata: map[string]interface{}{
+			modrlm.TraceMetadataSubLLMCallCount:      0,
+			modrlm.TraceMetadataSubRLMCallCount:      0,
+			modrlm.TraceMetadataConfidenceSignals:    0,
+			modrlm.TraceMetadataHistoryCompressions:  0,
+			modrlm.TraceMetadataRootPromptMeanTokens: 0,
+			modrlm.TraceMetadataRootPromptMaxTokens:  0,
+		},
+	}, nil)
+
+	assert.Contains(t, evidence, "sub_llm_calls=0")
+	assert.Contains(t, evidence, "sub_rlm_calls=0")
+	assert.Contains(t, evidence, "confidence_signals=0")
+	assert.Contains(t, evidence, "history_compressions=0")
+	assert.Contains(t, evidence, "root_prompt_mean_tokens=0")
+	assert.Contains(t, evidence, "root_prompt_max_tokens=0")
+
+	summary := summarizeAgentTrace(&agents.ExecutionTrace{
+		ContextMetadata: map[string]interface{}{
+			modrlm.TraceMetadataSubLLMCallCount:     0,
+			modrlm.TraceMetadataSubRLMCallCount:     0,
+			modrlm.TraceMetadataConfidenceSignals:   0,
+			modrlm.TraceMetadataHistoryCompressions: 0,
+		},
+	})
+	assert.Contains(t, summary, "subllm=0")
+	assert.Contains(t, summary, "subrlm=0")
+	assert.Contains(t, summary, "signals=0")
+	assert.Contains(t, summary, "compressions=0")
 }
 
 type cloneFailAgent struct {

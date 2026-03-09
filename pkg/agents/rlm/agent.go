@@ -14,13 +14,16 @@ import (
 )
 
 const (
-	ArtifactMaxIterations            = "rlm_max_iterations"
-	ArtifactMaxTokens                = "rlm_max_tokens"
-	ArtifactUseIterationDemos        = "rlm_use_iteration_demos"
-	ArtifactCompactIterationPrompt   = "rlm_compact_iteration_instructions"
-	ArtifactAdaptiveIterationEnabled = "rlm_adaptive_iteration_enabled"
-	defaultAgentIDPrefix             = "rlm-agent"
-	agentTypeRLM                     = "rlm"
+	ArtifactMaxIterations               = "rlm_max_iterations"
+	ArtifactMaxTokens                   = "rlm_max_tokens"
+	ArtifactAdaptiveBaseIterations      = "rlm_adaptive_base_iterations"
+	ArtifactAdaptiveMaxIterations       = "rlm_adaptive_max_iterations"
+	ArtifactAdaptiveConfidenceThreshold = "rlm_adaptive_confidence_threshold"
+	ArtifactUseIterationDemos           = "rlm_use_iteration_demos"
+	ArtifactCompactIterationPrompt      = "rlm_compact_iteration_instructions"
+	ArtifactAdaptiveIterationEnabled    = "rlm_adaptive_iteration_enabled"
+	defaultAgentIDPrefix                = "rlm-agent"
+	agentTypeRLM                        = "rlm"
 )
 
 // Agent wraps an RLM module with the agents.Agent and optimize.OptimizableAgent contracts.
@@ -215,13 +218,22 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 	}
 
 	contextMetadata := map[string]interface{}{
-		"iterations":                     trace.Iterations,
-		"termination_cause":              trace.TerminationCause,
-		"adaptive_iteration_enabled":     a.artifacts.Bool[ArtifactAdaptiveIterationEnabled],
-		"compact_iteration_instructions": a.artifacts.Bool[ArtifactCompactIterationPrompt],
-		"use_iteration_demos":            a.artifacts.Bool[ArtifactUseIterationDemos],
-		"max_iterations":                 a.artifacts.Int[ArtifactMaxIterations],
-		"max_tokens":                     a.artifacts.Int[ArtifactMaxTokens],
+		modrlm.TraceMetadataIterations:                   trace.Iterations,
+		modrlm.TraceMetadataTerminationCause:             trace.TerminationCause,
+		modrlm.TraceMetadataAdaptiveIterationEnabled:     a.artifacts.Bool[ArtifactAdaptiveIterationEnabled],
+		modrlm.TraceMetadataCompactIterationInstructions: a.artifacts.Bool[ArtifactCompactIterationPrompt],
+		modrlm.TraceMetadataUseIterationDemos:            a.artifacts.Bool[ArtifactUseIterationDemos],
+		modrlm.TraceMetadataMaxIterations:                a.artifacts.Int[ArtifactMaxIterations],
+		modrlm.TraceMetadataMaxTokens:                    a.artifacts.Int[ArtifactMaxTokens],
+		modrlm.TraceMetadataAdaptiveBaseIterations:       a.artifacts.Int[ArtifactAdaptiveBaseIterations],
+		modrlm.TraceMetadataAdaptiveMaxIterations:        a.artifacts.Int[ArtifactAdaptiveMaxIterations],
+		modrlm.TraceMetadataAdaptiveConfidenceThreshold:  a.artifacts.Int[ArtifactAdaptiveConfidenceThreshold],
+		modrlm.TraceMetadataSubLLMCallCount:              trace.SubLLMCallCount,
+		modrlm.TraceMetadataSubRLMCallCount:              trace.SubRLMCallCount,
+		modrlm.TraceMetadataConfidenceSignals:            trace.ConfidenceSignals,
+		modrlm.TraceMetadataHistoryCompressions:          trace.CompressionCount,
+		modrlm.TraceMetadataRootPromptMeanTokens:         meanPromptTokens(trace.RootSnapshots),
+		modrlm.TraceMetadataRootPromptMaxTokens:          maxPromptTokens(trace.RootSnapshots),
 	}
 
 	executionTrace := &agents.ExecutionTrace{
@@ -292,8 +304,11 @@ func artifactsFromConfig(cfg modrlm.Config) optimize.AgentArtifacts {
 			optimize.ArtifactRLMIterationPrompt: cfg.IterationInstruction,
 		},
 		Int: map[string]int{
-			ArtifactMaxIterations: cfg.MaxIterations,
-			ArtifactMaxTokens:     cfg.MaxTokens,
+			ArtifactMaxIterations:               cfg.MaxIterations,
+			ArtifactMaxTokens:                   cfg.MaxTokens,
+			ArtifactAdaptiveBaseIterations:      adaptiveBaseIterations(cfg),
+			ArtifactAdaptiveMaxIterations:       adaptiveMaxIterations(cfg),
+			ArtifactAdaptiveConfidenceThreshold: adaptiveConfidenceThreshold(cfg),
 		},
 		Bool: map[string]bool{
 			ArtifactUseIterationDemos:        cfg.UseIterationDemos,
@@ -330,6 +345,18 @@ func applyArtifactsToConfig(cfg *modrlm.Config, artifacts optimize.AgentArtifact
 	if value, ok := artifacts.Int[ArtifactMaxTokens]; ok && value >= 0 {
 		cfg.MaxTokens = value
 	}
+	if value, ok := artifacts.Int[ArtifactAdaptiveBaseIterations]; ok && value > 0 {
+		ensureAdaptiveConfig(cfg)
+		cfg.AdaptiveIteration.BaseIterations = value
+	}
+	if value, ok := artifacts.Int[ArtifactAdaptiveMaxIterations]; ok && value > 0 {
+		ensureAdaptiveConfig(cfg)
+		cfg.AdaptiveIteration.MaxIterations = value
+	}
+	if value, ok := artifacts.Int[ArtifactAdaptiveConfidenceThreshold]; ok && value > 0 {
+		ensureAdaptiveConfig(cfg)
+		cfg.AdaptiveIteration.ConfidenceThreshold = value
+	}
 
 	if value, ok := artifacts.Bool[ArtifactUseIterationDemos]; ok {
 		cfg.UseIterationDemos = value
@@ -349,4 +376,54 @@ func applyArtifactsToConfig(cfg *modrlm.Config, artifacts optimize.AgentArtifact
 			cfg.AdaptiveIteration = nil
 		}
 	}
+}
+
+func ensureAdaptiveConfig(cfg *modrlm.Config) {
+	if cfg == nil || cfg.AdaptiveIteration != nil {
+		return
+	}
+	defaultAdaptive := modrlm.DefaultAdaptiveIterationConfig()
+	cfg.AdaptiveIteration = &defaultAdaptive
+}
+
+func adaptiveBaseIterations(cfg modrlm.Config) int {
+	if cfg.AdaptiveIteration == nil {
+		return modrlm.DefaultAdaptiveIterationConfig().BaseIterations
+	}
+	return cfg.AdaptiveIteration.BaseIterations
+}
+
+func adaptiveMaxIterations(cfg modrlm.Config) int {
+	if cfg.AdaptiveIteration == nil {
+		return modrlm.DefaultAdaptiveIterationConfig().MaxIterations
+	}
+	return cfg.AdaptiveIteration.MaxIterations
+}
+
+func adaptiveConfidenceThreshold(cfg modrlm.Config) int {
+	if cfg.AdaptiveIteration == nil {
+		return modrlm.DefaultAdaptiveIterationConfig().ConfidenceThreshold
+	}
+	return cfg.AdaptiveIteration.ConfidenceThreshold
+}
+
+func meanPromptTokens(snapshots []modrlm.RootIterationSnapshot) int {
+	if len(snapshots) == 0 {
+		return 0
+	}
+	total := 0
+	for _, snapshot := range snapshots {
+		total += snapshot.PromptTokens
+	}
+	return total / len(snapshots)
+}
+
+func maxPromptTokens(snapshots []modrlm.RootIterationSnapshot) int {
+	maxTokens := 0
+	for _, snapshot := range snapshots {
+		if snapshot.PromptTokens > maxTokens {
+			maxTokens = snapshot.PromptTokens
+		}
+	}
+	return maxTokens
 }
