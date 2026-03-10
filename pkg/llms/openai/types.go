@@ -164,8 +164,10 @@ func (r *ChatCompletionRequest) ApplyOptions(opts *GenerateOptions) {
 			r.MaxTokens = &opts.MaxTokens
 		}
 	}
-	if opts.Temperature >= 0 {
+	if opts.Temperature >= 0 && supportsCustomTemperature(r.Model) {
 		r.Temperature = &opts.Temperature
+	} else {
+		r.Temperature = nil
 	}
 	if opts.TopP > 0 {
 		r.TopP = &opts.TopP
@@ -183,6 +185,10 @@ func (r *ChatCompletionRequest) ApplyOptions(opts *GenerateOptions) {
 
 func usesMaxCompletionTokens(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-5")
+}
+
+func supportsCustomTemperature(model string) bool {
+	return !usesMaxCompletionTokens(model)
 }
 
 // FromCoreOptions creates GenerateOptions from core.GenerateOptions values.

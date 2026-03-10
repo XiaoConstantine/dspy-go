@@ -24,52 +24,21 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 )
 
-// OolongTask represents a single OOLONG benchmark task.
-// Supports both HuggingFace format and rlm-go format.
-type OolongTask struct {
-	// HuggingFace format fields
-	ID                string `json:"id"`
-	ContextLen        int    `json:"context_len"`
-	Dataset           string `json:"dataset"`
-	ContextWindowText string `json:"context_window_text"`
-	Question          string `json:"question"`
-	TaskGroup         string `json:"task_group"`
-	Task              string `json:"task"`
-	Answer            string `json:"answer"`
-	AnswerType        string `json:"answer_type"`
-
-	// rlm-go format fields (task_id, context, question, answer)
-	TaskID  string `json:"task_id"`
-	Context string `json:"context"`
-}
-
-// Normalize returns a normalized version of the task (handles both formats).
-func (t OolongTask) Normalize() OolongTask {
-	// Use rlm-go format fields if HuggingFace fields are empty
-	if t.ID == "" && t.TaskID != "" {
-		t.ID = t.TaskID
-	}
-	if t.ContextWindowText == "" && t.Context != "" {
-		t.ContextWindowText = t.Context
-	}
-	return t
-}
+type OolongTask = datasets.OolongTask
 
 // BenchmarkResult stores the result of running a single task.
 type BenchmarkResult struct {
@@ -90,164 +59,25 @@ type BenchmarkResult struct {
 
 // BenchmarkSummary provides aggregate statistics.
 type BenchmarkSummary struct {
-	TotalTasks       int     `json:"total_tasks"`
-	RLMCorrect       int     `json:"rlm_correct"`
-	BaselineCorrect  int     `json:"baseline_correct"`
-	RLMAccuracy      float64 `json:"rlm_accuracy"`
-	BaselineAccuracy float64 `json:"baseline_accuracy"`
-	TotalRLMTime     float64 `json:"total_rlm_time_secs"`
-	TotalBaselineTime float64 `json:"total_baseline_time_secs"`
-	AvgRLMTime       float64 `json:"avg_rlm_time_secs"`
-	AvgBaselineTime  float64 `json:"avg_baseline_time_secs"`
-	TotalRLMInputTokens  int `json:"total_rlm_input_tokens"`
-	TotalRLMOutputTokens int `json:"total_rlm_output_tokens"`
+	TotalTasks           int     `json:"total_tasks"`
+	RLMCorrect           int     `json:"rlm_correct"`
+	BaselineCorrect      int     `json:"baseline_correct"`
+	RLMAccuracy          float64 `json:"rlm_accuracy"`
+	BaselineAccuracy     float64 `json:"baseline_accuracy"`
+	TotalRLMTime         float64 `json:"total_rlm_time_secs"`
+	TotalBaselineTime    float64 `json:"total_baseline_time_secs"`
+	AvgRLMTime           float64 `json:"avg_rlm_time_secs"`
+	AvgBaselineTime      float64 `json:"avg_baseline_time_secs"`
+	TotalRLMInputTokens  int     `json:"total_rlm_input_tokens"`
+	TotalRLMOutputTokens int     `json:"total_rlm_output_tokens"`
 }
 
-// loadTasksFromFile loads OOLONG tasks from a JSON file.
-// Supports both rlm-go format (task_id, context, question, answer)
-// and HuggingFace format.
 func loadTasksFromFile(path string) ([]OolongTask, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
-	}
-
-	var tasks []OolongTask
-	if err := json.Unmarshal(data, &tasks); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-
-	// Normalize all tasks
-	for i := range tasks {
-		tasks[i] = tasks[i].Normalize()
-	}
-
-	return tasks, nil
+	return datasets.LoadOolongTasksFromFile(path)
 }
 
-// getSampleOolongTasks returns embedded sample OOLONG-style tasks for testing.
-// These are simplified examples that demonstrate the types of reasoning required.
 func getSampleOolongTasks() []OolongTask {
-	// Sample context simulating product reviews with user IDs and timestamps
-	reviewContext := `
-User: alice | Date: 2024-01-15 | Product: Widget A | Rating: 5 | Review: Excellent product, highly recommend!
-User: bob | Date: 2024-01-16 | Product: Widget B | Rating: 2 | Review: Poor quality, broke after a week.
-User: alice | Date: 2024-01-17 | Product: Widget C | Rating: 4 | Review: Good value for money.
-User: charlie | Date: 2024-01-18 | Product: Widget A | Rating: 5 | Review: Best purchase ever!
-User: bob | Date: 2024-01-19 | Product: Widget A | Rating: 1 | Review: Terrible, completely unusable.
-User: diana | Date: 2024-01-20 | Product: Widget B | Rating: 3 | Review: It's okay, nothing special.
-User: alice | Date: 2024-02-01 | Product: Widget A | Rating: 5 | Review: Still works great after weeks!
-User: charlie | Date: 2024-02-02 | Product: Widget C | Rating: 4 | Review: Solid choice.
-User: eve | Date: 2024-02-03 | Product: Widget A | Rating: 5 | Review: Amazing quality.
-User: bob | Date: 2024-02-04 | Product: Widget C | Rating: 2 | Review: Not worth the price.
-User: diana | Date: 2024-02-05 | Product: Widget A | Rating: 4 | Review: Pretty good overall.
-User: eve | Date: 2024-02-06 | Product: Widget B | Rating: 3 | Review: Average product.
-User: charlie | Date: 2024-02-07 | Product: Widget B | Rating: 4 | Review: Better than expected.
-User: alice | Date: 2024-02-08 | Product: Widget B | Rating: 5 | Review: Love it!
-User: diana | Date: 2024-02-09 | Product: Widget C | Rating: 4 | Review: Would buy again.
-`
-
-	// Repeat context to make it longer (simulating larger OOLONG contexts)
-	longContext := strings.Repeat(reviewContext, 50)
-
-	return []OolongTask{
-		{
-			ID:                "counting_1",
-			ContextLen:        len(longContext),
-			Dataset:           "sample_reviews",
-			ContextWindowText: longContext,
-			Question:          "How many reviews are there in total?",
-			TaskGroup:         "counting",
-			Task:              "count_total",
-			Answer:            "750",
-			AnswerType:        "NUMERIC",
-		},
-		{
-			ID:                "counting_2",
-			ContextLen:        len(longContext),
-			Dataset:           "sample_reviews",
-			ContextWindowText: longContext,
-			Question:          "How many reviews have a rating of 5 stars?",
-			TaskGroup:         "counting",
-			Task:              "count_by_label",
-			Answer:            "250",
-			AnswerType:        "NUMERIC",
-		},
-		{
-			ID:                "user_1",
-			ContextLen:        len(longContext),
-			Dataset:           "sample_reviews",
-			ContextWindowText: longContext,
-			Question:          "What is the average rating given by user 'alice'?",
-			TaskGroup:         "user",
-			Task:              "user_average",
-			Answer:            "4.75",
-			AnswerType:        "NUMERIC",
-		},
-		{
-			ID:                "comparison_1",
-			ContextLen:        len(longContext),
-			Dataset:           "sample_reviews",
-			ContextWindowText: longContext,
-			Question:          "Which product has the most 5-star reviews: Widget A, Widget B, or Widget C?",
-			TaskGroup:         "comparison",
-			Task:              "most_frequent",
-			Answer:            "Widget A",
-			AnswerType:        "LABEL",
-		},
-		{
-			ID:                "temporal_1",
-			ContextLen:        len(longContext),
-			Dataset:           "sample_reviews",
-			ContextWindowText: longContext,
-			Question:          "Are there more reviews in January or February?",
-			TaskGroup:         "temporal",
-			Task:              "temporal_comparison",
-			Answer:            "February",
-			AnswerType:        "LABEL",
-		},
-	}
-}
-
-// fetchOolongFromHuggingFace attempts to fetch OOLONG tasks from HuggingFace.
-// Returns sample tasks if fetch fails.
-func fetchOolongFromHuggingFace(limit int) ([]OolongTask, error) {
-	// HuggingFace datasets API endpoint for oolong-synth
-	url := fmt.Sprintf("https://datasets-server.huggingface.co/rows?dataset=oolongbench/oolong-synth&config=default&split=validation&offset=0&length=%d", limit)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch from HuggingFace: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HuggingFace API returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Parse HuggingFace response format
-	var hfResp struct {
-		Rows []struct {
-			Row OolongTask `json:"row"`
-		} `json:"rows"`
-	}
-
-	if err := json.Unmarshal(body, &hfResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	tasks := make([]OolongTask, len(hfResp.Rows))
-	for i, row := range hfResp.Rows {
-		tasks[i] = row.Row
-	}
-
-	return tasks, nil
+	return datasets.SampleOolongTasks()
 }
 
 // runBaseline runs the baseline (direct prompting) on a task.
@@ -291,9 +121,9 @@ func runBaseline(ctx context.Context, llm core.LLM, task OolongTask) (string, ti
 
 // RLMOptions holds configuration for RLM runs.
 type RLMOptions struct {
-	Verbose   bool
-	MaxIters  int
-	TraceDir  string
+	Verbose  bool
+	MaxIters int
+	TraceDir string
 }
 
 // RLMResult holds the result of an RLM run including token usage.
@@ -334,92 +164,8 @@ func runRLM(ctx context.Context, llm core.LLM, task OolongTask, opts RLMOptions)
 	}, nil
 }
 
-// checkAnswer determines if the model's answer matches the expected answer.
-// Uses the same logic as rlm-go's check_answer for consistency.
 func checkAnswer(expected, actual string) bool {
-	// Normalize expected - handle list notation like "['incorrect']"
-	expectedNorm := strings.ToLower(strings.TrimSpace(expected))
-	if strings.HasPrefix(expectedNorm, "[") && strings.HasSuffix(expectedNorm, "]") {
-		inner := strings.TrimSpace(expectedNorm[1 : len(expectedNorm)-1])
-		if (strings.HasPrefix(inner, "'") && strings.HasSuffix(inner, "'")) ||
-			(strings.HasPrefix(inner, "\"") && strings.HasSuffix(inner, "\"")) {
-			inner = inner[1 : len(inner)-1]
-		}
-		expectedNorm = inner
-	}
-
-	actualNorm := strings.ToLower(strings.TrimSpace(actual))
-	responseLen := len(actualNorm)
-
-	// Exact match
-	if expectedNorm == actualNorm {
-		return true
-	}
-
-	// For SHORT responses (< 50 chars), allow flexible matching
-	if responseLen < 50 {
-		// Word boundary match
-		pattern := `(?:^|[\s'":=-])` + regexp.QuoteMeta(expectedNorm) + `(?:$|[\s'".,;:=-])`
-		if matched, _ := regexp.MatchString(pattern, actualNorm); matched {
-			return true
-		}
-
-		// Numeric match
-		if isNumeric(expectedNorm) {
-			cleaned := regexp.MustCompile(`[^\d]`).ReplaceAllString(actualNorm, "")
-			if cleaned == expectedNorm {
-				return true
-			}
-		}
-
-		return false
-	}
-
-	// For LONG responses (>= 50 chars), only check the LAST LINE
-	lines := strings.Split(strings.TrimSpace(actualNorm), "\n")
-	lastLine := ""
-	if len(lines) > 0 {
-		lastLine = strings.TrimSpace(lines[len(lines)-1])
-	}
-
-	// Match structured formats: "Label: X", "Answer: X", "User: X"
-	structuredPattern := `^\s*(?:the\s+)?(?:answer|label|result|user)\s*(?:is)?[:=]\s*["']?([^"'\n,]+)["']?\s*$`
-	re := regexp.MustCompile(structuredPattern)
-	if match := re.FindStringSubmatch(lastLine); len(match) > 1 {
-		extracted := strings.Trim(strings.TrimSpace(match[1]), ".,;:")
-		if expectedNorm == extracted {
-			return true
-		}
-	}
-
-	// If last line is short, check if it equals the answer
-	if len(lastLine) < 30 {
-		cleaned := strings.Trim(lastLine, ".,;:\"'")
-		if expectedNorm == cleaned {
-			return true
-		}
-	}
-
-	// Numeric in structured format
-	if isNumeric(expectedNorm) {
-		numPattern := `^\s*(?:answer|result|user)?[:=]?\s*(\d+)\s*$`
-		numRe := regexp.MustCompile(numPattern)
-		if match := numRe.FindStringSubmatch(lastLine); len(match) > 1 && match[1] == expectedNorm {
-			return true
-		}
-	}
-
-	return false
-}
-
-// isNumeric checks if a string contains only digits.
-func isNumeric(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
+	return datasets.CheckOolongAnswer(expected, actual)
 }
 
 // computeSummary calculates aggregate statistics from benchmark results.
@@ -518,6 +264,7 @@ func main() {
 	provider := flag.String("provider", "anthropic", "LLM provider (anthropic, openai, gemini)")
 	model := flag.String("model", "", "Model to use (default: claude-haiku-4-5 for anthropic, gpt-4o-mini for openai, gemini-2.5-flash for gemini)")
 	numTasks := flag.Int("tasks", 3, "Number of tasks to run (max 5 for embedded samples)")
+	taskOffset := flag.Int("task-offset", 0, "Deterministic offset into the selected OOLONG task source")
 	taskFile := flag.String("file", "", "Path to OOLONG tasks JSON file (rlm-go format)")
 	useHuggingFace := flag.Bool("hf", false, "Fetch tasks from HuggingFace (requires internet)")
 	verbose := flag.Bool("verbose", false, "Enable verbose RLM output")
@@ -606,21 +353,23 @@ func main() {
 		if err != nil {
 			logger.Fatalf(ctx, "Failed to load tasks from file: %v", err)
 		}
+		tasks = datasets.SliceOolongTasks(tasks, *taskOffset, *numTasks)
 		logger.Info(ctx, "Loaded %d tasks from file", len(tasks))
 	} else if *useHuggingFace {
 		logger.Info(ctx, "Fetching tasks from HuggingFace...")
-		tasks, err = fetchOolongFromHuggingFace(*numTasks)
+		tasks, err = datasets.FetchOolongTasksFromHuggingFaceRange(*taskOffset, *numTasks)
 		if err != nil {
 			logger.Warn(ctx, "Failed to fetch from HuggingFace: %v. Using embedded samples.", err)
 			tasks = getSampleOolongTasks()
+			tasks = datasets.SliceOolongTasks(tasks, *taskOffset, *numTasks)
 		}
 	} else {
 		tasks = getSampleOolongTasks()
+		tasks = datasets.SliceOolongTasks(tasks, *taskOffset, *numTasks)
 	}
 
-	// Limit tasks
-	if *numTasks < len(tasks) {
-		tasks = tasks[:*numTasks]
+	if len(tasks) == 0 {
+		logger.Fatalf(ctx, "No OOLONG tasks found (offset=%d, tasks=%d)", *taskOffset, *numTasks)
 	}
 
 	fmt.Println(strings.Repeat("=", 60))
@@ -628,6 +377,7 @@ func main() {
 	fmt.Println(strings.Repeat("=", 60))
 	fmt.Printf("Provider: %s\n", *provider)
 	fmt.Printf("Tasks: %d\n", len(tasks))
+	fmt.Printf("Task Offset: %d\n", *taskOffset)
 	fmt.Printf("Max Iterations: %d\n", *maxIters)
 	fmt.Printf("Verbose: %v\n", *verbose)
 	if *traceDir != "" {
@@ -702,11 +452,11 @@ func main() {
 	if *outputFile != "" {
 		summary := computeSummary(results)
 		output := map[string]any{
-			"provider":    *provider,
-			"model":       *model,
-			"max_iters":   *maxIters,
-			"results":     results,
-			"summary":     summary,
+			"provider":  *provider,
+			"model":     *model,
+			"max_iters": *maxIters,
+			"results":   results,
+			"summary":   summary,
 		}
 
 		data, err := json.MarshalIndent(output, "", "  ")

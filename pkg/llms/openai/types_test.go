@@ -16,7 +16,7 @@ func TestChatCompletionRequestApplyOptions(t *testing.T) {
 		assert.Nil(t, req.Temperature)
 	})
 
-	t.Run("gpt5 uses max completion tokens", func(t *testing.T) {
+	t.Run("gpt5 uses max completion tokens and omits temperature", func(t *testing.T) {
 		req := &ChatCompletionRequest{Model: " GPT-5-mini "}
 		req.ApplyOptions(&GenerateOptions{
 			MaxTokens:        256,
@@ -30,8 +30,7 @@ func TestChatCompletionRequestApplyOptions(t *testing.T) {
 		require.NotNil(t, req.MaxCompletionTokens)
 		assert.Equal(t, 256, *req.MaxCompletionTokens)
 		assert.Nil(t, req.MaxTokens)
-		require.NotNil(t, req.Temperature)
-		assert.Equal(t, 0.0, *req.Temperature)
+		assert.Nil(t, req.Temperature)
 		require.NotNil(t, req.TopP)
 		assert.Equal(t, 0.9, *req.TopP)
 		require.NotNil(t, req.PresencePenalty)
@@ -66,6 +65,13 @@ func TestUsesMaxCompletionTokens(t *testing.T) {
 	assert.True(t, usesMaxCompletionTokens(" GPT-5-nano "))
 	assert.False(t, usesMaxCompletionTokens("gpt-4o"))
 	assert.False(t, usesMaxCompletionTokens(""))
+}
+
+func TestSupportsCustomTemperature(t *testing.T) {
+	assert.False(t, supportsCustomTemperature("gpt-5-mini"))
+	assert.False(t, supportsCustomTemperature(" GPT-5.2-codex "))
+	assert.True(t, supportsCustomTemperature("gpt-4o"))
+	assert.True(t, supportsCustomTemperature(""))
 }
 
 func TestNewGenerateOptions(t *testing.T) {
