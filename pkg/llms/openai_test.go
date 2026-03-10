@@ -926,6 +926,9 @@ func TestOpenAILLM_GenerateWithOptions_GPT5UsesMaxCompletionTokens(t *testing.T)
 		if req.MaxTokens != nil {
 			t.Errorf("expected max_tokens to be omitted for gpt-5.x, got %v", *req.MaxTokens)
 		}
+		if req.Temperature != nil {
+			t.Errorf("expected temperature to be omitted for gpt-5.x, got %v", *req.Temperature)
+		}
 
 		response := openai.ChatCompletionResponse{
 			ID:      "test-id",
@@ -971,7 +974,7 @@ func TestOpenAILLM_GenerateWithOptions_GPT5UsesMaxCompletionTokens(t *testing.T)
 		t.Fatalf("failed to create LLM: %v", err)
 	}
 
-	if _, err := llm.Generate(ctx, "Hello", core.WithMaxTokens(123)); err != nil {
+	if _, err := llm.Generate(ctx, "Hello", core.WithMaxTokens(123), core.WithTemperature(0.8)); err != nil {
 		t.Fatalf("failed to generate: %v", err)
 	}
 }
