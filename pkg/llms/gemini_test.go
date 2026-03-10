@@ -20,6 +20,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func testGeminiTextResponse(text string) geminiResponse {
+	var resp geminiResponse
+	resp.Candidates = []struct {
+		Content struct {
+			Parts []geminiPart `json:"parts"`
+		} `json:"content"`
+	}{
+		{
+			Content: struct {
+				Parts []geminiPart `json:"parts"`
+			}{
+				Parts: []geminiPart{{Text: text}},
+			},
+		},
+	}
+	return resp
+}
+
 func TestNewGeminiLLM(t *testing.T) {
 	originalEnv := os.Getenv("GEMINI_API_KEY")
 	defer os.Setenv("GEMINI_API_KEY", originalEnv)
@@ -118,38 +136,20 @@ func TestGeminiLLM_Generate(t *testing.T) {
 	}{
 		{
 			name: "Successful generation",
-			serverResponse: geminiResponse{
-				Candidates: []struct {
-					Content struct {
-						Parts []struct {
-							Text string `json:"text"`
-						} `json:"parts"`
-					} `json:"content"`
-				}{
-					{
-						Content: struct {
-							Parts []struct {
-								Text string `json:"text"`
-							} `json:"parts"`
-						}{
-							Parts: []struct {
-								Text string `json:"text"`
-							}{
-								{Text: "Generated text"},
-							},
-						},
-					},
-				},
-				UsageMetadata: struct {
+			serverResponse: func() geminiResponse {
+				resp := testGeminiTextResponse("Generated text")
+				resp.UsageMetadata = struct {
 					PromptTokenCount     int `json:"promptTokenCount"`
 					CandidatesTokenCount int `json:"candidatesTokenCount"`
 					TotalTokenCount      int `json:"totalTokenCount"`
+					ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 				}{
 					PromptTokenCount:     10,
 					CandidatesTokenCount: 5,
 					TotalTokenCount:      15,
-				},
-			},
+				}
+				return resp
+			}(),
 			serverStatus: http.StatusOK,
 			expectError:  false,
 			expectedTokens: &core.TokenInfo{
@@ -166,16 +166,8 @@ func TestGeminiLLM_Generate(t *testing.T) {
 			expectedTokens: nil,
 		},
 		{
-			name: "Empty candidates",
-			serverResponse: geminiResponse{
-				Candidates: []struct {
-					Content struct {
-						Parts []struct {
-							Text string `json:"text"`
-						} `json:"parts"`
-					} `json:"content"`
-				}{},
-			},
+			name:           "Empty candidates",
+			serverResponse: geminiResponse{},
 			serverStatus:   http.StatusOK,
 			expectError:    true,
 			expectedTokens: nil,
@@ -250,60 +242,16 @@ func TestGeminiLLM_GenerateWithJSON(t *testing.T) {
 		expectedJSON   map[string]interface{}
 	}{
 		{
-			name: "Valid JSON response",
-			serverResponse: geminiResponse{
-				Candidates: []struct {
-					Content struct {
-						Parts []struct {
-							Text string `json:"text"`
-						} `json:"parts"`
-					} `json:"content"`
-				}{
-					{
-						Content: struct {
-							Parts []struct {
-								Text string `json:"text"`
-							} `json:"parts"`
-						}{
-							Parts: []struct {
-								Text string `json:"text"`
-							}{
-								{Text: `{"key": "value"}`},
-							},
-						},
-					},
-				},
-			},
-			expectError:  false,
-			expectedJSON: map[string]interface{}{"key": "value"},
+			name:           "Valid JSON response",
+			serverResponse: testGeminiTextResponse(`{"key": "value"}`),
+			expectError:    false,
+			expectedJSON:   map[string]interface{}{"key": "value"},
 		},
 		{
-			name: "Invalid JSON response",
-			serverResponse: geminiResponse{
-				Candidates: []struct {
-					Content struct {
-						Parts []struct {
-							Text string `json:"text"`
-						} `json:"parts"`
-					} `json:"content"`
-				}{
-					{
-						Content: struct {
-							Parts []struct {
-								Text string `json:"text"`
-							} `json:"parts"`
-						}{
-							Parts: []struct {
-								Text string `json:"text"`
-							}{
-								{Text: "invalid json"},
-							},
-						},
-					},
-				},
-			},
-			expectError:  true,
-			expectedJSON: nil,
+			name:           "Invalid JSON response",
+			serverResponse: testGeminiTextResponse("invalid json"),
+			expectError:    true,
+			expectedJSON:   nil,
 		},
 	}
 	for _, tt := range tests {
@@ -793,6 +741,104 @@ func TestGeminiLLM_GenerateWithFunctions(t *testing.T) {
 	assert.Equal(t, 15, usage.PromptTokens)
 	assert.Equal(t, 10, usage.CompletionTokens)
 	assert.Equal(t, 25, usage.TotalTokens)
+}
+
+func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody geminiRequest
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		require.NoError(t, err)
+		require.NotNil(t, reqBody.GenerationConfig.ThinkingConfig)
+		assert.True(t, reqBody.GenerationConfig.ThinkingConfig.IncludeThoughts)
+		require.Len(t, reqBody.Contents, 2)
+		require.Len(t, reqBody.Contents[1].Parts, 1)
+		require.NotNil(t, reqBody.Contents[1].Parts[0].FunctionResponse)
+		assert.Equal(t, "search", reqBody.Contents[1].Parts[0].FunctionResponse.Name)
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": [
+						{
+							"text": "Need to use search",
+							"thought": true,
+							"thoughtSignature": "sig-thought"
+						},
+						{
+							"function_call": {
+								"name": "search",
+								"arguments": {"query": "gemini"}
+							},
+							"thought": true,
+							"thoughtSignature": "sig-call"
+						}
+					]
+				}
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 12,
+				"candidatesTokenCount": 7,
+				"totalTokenCount": 19,
+				"thoughtsTokenCount": 3
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	llm := &GeminiLLM{
+		apiKey: "test-api-key",
+		BaseLLM: core.NewBaseLLM(
+			"google",
+			core.ModelGoogleGemini3FlashPreview,
+			[]core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			&core.EndpointConfig{
+				BaseURL:    server.URL,
+				Path:       "/models/gemini-3-flash-preview:generateContent",
+				Headers:    map[string]string{"Content-Type": "application/json"},
+				TimeoutSec: 30,
+			},
+		),
+	}
+
+	messages := []core.ChatMessage{
+		{Role: "user", Content: []core.ContentBlock{core.NewTextBlock("Find info")}},
+		{
+			Role: "tool",
+			ToolResult: &core.ChatToolResult{
+				ToolCallID: "call-1",
+				Name:       "search",
+				Content:    []core.ContentBlock{core.NewTextBlock("tool output")},
+			},
+		},
+	}
+	tools := []map[string]any{
+		{
+			"name":        "search",
+			"description": "Search docs",
+			"parameters": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"query": map[string]any{"type": "string"}},
+			},
+		},
+	}
+
+	result, err := llm.GenerateWithTools(context.Background(), messages, tools)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	toolCalls, ok := result["tool_calls"].([]core.ToolCall)
+	require.True(t, ok)
+	require.Len(t, toolCalls, 1)
+	assert.Equal(t, "search", toolCalls[0].Name)
+	assert.Equal(t, "sig-call", toolCalls[0].Metadata["gemini_thought_signature"])
+	assert.Equal(t, true, toolCalls[0].Metadata["gemini_thought"])
+
+	thoughtBlocks, ok := result["thought_blocks"].([]core.ContentBlock)
+	require.True(t, ok)
+	require.Len(t, thoughtBlocks, 1)
+	assert.Equal(t, "sig-thought", thoughtBlocks[0].Metadata["gemini_thought_signature"])
+	assert.Equal(t, 3, result["thoughts_token_count"])
 }
 
 func TestGeminiLLM_StreamGenerate_ChunkHandling(t *testing.T) {
@@ -1339,7 +1385,7 @@ func TestGeminiLLM_GenerateWithFunctions_OptionsHandling(t *testing.T) {
 	// Create test server that verifies options are properly passed
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Decode the request to verify options are properly set
-		var reqBody geminiRequestWithFunction
+		var reqBody geminiRequest
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		require.NoError(t, err)
 
@@ -1415,6 +1461,59 @@ func TestGeminiLLM_GenerateWithFunctions_OptionsHandling(t *testing.T) {
 	funcCall, ok := result["function_call"].(map[string]interface{})
 	assert.True(t, ok)
 	assert.Equal(t, "test_function", funcCall["name"])
+}
+
+func TestGeminiLLM_Generate_Gemini3IncludesThinkingConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody geminiRequest
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		require.NoError(t, err)
+		require.NotNil(t, reqBody.GenerationConfig.ThinkingConfig)
+		assert.True(t, reqBody.GenerationConfig.ThinkingConfig.IncludeThoughts)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": [
+						{"text": "reasoning", "thought": true, "thoughtSignature": "sig-1"},
+						{"text": "final answer"}
+					]
+				}
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 10,
+				"candidatesTokenCount": 5,
+				"totalTokenCount": 15,
+				"thoughtsTokenCount": 2
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	llm := &GeminiLLM{
+		apiKey: "test-api-key",
+		BaseLLM: core.NewBaseLLM(
+			"google",
+			core.ModelGoogleGemini3FlashPreview,
+			[]core.Capability{core.CapabilityCompletion},
+			&core.EndpointConfig{
+				BaseURL:    server.URL,
+				Path:       "/models/gemini-3-flash-preview:generateContent",
+				Headers:    map[string]string{"Content-Type": "application/json"},
+				TimeoutSec: 30,
+			},
+		),
+	}
+
+	resp, err := llm.Generate(context.Background(), "hello")
+	require.NoError(t, err)
+	assert.Equal(t, "final answer", resp.Content)
+	require.NotNil(t, resp.Metadata)
+	assert.Equal(t, 2, resp.Metadata["thoughts_token_count"])
+	thoughtBlocks, ok := resp.Metadata["thought_blocks"].([]core.ContentBlock)
+	require.True(t, ok)
+	require.Len(t, thoughtBlocks, 1)
+	assert.Equal(t, "sig-1", thoughtBlocks[0].Metadata["gemini_thought_signature"])
 }
 
 func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {

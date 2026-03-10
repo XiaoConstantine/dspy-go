@@ -187,6 +187,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 		}
 
 		logger.Debug(ctx, "Received prediction in iteration %d: %v", i+1, prediction)
+		carryForwardNativeState(state, prediction)
 		step := ReActTraceStep{
 			Index:   i + 1,
 			Thought: stringifyPredictionField(prediction, "thought"),
@@ -437,6 +438,17 @@ func stringifyActionField(actionField interface{}) string {
 		}
 	}
 	return fmt.Sprint(actionField)
+}
+
+func carryForwardNativeState(state map[string]interface{}, prediction map[string]interface{}) {
+	if state == nil || prediction == nil {
+		return
+	}
+	for key, value := range prediction {
+		if strings.HasPrefix(key, "_native_") {
+			state[key] = value
+		}
+	}
 }
 
 // appendReActFields adds the standard ReAct fields (thought, action, observation)

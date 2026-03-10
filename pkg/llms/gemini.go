@@ -30,13 +30,7 @@ type GeminiLLM struct {
 type geminiRequest struct {
 	Contents         []geminiContent        `json:"contents"`
 	GenerationConfig geminiGenerationConfig `json:"generationConfig,omitempty"`
-}
-
-// Add this to your existing geminiRequest struct or create a new one for function calling.
-type geminiRequestWithFunction struct {
-	Contents         []geminiContent        `json:"contents"`
 	Tools            []geminiTool           `json:"tools,omitempty"`
-	GenerationConfig geminiGenerationConfig `json:"generationConfig,omitempty"`
 }
 
 // Add these new types to support function calling.
@@ -55,9 +49,18 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text       string            `json:"text,omitempty"`
-	InlineData *geminiInlineData `json:"inline_data,omitempty"`
-	FileData   *geminiFileData   `json:"file_data,omitempty"`
+	Text             string                      `json:"text,omitempty"`
+	InlineData       *geminiInlineData           `json:"inline_data,omitempty"`
+	FileData         *geminiFileData             `json:"file_data,omitempty"`
+	FunctionCall     *geminiFunctionCall         `json:"function_call,omitempty"`
+	FunctionResponse *geminiFunctionResponsePart `json:"function_response,omitempty"`
+	Thought          bool                        `json:"thought,omitempty"`
+	ThoughtSignature string                      `json:"thoughtSignature,omitempty"`
+}
+
+type geminiFunctionResponsePart struct {
+	Name     string                 `json:"name"`
+	Response map[string]interface{} `json:"response"`
 }
 
 // geminiInlineData represents inline binary data (base64 encoded).
@@ -73,40 +76,42 @@ type geminiFileData struct {
 }
 
 type geminiGenerationConfig struct {
-	Temperature     float64 `json:"temperature,omitempty"`
-	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-	TopP            float64 `json:"topP,omitempty"`
+	Temperature     float64               `json:"temperature,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
+	TopP            float64               `json:"topP,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+type geminiThinkingConfig struct {
+	IncludeThoughts bool `json:"includeThoughts,omitempty"`
 }
 
 // GeminiResponse represents the response structure from Gemini API.
 type geminiResponse struct {
 	Candidates []struct {
 		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
+			Parts []geminiPart `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
 	UsageMetadata struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
 		CandidatesTokenCount int `json:"candidatesTokenCount"`
 		TotalTokenCount      int `json:"totalTokenCount"`
+		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 	} `json:"usageMetadata"`
 }
 
-type geminiFunctionResponse struct {
+type geminiFunctionCallResponse struct {
 	Candidates []struct {
 		Content struct {
-			Parts []struct {
-				Text         string              `json:"text,omitempty"`
-				FunctionCall *geminiFunctionCall `json:"function_call,omitempty"`
-			} `json:"parts"`
+			Parts []geminiPart `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
 	UsageMetadata struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
 		CandidatesTokenCount int `json:"candidatesTokenCount"`
 		TotalTokenCount      int `json:"totalTokenCount"`
+		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 	} `json:"usageMetadata"`
 }
 type geminiFunctionCall struct {
@@ -329,6 +334,272 @@ func supportsGeminiFunctionCalling(_ core.ModelID) bool {
 	return true
 }
 
+const (
+	geminiThoughtMetadataKey          = "gemini_thought"
+	geminiThoughtSignatureMetadataKey = "gemini_thought_signature"
+)
+
+func supportsGeminiThoughtSignatures(modelID core.ModelID) bool {
+	model := strings.ToLower(strings.TrimSpace(string(modelID)))
+	return strings.HasPrefix(model, "gemini-3")
+}
+
+// Gemini 3 thought signatures must be round-tripped when tool calling is active.
+// We currently enable thoughts automatically for Gemini 3 family models so the
+// caller receives the signatures needed for subsequent function-response turns.
+func (g *GeminiLLM) buildGenerationConfig(opts *core.GenerateOptions) geminiGenerationConfig {
+	cfg := geminiGenerationConfig{
+		Temperature:     opts.Temperature,
+		MaxOutputTokens: opts.MaxTokens,
+		TopP:            opts.TopP,
+	}
+	if supportsGeminiThoughtSignatures(core.ModelID(g.ModelID())) {
+		cfg.ThinkingConfig = &geminiThinkingConfig{IncludeThoughts: true}
+	}
+	return cfg
+}
+
+func geminiUsageToTokenInfo(metadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
+	ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+}) *core.TokenInfo {
+	return &core.TokenInfo{
+		PromptTokens:     metadata.PromptTokenCount,
+		CompletionTokens: metadata.CandidatesTokenCount,
+		TotalTokens:      metadata.TotalTokenCount,
+	}
+}
+
+func geminiUsageMetadataMap(metadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
+	ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+}) map[string]any {
+	result := map[string]any{}
+	if metadata.ThoughtsTokenCount > 0 {
+		result["thoughts_token_count"] = metadata.ThoughtsTokenCount
+	}
+	return result
+}
+
+func buildGeminiContentResponse(parts []geminiPart) (string, []core.ContentBlock, []core.ToolCall, map[string]any) {
+	var (
+		textParts     []string
+		contentBlocks []core.ContentBlock
+		toolCalls     []core.ToolCall
+		thoughtBlocks []core.ContentBlock
+	)
+
+	for idx, part := range parts {
+		if part.Text != "" {
+			block := core.NewTextBlock(part.Text)
+			if part.Thought {
+				if block.Metadata == nil {
+					block.Metadata = map[string]any{}
+				}
+				block.Metadata[geminiThoughtMetadataKey] = true
+				if part.ThoughtSignature != "" {
+					block.Metadata[geminiThoughtSignatureMetadataKey] = part.ThoughtSignature
+				}
+				thoughtBlocks = append(thoughtBlocks, block)
+			} else {
+				textParts = append(textParts, part.Text)
+				contentBlocks = append(contentBlocks, block)
+			}
+		}
+
+		if part.FunctionCall != nil {
+			call := core.ToolCall{
+				ID:        fmt.Sprintf("gemini-call-%d", idx),
+				Name:      part.FunctionCall.Name,
+				Arguments: part.FunctionCall.Arguments,
+			}
+			if part.Thought || part.ThoughtSignature != "" {
+				call.Metadata = map[string]any{}
+				if part.Thought {
+					call.Metadata[geminiThoughtMetadataKey] = true
+				}
+				if part.ThoughtSignature != "" {
+					call.Metadata[geminiThoughtSignatureMetadataKey] = part.ThoughtSignature
+				}
+			}
+			toolCalls = append(toolCalls, call)
+		}
+	}
+
+	metadata := map[string]any{}
+	if len(thoughtBlocks) > 0 {
+		metadata["thought_blocks"] = thoughtBlocks
+	}
+	if len(toolCalls) > 0 {
+		metadata["tool_call_count"] = len(toolCalls)
+	}
+
+	return strings.Join(textParts, " "), contentBlocks, toolCalls, metadata
+}
+
+func (g *GeminiLLM) chatMessagesToGeminiContents(messages []core.ChatMessage) []geminiContent {
+	contents := make([]geminiContent, 0, len(messages))
+	for _, msg := range messages {
+		// Gemini expects tool results as function_response parts rather than a
+		// standalone "tool" role. If we somehow receive a tool-role message
+		// without a tool result payload, drop it instead of emitting a malformed
+		// synthetic user turn.
+		if msg.Role == "tool" && msg.ToolResult == nil {
+			continue
+		}
+
+		content := geminiContent{
+			Role:  geminiRoleForChatMessage(msg.Role),
+			Parts: make([]geminiPart, 0, len(msg.Content)+len(msg.ToolCalls)+1),
+		}
+
+		if msg.ToolResult != nil {
+			response := map[string]any{
+				"content": contentBlocksToText(msg.ToolResult.Content),
+			}
+			content.Parts = append(content.Parts, geminiPart{
+				FunctionResponse: &geminiFunctionResponsePart{
+					Name:     msg.ToolResult.Name,
+					Response: response,
+				},
+			})
+		} else {
+			content.Parts = append(content.Parts, g.convertToGeminiParts(msg.Content)...)
+		}
+
+		for _, toolCall := range msg.ToolCalls {
+			part := geminiPart{
+				FunctionCall: &geminiFunctionCall{
+					Name:      toolCall.Name,
+					Arguments: toolCall.Arguments,
+				},
+			}
+			if toolCall.Metadata != nil {
+				if thought, ok := toolCall.Metadata[geminiThoughtMetadataKey].(bool); ok {
+					part.Thought = thought
+				}
+				if signature, ok := toolCall.Metadata[geminiThoughtSignatureMetadataKey].(string); ok {
+					part.ThoughtSignature = signature
+				}
+			}
+			content.Parts = append(content.Parts, part)
+		}
+
+		if len(content.Parts) == 0 {
+			continue
+		}
+		contents = append(contents, content)
+	}
+	return contents
+}
+
+func geminiRoleForChatMessage(role string) string {
+	switch role {
+	case "assistant":
+		return "model"
+	default:
+		return "user"
+	}
+}
+
+func (g *GeminiLLM) doGeminiRequest(ctx context.Context, reqBody any, dest any) error {
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return errors.WithFields(
+			errors.New(errors.InvalidInput, fmt.Sprintf("failed to marshal Gemini request body: %v", err)),
+			errors.Fields{"model": g.ModelID()},
+		)
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		constructRequestURL(g.GetEndpointConfig(), g.apiKey),
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return errors.WithFields(
+			errors.New(errors.InvalidInput, fmt.Sprintf("failed to create Gemini request: %v", err)),
+			errors.Fields{"model": g.ModelID()},
+		)
+	}
+	for key, value := range g.GetEndpointConfig().Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := g.GetHTTPClient().Do(req)
+	if err != nil {
+		return errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: failed to send Gemini request: %v", err)),
+			errors.Fields{"model": g.ModelID()},
+		)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: failed to read Gemini response body: %v", err)),
+			errors.Fields{"model": g.ModelID()},
+		)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errors.WithFields(
+			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: API request failed with status code %d: %s", resp.StatusCode, string(body))),
+			errors.Fields{"model": g.ModelID(), "statusCode": resp.StatusCode},
+		)
+	}
+	if err := json.Unmarshal(body, dest); err != nil {
+		return errors.WithFields(
+			errors.New(errors.InvalidResponse, fmt.Sprintf("InvalidResponse: failed to unmarshal Gemini response: %v", err)),
+			errors.Fields{"model": g.ModelID(), "body": string(body)},
+		)
+	}
+	return nil
+}
+
+func contentBlocksToText(blocks []core.ContentBlock) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type == core.FieldTypeText && block.Text != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func toolSchemasToDeclarations(tools []map[string]interface{}) ([]geminiFunctionDeclaration, error) {
+	functionDeclarations := make([]geminiFunctionDeclaration, 0, len(tools))
+	for _, tool := range tools {
+		name, ok := tool["name"].(string)
+		if !ok {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "tool schema missing 'name' field"),
+				errors.Fields{"tool": tool},
+			)
+		}
+		description, _ := tool["description"].(string)
+		parameters, ok := tool["parameters"].(map[string]interface{})
+		if !ok {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "tool schema missing 'parameters' field"),
+				errors.Fields{"tool": tool},
+			)
+		}
+
+		functionDeclarations = append(functionDeclarations, geminiFunctionDeclaration{
+			Name:        name,
+			Description: description,
+			Parameters:  parameters,
+		})
+	}
+	return functionDeclarations, nil
+}
+
 // Generate implements the core.LLM interface.
 func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()
@@ -344,76 +615,15 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 				},
 			},
 		},
-		GenerationConfig: geminiGenerationConfig{
-			Temperature:     opts.Temperature,
-			MaxOutputTokens: opts.MaxTokens,
-			TopP:            opts.TopP,
-		},
+		GenerationConfig: g.buildGenerationConfig(opts),
 	}
-
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
+	var geminiResp geminiResponse
+	if err := g.doGeminiRequest(ctx, reqBody, &geminiResp); err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			err,
 			errors.Fields{
 				"prompt": prompt,
 				"model":  g.ModelID(),
-			})
-	}
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		"POST",
-		constructRequestURL(g.GetEndpointConfig(), g.apiKey),
-		bytes.NewBuffer(jsonData),
-	)
-
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
-			errors.Fields{
-				"model": g.ModelID(),
-			})
-	}
-	// TODO: make basellm make request to dry this up
-	for key, value := range g.GetEndpointConfig().Headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, err := g.GetHTTPClient().Do(req)
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: failed to send request: %v", err)),
-			errors.Fields{
-				"model": g.ModelID(),
-			})
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: failed to read response body: %v", err)),
-			errors.Fields{
-				"model": g.ModelID(),
-			})
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("LLMGenerationFailed: API request failed with status code %d: %s", resp.StatusCode, string(body))),
-			errors.Fields{
-				"model":      g.ModelID(),
-				"statusCode": resp.StatusCode,
-			})
-	}
-
-	var geminiResp geminiResponse
-	if err := json.Unmarshal(body, &geminiResp); err != nil {
-		return nil, errors.WithFields(
-			errors.New(errors.InvalidResponse, fmt.Sprintf("InvalidResponse: failed to unmarshal response: %v", err)),
-			errors.Fields{
-				"model": g.ModelID(),
 			})
 	}
 
@@ -433,16 +643,17 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 			})
 	}
 
-	content := geminiResp.Candidates[0].Content.Parts[0].Text
-	usage := &core.TokenInfo{
-		PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
-		CompletionTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:      geminiResp.UsageMetadata.TotalTokenCount,
+	content, _, _, responseMetadata := buildGeminiContentResponse(geminiResp.Candidates[0].Content.Parts)
+	usage := geminiUsageToTokenInfo(geminiResp.UsageMetadata)
+	metadata := geminiUsageMetadataMap(geminiResp.UsageMetadata)
+	for key, value := range responseMetadata {
+		metadata[key] = value
 	}
 
 	return &core.LLMResponse{
-		Content: content,
-		Usage:   usage,
+		Content:  content,
+		Usage:    usage,
+		Metadata: metadata,
 	}, nil
 }
 
@@ -464,41 +675,13 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 		opt(opts)
 	}
 
-	// Convert the generic function schemas to Gemini's format
-	functionDeclarations := make([]geminiFunctionDeclaration, 0, len(functions))
-	for _, function := range functions {
-		name, ok := function["name"].(string)
-		if !ok {
-			return nil, errors.WithFields(
-				errors.New(errors.InvalidInput, "function schema missing 'name' field"),
-				errors.Fields{
-					"function": function,
-				})
-		}
-
-		description := ""
-		if desc, ok := function["description"].(string); ok {
-			description = desc
-		}
-
-		parameters, ok := function["parameters"].(map[string]interface{})
-		if !ok {
-			return nil, errors.WithFields(
-				errors.New(errors.InvalidInput, "function schema missing 'parameters' field"),
-				errors.Fields{
-					"function": function,
-				})
-		}
-
-		functionDeclarations = append(functionDeclarations, geminiFunctionDeclaration{
-			Name:        name,
-			Description: description,
-			Parameters:  parameters,
-		})
+	functionDeclarations, err := toolSchemasToDeclarations(functions)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create the request body with functions
-	reqBody := geminiRequestWithFunction{
+	reqBody := geminiRequest{
 		Contents: []geminiContent{
 			{
 				Parts: []geminiPart{
@@ -512,86 +695,19 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 				FunctionDeclarations: functionDeclarations,
 			},
 		},
-		GenerationConfig: geminiGenerationConfig{
-			Temperature:     opts.Temperature,
-			MaxOutputTokens: opts.MaxTokens,
-			TopP:            opts.TopP,
-		},
+		GenerationConfig: g.buildGenerationConfig(opts),
 	}
 	requestJSON, _ := json.MarshalIndent(reqBody, "", "  ")
 	logger.Debug(ctx, "Function call request JSON: %s", string(requestJSON))
 
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
+	// Parse the response
+	var geminiResp geminiFunctionCallResponse
+	if err := g.doGeminiRequest(ctx, reqBody, &geminiResp); err != nil {
 		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidInput, "failed to marshal request body"),
+			err,
 			errors.Fields{
 				"prompt": prompt,
 				"model":  g.ModelID(),
-			})
-	}
-
-	// Create the request URL
-	req, err := http.NewRequestWithContext(
-		ctx,
-		"POST",
-		constructRequestURL(g.GetEndpointConfig(), g.apiKey),
-		bytes.NewBuffer(jsonData),
-	)
-
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
-			errors.Fields{
-				"model": g.ModelID(),
-			})
-	}
-
-	// Set headers
-	for key, value := range g.GetEndpointConfig().Headers {
-		req.Header.Set(key, value)
-	}
-
-	// Send the request
-	resp, err := g.GetHTTPClient().Do(req)
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
-			errors.Fields{
-				"model": g.ModelID(),
-			})
-	}
-	defer resp.Body.Close()
-
-	// Read and process the response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.LLMGenerationFailed, "failed to read response body"),
-			errors.Fields{
-				"model": g.ModelID(),
-			})
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
-			errors.Fields{
-				"model":      g.ModelID(),
-				"statusCode": resp.StatusCode,
-			})
-	}
-
-	logger.Debug(ctx, "Raw Gemini response: %s", string(body))
-
-	// Parse the response
-	var geminiResp geminiFunctionResponse
-	if err := json.Unmarshal(body, &geminiResp); err != nil {
-		return nil, errors.WithFields(
-			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
-			errors.Fields{
-				"model": g.ModelID(),
-				"body":  string(body),
 			})
 	}
 
@@ -604,47 +720,38 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	}
 
 	// Extract usage information
-	usage := &core.TokenInfo{
-		PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
-		CompletionTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:      geminiResp.UsageMetadata.TotalTokenCount,
-	}
+	usage := geminiUsageToTokenInfo(geminiResp.UsageMetadata)
 
 	// Process the response to extract function call if present
 	result := make(map[string]interface{})
 
 	// Check if there are any parts in the response
 	if len(geminiResp.Candidates[0].Content.Parts) > 0 {
-		// Process all parts
-		var textContent string
-		var functionCall *geminiFunctionCall
-
-		for _, part := range geminiResp.Candidates[0].Content.Parts {
-			// Collect text content
-			if part.Text != "" {
-				if textContent != "" {
-					textContent += " "
-				}
-				textContent += part.Text
-			}
-
-			// Get function call if present
-			if part.FunctionCall != nil {
-				functionCall = part.FunctionCall
-			}
-		}
+		textContent, contentBlocks, toolCalls, responseMetadata := buildGeminiContentResponse(geminiResp.Candidates[0].Content.Parts)
 
 		// Add text content if available
 		if textContent != "" {
 			result["content"] = textContent
 		}
 
-		// Add function call if available
-		if functionCall != nil {
+		if len(contentBlocks) > 0 {
+			result["content_blocks"] = contentBlocks
+		}
+
+		if len(toolCalls) > 0 {
+			result["tool_calls"] = toolCalls
+			call := toolCalls[0]
 			result["function_call"] = map[string]interface{}{
-				"name":      functionCall.Name,
-				"arguments": functionCall.Arguments,
+				"name":      call.Name,
+				"arguments": call.Arguments,
 			}
+			if len(call.Metadata) > 0 {
+				result["function_call"].(map[string]interface{})["metadata"] = call.Metadata
+			}
+		}
+
+		for key, value := range responseMetadata {
+			result[key] = value
 		}
 	}
 
@@ -655,6 +762,76 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 
 	// Add token usage information
 	result["_usage"] = usage
+
+	return result, nil
+}
+
+// GenerateWithTools implements native multi-turn tool calling for Gemini.
+func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]interface{}, error) {
+	logger := logging.GetLogger()
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	functionDeclarations, err := toolSchemasToDeclarations(tools)
+	if err != nil {
+		return nil, err
+	}
+
+	reqBody := geminiRequest{
+		Contents:         g.chatMessagesToGeminiContents(messages),
+		GenerationConfig: g.buildGenerationConfig(opts),
+	}
+	if len(functionDeclarations) > 0 {
+		reqBody.Tools = []geminiTool{{FunctionDeclarations: functionDeclarations}}
+	}
+
+	requestJSON, _ := json.MarshalIndent(reqBody, "", "  ")
+	logger.Debug(ctx, "Gemini tool request JSON: %s", string(requestJSON))
+
+	var geminiResp geminiFunctionCallResponse
+	if err := g.doGeminiRequest(ctx, reqBody, &geminiResp); err != nil {
+		return nil, errors.WithFields(
+			err,
+			errors.Fields{"model": g.ModelID()},
+		)
+	}
+	if len(geminiResp.Candidates) == 0 {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "no candidates in Gemini tool response"),
+			errors.Fields{"model": g.ModelID()},
+		)
+	}
+
+	textContent, contentBlocks, toolCalls, responseMetadata := buildGeminiContentResponse(geminiResp.Candidates[0].Content.Parts)
+	result := map[string]any{
+		"_usage": geminiUsageToTokenInfo(geminiResp.UsageMetadata),
+	}
+	if textContent != "" {
+		result["content"] = textContent
+	}
+	if len(contentBlocks) > 0 {
+		result["content_blocks"] = contentBlocks
+	}
+	if len(toolCalls) > 0 {
+		result["tool_calls"] = toolCalls
+		first := toolCalls[0]
+		functionCall := map[string]any{
+			"name":      first.Name,
+			"arguments": first.Arguments,
+		}
+		if len(first.Metadata) > 0 {
+			functionCall["metadata"] = first.Metadata
+		}
+		result["function_call"] = functionCall
+	}
+	for key, value := range geminiUsageMetadataMap(geminiResp.UsageMetadata) {
+		result[key] = value
+	}
+	for key, value := range responseMetadata {
+		result[key] = value
+	}
 
 	return result, nil
 }
@@ -1186,11 +1363,7 @@ func (g *GeminiLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 				Parts: geminiParts,
 			},
 		},
-		GenerationConfig: geminiGenerationConfig{
-			Temperature:     opts.Temperature,
-			MaxOutputTokens: opts.MaxTokens,
-			TopP:            opts.TopP,
-		},
+		GenerationConfig: g.buildGenerationConfig(opts),
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -1275,16 +1448,17 @@ func (g *GeminiLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 			})
 	}
 
-	content_text := geminiResp.Candidates[0].Content.Parts[0].Text
-	usage := &core.TokenInfo{
-		PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
-		CompletionTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:      geminiResp.UsageMetadata.TotalTokenCount,
+	contentText, _, _, responseMetadata := buildGeminiContentResponse(geminiResp.Candidates[0].Content.Parts)
+	usage := geminiUsageToTokenInfo(geminiResp.UsageMetadata)
+	metadata := geminiUsageMetadataMap(geminiResp.UsageMetadata)
+	for key, value := range responseMetadata {
+		metadata[key] = value
 	}
 
 	return &core.LLMResponse{
-		Content: content_text,
-		Usage:   usage,
+		Content:  contentText,
+		Usage:    usage,
+		Metadata: metadata,
 	}, nil
 }
 
@@ -1304,11 +1478,7 @@ func (g *GeminiLLM) StreamGenerateWithContent(ctx context.Context, content []cor
 				Parts: geminiParts,
 			},
 		},
-		GenerationConfig: geminiGenerationConfig{
-			Temperature:     opts.Temperature,
-			MaxOutputTokens: opts.MaxTokens,
-			TopP:            opts.TopP,
-		},
+		GenerationConfig: g.buildGenerationConfig(opts),
 	}
 
 	return g.streamRequest(ctx, reqBody)
@@ -1321,9 +1491,18 @@ func (g *GeminiLLM) convertToGeminiParts(blocks []core.ContentBlock) []geminiPar
 	for _, block := range blocks {
 		switch block.Type {
 		case core.FieldTypeText:
-			parts = append(parts, geminiPart{
+			part := geminiPart{
 				Text: block.Text,
-			})
+			}
+			if block.Metadata != nil {
+				if thought, ok := block.Metadata[geminiThoughtMetadataKey].(bool); ok {
+					part.Thought = thought
+				}
+				if signature, ok := block.Metadata[geminiThoughtSignatureMetadataKey].(string); ok {
+					part.ThoughtSignature = signature
+				}
+			}
+			parts = append(parts, part)
 		case core.FieldTypeImage:
 			parts = append(parts, geminiPart{
 				InlineData: &geminiInlineData{

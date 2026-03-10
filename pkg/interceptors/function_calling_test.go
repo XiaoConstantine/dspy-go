@@ -47,8 +47,11 @@ type mockLLMWithFunctionCalling struct {
 	core.BaseLLM
 	generateWithFunctionsResult map[string]interface{}
 	generateWithFunctionsError  error
+	generateWithToolsResult     map[string]interface{}
+	generateWithToolsError      error
 	lastFunctions               []map[string]interface{}
 	lastPrompt                  string
+	lastMessages                []core.ChatMessage
 }
 
 func newMockLLMWithFunctionCalling() *mockLLMWithFunctionCalling {
@@ -75,6 +78,15 @@ func (m *mockLLMWithFunctionCalling) GenerateWithFunctions(ctx context.Context, 
 		return nil, m.generateWithFunctionsError
 	}
 	return m.generateWithFunctionsResult, nil
+}
+
+func (m *mockLLMWithFunctionCalling) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]interface{}, error) {
+	m.lastMessages = append([]core.ChatMessage{}, messages...)
+	m.lastFunctions = tools
+	if m.generateWithToolsError != nil {
+		return nil, m.generateWithToolsError
+	}
+	return m.generateWithToolsResult, nil
 }
 
 func (m *mockLLMWithFunctionCalling) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
@@ -407,11 +419,14 @@ func TestSupportsToolCalling(t *testing.T) {
 func TestNativeFunctionCallingInterceptor_WithToolCallingLLM(t *testing.T) {
 	// Setup mock LLM with function calling
 	mockLLM := newMockLLMWithFunctionCalling()
-	mockLLM.generateWithFunctionsResult = map[string]interface{}{
-		"function_call": map[string]interface{}{
-			"name": "search",
-			"arguments": map[string]interface{}{
-				"query": "test query",
+	mockLLM.generateWithToolsResult = map[string]interface{}{
+		"tool_calls": []core.ToolCall{
+			{
+				ID:   "call-1",
+				Name: "search",
+				Arguments: map[string]interface{}{
+					"query": "test query",
+				},
 			},
 		},
 	}
@@ -464,9 +479,67 @@ func TestNativeFunctionCallingInterceptor_WithToolCallingLLM(t *testing.T) {
 	action, ok := result["action"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "search", action["tool_name"])
+	assert.NotNil(t, result[nativeToolHistoryKey])
+	assert.Equal(t, "call-1", result[nativeToolPendingCallIDKey])
 
 	// Verify the functions were passed to the LLM
 	assert.Len(t, mockLLM.lastFunctions, 2) // search + Finish
+	assert.Len(t, mockLLM.lastMessages, 1)
+}
+
+func TestNativeFunctionCallingInterceptor_WithChatHistoryAppendsToolResult(t *testing.T) {
+	mockLLM := newMockLLMWithFunctionCalling()
+	mockLLM.generateWithToolsResult = map[string]interface{}{
+		"content": "done",
+		"tool_calls": []core.ToolCall{
+			{
+				ID:        "call-2",
+				Name:      "Finish",
+				Arguments: map[string]any{"answer": "done"},
+				Metadata: map[string]any{
+					"gemini_thought_signature": "sig-2",
+				},
+			},
+		},
+	}
+
+	originalLLM := core.GlobalConfig.DefaultLLM
+	core.GlobalConfig.DefaultLLM = mockLLM
+	defer func() { core.GlobalConfig.DefaultLLM = originalLLM }()
+
+	registry := tools.NewInMemoryToolRegistry()
+	err := registry.Register(&mockTool{
+		name:        "search",
+		description: "Search for information",
+		schema:      models.InputSchema{Type: "object", Properties: map[string]models.ParameterSchema{}},
+	})
+	require.NoError(t, err)
+
+	interceptor := NativeFunctionCallingInterceptor(FunctionCallingConfig{
+		ToolRegistry:      registry,
+		IncludeFinishTool: true,
+	})
+
+	history := []core.ChatMessage{
+		{Role: "user", Content: []core.ContentBlock{core.NewTextBlock("Task: Find info")}},
+		{Role: "assistant", ToolCalls: []core.ToolCall{{ID: "call-1", Name: "search", Arguments: map[string]any{"query": "x"}}}},
+	}
+	result, err := interceptor(context.Background(), map[string]any{
+		"task":                       "Find information",
+		"observation":                "search result",
+		nativeToolHistoryKey:         history,
+		nativeToolPendingCallIDKey:   "call-1",
+		nativeToolPendingToolNameKey: "search",
+		nativeToolLastObsKey:         "",
+	}, nil, func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+		return map[string]any{"fallback": true}, nil
+	})
+	require.NoError(t, err)
+	require.Len(t, mockLLM.lastMessages, 3)
+	require.NotNil(t, mockLLM.lastMessages[2].ToolResult)
+	assert.Equal(t, "call-1", mockLLM.lastMessages[2].ToolResult.ToolCallID)
+	assert.Equal(t, "search", mockLLM.lastMessages[2].ToolResult.Name)
+	assert.Equal(t, "Finish", result["action"].(map[string]any)["tool_name"])
 }
 
 func TestNativeFunctionCallingInterceptor_FallbackWithoutToolCalling(t *testing.T) {
