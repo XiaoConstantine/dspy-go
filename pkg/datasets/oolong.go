@@ -12,6 +12,12 @@ import (
 	"time"
 )
 
+var (
+	oolongNonDigitRegexp         = regexp.MustCompile(`[^\d]`)
+	oolongStructuredAnswerRegexp = regexp.MustCompile(`^\s*(?:the\s+)?(?:answer|label|result|user)\s*(?:is)?[:=]\s*["']?([^"'\n,]+)["']?\s*$`)
+	oolongNumericAnswerRegexp    = regexp.MustCompile(`^\s*(?:answer|result|user)?[:=]?\s*(\d+)\s*$`)
+)
+
 // OolongTask represents a single OOLONG benchmark task.
 // It supports both the HuggingFace schema and the local example schema.
 type OolongTask struct {
@@ -215,11 +221,15 @@ func SliceOolongTasks(tasks []OolongTask, offset, limit int) []OolongTask {
 	if offset >= len(tasks) {
 		return nil
 	}
-	tasks = append([]OolongTask(nil), tasks[offset:]...)
-	if limit > 0 && limit < len(tasks) {
-		tasks = tasks[:limit]
+
+	remaining := tasks[offset:]
+	if limit > 0 && limit < len(remaining) {
+		remaining = remaining[:limit]
 	}
-	return tasks
+
+	result := make([]OolongTask, len(remaining))
+	copy(result, remaining)
+	return result
 }
 
 // CheckOolongAnswer applies the same answer-matching logic used by the benchmark examples.
@@ -248,7 +258,7 @@ func CheckOolongAnswer(expected, actual string) bool {
 		}
 
 		if isNumeric(expectedNorm) {
-			cleaned := regexp.MustCompile(`[^\d]`).ReplaceAllString(actualNorm, "")
+			cleaned := oolongNonDigitRegexp.ReplaceAllString(actualNorm, "")
 			if cleaned == expectedNorm {
 				return true
 			}
@@ -263,9 +273,7 @@ func CheckOolongAnswer(expected, actual string) bool {
 		lastLine = strings.TrimSpace(lines[len(lines)-1])
 	}
 
-	structuredPattern := `^\s*(?:the\s+)?(?:answer|label|result|user)\s*(?:is)?[:=]\s*["']?([^"'\n,]+)["']?\s*$`
-	re := regexp.MustCompile(structuredPattern)
-	if match := re.FindStringSubmatch(lastLine); len(match) > 1 {
+	if match := oolongStructuredAnswerRegexp.FindStringSubmatch(lastLine); len(match) > 1 {
 		extracted := strings.Trim(strings.TrimSpace(match[1]), ".,;:")
 		if expectedNorm == extracted {
 			return true
@@ -280,9 +288,7 @@ func CheckOolongAnswer(expected, actual string) bool {
 	}
 
 	if isNumeric(expectedNorm) {
-		numPattern := `^\s*(?:answer|result|user)?[:=]?\s*(\d+)\s*$`
-		numRe := regexp.MustCompile(numPattern)
-		if match := numRe.FindStringSubmatch(lastLine); len(match) > 1 && match[1] == expectedNorm {
+		if match := oolongNumericAnswerRegexp.FindStringSubmatch(lastLine); len(match) > 1 && match[1] == expectedNorm {
 			return true
 		}
 	}
