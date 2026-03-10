@@ -44,6 +44,7 @@ go run ./examples/rlm_oolong_gepa -file ./oolong_tasks.json -tasks 20
 ## Notes
 
 - This example uses real model calls and may incur provider cost.
+- This example executes model-generated Go code through the `RLM` REPL. Only run it on trusted datasets and task files.
 - It is intended as a benchmark-oriented optimization example, not a CI test.
 - The default embedded tasks are small smoke-test tasks; use `-hf` or `-file` for broader evaluation.
 - Use `-task-offset` with `-hf` or `-file` to evaluate a stable task slice across runs.

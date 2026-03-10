@@ -25,6 +25,7 @@ const (
 	passThreshold     = 1.0
 	defaultMaxIters   = 8
 	defaultValidation = 0.25
+	safetyWarning     = "Warning: this example executes model-generated Go code through RLM. Only run it on trusted datasets and task files."
 )
 
 type evalConfig struct {
@@ -137,6 +138,7 @@ func main() {
 	fmt.Printf("Tasks: %d total (%d train / %d validation)\n", len(examples), len(trainExamples), len(validationExamples))
 	fmt.Printf("Max RLM iterations: %d\n", *maxIters)
 	fmt.Println("This example uses real model calls on OOLONG-style long-context tasks.")
+	fmt.Println(safetyWarning)
 	fmt.Println()
 	printRunSummary("Baseline", baselineRun)
 
@@ -227,7 +229,7 @@ func buildLLM(ctx context.Context, logger *logging.Logger, provider, model, apiK
 		}
 		modelName := model
 		if modelName == "" {
-			modelName = "claude-haiku-4-5"
+			modelName = string(anthropic.ModelClaude_3_Haiku_20240307)
 		}
 		llm, err := llms.NewAnthropicLLM(apiKey, anthropic.Model(modelName))
 		if err != nil {
