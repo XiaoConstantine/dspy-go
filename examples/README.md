@@ -17,6 +17,10 @@ This directory contains comprehensive examples demonstrating the various feature
 - **[mcp/](mcp/)** - Model Context Protocol (MCP) integrations
 - **[others/](others/)** - Additional integrations and utilities
 
+### 🤖 Agent Optimization
+- **[rlm_oolong/](rlm_oolong/)** - Benchmark the RLM module on OOLONG long-context tasks
+- **[rlm_oolong_gepa/](rlm_oolong_gepa/)** - Optimize an adaptive RLM agent with GEPA on OOLONG tasks
+
 ## 🚀 Quick Start
 
 ### Smart Tool Registry
