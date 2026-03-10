@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -95,6 +96,15 @@ func NativeFunctionCallingInterceptor(config FunctionCallingConfig) core.ModuleI
 
 		logger.Debug(ctx, "Using native function calling with %d functions", len(functions))
 
+		if chatLLM, ok := llm.(core.ToolCallingChatLLM); ok {
+			result, err := generateWithToolHistory(ctx, chatLLM, inputs, info, functions)
+			if err != nil {
+				logger.Error(ctx, "GenerateWithTools failed: %v", err)
+				return nil, fmt.Errorf("native tool calling failed: %w", err)
+			}
+			return transformFunctionCallResult(result, inputs)
+		}
+
 		// Call LLM with function calling
 		result, err := llm.GenerateWithFunctions(ctx, prompt, functions)
 		if err != nil {
@@ -105,6 +115,103 @@ func NativeFunctionCallingInterceptor(config FunctionCallingConfig) core.ModuleI
 		// Transform the result into the expected ReAct format
 		return transformFunctionCallResult(result, inputs)
 	}
+}
+
+const (
+	nativeToolHistoryKey         = "_native_tool_history"
+	nativeToolPendingCallIDKey   = "_native_tool_pending_call_id"
+	nativeToolPendingToolNameKey = "_native_tool_pending_tool_name"
+	nativeToolLastObsKey         = "_native_tool_last_observation"
+)
+
+func generateWithToolHistory(ctx context.Context, llm core.ToolCallingChatLLM, inputs map[string]any, info *core.ModuleInfo, functions []map[string]any) (map[string]any, error) {
+	messages := nativeToolHistoryFromInputs(inputs)
+	if len(messages) == 0 {
+		messages = []core.ChatMessage{
+			{
+				Role:    "user",
+				Content: []core.ContentBlock{core.NewTextBlock(buildPromptFromInputs(inputs, info))},
+			},
+		}
+	}
+	messages, appendedObservation := appendPendingToolResult(messages, inputs)
+
+	result, err := llm.GenerateWithTools(ctx, messages, functions)
+	if err != nil {
+		return nil, err
+	}
+
+	history := append([]core.ChatMessage{}, messages...)
+	assistantMessage := core.ChatMessage{Role: "assistant"}
+	if blocks, ok := result["content_blocks"].([]core.ContentBlock); ok {
+		assistantMessage.Content = blocks
+	} else if content, ok := result["content"].(string); ok && content != "" {
+		assistantMessage.Content = []core.ContentBlock{core.NewTextBlock(content)}
+	}
+	if toolCalls, ok := result["tool_calls"].([]core.ToolCall); ok {
+		assistantMessage.ToolCalls = toolCalls
+	}
+	if len(assistantMessage.Content) > 0 || len(assistantMessage.ToolCalls) > 0 {
+		history = append(history, assistantMessage)
+	}
+
+	result[nativeToolHistoryKey] = history
+	if appendedObservation != "" {
+		result[nativeToolLastObsKey] = appendedObservation
+	}
+	if len(assistantMessage.ToolCalls) > 0 {
+		first := assistantMessage.ToolCalls[0]
+		if _, exists := result["function_call"]; !exists {
+			functionCall := map[string]any{
+				"name":      first.Name,
+				"arguments": first.Arguments,
+			}
+			if len(first.Metadata) > 0 {
+				functionCall["metadata"] = first.Metadata
+			}
+			result["function_call"] = functionCall
+		}
+		result[nativeToolPendingCallIDKey] = first.ID
+		result[nativeToolPendingToolNameKey] = first.Name
+		result[nativeToolLastObsKey] = ""
+	}
+	return result, nil
+}
+
+func nativeToolHistoryFromInputs(inputs map[string]any) []core.ChatMessage {
+	raw, ok := inputs[nativeToolHistoryKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	history, ok := raw.([]core.ChatMessage)
+	if !ok {
+		return nil
+	}
+	return append([]core.ChatMessage{}, history...)
+}
+
+func appendPendingToolResult(history []core.ChatMessage, inputs map[string]any) ([]core.ChatMessage, string) {
+	observation, _ := inputs["observation"].(string)
+	if strings.TrimSpace(observation) == "" {
+		return history, ""
+	}
+
+	callID, _ := inputs[nativeToolPendingCallIDKey].(string)
+	toolName, _ := inputs[nativeToolPendingToolNameKey].(string)
+	lastObservation, _ := inputs[nativeToolLastObsKey].(string)
+	if callID == "" || toolName == "" || observation == lastObservation {
+		return history, ""
+	}
+
+	msg := core.ChatMessage{
+		Role: "tool",
+		ToolResult: &core.ChatToolResult{
+			ToolCallID: callID,
+			Name:       toolName,
+			Content:    []core.ContentBlock{core.NewTextBlock(observation)},
+		},
+	}
+	return append(history, msg), observation
 }
 
 // supportsToolCalling checks if the LLM supports native function/tool calling.
@@ -189,6 +296,11 @@ func transformFunctionCallResult(result map[string]interface{}, originalInputs m
 	// Copy through original inputs that should be preserved
 	for key, value := range originalInputs {
 		output[key] = value
+	}
+	for key, value := range result {
+		if strings.HasPrefix(key, "_native_") {
+			output[key] = value
+		}
 	}
 
 	// Extract function call from result
