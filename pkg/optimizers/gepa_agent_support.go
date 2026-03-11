@@ -94,7 +94,9 @@ func (g *GEPA) UpdateBestCandidate(candidate *GEPACandidate) {
 	g.updateBestCandidate(candidate)
 }
 
-// EvolveCurrentPopulation advances GEPA to the next generation using its existing operators.
+// EvolveCurrentPopulation advances GEPA by one candidate-update step on the
+// current population snapshot. Agent orchestration still decides how often to
+// re-evaluate and reflect around those updates.
 func (g *GEPA) EvolveCurrentPopulation(ctx context.Context) error {
 	return g.evolvePopulation(ctx)
 }
