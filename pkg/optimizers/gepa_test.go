@@ -606,6 +606,11 @@ func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
 	assert.Equal(t, 1.0, candidate1.Fitness)
 	assert.Equal(t, 0.0, candidate2.Fitness)
 
+	storedEvaluation := gepa.state.GetCandidateEvaluation(candidate1.ID)
+	require.NotNil(t, storedEvaluation)
+	require.Len(t, storedEvaluation.Cases, 2)
+	assert.Equal(t, 1.0, storedEvaluation.AverageScore)
+
 	resetCalls, nextCalls := dataset.counts()
 	assert.Equal(t, 1, resetCalls)
 	assert.Equal(t, 2, nextCalls)
@@ -1134,13 +1139,13 @@ func TestReflectionEngine(t *testing.T) {
 	assert.Equal(t, 0.5, patterns.SuccessRate)
 
 	// Test reflection prompt building
-	prompt := gepa.buildReflectionPrompt(candidate, patterns)
+	prompt := gepa.buildReflectionPrompt(candidate, patterns, nil)
 	assert.Contains(t, prompt, candidate.Instruction)
 	assert.Contains(t, prompt, "STRENGTHS")
 	assert.Contains(t, prompt, "WEAKNESSES")
 
 	// Test reflection on candidate
-	reflection, err := gepa.reflectOnCandidate(ctx, candidate, traces)
+	reflection, err := gepa.reflectOnCandidate(ctx, candidate, nil, traces)
 	require.NoError(t, err)
 	assert.Equal(t, candidate.ID, reflection.CandidateID)
 }
@@ -1184,10 +1189,97 @@ func TestReflectionEngine_UsesRichTraceEvidence(t *testing.T) {
 	assert.Contains(t, patterns.RichTraceEvidence, "termination=max_iterations (seen 1x)")
 	assert.Contains(t, patterns.RichTraceEvidence, "failed_test=output:answer (seen 1x)")
 
-	prompt := gepa.buildReflectionPrompt(candidate, patterns)
+	prompt := gepa.buildReflectionPrompt(candidate, patterns, nil)
 	assert.Contains(t, prompt, "RICH TRACE EVIDENCE:")
 	assert.Contains(t, prompt, "termination=max_iterations (seen 1x)")
 	assert.Contains(t, prompt, "failed_test=output:answer (seen 1x)")
+}
+
+func TestBuildReflectionPromptIncludesExampleLevelEvidence(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+
+	candidate := &GEPACandidate{
+		ID:          "reflection-evidence-candidate",
+		ModuleName:  "alpha",
+		Instruction: "Return the tuned answer.",
+		Fitness:     0.4,
+		Generation:  2,
+	}
+	patterns := &ExecutionPatterns{
+		SuccessRate:         0.5,
+		SuccessCount:        1,
+		TotalExecutions:     2,
+		AverageResponseTime: 120 * time.Millisecond,
+		CommonFailures:      []string{"comparison_error"},
+		QualityIndicators:   []string{"variable_performance"},
+		RichTraceEvidence:   []string{"termination=max_iterations (seen 1x)"},
+	}
+	evaluation := &gepaCandidateEvaluation{
+		Candidate: candidate,
+		Cases: []gepaEvaluationCase{
+			{
+				Example: core.Example{
+					Inputs:  map[string]interface{}{"question": "What is DSPy?"},
+					Outputs: map[string]interface{}{"output": "framework"},
+				},
+				Outputs: map[string]interface{}{"output": "wrong"},
+				Score:   0.0,
+				Err:     fmt.Errorf("comparison failed"),
+			},
+			{
+				Example: core.Example{
+					Inputs:  map[string]interface{}{"question": "What is GEPA?"},
+					Outputs: map[string]interface{}{"output": "optimizer"},
+				},
+				Outputs: map[string]interface{}{"output": "optimizer"},
+				Score:   1.0,
+			},
+		},
+		AverageScore: 0.5,
+	}
+
+	reflectionInput := gepa.buildReflectionInput(evaluation)
+	require.NotNil(t, reflectionInput)
+	prompt := gepa.buildReflectionPrompt(candidate, patterns, reflectionInput)
+
+	assert.Contains(t, prompt, "EXAMPLE-LEVEL EVIDENCE:")
+	assert.Contains(t, prompt, "Worst Cases:")
+	assert.Contains(t, prompt, `{"question":"What is DSPy?"}`)
+	assert.Contains(t, prompt, `{"output":"wrong"}`)
+	assert.Contains(t, prompt, "Representative Successes:")
+	assert.Contains(t, prompt, `{"question":"What is GEPA?"}`)
+}
+
+func TestBuildReflectionInputBoundsWorstCases(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+
+	cases := make([]gepaEvaluationCase, 0, 5)
+	for i := 0; i < 5; i++ {
+		cases = append(cases, gepaEvaluationCase{
+			Example: core.Example{
+				Inputs:  map[string]interface{}{"question": fmt.Sprintf("q-%d", i)},
+				Outputs: map[string]interface{}{"output": fmt.Sprintf("expected-%d", i)},
+			},
+			Outputs: map[string]interface{}{"output": fmt.Sprintf("actual-%d", i)},
+			Score:   float64(i) / 10.0,
+		})
+	}
+
+	reflectionInput := gepa.buildReflectionInput(&gepaCandidateEvaluation{
+		Cases:        cases,
+		AverageScore: 0.2,
+	})
+	require.NotNil(t, reflectionInput)
+	assert.Len(t, reflectionInput.WorstCases, maxReflectionWorstCases)
+	assert.Len(t, reflectionInput.BestCases, maxReflectionBestCases)
+	assert.Equal(t, `{"question":"q-0"}`, reflectionInput.WorstCases[0].InputSummary)
+	assert.Equal(t, `{"question":"q-4"}`, reflectionInput.BestCases[0].InputSummary)
 }
 
 func TestSelfCritiqueSystem(t *testing.T) {

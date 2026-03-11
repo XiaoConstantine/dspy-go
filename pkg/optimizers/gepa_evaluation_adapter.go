@@ -110,3 +110,52 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 
 	return result
 }
+
+func cloneGEPACandidateEvaluation(evaluation *gepaCandidateEvaluation) *gepaCandidateEvaluation {
+	if evaluation == nil {
+		return nil
+	}
+
+	cloned := &gepaCandidateEvaluation{
+		AverageScore: evaluation.AverageScore,
+	}
+	if evaluation.Candidate != nil {
+		cloned.Candidate = CloneCandidate(evaluation.Candidate)
+	}
+	if len(evaluation.Cases) > 0 {
+		cloned.Cases = make([]gepaEvaluationCase, len(evaluation.Cases))
+		for i, evalCase := range evaluation.Cases {
+			cloned.Cases[i] = gepaEvaluationCase{
+				Example: cloneEvaluationExample(evalCase.Example),
+				Outputs: cloneStringAnyMap(evalCase.Outputs),
+				Score:   evalCase.Score,
+				Err:     evalCase.Err,
+			}
+		}
+	}
+
+	return cloned
+}
+
+func cloneEvaluationExample(example core.Example) core.Example {
+	return core.Example{
+		Inputs:  cloneStringAnyMap(example.Inputs),
+		Outputs: cloneStringAnyMap(example.Outputs),
+	}
+}
+
+func cloneStringAnyMap(values map[string]interface{}) map[string]interface{} {
+	if len(values) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		// This is intentionally a shallow value copy. Evaluation examples and
+		// outputs currently hold scalar/string-like values, and reflection only
+		// needs map isolation rather than recursive deep-copying.
+		cloned[key] = value
+	}
+
+	return cloned
+}

@@ -313,6 +313,7 @@ type GEPAState struct {
 	ExecutionTraces          map[string][]ExecutionTrace       `json:"execution_traces"`
 	CandidateMetrics         map[string]*CandidateMetrics      `json:"candidate_metrics"`
 	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness `json:"multi_objective_fitness_map"`
+	candidateEvaluations     map[string]*gepaCandidateEvaluation
 
 	// Pareto archive for elite solution management
 	ParetoArchive     []*GEPACandidate                  `json:"pareto_archive"`
@@ -334,6 +335,7 @@ func NewGEPAState() *GEPAState {
 		ExecutionTraces:          make(map[string][]ExecutionTrace),
 		CandidateMetrics:         make(map[string]*CandidateMetrics),
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
+		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
 		ParetoArchive:            make([]*GEPACandidate, 0),
 		ArchiveFitnessMap:        make(map[string]*MultiObjectiveFitness),
 		MaxArchiveSize:           50, // Configurable archive size
@@ -394,6 +396,36 @@ func (s *GEPAState) GetTracesForCandidate(candidateID string) []ExecutionTrace {
 	}
 
 	return traces
+}
+
+// SetCandidateEvaluations replaces the latest candidate evaluation cache for the
+// current generation. Reflection consumes this to build example-grounded
+// prompts without re-running candidate evaluation.
+func (s *GEPAState) SetCandidateEvaluations(evaluations map[string]*gepaCandidateEvaluation) {
+	if s == nil {
+		return
+	}
+
+	cloned := make(map[string]*gepaCandidateEvaluation, len(evaluations))
+	for candidateID, evaluation := range evaluations {
+		cloned[candidateID] = cloneGEPACandidateEvaluation(evaluation)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.candidateEvaluations = cloned
+}
+
+// GetCandidateEvaluation returns the cached evaluation for a candidate from the
+// latest evaluated generation.
+func (s *GEPAState) GetCandidateEvaluation(candidateID string) *gepaCandidateEvaluation {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneGEPACandidateEvaluation(s.candidateEvaluations[candidateID])
 }
 
 // UpdateParetoArchive maintains elite Pareto-optimal solutions across generations.
@@ -4394,6 +4426,7 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 	var mu sync.Mutex
 	evaluatedCount := 0
 	multiObjFitnessMap := make(map[string]*MultiObjectiveFitness)
+	candidateEvaluations := make(map[string]*gepaCandidateEvaluation, len(population.Candidates))
 
 	for _, candidate := range population.Candidates {
 		candidate := candidate // Capture loop variable
@@ -4407,6 +4440,7 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 			mu.Lock()
 			candidate.Fitness = fitness
 			evaluatedCount++
+			candidateEvaluations[candidate.ID] = evaluation
 
 			// Get multi-objective fitness from candidate metrics
 			if metrics := g.performanceLogger.GetCandidateMetrics(candidate.ID); metrics != nil {
@@ -4436,6 +4470,7 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 	}
 
 	p.Wait()
+	g.state.SetCandidateEvaluations(candidateEvaluations)
 
 	logger.Info(ctx, "Population evaluation completed: generation=%d, best_fitness=%.3f, evaluated_candidates=%d, multi_objective_entries=%d",
 		population.Generation,
@@ -4510,11 +4545,12 @@ func (g *GEPA) performReflection(ctx context.Context, generation int) error {
 
 	for _, candidate := range population.Candidates {
 		traces := g.state.GetTracesForCandidate(candidate.ID)
-		if len(traces) == 0 {
-			continue // Skip candidates with no execution traces
+		evaluation := g.state.GetCandidateEvaluation(candidate.ID)
+		if len(traces) == 0 && evaluation == nil {
+			continue // Skip candidates with no reflection evidence
 		}
 
-		reflection, err := g.reflectOnCandidate(ctx, candidate, traces)
+		reflection, err := g.reflectOnCandidate(ctx, candidate, evaluation, traces)
 		if err != nil {
 			logger.Error(ctx, "Failed to reflect on candidate %s: %v",
 				candidate.ID, err)
@@ -4538,13 +4574,14 @@ func (g *GEPA) performReflection(ctx context.Context, generation int) error {
 
 // reflectOnCandidate performs reflection analysis on a single candidate.
 func (g *GEPA) reflectOnCandidate(ctx context.Context, candidate *GEPACandidate,
-	traces []ExecutionTrace) (*ReflectionResult, error) {
+	evaluation *gepaCandidateEvaluation, traces []ExecutionTrace) (*ReflectionResult, error) {
 
 	// Analyze execution patterns
 	patterns := g.analyzeExecutionPatterns(traces)
+	reflectionInput := g.buildReflectionInput(evaluation)
 
 	// Generate reflection prompt
-	prompt := g.buildReflectionPrompt(candidate, patterns)
+	prompt := g.buildReflectionPrompt(candidate, patterns, reflectionInput)
 
 	// Get reflection from LLM
 	response, err := g.reflectionLLM.Generate(ctx, prompt)
@@ -4608,11 +4645,12 @@ func (g *GEPA) analyzeExecutionPatterns(traces []ExecutionTrace) *ExecutionPatte
 }
 
 // buildReflectionPrompt creates a reflection prompt for a candidate.
-func (g *GEPA) buildReflectionPrompt(candidate *GEPACandidate, patterns *ExecutionPatterns) string {
+func (g *GEPA) buildReflectionPrompt(candidate *GEPACandidate, patterns *ExecutionPatterns, reflectionInput *gepaReflectionInput) string {
 	richTraceEvidence := "none recorded"
 	if len(patterns.RichTraceEvidence) > 0 {
 		richTraceEvidence = "- " + strings.Join(patterns.RichTraceEvidence, "\n- ")
 	}
+	caseEvidence := g.formatReflectionCaseEvidence(reflectionInput)
 
 	return fmt.Sprintf(`As an expert prompt engineer, critically analyze this instruction and its performance:
 
@@ -4630,11 +4668,14 @@ EXECUTION PATTERNS:
 RICH TRACE EVIDENCE:
 %s
 
+EXAMPLE-LEVEL EVIDENCE:
+%s
+
 Please provide a detailed self-reflection covering:
 
 1. STRENGTHS: What aspects of this instruction work well?
-2. WEAKNESSES: What specific issues limit its effectiveness? Use the rich trace evidence section to ground concrete failure modes, loops, mismatches, and termination behavior.
-3. IMPROVEMENT SUGGESTIONS: Concrete ways to enhance this instruction based on the execution patterns and rich trace evidence.
+2. WEAKNESSES: What specific issues limit its effectiveness? Use the rich trace evidence and example-level evidence sections to ground concrete failure modes, loops, mismatches, bad outputs, and error cases.
+3. IMPROVEMENT SUGGESTIONS: Concrete ways to enhance this instruction based on the execution patterns, rich trace evidence, and example-level evidence.
 4. CONFIDENCE: Rate your confidence in this analysis (0.0-1.0)
 
 Format your response as:
@@ -4661,7 +4702,8 @@ CONFIDENCE: [0.0-1.0]`,
 		patterns.AverageResponseTime,
 		strings.Join(patterns.CommonFailures, ", "),
 		strings.Join(patterns.QualityIndicators, ", "),
-		richTraceEvidence)
+		richTraceEvidence,
+		caseEvidence)
 }
 
 // parseReflectionResponse parses the LLM reflection response.
