@@ -39,6 +39,11 @@ func (g *GEPA) acceptMutationProposal(ctx context.Context, baseline, proposed *G
 	}
 
 	baselineEvaluation := g.cachedOrEvaluateCandidate(ctx, baseline, adapter)
+	if baselineEvaluation != nil && g != nil && g.state != nil {
+		g.state.UpsertCandidateEvaluation(baseline.ID, baselineEvaluation)
+	}
+
+	g.ensureCandidateMetrics(proposed.ID)
 	proposedEvaluation := g.evaluateCandidateWithAdapter(ctx, proposed, adapter)
 	if proposedEvaluation == nil {
 		return baseline
@@ -49,6 +54,9 @@ func (g *GEPA) acceptMutationProposal(ctx context.Context, baseline, proposed *G
 	}
 
 	proposed.Fitness = proposedEvaluation.AverageScore
+	if g != nil && g.state != nil {
+		g.state.UpsertCandidateEvaluation(proposed.ID, proposedEvaluation)
+	}
 	proposed.Metadata = mergeCandidateMetadata(map[string]interface{}{
 		"proposal_accepted":          true,
 		"proposal_baseline_total":    totalScoreFromEvaluation(baselineEvaluation),

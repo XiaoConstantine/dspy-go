@@ -460,6 +460,22 @@ func (s *GEPAState) GetCandidateEvaluation(candidateID string) *gepaCandidateEva
 	return cloneGEPACandidateEvaluation(s.candidateEvaluations[candidateID])
 }
 
+// UpsertCandidateEvaluation updates the cached evaluation for a single
+// candidate without replacing the rest of the current evaluation cache.
+func (s *GEPAState) UpsertCandidateEvaluation(candidateID string, evaluation *gepaCandidateEvaluation) {
+	if s == nil || strings.TrimSpace(candidateID) == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.candidateEvaluations == nil {
+		s.candidateEvaluations = make(map[string]*gepaCandidateEvaluation)
+	}
+	s.candidateEvaluations[candidateID] = cloneGEPACandidateEvaluation(evaluation)
+}
+
 // UpdateParetoArchive maintains elite Pareto-optimal solutions across generations.
 func (s *GEPAState) UpdateParetoArchive(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) {
 	s.mu.Lock()
@@ -2787,63 +2803,7 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 
 	// Install interceptors on the program
 	optimizedProgram := g.installInterceptors(program)
-	err := RunEvolutionLoop(ctx, EvolutionLoopConfig{
-		MaxGenerations: g.config.MaxGenerations,
-		ReflectionFreq: g.config.ReflectionFreq,
-		PhaseName:      "GEPA Evolution",
-	}, EvolutionLoopHooks{
-		Initialize: func(ctx context.Context) error {
-			if err := g.initializePopulation(ctx, optimizedProgram); err != nil {
-				return fmt.Errorf("failed to initialize population: %w", err)
-			}
-			return nil
-		},
-		BeforeGeneration: func(ctx context.Context, generation int) error {
-			g.state.CurrentGeneration = generation
-			logger.Info(ctx, "Starting generation %d", generation)
-			return nil
-		},
-		EvaluateGeneration: func(ctx context.Context, generation int) error {
-			multiObjFitnessMap, err := g.evaluatePopulation(ctx, optimizedProgram, dataset, metric)
-			if err != nil {
-				return fmt.Errorf("evaluation failed at generation %d: %w", generation, err)
-			}
-
-			g.setCurrentMultiObjectiveFitnessMap(multiObjFitnessMap)
-			return nil
-		},
-		AfterEvaluation: func(ctx context.Context, generation int) error {
-			currentPop := g.getCurrentPopulation()
-			if currentPop != nil {
-				g.state.UpdateParetoArchive(currentPop.Candidates, g.getCurrentMultiObjectiveFitnessMap())
-			}
-			return nil
-		},
-		Reflect: func(ctx context.Context, generation int) error {
-			return g.performReflection(ctx, generation)
-		},
-		OnNonFatalError: func(ctx context.Context, stage string, generation int, err error) {
-			logger.Error(ctx, "%s failed at generation %d: %v", stage, generation, err)
-		},
-		HasConverged: func(ctx context.Context, generation int) bool {
-			if g.hasConverged() {
-				logger.Info(ctx, "Convergence achieved at generation %d", generation)
-				return true
-			}
-			return false
-		},
-		Evolve: func(ctx context.Context, generation int) error {
-			if err := g.evolvePopulation(ctx); err != nil {
-				return fmt.Errorf("evolution failed at generation %d: %w", generation, err)
-			}
-			return nil
-		},
-		ReportProgress: func(phase string, current, total int) {
-			if g.progressReporter != nil {
-				g.progressReporter.Report(phase, current, total)
-			}
-		},
-	})
+	err := g.runIterativeOptimizationLoop(ctx, optimizedProgram, dataset, metric)
 	if err != nil {
 		return program, err
 	}
@@ -2855,6 +2815,91 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	g.logOptimizationResults(ctx)
 
 	return finalProgram, nil
+}
+
+func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
+	logger := logging.GetLogger()
+	if g.config.MaxGenerations <= 0 {
+		return fmt.Errorf("optimizers: max generations must be positive")
+	}
+
+	if err := g.initializePopulation(ctx, program); err != nil {
+		return fmt.Errorf("failed to initialize population: %w", err)
+	}
+
+	g.state.CurrentGeneration = 0
+	if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, dataset, metric); err != nil {
+		return fmt.Errorf("evaluation failed at generation 0: %w", err)
+	}
+	if err := g.reflectIfScheduled(ctx, 0); err != nil {
+		logger.Error(ctx, "reflection failed at generation 0: %v", err)
+	}
+	g.reportOptimizationProgress("GEPA Evolution", 1, g.config.MaxGenerations)
+
+	if g.hasConverged() || g.config.MaxGenerations == 1 {
+		return nil
+	}
+
+	for generation := 1; generation < g.config.MaxGenerations; generation++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		g.state.CurrentGeneration = generation
+		logger.Info(ctx, "Starting generation %d", generation)
+
+		if err := g.evolvePopulation(ctx); err != nil {
+			return fmt.Errorf("evolution failed at generation %d: %w", generation, err)
+		}
+		currentPop := g.getCurrentPopulation()
+		if currentPop != nil {
+			g.state.UpdateParetoArchive(currentPop.Candidates, g.getCurrentMultiObjectiveFitnessMap())
+		}
+		if err := g.reflectIfScheduled(ctx, generation); err != nil {
+			logger.Error(ctx, "reflection failed at generation %d: %v", generation, err)
+		}
+
+		g.reportOptimizationProgress("GEPA Evolution", generation+1, g.config.MaxGenerations)
+
+		if g.hasConverged() {
+			logger.Info(ctx, "Convergence achieved at generation %d", generation)
+			break
+		}
+	}
+
+	return nil
+}
+
+func (g *GEPA) evaluateAndArchiveCurrentPopulation(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
+	multiObjFitnessMap, err := g.evaluatePopulation(ctx, program, dataset, metric)
+	if err != nil {
+		return err
+	}
+
+	g.setCurrentMultiObjectiveFitnessMap(multiObjFitnessMap)
+	currentPop := g.getCurrentPopulation()
+	if currentPop != nil {
+		g.state.UpdateParetoArchive(currentPop.Candidates, multiObjFitnessMap)
+	}
+
+	return nil
+}
+
+func (g *GEPA) reflectIfScheduled(ctx context.Context, generation int) error {
+	if g.config.ReflectionFreq <= 0 {
+		return nil
+	}
+	if generation != 0 && generation%g.config.ReflectionFreq != 0 {
+		return nil
+	}
+	return g.performReflection(ctx, generation)
+}
+
+func (g *GEPA) reportOptimizationProgress(phase string, current, total int) {
+	if g.progressReporter == nil {
+		return
+	}
+	g.progressReporter.Report(phase, current, total)
 }
 
 // withGEPAState adds GEPA state to the context.
@@ -3801,9 +3846,10 @@ func (g *GEPA) updateBestCandidate(candidate *GEPACandidate) {
 
 // Evolutionary Operators
 
-// evolvePopulation creates the next generation using candidate-centric proposal
-// updates. This preserves the current generational shell while moving GEPA away
-// from crossover-heavy offspring generation toward one proposal at a time.
+// evolvePopulation advances the working population by updating one selected
+// candidate at a time. The latest population snapshot remains available for
+// history/debugging, but the operational step is now a single proposal/accept
+// cycle rather than rebuilding an entire offspring population.
 func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	logger := logging.GetLogger()
 	currentPop := g.getCurrentPopulation()
@@ -3811,75 +3857,37 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 		return fmt.Errorf("no current population found")
 	}
 
-	logger.Info(ctx, "Evolving population for generation %d", currentPop.Generation)
+	nextGeneration := currentPop.Generation + 1
+	logger.Info(ctx, "Updating population for generation %d", nextGeneration)
 
-	// Select candidates that seed proposal updates. Small populations can yield
-	// zero selected parents from the current selection heuristics, so fall back
-	// to the current population in that case.
-	parents := g.selectParents(currentPop)
-	if len(parents) == 0 {
-		parents = currentPop.Candidates
-	}
-	if len(parents) == 0 {
+	source := g.selectCandidateForUpdate(currentPop)
+	if source == nil {
 		return fmt.Errorf("no candidates available for proposal evolution")
 	}
 
-	// Create the next generation by carrying forward elites and then repeatedly
-	// proposing a single candidate update at a time.
-	offspring := make([]*GEPACandidate, 0, g.config.PopulationSize)
+	nextCandidate := g.proposeNextGenerationCandidate(ctx, source, nextGeneration)
+	g.ensureCandidateMetrics(nextCandidate.ID)
+	g.syncCandidateUpdateState(ctx, source, nextCandidate)
 
-	// Elitism: keep best candidates
-	eliteCount := int(float64(g.config.PopulationSize) * g.config.ElitismRate)
-	elite := g.selectElite(currentPop, eliteCount)
-	offspring = append(offspring, elite...)
-
-	nextGeneration := currentPop.Generation + 1
-	for len(offspring) < g.config.PopulationSize {
-		source := parents[g.rng.Intn(len(parents))]
-		nextCandidate := g.proposeNextGenerationCandidate(ctx, source, nextGeneration)
-		if nextCandidate == nil {
-			continue
-		}
-		offspring = append(offspring, nextCandidate)
+	newPopulation, replaced := g.populationSnapshotWithReplacement(currentPop, source.ID, nextCandidate, nextGeneration)
+	if !replaced {
+		return fmt.Errorf("candidate %s not found in current population", source.ID)
 	}
-
-	// Ensure we don't exceed population size
-	if len(offspring) > g.config.PopulationSize {
-		offspring = offspring[:g.config.PopulationSize]
-	}
-
-	// Create new population
-	newPopulation := &Population{
-		Candidates:    offspring,
-		Generation:    nextGeneration,
-		BestFitness:   0.0,
-		BestCandidate: nil,
-	}
+	g.recomputePopulationBest(newPopulation)
 
 	// Add to population history
 	g.state.mu.Lock()
 	g.state.PopulationHistory = append(g.state.PopulationHistory, newPopulation)
 	g.state.mu.Unlock()
-
-	// Initialize metrics for new candidates
-	for _, candidate := range offspring {
-		if _, exists := g.state.CandidateMetrics[candidate.ID]; !exists {
-			g.state.CandidateMetrics[candidate.ID] = &CandidateMetrics{
-				TotalEvaluations: 0,
-				SuccessCount:     0,
-				AverageFitness:   0.0,
-				BestFitness:      0.0,
-				ExecutionTimes:   make([]time.Duration, 0),
-				ErrorCounts:      make(map[string]int),
-				Metadata:         make(map[string]interface{}),
-			}
-		}
+	if newPopulation.BestCandidate != nil {
+		g.updateBestCandidate(newPopulation.BestCandidate)
 	}
 
-	logger.Info(ctx, "Population evolved: generation=%d, offspring_count=%d, elite_count=%d",
+	logger.Info(ctx, "Population updated: generation=%d, source_candidate=%s, replacement_candidate=%s, population_size=%d",
 		newPopulation.Generation,
-		len(offspring),
-		eliteCount)
+		source.ID,
+		nextCandidate.ID,
+		len(newPopulation.Candidates))
 
 	return nil
 }
@@ -3903,28 +3911,171 @@ func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, source *GEPAC
 	return proposed
 }
 
-// selectParents selects parents for reproduction based on the selection strategy.
-func (g *GEPA) selectParents(population *Population) []*GEPACandidate {
+// selectCandidates returns candidates sampled according to the configured
+// selection strategy.
+func (g *GEPA) selectCandidates(population *Population, count int) []*GEPACandidate {
 	logger := logging.GetLogger()
-	selectionSize := g.config.PopulationSize / 2
+	if population == nil || len(population.Candidates) == 0 {
+		return nil
+	}
+	if count <= 0 {
+		count = 1
+	}
 
 	switch g.config.SelectionStrategy {
 	case "tournament":
-		logger.Debug(context.Background(), "Using tournament selection for parent selection")
-		return g.tournamentSelection(population, selectionSize)
+		logger.Debug(context.Background(), "Using tournament selection for candidate updates")
+		return g.tournamentSelection(population, count)
 	case "roulette":
-		logger.Debug(context.Background(), "Using roulette selection for parent selection")
-		return g.rouletteSelection(population, selectionSize)
+		logger.Debug(context.Background(), "Using roulette selection for candidate updates")
+		return g.rouletteSelection(population, count)
 	case "pareto":
-		logger.Debug(context.Background(), "Using Pareto-based selection for parent selection")
-		return g.paretoBasedSelection(population, selectionSize)
+		logger.Debug(context.Background(), "Using Pareto-based selection for candidate updates")
+		return g.paretoBasedSelection(population, count)
 	case "adaptive_pareto":
-		logger.Debug(context.Background(), "Using adaptive Pareto-based selection for parent selection")
-		return g.adaptiveParetoSelection(population, selectionSize)
+		logger.Debug(context.Background(), "Using adaptive Pareto-based selection for candidate updates")
+		return g.adaptiveParetoSelection(population, count)
 	default:
-		logger.Debug(context.Background(), "Using default tournament selection for parent selection")
-		return g.tournamentSelection(population, selectionSize)
+		logger.Debug(context.Background(), "Using default tournament selection for candidate updates")
+		return g.tournamentSelection(population, count)
 	}
+}
+
+func (g *GEPA) selectCandidateForUpdate(population *Population) *GEPACandidate {
+	selected := g.selectCandidates(population, 1)
+	if len(selected) > 0 && selected[0] != nil {
+		return selected[0]
+	}
+	if population == nil || len(population.Candidates) == 0 {
+		return nil
+	}
+	return population.Candidates[g.rng.Intn(len(population.Candidates))]
+}
+
+func (g *GEPA) populationSnapshotWithReplacement(current *Population, sourceID string, replacement *GEPACandidate, generation int) (*Population, bool) {
+	if current == nil {
+		return nil, false
+	}
+
+	snapshot := &Population{
+		Candidates:  make([]*GEPACandidate, len(current.Candidates)),
+		Generation:  generation,
+		BestFitness: current.BestFitness,
+	}
+
+	replaced := false
+	for i, candidate := range current.Candidates {
+		switch {
+		case !replaced && candidate != nil && candidate.ID == sourceID:
+			snapshot.Candidates[i] = g.copyCandidate(replacement)
+			replaced = true
+		default:
+			snapshot.Candidates[i] = g.copyCandidate(candidate)
+		}
+	}
+
+	return snapshot, replaced
+}
+
+func (g *GEPA) recomputePopulationBest(population *Population) {
+	if population == nil {
+		return
+	}
+
+	population.BestCandidate = nil
+	population.BestFitness = math.Inf(-1)
+	for _, candidate := range population.Candidates {
+		if candidate == nil {
+			continue
+		}
+		if population.BestCandidate == nil || candidate.Fitness > population.BestFitness {
+			population.BestCandidate = candidate
+			population.BestFitness = candidate.Fitness
+		}
+	}
+	if population.BestCandidate == nil {
+		population.BestFitness = 0.0
+	}
+}
+
+func (g *GEPA) syncCandidateUpdateState(ctx context.Context, source, updated *GEPACandidate) {
+	if updated == nil {
+		return
+	}
+
+	evaluation := g.state.GetCandidateEvaluation(updated.ID)
+	if evaluation == nil {
+		adapter := g.getLatestEvaluationAdapter()
+		if adapter != nil {
+			evaluation = g.evaluateCandidateWithAdapter(ctx, updated, adapter)
+			g.state.UpsertCandidateEvaluation(updated.ID, evaluation)
+		}
+	}
+	if evaluation != nil {
+		updated.Fitness = evaluation.AverageScore
+	}
+
+	g.upsertCurrentMultiObjectiveFitness(source, updated)
+}
+
+func (g *GEPA) upsertCurrentMultiObjectiveFitness(source, updated *GEPACandidate) {
+	currentFitnessMap := g.getCurrentMultiObjectiveFitnessMap()
+	nextFitnessMap := make(map[string]*MultiObjectiveFitness, len(currentFitnessMap)+1)
+	for candidateID, fitness := range currentFitnessMap {
+		if source != nil && source.ID != updated.ID && candidateID == source.ID {
+			continue
+		}
+		nextFitnessMap[candidateID] = fitness
+	}
+
+	multiObjFitness := g.latestOrFallbackMultiObjectiveFitness(source, updated)
+	if updated != nil && multiObjFitness != nil {
+		nextFitnessMap[updated.ID] = multiObjFitness
+		g.state.RecordCandidateFitness(updated, multiObjFitness, updated.Fitness)
+	}
+
+	g.setCurrentMultiObjectiveFitnessMap(nextFitnessMap)
+}
+
+func (g *GEPA) latestOrFallbackMultiObjectiveFitness(source, updated *GEPACandidate) *MultiObjectiveFitness {
+	if updated == nil {
+		return nil
+	}
+
+	if g.performanceLogger != nil {
+		if metrics := g.performanceLogger.GetCandidateMetrics(updated.ID); metrics != nil {
+			if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok && multiObjFitness != nil {
+				return multiObjFitness
+			}
+		}
+	}
+
+	// Iterative GEPA steps only re-evaluate the updated candidate, so preserve a
+	// usable Pareto record even when no fresh interceptor-derived multi-objective
+	// metrics are available. This keeps selection quality from collapsing to
+	// implicit zeroes for post-initialization candidates.
+	fallback := &MultiObjectiveFitness{
+		SuccessRate:    updated.Fitness,
+		OutputQuality:  updated.Fitness,
+		Efficiency:     0.5,
+		Robustness:     0.5,
+		Generalization: 0.5,
+		Diversity:      0.5,
+		Innovation:     0.5,
+	}
+
+	if source != nil {
+		if sourceFitness, ok := g.getCurrentMultiObjectiveFitnessMap()[source.ID]; ok && sourceFitness != nil {
+			fallback.Efficiency = sourceFitness.Efficiency
+			fallback.Robustness = sourceFitness.Robustness
+			fallback.Generalization = sourceFitness.Generalization
+			fallback.Diversity = sourceFitness.Diversity
+			fallback.Innovation = sourceFitness.Innovation
+		}
+	}
+
+	fallback.WeightedScore = fallback.ComputeWeightedScore(nil)
+	return fallback
 }
 
 // tournamentSelection implements tournament selection.

@@ -816,6 +816,34 @@ func TestMaterializeEvaluationBatchUsesSingleExampleForNonPositiveBatchSize(t *t
 	}
 }
 
+func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	config := DefaultGEPAConfig()
+	config.PopulationSize = 2
+	config.MaxGenerations = 3
+	config.MutationRate = 0.0
+	config.ReflectionFreq = 0
+	config.EvaluationBatchSize = 2
+
+	gepa, err := NewGEPA(config)
+	require.NoError(t, err)
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+	})
+
+	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NoError(t, err)
+
+	resetCalls, nextCalls := dataset.counts()
+	assert.Equal(t, 1, resetCalls)
+	assert.Equal(t, 2, nextCalls)
+}
+
 func TestBestCandidatesByModuleReturnsCopies(t *testing.T) {
 	gepa := &GEPA{state: NewGEPAState()}
 
@@ -1794,7 +1822,7 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 		return strings.Contains(prompt, "Apply a")
 	}), mock.Anything).Return(&core.LLMResponse{
 		Content: "Improved instruction for the selected candidate.",
-	}, nil).Twice()
+	}, nil).Once()
 
 	gepa := &GEPA{
 		config: &GEPAConfig{
@@ -1808,6 +1836,12 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 		generationLLM: mockLLM,
 		rng:           rand.New(rand.NewSource(3)),
 	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "Improved instruction for the selected candidate."}},
+	})
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	gepa.setLatestEvaluationAdapter(adapter)
 
 	population := &Population{
 		Generation: 0,
@@ -1825,10 +1859,25 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 	require.NotNil(t, current)
 	assert.Equal(t, 1, current.Generation)
 	require.Len(t, current.Candidates, 2)
+
+	improvedCount := 0
+	unchangedCount := 0
 	for _, candidate := range current.Candidates {
-		assert.Equal(t, 1, candidate.Generation)
-		assert.Equal(t, "Improved instruction for the selected candidate.", candidate.Instruction)
+		switch candidate.Instruction {
+		case "Improved instruction for the selected candidate.":
+			improvedCount++
+			assert.Equal(t, 1, candidate.Generation)
+			assert.Equal(t, 1.0, candidate.Fitness)
+			require.NotNil(t, gepa.state.GetCandidateEvaluation(candidate.ID))
+		case "Base instruction one.", "Base instruction two.":
+			unchangedCount++
+			assert.Equal(t, 0, candidate.Generation)
+		default:
+			t.Fatalf("unexpected candidate instruction %q", candidate.Instruction)
+		}
 	}
+	assert.Equal(t, 1, improvedCount)
+	assert.Equal(t, 1, unchangedCount)
 
 	mockLLM.AssertExpectations(t)
 }
@@ -1869,6 +1918,82 @@ func TestEvolvePopulationCarriesForwardCandidatesWithoutSelectedParents(t *testi
 	assert.Equal(t, original.ID, current.Candidates[0].ID)
 	assert.Equal(t, 1, current.Candidates[0].Generation)
 	assert.Equal(t, original.Instruction, current.Candidates[0].Instruction)
+}
+
+func TestEvolvePopulationPreservesFitnessMapForUpdatedCandidates(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		return strings.Contains(prompt, "Apply a")
+	}), mock.Anything).Return(&core.LLMResponse{
+		Content: "Improved instruction for the selected candidate.",
+	}, nil).Once()
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			PopulationSize:    2,
+			MutationRate:      1.0,
+			TournamentSize:    1,
+			SelectionStrategy: "tournament",
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(3)),
+	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "Improved instruction for the selected candidate."}},
+	})
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	gepa.setLatestEvaluationAdapter(adapter)
+
+	sourceFitness := &MultiObjectiveFitness{
+		SuccessRate:    0.8,
+		OutputQuality:  0.7,
+		Efficiency:     0.4,
+		Robustness:     0.6,
+		Generalization: 0.5,
+		Diversity:      0.3,
+		Innovation:     0.2,
+	}
+	sourceFitness.WeightedScore = sourceFitness.ComputeWeightedScore(nil)
+
+	population := &Population{
+		Generation: 0,
+		Candidates: []*GEPACandidate{
+			{ID: "cand-1", ModuleName: "alpha", Instruction: "Base instruction one.", Fitness: 0.8},
+			{ID: "cand-2", ModuleName: "alpha", Instruction: "Base instruction two.", Fitness: 0.6},
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{population}
+	gepa.setCurrentMultiObjectiveFitnessMap(map[string]*MultiObjectiveFitness{
+		"cand-1": sourceFitness,
+		"cand-2": sourceFitness,
+	})
+
+	err := gepa.evolvePopulation(context.Background())
+	require.NoError(t, err)
+
+	current := gepa.getCurrentPopulation()
+	require.NotNil(t, current)
+
+	var updated *GEPACandidate
+	for _, candidate := range current.Candidates {
+		if candidate.Instruction == "Improved instruction for the selected candidate." {
+			updated = candidate
+			break
+		}
+	}
+	require.NotNil(t, updated)
+
+	fitnessMap := gepa.getCurrentMultiObjectiveFitnessMap()
+	require.Contains(t, fitnessMap, updated.ID)
+	assert.Equal(t, 1.0, fitnessMap[updated.ID].SuccessRate)
+	assert.Equal(t, 1.0, fitnessMap[updated.ID].OutputQuality)
+	assert.Equal(t, sourceFitness.Efficiency, fitnessMap[updated.ID].Efficiency)
+	assert.Equal(t, sourceFitness.Robustness, fitnessMap[updated.ID].Robustness)
+	assert.Equal(t, sourceFitness.Generalization, fitnessMap[updated.ID].Generalization)
+	assert.Equal(t, sourceFitness.Diversity, fitnessMap[updated.ID].Diversity)
+	assert.Equal(t, sourceFitness.Innovation, fitnessMap[updated.ID].Innovation)
 }
 
 func TestInterceptorIntegration(t *testing.T) {
