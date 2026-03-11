@@ -237,6 +237,19 @@ func newCandidateEvaluationTestProgram(instruction string) core.Program {
 	})
 }
 
+func newTwoModuleCandidateEvaluationTestProgram(alphaInstruction, betaInstruction string) core.Program {
+	return core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule(alphaInstruction),
+		"beta":  newStaticCandidateTestModule(betaInstruction),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"output": modules["alpha"].GetSignature().Instruction + "|" + modules["beta"].GetSignature().Instruction,
+			}, nil
+		}
+	})
+}
+
 func exactOutputMetric(expected, actual map[string]interface{}) float64 {
 	if expected["output"] == actual["output"] {
 		return 1.0
@@ -400,7 +413,7 @@ func TestPopulationManagement(t *testing.T) {
 	}
 }
 
-func TestApplyCandidateOnlyUpdatesTargetModule(t *testing.T) {
+func TestApplyCandidateAppliesWholeProgramComponentTexts(t *testing.T) {
 	gepa := &GEPA{state: NewGEPAState()}
 
 	program := core.Program{
@@ -422,7 +435,7 @@ func TestApplyCandidateOnlyUpdatesTargetModule(t *testing.T) {
 
 	modified := gepa.applyCandidate(program, candidate)
 	assert.Equal(t, "alpha tuned", modified.Modules["alpha"].GetSignature().Instruction)
-	assert.Equal(t, "beta base", modified.Modules["beta"].GetSignature().Instruction)
+	assert.Equal(t, "beta tuned", modified.Modules["beta"].GetSignature().Instruction)
 }
 
 func TestNewEvaluationAdapterSnapshotsBatchOnce(t *testing.T) {
@@ -501,33 +514,23 @@ func TestCandidateInstructionForModule(t *testing.T) {
 	assert.Equal(t, "alpha inline", candidateInstructionForModule(inlineOnly, "alpha"))
 }
 
-func TestApplyBestCandidateComposesBestModuleCandidates(t *testing.T) {
+func TestApplyBestCandidateUsesWholeProgramState(t *testing.T) {
 	gepa := &GEPA{state: NewGEPAState()}
 
-	alphaBest := &GEPACandidate{
-		ID:          "alpha-best",
+	bestCandidate := &GEPACandidate{
+		ID:          "best-whole-program",
 		ModuleName:  "alpha",
 		Instruction: "alpha tuned",
 		ComponentTexts: map[string]string{
 			"alpha": "alpha tuned",
-			"beta":  "beta base",
+			"beta":  "beta tuned",
 		},
 		Fitness: 0.9,
 	}
-	betaBest := &GEPACandidate{
-		ID:          "beta-best",
-		ModuleName:  "beta",
-		Instruction: "beta tuned",
-		ComponentTexts: map[string]string{
-			"alpha": "alpha base",
-			"beta":  "beta tuned",
-		},
-		Fitness: 0.8,
-	}
 
-	gepa.state.BestCandidate = alphaBest
+	gepa.state.BestCandidate = bestCandidate
 	gepa.state.PopulationHistory = []*Population{{
-		Candidates: []*GEPACandidate{alphaBest, betaBest},
+		Candidates: []*GEPACandidate{bestCandidate},
 	}}
 
 	program := core.Program{
@@ -540,6 +543,36 @@ func TestApplyBestCandidateComposesBestModuleCandidates(t *testing.T) {
 	modified := gepa.applyBestCandidate(program)
 	assert.Equal(t, "alpha tuned", modified.Modules["alpha"].GetSignature().Instruction)
 	assert.Equal(t, "beta tuned", modified.Modules["beta"].GetSignature().Instruction)
+}
+
+func TestEvaluateCandidateWithAdapterUsesWholeProgramComponentTexts(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 1
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+	})
+	adapter := gepa.newEvaluationAdapter(newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"), dataset, exactOutputMetric)
+
+	candidate := &GEPACandidate{
+		ID:          "whole-program-candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta tuned",
+		},
+	}
+
+	evaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter)
+	require.NotNil(t, evaluation)
+	assert.Equal(t, 1.0, evaluation.TotalScore)
+	assert.Equal(t, 1.0, evaluation.AverageScore)
+	require.Len(t, evaluation.Cases, 1)
+	assert.Equal(t, "alpha tuned|beta tuned", evaluation.Cases[0].Outputs["output"])
 }
 
 func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
@@ -842,28 +875,6 @@ func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
 	resetCalls, nextCalls := dataset.counts()
 	assert.Equal(t, 1, resetCalls)
 	assert.Equal(t, 2, nextCalls)
-}
-
-func TestBestCandidatesByModuleReturnsCopies(t *testing.T) {
-	gepa := &GEPA{state: NewGEPAState()}
-
-	alphaBest := &GEPACandidate{
-		ID:          "alpha-best",
-		ModuleName:  "alpha",
-		Instruction: "alpha tuned",
-		Fitness:     0.9,
-	}
-	gepa.state.BestCandidate = alphaBest
-	gepa.state.PopulationHistory = []*Population{{
-		Candidates: []*GEPACandidate{alphaBest},
-	}}
-
-	bestByModule := gepa.bestCandidatesByModule()
-	require.Contains(t, bestByModule, "alpha")
-	assert.NotSame(t, alphaBest, bestByModule["alpha"])
-
-	bestByModule["alpha"].Instruction = "mutated outside state"
-	assert.Equal(t, "alpha tuned", alphaBest.Instruction)
 }
 
 func TestEvolutionaryOperators(t *testing.T) {
