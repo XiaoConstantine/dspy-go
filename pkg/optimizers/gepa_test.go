@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,50 @@ func mockMetric(expected, actual map[string]interface{}) float64 {
 		return 0.5
 	}
 	return 0.0
+}
+
+type staticCandidateTestModule struct {
+	signature core.Signature
+}
+
+func newStaticCandidateTestModule(instruction string) *staticCandidateTestModule {
+	return &staticCandidateTestModule{
+		signature: core.Signature{
+			Instruction: instruction,
+			Inputs: []core.InputField{
+				{Field: core.Field{Name: "input", Description: "Test input"}},
+			},
+			Outputs: []core.OutputField{
+				{Field: core.Field{Name: "output", Description: "Test output"}},
+			},
+		},
+	}
+}
+
+func (m *staticCandidateTestModule) Process(context.Context, map[string]any, ...core.Option) (map[string]any, error) {
+	return map[string]any{"output": "ok"}, nil
+}
+
+func (m *staticCandidateTestModule) GetSignature() core.Signature {
+	return m.signature
+}
+
+func (m *staticCandidateTestModule) SetSignature(signature core.Signature) {
+	m.signature = signature
+}
+
+func (m *staticCandidateTestModule) SetLLM(core.LLM) {}
+
+func (m *staticCandidateTestModule) Clone() core.Module {
+	return &staticCandidateTestModule{signature: m.signature}
+}
+
+func (m *staticCandidateTestModule) GetDisplayName() string {
+	return "StaticCandidateTestModule"
+}
+
+func (m *staticCandidateTestModule) GetModuleType() string {
+	return "test"
 }
 
 type countingLLM struct {
@@ -289,8 +334,139 @@ func TestPopulationManagement(t *testing.T) {
 		assert.NotEmpty(t, candidate.ID)
 		assert.NotEmpty(t, candidate.Instruction)
 		assert.Equal(t, "test_module", candidate.ModuleName)
+		require.Contains(t, candidate.ComponentTexts, "test_module")
+		assert.Equal(t, candidate.Instruction, candidate.ComponentTexts["test_module"])
 		assert.Equal(t, 0, candidate.Generation)
 	}
+}
+
+func TestApplyCandidateOnlyUpdatesTargetModule(t *testing.T) {
+	gepa := &GEPA{state: NewGEPAState()}
+
+	program := core.Program{
+		Modules: map[string]core.Module{
+			"alpha": newStaticCandidateTestModule("alpha base"),
+			"beta":  newStaticCandidateTestModule("beta base"),
+		},
+	}
+
+	candidate := &GEPACandidate{
+		ID:          "candidate-whole-program",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta tuned",
+		},
+	}
+
+	modified := gepa.applyCandidate(program, candidate)
+	assert.Equal(t, "alpha tuned", modified.Modules["alpha"].GetSignature().Instruction)
+	assert.Equal(t, "beta base", modified.Modules["beta"].GetSignature().Instruction)
+}
+
+func TestCandidateInstructionForModule(t *testing.T) {
+	candidate := &GEPACandidate{
+		ModuleName:  "alpha",
+		Instruction: "alpha inline",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha mapped",
+			"beta":  "beta mapped",
+		},
+	}
+
+	assert.Equal(t, "alpha mapped", candidateInstructionForModule(candidate, "alpha"))
+	assert.Equal(t, "beta mapped", candidateInstructionForModule(candidate, "beta"))
+	assert.Equal(t, "", candidateInstructionForModule(candidate, "gamma"))
+	assert.Equal(t, "", candidateInstructionForModule(candidate, ""))
+
+	inlineOnly := &GEPACandidate{
+		ModuleName:  "alpha",
+		Instruction: "alpha inline",
+	}
+	assert.Equal(t, "alpha inline", candidateInstructionForModule(inlineOnly, "alpha"))
+}
+
+func TestSelectCompatibleParentFallsBackWithoutInfiniteLoop(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		rng:    rand.New(rand.NewSource(1)),
+		state:  NewGEPAState(),
+	}
+
+	parent1 := &GEPACandidate{ID: "duplicate", ModuleName: "alpha"}
+	parents := []*GEPACandidate{
+		parent1,
+		{ID: "duplicate", ModuleName: "alpha"},
+		{ID: "duplicate", ModuleName: "beta"},
+	}
+
+	selected := gepa.selectCompatibleParent(parents, parent1)
+	require.NotNil(t, selected)
+	assert.Equal(t, parent1, selected)
+}
+
+func TestApplyBestCandidateComposesBestModuleCandidates(t *testing.T) {
+	gepa := &GEPA{state: NewGEPAState()}
+
+	alphaBest := &GEPACandidate{
+		ID:          "alpha-best",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta base",
+		},
+		Fitness: 0.9,
+	}
+	betaBest := &GEPACandidate{
+		ID:          "beta-best",
+		ModuleName:  "beta",
+		Instruction: "beta tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta tuned",
+		},
+		Fitness: 0.8,
+	}
+
+	gepa.state.BestCandidate = alphaBest
+	gepa.state.PopulationHistory = []*Population{{
+		Candidates: []*GEPACandidate{alphaBest, betaBest},
+	}}
+
+	program := core.Program{
+		Modules: map[string]core.Module{
+			"alpha": newStaticCandidateTestModule("alpha base"),
+			"beta":  newStaticCandidateTestModule("beta base"),
+		},
+	}
+
+	modified := gepa.applyBestCandidate(program)
+	assert.Equal(t, "alpha tuned", modified.Modules["alpha"].GetSignature().Instruction)
+	assert.Equal(t, "beta tuned", modified.Modules["beta"].GetSignature().Instruction)
+}
+
+func TestBestCandidatesByModuleReturnsCopies(t *testing.T) {
+	gepa := &GEPA{state: NewGEPAState()}
+
+	alphaBest := &GEPACandidate{
+		ID:          "alpha-best",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		Fitness:     0.9,
+	}
+	gepa.state.BestCandidate = alphaBest
+	gepa.state.PopulationHistory = []*Population{{
+		Candidates: []*GEPACandidate{alphaBest},
+	}}
+
+	bestByModule := gepa.bestCandidatesByModule()
+	require.Contains(t, bestByModule, "alpha")
+	assert.NotSame(t, alphaBest, bestByModule["alpha"])
+
+	bestByModule["alpha"].Instruction = "mutated outside state"
+	assert.Equal(t, "alpha tuned", alphaBest.Instruction)
 }
 
 func TestEvolutionaryOperators(t *testing.T) {
@@ -954,9 +1130,13 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 	// Test candidate copying
 	original := &GEPACandidate{
 		ID:          "copy-test",
+		ModuleName:  "copy-module",
 		Instruction: "Original instruction",
-		Fitness:     0.8,
-		Metadata:    map[string]interface{}{"key": "value"},
+		ComponentTexts: map[string]string{
+			"copy-module": "Original instruction",
+		},
+		Fitness:  0.8,
+		Metadata: map[string]interface{}{"key": "value"},
 	}
 
 	copied := gepa.copyCandidate(original)
@@ -964,6 +1144,7 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 	assert.Equal(t, original.Fitness, copied.Fitness)
 	assert.Equal(t, original.ID, copied.ID) // copyCandidate preserves original ID
 	assert.NotSame(t, original, copied)     // But creates a new instance
+	assert.Equal(t, original.ComponentTexts, copied.ComponentTexts)
 
 	// Test convergence with various states
 	gepa.state.BestFitness = 1.0
