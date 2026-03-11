@@ -21,6 +21,7 @@ type gepaEvaluationCase struct {
 type gepaCandidateEvaluation struct {
 	Candidate    *GEPACandidate
 	Cases        []gepaEvaluationCase
+	TotalScore   float64
 	AverageScore float64
 }
 
@@ -105,6 +106,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	}
 
 	if scoredCases > 0 {
+		result.TotalScore = totalScore
 		result.AverageScore = totalScore / float64(scoredCases)
 	}
 
@@ -117,6 +119,7 @@ func cloneGEPACandidateEvaluation(evaluation *gepaCandidateEvaluation) *gepaCand
 	}
 
 	cloned := &gepaCandidateEvaluation{
+		TotalScore:   evaluation.TotalScore,
 		AverageScore: evaluation.AverageScore,
 	}
 	if evaluation.Candidate != nil {

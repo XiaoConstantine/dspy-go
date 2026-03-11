@@ -724,6 +724,12 @@ type GEPA struct {
 	generationLLM core.LLM
 	reflectionLLM core.LLM
 
+	// Latest stable minibatch adapter from the current generation. Mutation
+	// proposals can use this to do candidate-level accept/reject before they
+	// enter the next generation.
+	evaluationAdapterMu     sync.RWMutex
+	latestEvaluationAdapter *gepaEvaluationAdapter
+
 	// Interceptor integration
 	interceptorChain *core.InterceptorChain
 
@@ -4269,10 +4275,18 @@ func (g *GEPA) mutate(ctx context.Context, candidate *GEPACandidate) *GEPACandid
 	}
 
 	if proposed := g.reflectionGuidedMutation(ctx, candidate); proposed != nil {
-		return proposed
+		if proposed == candidate {
+			return candidate
+		}
+		return g.acceptMutationProposal(ctx, candidate, proposed)
 	}
 
-	return g.semanticMutation(ctx, candidate)
+	proposed := g.semanticMutation(ctx, candidate)
+	if proposed == candidate {
+		return candidate
+	}
+
+	return g.acceptMutationProposal(ctx, candidate, proposed)
 }
 
 // semanticMutation performs LLM-based semantic mutation.
@@ -4455,6 +4469,7 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 		len(population.Candidates))
 
 	adapter := g.newEvaluationAdapter(program, dataset, metric)
+	g.setLatestEvaluationAdapter(adapter)
 
 	// Use concurrent evaluation with controlled concurrency
 	p := pool.New().WithMaxGoroutines(g.config.ConcurrencyLevel)

@@ -470,6 +470,7 @@ func TestEvaluateCandidateWithAdapterCapturesExampleResults(t *testing.T) {
 	evaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter)
 	require.NotNil(t, evaluation)
 	assert.Equal(t, candidate, evaluation.Candidate)
+	assert.Equal(t, 2.0, evaluation.TotalScore)
 	assert.Equal(t, 1.0, evaluation.AverageScore)
 	require.Len(t, evaluation.Cases, 2)
 	for _, evalCase := range evaluation.Cases {
@@ -609,11 +610,197 @@ func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
 	storedEvaluation := gepa.state.GetCandidateEvaluation(candidate1.ID)
 	require.NotNil(t, storedEvaluation)
 	require.Len(t, storedEvaluation.Cases, 2)
+	assert.Equal(t, 2.0, storedEvaluation.TotalScore)
 	assert.Equal(t, 1.0, storedEvaluation.AverageScore)
 
 	resetCalls, nextCalls := dataset.counts()
 	assert.Equal(t, 1, resetCalls)
 	assert.Equal(t, 2, nextCalls)
+}
+
+func TestMutateAcceptsImprovingProposalOnMinibatch(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: "alpha tuned",
+	}, nil)
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			MutationRate:        1.0,
+			EvaluationBatchSize: 2,
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(1)),
+	}
+
+	baseline := &GEPACandidate{
+		ID:          "baseline",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		Fitness:     0.0,
+	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+	})
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	gepa.setLatestEvaluationAdapter(adapter)
+	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		baseline.ID: gepa.evaluateCandidateWithAdapter(context.Background(), baseline, adapter),
+	})
+
+	mutated := gepa.mutate(context.Background(), baseline)
+	require.NotNil(t, mutated)
+	assert.NotEqual(t, baseline.ID, mutated.ID)
+	assert.Equal(t, "alpha tuned", mutated.Instruction)
+	assert.Equal(t, 1.0, mutated.Fitness)
+	assert.Equal(t, true, mutated.Metadata["proposal_accepted"])
+	assert.Equal(t, 0.0, mutated.Metadata["proposal_baseline_total"])
+	assert.Equal(t, 2.0, mutated.Metadata["proposal_candidate_total"])
+	assert.Equal(t, 0.0, mutated.Metadata["proposal_baseline_average"])
+	assert.Equal(t, 1.0, mutated.Metadata["proposal_candidate_average"])
+}
+
+func TestMutateRejectsNonImprovingProposalOnMinibatch(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: "alpha worse",
+	}, nil)
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			MutationRate:        1.0,
+			EvaluationBatchSize: 2,
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(1)),
+	}
+
+	baseline := &GEPACandidate{
+		ID:          "baseline",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		Fitness:     1.0,
+	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+	})
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	gepa.setLatestEvaluationAdapter(adapter)
+	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		baseline.ID: gepa.evaluateCandidateWithAdapter(context.Background(), baseline, adapter),
+	})
+
+	mutated := gepa.mutate(context.Background(), baseline)
+	require.NotNil(t, mutated)
+	assert.Same(t, baseline, mutated)
+	assert.Equal(t, "alpha base", mutated.Instruction)
+}
+
+func TestMutateSkipsAcceptanceForNoOpFallbackMutation(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return((*core.LLMResponse)(nil), fmt.Errorf("boom"))
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			MutationRate:        1.0,
+			EvaluationBatchSize: 2,
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(1)),
+	}
+
+	executeCalls := 0
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule(""),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			executeCalls++
+			return map[string]interface{}{"output": modules["alpha"].GetSignature().Instruction}, nil
+		}
+	})
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": ""}},
+	})
+	gepa.setLatestEvaluationAdapter(gepa.newEvaluationAdapter(program, dataset, exactOutputMetric))
+
+	baseline := &GEPACandidate{
+		ID:          "empty",
+		ModuleName:  "alpha",
+		Instruction: "",
+	}
+
+	mutated := gepa.mutate(context.Background(), baseline)
+	assert.Same(t, baseline, mutated)
+	assert.Equal(t, 0, executeCalls)
+}
+
+func TestMutateAcceptsProposalUsingTotalScoreWhenAverageWouldReject(t *testing.T) {
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			EvaluationBatchSize: 2,
+		},
+		state: NewGEPAState(),
+	}
+
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule("fragile"),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(_ context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			instruction := modules["alpha"].GetSignature().Instruction
+			if instruction == "fragile" && inputs["case"] == "hard" {
+				return nil, fmt.Errorf("hard-case failure")
+			}
+			return map[string]interface{}{"output": "ok"}, nil
+		}
+	})
+	weightedMetric := func(expected, actual map[string]interface{}) float64 {
+		if expected["output"] != actual["output"] {
+			return 0.0
+		}
+		return expected["weight"].(float64)
+	}
+	dataset := newCountingDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"case": "easy"},
+			Outputs: map[string]interface{}{"output": "ok", "weight": 1.0},
+		},
+		{
+			Inputs:  map[string]interface{}{"case": "hard"},
+			Outputs: map[string]interface{}{"output": "ok", "weight": 0.6},
+		},
+	})
+	adapter := gepa.newEvaluationAdapter(program, dataset, weightedMetric)
+	gepa.setLatestEvaluationAdapter(adapter)
+
+	baseline := &GEPACandidate{
+		ID:          "fragile-parent",
+		ModuleName:  "alpha",
+		Instruction: "fragile",
+	}
+	proposed := &GEPACandidate{
+		ID:          "robust-child",
+		ModuleName:  "alpha",
+		Instruction: "robust instruction",
+	}
+	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		baseline.ID: gepa.evaluateCandidateWithAdapter(context.Background(), baseline, adapter),
+	})
+
+	accepted := gepa.acceptMutationProposal(context.Background(), baseline, proposed)
+	require.NotNil(t, accepted)
+	assert.Same(t, proposed, accepted)
+	assert.Equal(t, "robust instruction", accepted.Instruction)
+	assert.Equal(t, 1.6, accepted.Metadata["proposal_candidate_total"])
+	assert.Equal(t, 1.0, accepted.Metadata["proposal_baseline_total"])
+	assert.Equal(t, 0.8, accepted.Metadata["proposal_candidate_average"])
+	assert.Equal(t, 1.0, accepted.Metadata["proposal_baseline_average"])
 }
 
 func TestMaterializeEvaluationBatchUsesSingleExampleForNonPositiveBatchSize(t *testing.T) {
