@@ -177,9 +177,8 @@ func deriveBaseComponentTexts(base map[string]string, moduleName, instruction st
 	if componentTexts == nil {
 		componentTexts = make(map[string]string, 1)
 	}
-	// Non-target component texts are lineage bookkeeping until GEPA switches to
-	// whole-program candidate evaluation. Mutations/crossovers therefore inherit
-	// the source candidate's view and update only the targeted module here.
+	// GEPA candidates carry the full program instruction map. Mutations update
+	// one selected component while preserving the rest of the candidate state.
 	componentTexts[moduleName] = instruction
 	return componentTexts
 }
@@ -222,6 +221,23 @@ func componentTextsFromProgram(program core.Program) map[string]string {
 	}
 
 	return componentTexts
+}
+
+func componentModuleNames(componentTexts map[string]string) []string {
+	if len(componentTexts) == 0 {
+		return nil
+	}
+
+	moduleNames := make([]string, 0, len(componentTexts))
+	for moduleName := range componentTexts {
+		moduleName = strings.TrimSpace(moduleName)
+		if moduleName == "" {
+			continue
+		}
+		moduleNames = append(moduleNames, moduleName)
+	}
+	sort.Strings(moduleNames)
+	return moduleNames
 }
 
 // Population represents a generation of prompt candidates.
@@ -3897,8 +3913,9 @@ func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, source *GEPAC
 		return nil
 	}
 
-	proposed := g.mutate(ctx, source)
-	if proposed == nil || proposed == source {
+	focusedSource := g.prepareCandidateForComponentUpdate(source)
+	proposed := g.mutate(ctx, focusedSource)
+	if proposed == nil || proposed == source || proposed == focusedSource {
 		carried := g.copyCandidate(source)
 		carried.Generation = nextGeneration
 		return carried
@@ -3909,6 +3926,35 @@ func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, source *GEPAC
 	}
 
 	return proposed
+}
+
+func (g *GEPA) prepareCandidateForComponentUpdate(source *GEPACandidate) *GEPACandidate {
+	if source == nil {
+		return nil
+	}
+
+	moduleName := g.selectComponentForUpdate(source)
+	focused := g.copyCandidate(source)
+	focused.ModuleName = moduleName
+	focused.Instruction = candidateInstructionForModule(source, moduleName)
+	return focused
+}
+
+func (g *GEPA) selectComponentForUpdate(candidate *GEPACandidate) string {
+	if candidate == nil {
+		return ""
+	}
+
+	moduleNames := componentModuleNames(cloneCandidateComponentTexts(candidate))
+	if len(moduleNames) == 0 {
+		return strings.TrimSpace(candidate.ModuleName)
+	}
+
+	// The current whole-program refactor keeps component focus selection simple:
+	// choose one module uniformly at random from the candidate state. This keeps
+	// the iterative update path lightweight for now; round-robin or "update all"
+	// strategies can layer on top of the same whole-program candidate model later.
+	return moduleNames[g.rng.Intn(len(moduleNames))]
 }
 
 // selectCandidates returns candidates sampled according to the configured
@@ -4546,13 +4592,17 @@ func (g *GEPA) applyComponentTexts(program core.Program, componentTexts map[stri
 	return modified
 }
 
-// applyCandidate applies only the candidate's target module during evaluation.
-// Until GEPA candidates become true whole-program states, non-target component
-// texts are lineage bookkeeping and should not overwrite other independently
-// tuned modules during fitness measurement.
+// applyCandidate applies the candidate's whole-program instruction state during
+// evaluation. ModuleName/Instruction remain the focused component for the
+// current update step, while ComponentTexts is the authoritative program state.
 func (g *GEPA) applyCandidate(program core.Program, candidate *GEPACandidate) core.Program {
 	if candidate == nil {
 		return program.Clone()
+	}
+
+	componentTexts := cloneCandidateComponentTexts(candidate)
+	if len(componentTexts) > 0 {
+		return g.applyComponentTexts(program, componentTexts)
 	}
 
 	moduleName := strings.TrimSpace(candidate.ModuleName)
@@ -4565,9 +4615,7 @@ func (g *GEPA) applyCandidate(program core.Program, candidate *GEPACandidate) co
 		return program.Clone()
 	}
 
-	return g.applyComponentTexts(program, map[string]string{
-		moduleName: instruction,
-	})
+	return g.applyComponentTexts(program, map[string]string{moduleName: instruction})
 }
 
 // Reflection Engine
@@ -5103,7 +5151,11 @@ func (g *GEPA) hasConverged() bool {
 	return false
 }
 
-// applyBestCandidate applies the best candidate to the final program.
+// applyBestCandidate applies the best whole-program candidate to the final
+// program. This intentionally prefers a coherent candidate state over the older
+// "best module from anywhere in history" composition, matching whole-program
+// GEPA semantics even when that means a module-specific local winner from a
+// different candidate is not stitched into the final result.
 func (g *GEPA) applyBestCandidate(program core.Program) core.Program {
 	if g.state.BestCandidate == nil {
 		logging.GetLogger().Warn(context.Background(), "No best candidate found, returning original program")
@@ -5116,56 +5168,7 @@ func (g *GEPA) applyBestCandidate(program core.Program) core.Program {
 		g.state.BestCandidate.Fitness,
 		g.state.BestCandidate.Instruction)
 
-	bestByModule := g.bestCandidatesByModule()
-	if len(bestByModule) == 0 {
-		return g.applyCandidate(program, g.state.BestCandidate)
-	}
-
-	componentTexts := make(map[string]string, len(bestByModule))
-	for moduleName, candidate := range bestByModule {
-		instruction := candidateInstructionForModule(candidate, moduleName)
-		if instruction == "" {
-			continue
-		}
-		componentTexts[moduleName] = instruction
-	}
-
-	return g.applyComponentTexts(program, componentTexts)
-}
-
-func (g *GEPA) bestCandidatesByModule() map[string]*GEPACandidate {
-	bestByModule := make(map[string]*GEPACandidate)
-
-	g.state.mu.RLock()
-	defer g.state.mu.RUnlock()
-
-	for _, population := range g.state.PopulationHistory {
-		if population == nil {
-			continue
-		}
-
-		for _, candidate := range population.Candidates {
-			if candidate == nil || strings.TrimSpace(candidate.ModuleName) == "" {
-				continue
-			}
-
-			currentBest, exists := bestByModule[candidate.ModuleName]
-			if !exists || candidate.Fitness > currentBest.Fitness {
-				bestByModule[candidate.ModuleName] = candidate
-			}
-		}
-	}
-
-	if len(bestByModule) == 0 && g.state.BestCandidate != nil && strings.TrimSpace(g.state.BestCandidate.ModuleName) != "" {
-		bestByModule[g.state.BestCandidate.ModuleName] = g.state.BestCandidate
-	}
-
-	clonedBestByModule := make(map[string]*GEPACandidate, len(bestByModule))
-	for moduleName, candidate := range bestByModule {
-		clonedBestByModule[moduleName] = g.copyCandidate(candidate)
-	}
-
-	return clonedBestByModule
+	return g.applyCandidate(program, g.state.BestCandidate)
 }
 
 // LLM-based Self-Critique Implementation
