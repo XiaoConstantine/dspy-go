@@ -11,7 +11,6 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -502,25 +501,6 @@ func TestCandidateInstructionForModule(t *testing.T) {
 	assert.Equal(t, "alpha inline", candidateInstructionForModule(inlineOnly, "alpha"))
 }
 
-func TestSelectCompatibleParentFallsBackWithoutInfiniteLoop(t *testing.T) {
-	gepa := &GEPA{
-		config: DefaultGEPAConfig(),
-		rng:    rand.New(rand.NewSource(1)),
-		state:  NewGEPAState(),
-	}
-
-	parent1 := &GEPACandidate{ID: "duplicate", ModuleName: "alpha"}
-	parents := []*GEPACandidate{
-		parent1,
-		{ID: "duplicate", ModuleName: "alpha"},
-		{ID: "duplicate", ModuleName: "beta"},
-	}
-
-	selected := gepa.selectCompatibleParent(parents, parent1)
-	require.NotNil(t, selected)
-	assert.Equal(t, parent1, selected)
-}
-
 func TestApplyBestCandidateComposesBestModuleCandidates(t *testing.T) {
 	gepa := &GEPA{state: NewGEPAState()}
 
@@ -916,15 +896,6 @@ func TestEvolutionaryOperators(t *testing.T) {
 	// Test tournament selection
 	selected := gepa.tournamentSelection(population, 2)
 	assert.Len(t, selected, 2)
-
-	// Test crossover
-	parent1 := candidates[0]
-	parent2 := candidates[1]
-	child1, child2 := gepa.crossover(parent1, parent2)
-
-	assert.NotEqual(t, parent1.ID, child1.ID)
-	assert.NotEqual(t, parent2.ID, child2.ID)
-	assert.Equal(t, utils.Max(parent1.Generation, parent2.Generation)+1, child1.Generation)
 
 	// Test mutation
 	mutated := gepa.mutate(context.Background(), candidates[0])
@@ -1815,6 +1786,89 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 
 	concurrentTasks := gepa.getCurrentConcurrentTasks()
 	assert.GreaterOrEqual(t, concurrentTasks, 0)
+}
+
+func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		return strings.Contains(prompt, "Apply a")
+	}), mock.Anything).Return(&core.LLMResponse{
+		Content: "Improved instruction for the selected candidate.",
+	}, nil).Twice()
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			PopulationSize:    2,
+			MutationRate:      1.0,
+			ElitismRate:       0.0,
+			TournamentSize:    1,
+			SelectionStrategy: "tournament",
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(3)),
+	}
+
+	population := &Population{
+		Generation: 0,
+		Candidates: []*GEPACandidate{
+			{ID: "cand-1", ModuleName: "alpha", Instruction: "Base instruction one.", Fitness: 0.8},
+			{ID: "cand-2", ModuleName: "alpha", Instruction: "Base instruction two.", Fitness: 0.6},
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{population}
+
+	err := gepa.evolvePopulation(context.Background())
+	require.NoError(t, err)
+
+	current := gepa.getCurrentPopulation()
+	require.NotNil(t, current)
+	assert.Equal(t, 1, current.Generation)
+	require.Len(t, current.Candidates, 2)
+	for _, candidate := range current.Candidates {
+		assert.Equal(t, 1, candidate.Generation)
+		assert.Equal(t, "Improved instruction for the selected candidate.", candidate.Instruction)
+	}
+
+	mockLLM.AssertExpectations(t)
+}
+
+func TestEvolvePopulationCarriesForwardCandidatesWithoutSelectedParents(t *testing.T) {
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			PopulationSize:    1,
+			MutationRate:      0.0,
+			ElitismRate:       0.0,
+			TournamentSize:    1,
+			SelectionStrategy: "tournament",
+		},
+		state: NewGEPAState(),
+		rng:   rand.New(rand.NewSource(1)),
+	}
+
+	original := &GEPACandidate{
+		ID:          "solo",
+		ModuleName:  "alpha",
+		Instruction: "Carry me forward.",
+		Generation:  0,
+		Fitness:     0.7,
+	}
+	gepa.state.PopulationHistory = []*Population{{
+		Generation: 0,
+		Candidates: []*GEPACandidate{original},
+	}}
+
+	err := gepa.evolvePopulation(context.Background())
+	require.NoError(t, err)
+
+	current := gepa.getCurrentPopulation()
+	require.NotNil(t, current)
+	assert.Equal(t, 1, current.Generation)
+	require.Len(t, current.Candidates, 1)
+	assert.NotSame(t, original, current.Candidates[0])
+	assert.Equal(t, original.ID, current.Candidates[0].ID)
+	assert.Equal(t, 1, current.Candidates[0].Generation)
+	assert.Equal(t, original.Instruction, current.Candidates[0].Instruction)
 }
 
 func TestInterceptorIntegration(t *testing.T) {

@@ -3801,7 +3801,9 @@ func (g *GEPA) updateBestCandidate(candidate *GEPACandidate) {
 
 // Evolutionary Operators
 
-// evolvePopulation creates the next generation using evolutionary operators.
+// evolvePopulation creates the next generation using candidate-centric proposal
+// updates. This preserves the current generational shell while moving GEPA away
+// from crossover-heavy offspring generation toward one proposal at a time.
 func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	logger := logging.GetLogger()
 	currentPop := g.getCurrentPopulation()
@@ -3811,10 +3813,19 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 
 	logger.Info(ctx, "Evolving population for generation %d", currentPop.Generation)
 
-	// Select parents for reproduction
+	// Select candidates that seed proposal updates. Small populations can yield
+	// zero selected parents from the current selection heuristics, so fall back
+	// to the current population in that case.
 	parents := g.selectParents(currentPop)
+	if len(parents) == 0 {
+		parents = currentPop.Candidates
+	}
+	if len(parents) == 0 {
+		return fmt.Errorf("no candidates available for proposal evolution")
+	}
 
-	// Create offspring through crossover and mutation
+	// Create the next generation by carrying forward elites and then repeatedly
+	// proposing a single candidate update at a time.
 	offspring := make([]*GEPACandidate, 0, g.config.PopulationSize)
 
 	// Elitism: keep best candidates
@@ -3822,25 +3833,14 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	elite := g.selectElite(currentPop, eliteCount)
 	offspring = append(offspring, elite...)
 
-	// Generate remaining offspring
+	nextGeneration := currentPop.Generation + 1
 	for len(offspring) < g.config.PopulationSize {
-		// Select two parents
-		parent1 := parents[g.rng.Intn(len(parents))]
-		parent2 := g.selectCompatibleParent(parents, parent1)
-
-		// Apply crossover
-		child1, child2 := g.crossover(parent1, parent2)
-
-		// Apply mutation
-		child1 = g.mutate(ctx, child1)
-		if len(offspring) < g.config.PopulationSize-1 {
-			child2 = g.mutate(ctx, child2)
+		source := parents[g.rng.Intn(len(parents))]
+		nextCandidate := g.proposeNextGenerationCandidate(ctx, source, nextGeneration)
+		if nextCandidate == nil {
+			continue
 		}
-
-		offspring = append(offspring, child1)
-		if len(offspring) < g.config.PopulationSize {
-			offspring = append(offspring, child2)
-		}
+		offspring = append(offspring, nextCandidate)
 	}
 
 	// Ensure we don't exceed population size
@@ -3851,7 +3851,7 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	// Create new population
 	newPopulation := &Population{
 		Candidates:    offspring,
-		Generation:    currentPop.Generation + 1,
+		Generation:    nextGeneration,
 		BestFitness:   0.0,
 		BestCandidate: nil,
 	}
@@ -3884,6 +3884,25 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	return nil
 }
 
+func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, source *GEPACandidate, nextGeneration int) *GEPACandidate {
+	if source == nil {
+		return nil
+	}
+
+	proposed := g.mutate(ctx, source)
+	if proposed == nil || proposed == source {
+		carried := g.copyCandidate(source)
+		carried.Generation = nextGeneration
+		return carried
+	}
+
+	if proposed.Generation < nextGeneration {
+		proposed.Generation = nextGeneration
+	}
+
+	return proposed
+}
+
 // selectParents selects parents for reproduction based on the selection strategy.
 func (g *GEPA) selectParents(population *Population) []*GEPACandidate {
 	logger := logging.GetLogger()
@@ -3906,43 +3925,6 @@ func (g *GEPA) selectParents(population *Population) []*GEPACandidate {
 		logger.Debug(context.Background(), "Using default tournament selection for parent selection")
 		return g.tournamentSelection(population, selectionSize)
 	}
-}
-
-func (g *GEPA) selectCompatibleParent(parents []*GEPACandidate, parent1 *GEPACandidate) *GEPACandidate {
-	if len(parents) == 0 {
-		return parent1
-	}
-
-	if len(parents) == 1 || parent1 == nil {
-		return parents[g.rng.Intn(len(parents))]
-	}
-
-	compatible := make([]*GEPACandidate, 0, len(parents))
-	for _, candidate := range parents {
-		if candidate == nil || candidate.ID == parent1.ID {
-			continue
-		}
-		if candidate.ModuleName == parent1.ModuleName {
-			compatible = append(compatible, candidate)
-		}
-	}
-
-	if len(compatible) > 0 {
-		return compatible[g.rng.Intn(len(compatible))]
-	}
-
-	distinct := make([]*GEPACandidate, 0, len(parents))
-	for _, candidate := range parents {
-		if candidate == nil || candidate.ID == parent1.ID {
-			continue
-		}
-		distinct = append(distinct, candidate)
-	}
-	if len(distinct) > 0 {
-		return distinct[g.rng.Intn(len(distinct))]
-	}
-
-	return parent1
 }
 
 // tournamentSelection implements tournament selection.
@@ -4124,148 +4106,6 @@ func (g *GEPA) selectParetoElite(candidates []*GEPACandidate, fitnessMap map[str
 	}
 
 	return selected
-}
-
-// crossover applies crossover between two parents.
-func (g *GEPA) crossover(parent1, parent2 *GEPACandidate) (*GEPACandidate, *GEPACandidate) {
-	if g.rng.Float64() > g.config.CrossoverRate {
-		// No crossover, return copies of parents
-		return g.copyCandidate(parent1), g.copyCandidate(parent2)
-	}
-
-	return g.semanticCrossover(parent1, parent2)
-}
-
-// semanticCrossover performs LLM-based semantic crossover.
-func (g *GEPA) semanticCrossover(parent1, parent2 *GEPACandidate) (*GEPACandidate, *GEPACandidate) {
-	prompt := fmt.Sprintf(`Create two new instruction variations by combining the best aspects of these parent instructions:
-
-Parent 1 (fitness: %.3f): "%s"
-Parent 2 (fitness: %.3f): "%s"
-
-Generate two offspring that:
-1. Combine semantic elements from both parents
-2. Maintain clarity and effectiveness
-3. Create novel but coherent instructions
-4. Each offspring should be on a separate line
-5. Number each offspring (1., 2.)
-
-Offspring:`,
-		parent1.Fitness, parent1.Instruction,
-		parent2.Fitness, parent2.Instruction)
-
-	response, err := g.generationLLM.Generate(context.Background(), prompt)
-	if err != nil {
-		// Fallback: simple text mixing
-		return g.fallbackCrossover(parent1, parent2)
-	}
-
-	offspring := g.parseOffspring(response.Content)
-	if len(offspring) < 2 {
-		return g.fallbackCrossover(parent1, parent2)
-	}
-
-	child1 := &GEPACandidate{
-		ID:             g.generateCandidateID(),
-		ModuleName:     parent1.ModuleName,
-		Instruction:    offspring[0],
-		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, offspring[0]),
-		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:      []string{parent1.ID, parent2.ID},
-		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
-			"crossover_type":  "semantic",
-			"parent1_fitness": parent1.Fitness,
-			"parent2_fitness": parent2.Fitness,
-		}, parent1.Metadata, parent2.Metadata),
-	}
-
-	child2 := &GEPACandidate{
-		ID:             g.generateCandidateID(),
-		ModuleName:     parent1.ModuleName,
-		Instruction:    offspring[1],
-		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, offspring[1]),
-		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:      []string{parent1.ID, parent2.ID},
-		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
-			"crossover_type":  "semantic",
-			"parent1_fitness": parent1.Fitness,
-			"parent2_fitness": parent2.Fitness,
-		}, parent1.Metadata, parent2.Metadata),
-	}
-
-	return child1, child2
-}
-
-// fallbackCrossover provides simple fallback crossover when LLM fails.
-func (g *GEPA) fallbackCrossover(parent1, parent2 *GEPACandidate) (*GEPACandidate, *GEPACandidate) {
-	// Simple structural mixing - split instructions and recombine
-	words1 := strings.Fields(parent1.Instruction)
-	words2 := strings.Fields(parent2.Instruction)
-
-	// Create child1: first half of parent1 + second half of parent2
-	split1 := len(words1) / 2
-	split2 := len(words2) / 2
-
-	child1Words := append(words1[:split1], words2[split2:]...)
-	child2Words := append(words2[:split2], words1[split1:]...)
-
-	child1 := &GEPACandidate{
-		ID:             g.generateCandidateID(),
-		ModuleName:     parent1.ModuleName,
-		Instruction:    strings.Join(child1Words, " "),
-		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, strings.Join(child1Words, " ")),
-		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:      []string{parent1.ID, parent2.ID},
-		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
-			"crossover_type": "structural_fallback",
-		}, parent1.Metadata, parent2.Metadata),
-	}
-
-	child2 := &GEPACandidate{
-		ID:             g.generateCandidateID(),
-		ModuleName:     parent1.ModuleName,
-		Instruction:    strings.Join(child2Words, " "),
-		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, strings.Join(child2Words, " ")),
-		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:      []string{parent1.ID, parent2.ID},
-		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
-			"crossover_type": "structural_fallback",
-		}, parent1.Metadata, parent2.Metadata),
-	}
-
-	return child1, child2
-}
-
-// parseOffspring extracts offspring from crossover LLM response.
-func (g *GEPA) parseOffspring(content string) []string {
-	lines := strings.Split(content, "\n")
-	offspring := make([]string, 0, 2)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Remove numbering and quotes
-		line = strings.TrimPrefix(line, "1.")
-		line = strings.TrimPrefix(line, "2.")
-		line = strings.TrimSpace(line)
-		line = strings.Trim(line, "\"'")
-
-		if line != "" && len(line) > 10 {
-			offspring = append(offspring, line)
-			if len(offspring) >= 2 {
-				break
-			}
-		}
-	}
-
-	return offspring
 }
 
 // mutate applies mutation to a candidate.
