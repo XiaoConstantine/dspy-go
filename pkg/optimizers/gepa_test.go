@@ -1441,6 +1441,26 @@ func TestMutateUsesParentReflectionGuidanceForOffspring(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
+func TestHasReflectionGuidanceRequiresActionableFeedback(t *testing.T) {
+	assert.False(t, hasReflectionGuidance(nil))
+	assert.False(t, hasReflectionGuidance(&ReflectionResult{
+		Strengths: []string{"Clear wording"},
+	}))
+	assert.True(t, hasReflectionGuidance(&ReflectionResult{
+		Weaknesses: []string{"Too vague"},
+	}))
+	assert.True(t, hasReflectionGuidance(&ReflectionResult{
+		Suggestions: []string{"Add output format constraints"},
+	}))
+}
+
+func TestExtractInstructionCandidateStripsMultiDigitNumbering(t *testing.T) {
+	gepa := &GEPA{}
+
+	instruction := gepa.extractInstructionCandidate("10. Return the answer in a labeled format.")
+	assert.Equal(t, "Return the answer in a labeled format.", instruction)
+}
+
 func TestSelfCritiqueSystem(t *testing.T) {
 	// Set up mock LLM with critique response
 	mockLLM := &testutil.MockLLM{}

@@ -105,9 +105,6 @@ func (g *GEPA) buildReflectionMutationPrompt(candidate *GEPACandidate, sourceCan
 	weaknesses := formatPromptList(reflection.Weaknesses, maxProposalWeaknesses)
 	suggestions := formatPromptList(reflection.Suggestions, maxProposalSuggestions)
 	caseEvidence := g.formatReflectionCaseEvidence(g.buildReflectionInput(evaluation))
-	if caseEvidence == "" {
-		caseEvidence = "none recorded"
-	}
 
 	sourceLabel := sourceCandidateID
 	if strings.TrimSpace(sourceLabel) == "" {
@@ -157,7 +154,7 @@ func hasReflectionGuidance(reflection *ReflectionResult) bool {
 		return false
 	}
 
-	return len(reflection.Weaknesses) > 0 || len(reflection.Suggestions) > 0 || len(reflection.Strengths) > 0
+	return len(reflection.Weaknesses) > 0 || len(reflection.Suggestions) > 0
 }
 
 func formatPromptList(items []string, limit int) string {
@@ -211,9 +208,7 @@ func (g *GEPA) extractInstructionCandidate(content string) string {
 		}
 
 		line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
-		if len(line) >= 3 && line[1] == '.' && line[0] >= '0' && line[0] <= '9' {
-			line = strings.TrimSpace(line[2:])
-		}
+		line = stripLeadingNumberedMarker(line)
 
 		line = strings.Trim(line, "\"'")
 		if len(line) > 10 {
@@ -222,4 +217,16 @@ func (g *GEPA) extractInstructionCandidate(content string) string {
 	}
 
 	return ""
+}
+
+func stripLeadingNumberedMarker(line string) string {
+	index := 0
+	for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+		index++
+	}
+	if index == 0 || index >= len(line) || line[index] != '.' {
+		return line
+	}
+
+	return strings.TrimSpace(line[index+1:])
 }
