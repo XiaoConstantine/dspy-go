@@ -313,6 +313,7 @@ type GEPAState struct {
 	ExecutionTraces          map[string][]ExecutionTrace       `json:"execution_traces"`
 	CandidateMetrics         map[string]*CandidateMetrics      `json:"candidate_metrics"`
 	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness `json:"multi_objective_fitness_map"`
+	candidateReflections     map[string]*ReflectionResult
 	candidateEvaluations     map[string]*gepaCandidateEvaluation
 
 	// Pareto archive for elite solution management
@@ -335,6 +336,7 @@ func NewGEPAState() *GEPAState {
 		ExecutionTraces:          make(map[string][]ExecutionTrace),
 		CandidateMetrics:         make(map[string]*CandidateMetrics),
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
+		candidateReflections:     make(map[string]*ReflectionResult),
 		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
 		ParetoArchive:            make([]*GEPACandidate, 0),
 		ArchiveFitnessMap:        make(map[string]*MultiObjectiveFitness),
@@ -396,6 +398,36 @@ func (s *GEPAState) GetTracesForCandidate(candidateID string) []ExecutionTrace {
 	}
 
 	return traces
+}
+
+// SetCandidateReflections replaces the latest candidate reflection cache for the
+// current generation. Proposal generation consumes this to turn reflection into
+// concrete instruction updates without re-running reflection.
+func (s *GEPAState) SetCandidateReflections(reflections map[string]*ReflectionResult) {
+	if s == nil {
+		return
+	}
+
+	cloned := make(map[string]*ReflectionResult, len(reflections))
+	for candidateID, reflection := range reflections {
+		cloned[candidateID] = cloneReflectionResult(reflection)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.candidateReflections = cloned
+}
+
+// GetCandidateReflection returns the cached reflection for a candidate from the
+// latest reflected generation.
+func (s *GEPAState) GetCandidateReflection(candidateID string) *ReflectionResult {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneReflectionResult(s.candidateReflections[candidateID])
 }
 
 // SetCandidateEvaluations replaces the latest candidate evaluation cache for the
@@ -4236,6 +4268,10 @@ func (g *GEPA) mutate(ctx context.Context, candidate *GEPACandidate) *GEPACandid
 		return candidate // No mutation
 	}
 
+	if proposed := g.reflectionGuidedMutation(ctx, candidate); proposed != nil {
+		return proposed
+	}
+
 	return g.semanticMutation(ctx, candidate)
 }
 
@@ -4542,6 +4578,7 @@ func (g *GEPA) performReflection(ctx context.Context, generation int) error {
 
 	// Individual candidate reflections
 	reflections := make([]*ReflectionResult, 0, len(population.Candidates))
+	latestReflections := make(map[string]*ReflectionResult, len(population.Candidates))
 
 	for _, candidate := range population.Candidates {
 		traces := g.state.GetTracesForCandidate(candidate.ID)
@@ -4558,12 +4595,14 @@ func (g *GEPA) performReflection(ctx context.Context, generation int) error {
 		}
 
 		reflections = append(reflections, reflection)
+		latestReflections[candidate.ID] = reflection
 	}
 
 	// Store reflection results
 	g.state.mu.Lock()
 	g.state.ReflectionHistory = append(g.state.ReflectionHistory, reflections...)
 	g.state.mu.Unlock()
+	g.state.SetCandidateReflections(latestReflections)
 
 	logger.Info(ctx, "Reflection analysis completed: generation=%d, reflections_generated=%d",
 		generation,

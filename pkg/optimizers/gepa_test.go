@@ -1282,6 +1282,185 @@ func TestBuildReflectionInputBoundsWorstCases(t *testing.T) {
 	assert.Equal(t, `{"question":"q-4"}`, reflectionInput.BestCases[0].InputSummary)
 }
 
+func TestPerformReflectionCachesLatestCandidateReflections(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	gepa, err := NewGEPA(DefaultGEPAConfig())
+	require.NoError(t, err)
+
+	candidate := &GEPACandidate{
+		ID:          "reflection-cache-candidate",
+		ModuleName:  "alpha",
+		Instruction: "Return the best answer.",
+		Fitness:     0.5,
+		Generation:  1,
+	}
+	gepa.state.PopulationHistory = append(gepa.state.PopulationHistory, &Population{
+		Candidates: []*GEPACandidate{candidate},
+		Generation: 1,
+	})
+	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		candidate.ID: {
+			Candidate: candidate,
+			Cases: []gepaEvaluationCase{
+				{
+					Example: core.Example{
+						Inputs:  map[string]interface{}{"question": "What is GEPA?"},
+						Outputs: map[string]interface{}{"output": "optimizer"},
+					},
+					Outputs: map[string]interface{}{"output": "wrong"},
+					Score:   0.0,
+					Err:     fmt.Errorf("mismatch"),
+				},
+			},
+		},
+	})
+
+	err = gepa.performReflection(context.Background(), 1)
+	require.NoError(t, err)
+
+	reflection := gepa.state.GetCandidateReflection(candidate.ID)
+	require.NotNil(t, reflection)
+	assert.Equal(t, candidate.ID, reflection.CandidateID)
+	assert.NotEmpty(t, gepa.state.ReflectionHistory)
+}
+
+func TestMutateUsesReflectionGuidedProposal(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		return strings.Contains(prompt, "REFLECTION SUGGESTIONS:") &&
+			strings.Contains(prompt, "Add a required output format") &&
+			strings.Contains(prompt, "EXAMPLE-LEVEL EVIDENCE:") &&
+			strings.Contains(prompt, `{"question":"What is GEPA?"}`)
+	}), mock.Anything).Return(&core.LLMResponse{
+		Content: `REWRITTEN INSTRUCTION: Answer the question directly and include the final output in a labeled format.`,
+	}, nil).Once()
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			MutationRate: 1.0,
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(42)),
+	}
+
+	candidate := &GEPACandidate{
+		ID:          "guided-parent",
+		ModuleName:  "alpha",
+		Instruction: "Answer the question.",
+		Fitness:     0.3,
+		Generation:  1,
+	}
+	gepa.state.SetCandidateReflections(map[string]*ReflectionResult{
+		candidate.ID: {
+			CandidateID:     candidate.ID,
+			Strengths:       []string{"Direct wording"},
+			Weaknesses:      []string{"Output format is underspecified"},
+			Suggestions:     []string{"Add a required output format"},
+			ConfidenceScore: 0.9,
+			Timestamp:       time.Now(),
+			ReflectionDepth: 1,
+		},
+	})
+	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		candidate.ID: {
+			Candidate: candidate,
+			Cases: []gepaEvaluationCase{
+				{
+					Example: core.Example{
+						Inputs:  map[string]interface{}{"question": "What is GEPA?"},
+						Outputs: map[string]interface{}{"output": "optimizer"},
+					},
+					Outputs: map[string]interface{}{"output": "plain text"},
+					Score:   0.0,
+					Err:     fmt.Errorf("format mismatch"),
+				},
+			},
+		},
+	})
+
+	mutated := gepa.mutate(context.Background(), candidate)
+	require.NotNil(t, mutated)
+	assert.NotEqual(t, candidate.ID, mutated.ID)
+	assert.Equal(t, "reflection_guided", mutated.Metadata["mutation_type"])
+	assert.Equal(t, candidate.ID, mutated.Metadata["guidance_candidate_id"])
+	assert.Contains(t, mutated.Instruction, "labeled format")
+
+	mockLLM.AssertExpectations(t)
+}
+
+func TestMutateUsesParentReflectionGuidanceForOffspring(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		return strings.Contains(prompt, "GUIDANCE SOURCE CANDIDATE: reflected-parent") &&
+			strings.Contains(prompt, "Mention the required reasoning steps explicitly")
+	}), mock.Anything).Return(&core.LLMResponse{
+		Content: `IMPROVED INSTRUCTION: Solve the task step by step and state the reasoning steps before the final answer.`,
+	}, nil).Once()
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			MutationRate: 1.0,
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(7)),
+	}
+
+	parentID := "reflected-parent"
+	gepa.state.SetCandidateReflections(map[string]*ReflectionResult{
+		parentID: {
+			CandidateID:     parentID,
+			Strengths:       []string{"Good coverage"},
+			Weaknesses:      []string{"Reasoning steps are implicit"},
+			Suggestions:     []string{"Mention the required reasoning steps explicitly"},
+			ConfidenceScore: 0.8,
+			Timestamp:       time.Now(),
+			ReflectionDepth: 1,
+		},
+	})
+
+	offspring := &GEPACandidate{
+		ID:          "child-candidate",
+		ModuleName:  "alpha",
+		Instruction: "Solve the task accurately.",
+		Fitness:     0.4,
+		Generation:  2,
+		ParentIDs:   []string{parentID, "other-parent"},
+	}
+
+	mutated := gepa.mutate(context.Background(), offspring)
+	require.NotNil(t, mutated)
+	assert.Equal(t, "reflection_guided", mutated.Metadata["mutation_type"])
+	assert.Equal(t, parentID, mutated.Metadata["guidance_candidate_id"])
+	assert.Contains(t, mutated.Instruction, "step by step")
+
+	mockLLM.AssertExpectations(t)
+}
+
+func TestHasReflectionGuidanceRequiresActionableFeedback(t *testing.T) {
+	assert.False(t, hasReflectionGuidance(nil))
+	assert.False(t, hasReflectionGuidance(&ReflectionResult{
+		Strengths: []string{"Clear wording"},
+	}))
+	assert.True(t, hasReflectionGuidance(&ReflectionResult{
+		Weaknesses: []string{"Too vague"},
+	}))
+	assert.True(t, hasReflectionGuidance(&ReflectionResult{
+		Suggestions: []string{"Add output format constraints"},
+	}))
+}
+
+func TestExtractInstructionCandidateStripsMultiDigitNumbering(t *testing.T) {
+	gepa := &GEPA{}
+
+	instruction := gepa.extractInstructionCandidate("10. Return the answer in a labeled format.")
+	assert.Equal(t, "Return the answer in a labeled format.", instruction)
+}
+
 func TestSelfCritiqueSystem(t *testing.T) {
 	// Set up mock LLM with critique response
 	mockLLM := &testutil.MockLLM{}
