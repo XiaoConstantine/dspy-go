@@ -611,6 +611,39 @@ func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
 	assert.Equal(t, 2, nextCalls)
 }
 
+func TestMaterializeEvaluationBatchUsesSingleExampleForNonPositiveBatchSize(t *testing.T) {
+	tests := []struct {
+		name      string
+		batchSize int
+	}{
+		{name: "zero", batchSize: 0},
+		{name: "negative", batchSize: -3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gepa := &GEPA{
+				config: DefaultGEPAConfig(),
+				state:  NewGEPAState(),
+			}
+			gepa.config.EvaluationBatchSize = tt.batchSize
+
+			dataset := newCountingDataset([]core.Example{
+				{Outputs: map[string]interface{}{"output": "first"}},
+				{Outputs: map[string]interface{}{"output": "second"}},
+			})
+
+			batch := gepa.materializeEvaluationBatch(dataset)
+			require.Len(t, batch, 1)
+			assert.Equal(t, "first", batch[0].Outputs["output"])
+
+			resetCalls, nextCalls := dataset.counts()
+			assert.Equal(t, 1, resetCalls)
+			assert.Equal(t, 1, nextCalls)
+		})
+	}
+}
+
 func TestBestCandidatesByModuleReturnsCopies(t *testing.T) {
 	gepa := &GEPA{state: NewGEPAState()}
 

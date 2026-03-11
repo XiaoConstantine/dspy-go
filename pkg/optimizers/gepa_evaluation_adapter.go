@@ -43,15 +43,15 @@ func (g *GEPA) materializeEvaluationBatch(dataset core.Dataset) []core.Example {
 		return nil
 	}
 
-	// Preserve existing GEPA semantics: a non-positive batch size means
-	// "materialize the full dataset" instead of truncating the batch.
 	limit := g.config.EvaluationBatchSize
-	batchCapacity := limit
-	if batchCapacity < 0 {
-		batchCapacity = 0
+	if limit <= 0 {
+		// Preserve legacy GEPA behavior from the pre-adapter evaluation loop:
+		// non-positive batch sizes still consume exactly one example because the
+		// old post-increment break condition fired after the first scored case.
+		limit = 1
 	}
 
-	batch := make([]core.Example, 0, batchCapacity)
+	batch := make([]core.Example, 0, limit)
 	dataset.Reset()
 	for {
 		example, hasNext := dataset.Next()
@@ -60,7 +60,7 @@ func (g *GEPA) materializeEvaluationBatch(dataset core.Dataset) []core.Example {
 		}
 
 		batch = append(batch, example)
-		if limit > 0 && len(batch) >= limit {
+		if len(batch) >= limit {
 			break
 		}
 	}
