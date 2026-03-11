@@ -4386,6 +4386,8 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 		population.Generation,
 		len(population.Candidates))
 
+	adapter := g.newEvaluationAdapter(program, dataset, metric)
+
 	// Use concurrent evaluation with controlled concurrency
 	p := pool.New().WithMaxGoroutines(g.config.ConcurrencyLevel)
 
@@ -4399,7 +4401,8 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 			g.incrementConcurrentTasks()
 			defer g.decrementConcurrentTasks()
 
-			fitness := g.evaluateCandidate(ctx, candidate, program, dataset, metric)
+			evaluation := g.evaluateCandidateWithAdapter(ctx, candidate, adapter)
+			fitness := evaluation.AverageScore
 
 			mu.Lock()
 			candidate.Fitness = fitness
@@ -4441,52 +4444,6 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 		len(multiObjFitnessMap))
 
 	return multiObjFitnessMap, nil
-}
-
-// evaluateCandidate evaluates a single candidate's fitness.
-func (g *GEPA) evaluateCandidate(ctx context.Context, candidate *GEPACandidate,
-	program core.Program, dataset core.Dataset, metric core.Metric) float64 {
-
-	// Create a copy of the program with the candidate's instruction
-	modifiedProgram := g.applyCandidate(program, candidate)
-
-	// Add candidate ID to context for tracking
-	candidateCtx := context.WithValue(ctx, candidateIDKey, candidate.ID)
-
-	// Evaluate on dataset
-	totalScore := 0.0
-	evaluationCount := 0
-
-	dataset.Reset()
-	for {
-		example, hasNext := dataset.Next()
-		if !hasNext {
-			break
-		}
-
-		// Execute program with candidate's instruction
-		outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
-		if err != nil {
-			// Penalize errors
-			continue
-		}
-
-		// Calculate score using metric
-		score := metric(example.Outputs, outputs)
-		totalScore += score
-		evaluationCount++
-
-		// Limit evaluations for efficiency
-		if evaluationCount >= g.config.EvaluationBatchSize {
-			break
-		}
-	}
-
-	if evaluationCount == 0 {
-		return 0.0
-	}
-
-	return totalScore / float64(evaluationCount)
 }
 
 func (g *GEPA) applyComponentTexts(program core.Program, componentTexts map[string]string) core.Program {
