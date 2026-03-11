@@ -127,12 +127,101 @@ type GEPACandidate struct {
 	ID             string                 `json:"id"`
 	ModuleName     string                 `json:"module_name"`
 	Instruction    string                 `json:"instruction"`
+	ComponentTexts map[string]string      `json:"component_texts,omitempty"`
 	Demonstrations []core.Example         `json:"demonstrations"`
 	Generation     int                    `json:"generation"`
 	Fitness        float64                `json:"fitness"`
 	ParentIDs      []string               `json:"parent_ids"`
 	CreatedAt      time.Time              `json:"created_at"`
 	Metadata       map[string]interface{} `json:"metadata"`
+}
+
+func cloneComponentTexts(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+
+	return cloned
+}
+
+func cloneCandidateComponentTexts(candidate *GEPACandidate) map[string]string {
+	if candidate == nil {
+		return nil
+	}
+
+	componentTexts := cloneComponentTexts(candidate.ComponentTexts)
+	if moduleName := strings.TrimSpace(candidate.ModuleName); moduleName != "" {
+		if componentTexts == nil {
+			componentTexts = make(map[string]string, 1)
+		}
+		if _, exists := componentTexts[moduleName]; !exists {
+			componentTexts[moduleName] = candidate.Instruction
+		}
+	}
+
+	return componentTexts
+}
+
+func deriveBaseComponentTexts(base map[string]string, moduleName, instruction string) map[string]string {
+	componentTexts := cloneComponentTexts(base)
+	moduleName = strings.TrimSpace(moduleName)
+	if moduleName == "" {
+		return componentTexts
+	}
+
+	if componentTexts == nil {
+		componentTexts = make(map[string]string, 1)
+	}
+	// Non-target component texts are lineage bookkeeping until GEPA switches to
+	// whole-program candidate evaluation. Mutations/crossovers therefore inherit
+	// the source candidate's view and update only the targeted module here.
+	componentTexts[moduleName] = instruction
+	return componentTexts
+}
+
+func deriveCandidateComponentTexts(candidate *GEPACandidate, moduleName, instruction string) map[string]string {
+	return deriveBaseComponentTexts(cloneCandidateComponentTexts(candidate), moduleName, instruction)
+}
+
+func candidateInstructionForModule(candidate *GEPACandidate, moduleName string) string {
+	if candidate == nil {
+		return ""
+	}
+
+	moduleName = strings.TrimSpace(moduleName)
+	if moduleName == "" {
+		return ""
+	}
+
+	if instruction, exists := candidate.ComponentTexts[moduleName]; exists {
+		return instruction
+	}
+
+	// Backward compatibility for callers that still construct candidates without
+	// a populated ComponentTexts map.
+	if candidate.ModuleName == moduleName {
+		return candidate.Instruction
+	}
+
+	return ""
+}
+
+func componentTextsFromProgram(program core.Program) map[string]string {
+	if len(program.Modules) == 0 {
+		return nil
+	}
+
+	componentTexts := make(map[string]string, len(program.Modules))
+	for moduleName, module := range program.Modules {
+		componentTexts[moduleName] = module.GetSignature().Instruction
+	}
+
+	return componentTexts
 }
 
 // Population represents a generation of prompt candidates.
@@ -3364,6 +3453,7 @@ func (g *GEPA) initializePopulation(ctx context.Context, program core.Program) e
 	logger.Info(ctx, "Initializing GEPA population with size %d", g.config.PopulationSize)
 
 	candidates := make([]*GEPACandidate, 0, g.config.PopulationSize)
+	baseComponentTexts := componentTextsFromProgram(program)
 
 	// Create diverse initial population for each module
 	for moduleName, module := range program.Modules {
@@ -3390,13 +3480,14 @@ func (g *GEPA) initializePopulation(ctx context.Context, program core.Program) e
 			}
 
 			candidate := &GEPACandidate{
-				ID:          g.generateCandidateID(),
-				ModuleName:  moduleName,
-				Instruction: variation,
-				Generation:  0,
-				Fitness:     0.0,
-				ParentIDs:   []string{},
-				CreatedAt:   time.Now(),
+				ID:             g.generateCandidateID(),
+				ModuleName:     moduleName,
+				Instruction:    variation,
+				ComponentTexts: deriveBaseComponentTexts(baseComponentTexts, moduleName, variation),
+				Generation:     0,
+				Fitness:        0.0,
+				ParentIDs:      []string{},
+				CreatedAt:      time.Now(),
 				Metadata: map[string]interface{}{
 					"variation_index":  i,
 					"base_instruction": baseInstruction,
@@ -3578,13 +3669,14 @@ func (g *GEPA) createMutatedCandidate(original *GEPACandidate) *GEPACandidate {
 	mutatedInstruction := prefix + strings.ToLower(string(original.Instruction[0])) + original.Instruction[1:]
 
 	return &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  original.ModuleName,
-		Instruction: mutatedInstruction,
-		Generation:  0,
-		Fitness:     0.0,
-		ParentIDs:   []string{original.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     original.ModuleName,
+		Instruction:    mutatedInstruction,
+		ComponentTexts: deriveCandidateComponentTexts(original, original.ModuleName, mutatedInstruction),
+		Generation:     0,
+		Fitness:        0.0,
+		ParentIDs:      []string{original.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"mutation_type": "prefix_addition",
 			"parent_id":     original.ID,
@@ -3664,12 +3756,7 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	for len(offspring) < g.config.PopulationSize {
 		// Select two parents
 		parent1 := parents[g.rng.Intn(len(parents))]
-		parent2 := parents[g.rng.Intn(len(parents))]
-
-		// Ensure parents are different (if possible)
-		for parent2.ID == parent1.ID && len(parents) > 1 {
-			parent2 = parents[g.rng.Intn(len(parents))]
-		}
+		parent2 := g.selectCompatibleParent(parents, parent1)
 
 		// Apply crossover
 		child1, child2 := g.crossover(parent1, parent2)
@@ -3749,6 +3836,43 @@ func (g *GEPA) selectParents(population *Population) []*GEPACandidate {
 		logger.Debug(context.Background(), "Using default tournament selection for parent selection")
 		return g.tournamentSelection(population, selectionSize)
 	}
+}
+
+func (g *GEPA) selectCompatibleParent(parents []*GEPACandidate, parent1 *GEPACandidate) *GEPACandidate {
+	if len(parents) == 0 {
+		return parent1
+	}
+
+	if len(parents) == 1 || parent1 == nil {
+		return parents[g.rng.Intn(len(parents))]
+	}
+
+	compatible := make([]*GEPACandidate, 0, len(parents))
+	for _, candidate := range parents {
+		if candidate == nil || candidate.ID == parent1.ID {
+			continue
+		}
+		if candidate.ModuleName == parent1.ModuleName {
+			compatible = append(compatible, candidate)
+		}
+	}
+
+	if len(compatible) > 0 {
+		return compatible[g.rng.Intn(len(compatible))]
+	}
+
+	distinct := make([]*GEPACandidate, 0, len(parents))
+	for _, candidate := range parents {
+		if candidate == nil || candidate.ID == parent1.ID {
+			continue
+		}
+		distinct = append(distinct, candidate)
+	}
+	if len(distinct) > 0 {
+		return distinct[g.rng.Intn(len(distinct))]
+	}
+
+	return parent1
 }
 
 // tournamentSelection implements tournament selection.
@@ -3972,12 +4096,13 @@ Offspring:`,
 	}
 
 	child1 := &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  parent1.ModuleName,
-		Instruction: offspring[0],
-		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:   []string{parent1.ID, parent2.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     parent1.ModuleName,
+		Instruction:    offspring[0],
+		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, offspring[0]),
+		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
+		ParentIDs:      []string{parent1.ID, parent2.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type":  "semantic",
 			"parent1_fitness": parent1.Fitness,
@@ -3986,12 +4111,13 @@ Offspring:`,
 	}
 
 	child2 := &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  parent1.ModuleName,
-		Instruction: offspring[1],
-		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:   []string{parent1.ID, parent2.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     parent1.ModuleName,
+		Instruction:    offspring[1],
+		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, offspring[1]),
+		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
+		ParentIDs:      []string{parent1.ID, parent2.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type":  "semantic",
 			"parent1_fitness": parent1.Fitness,
@@ -4016,24 +4142,26 @@ func (g *GEPA) fallbackCrossover(parent1, parent2 *GEPACandidate) (*GEPACandidat
 	child2Words := append(words2[:split2], words1[split1:]...)
 
 	child1 := &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  parent1.ModuleName,
-		Instruction: strings.Join(child1Words, " "),
-		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:   []string{parent1.ID, parent2.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     parent1.ModuleName,
+		Instruction:    strings.Join(child1Words, " "),
+		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, strings.Join(child1Words, " ")),
+		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
+		ParentIDs:      []string{parent1.ID, parent2.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type": "structural_fallback",
 		}, parent1.Metadata, parent2.Metadata),
 	}
 
 	child2 := &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  parent1.ModuleName,
-		Instruction: strings.Join(child2Words, " "),
-		Generation:  utils.Max(parent1.Generation, parent2.Generation) + 1,
-		ParentIDs:   []string{parent1.ID, parent2.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     parent1.ModuleName,
+		Instruction:    strings.Join(child2Words, " "),
+		ComponentTexts: deriveCandidateComponentTexts(parent1, parent1.ModuleName, strings.Join(child2Words, " ")),
+		Generation:     utils.Max(parent1.Generation, parent2.Generation) + 1,
+		ParentIDs:      []string{parent1.ID, parent2.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"crossover_type": "structural_fallback",
 		}, parent1.Metadata, parent2.Metadata),
@@ -4116,12 +4244,13 @@ Generate a mutated version that maintains the core intent while applying the spe
 	}
 
 	return &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  candidate.ModuleName,
-		Instruction: mutatedInstruction,
-		Generation:  candidate.Generation + 1,
-		ParentIDs:   []string{candidate.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     candidate.ModuleName,
+		Instruction:    mutatedInstruction,
+		ComponentTexts: deriveCandidateComponentTexts(candidate, candidate.ModuleName, mutatedInstruction),
+		Generation:     candidate.Generation + 1,
+		ParentIDs:      []string{candidate.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"mutation_type":  mutationType,
 			"parent_fitness": candidate.Fitness,
@@ -4205,12 +4334,13 @@ func (g *GEPA) fallbackMutation(candidate *GEPACandidate) *GEPACandidate {
 	}
 
 	return &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  candidate.ModuleName,
-		Instruction: mutatedInstruction,
-		Generation:  candidate.Generation + 1,
-		ParentIDs:   []string{candidate.ID},
-		CreatedAt:   time.Now(),
+		ID:             g.generateCandidateID(),
+		ModuleName:     candidate.ModuleName,
+		Instruction:    mutatedInstruction,
+		ComponentTexts: deriveCandidateComponentTexts(candidate, candidate.ModuleName, mutatedInstruction),
+		Generation:     candidate.Generation + 1,
+		ParentIDs:      []string{candidate.ID},
+		CreatedAt:      time.Now(),
 		Metadata: mergeCandidateMetadata(map[string]interface{}{
 			"mutation_type":  "fallback",
 			"parent_fitness": candidate.Fitness,
@@ -4232,6 +4362,7 @@ func (g *GEPA) copyCandidate(original *GEPACandidate) *GEPACandidate {
 		ID:             original.ID,
 		ModuleName:     original.ModuleName,
 		Instruction:    original.Instruction,
+		ComponentTexts: cloneComponentTexts(original.ComponentTexts),
 		Demonstrations: demonstrations,
 		Generation:     original.Generation,
 		Fitness:        original.Fitness,
@@ -4358,28 +4489,51 @@ func (g *GEPA) evaluateCandidate(ctx context.Context, candidate *GEPACandidate,
 	return totalScore / float64(evaluationCount)
 }
 
-// applyCandidate applies a candidate's instruction to a program.
-func (g *GEPA) applyCandidate(program core.Program, candidate *GEPACandidate) core.Program {
-	// Clone the program
+func (g *GEPA) applyComponentTexts(program core.Program, componentTexts map[string]string) core.Program {
 	modified := program.Clone()
+	if len(componentTexts) == 0 {
+		return modified
+	}
 
-	// Find the module that matches this candidate and update its instruction
-	for moduleName, module := range modified.Modules {
-		if moduleName == candidate.ModuleName {
-			// Update the module's signature with the new instruction
-			sig := module.GetSignature()
-			newSig := core.Signature{
-				Instruction: candidate.Instruction,
-				Inputs:      sig.Inputs,
-				Outputs:     sig.Outputs,
-			}
-
-			module.SetSignature(newSig)
-			break
+	for moduleName, instruction := range componentTexts {
+		module, exists := modified.Modules[moduleName]
+		if !exists {
+			continue
 		}
+
+		sig := module.GetSignature()
+		module.SetSignature(core.Signature{
+			Instruction: instruction,
+			Inputs:      sig.Inputs,
+			Outputs:     sig.Outputs,
+		})
 	}
 
 	return modified
+}
+
+// applyCandidate applies only the candidate's target module during evaluation.
+// Until GEPA candidates become true whole-program states, non-target component
+// texts are lineage bookkeeping and should not overwrite other independently
+// tuned modules during fitness measurement.
+func (g *GEPA) applyCandidate(program core.Program, candidate *GEPACandidate) core.Program {
+	if candidate == nil {
+		return program.Clone()
+	}
+
+	moduleName := strings.TrimSpace(candidate.ModuleName)
+	if moduleName == "" {
+		return program.Clone()
+	}
+
+	instruction := candidateInstructionForModule(candidate, moduleName)
+	if instruction == "" {
+		return program.Clone()
+	}
+
+	return g.applyComponentTexts(program, map[string]string{
+		moduleName: instruction,
+	})
 }
 
 // Reflection Engine
@@ -4918,7 +5072,56 @@ func (g *GEPA) applyBestCandidate(program core.Program) core.Program {
 		g.state.BestCandidate.Fitness,
 		g.state.BestCandidate.Instruction)
 
-	return g.applyCandidate(program, g.state.BestCandidate)
+	bestByModule := g.bestCandidatesByModule()
+	if len(bestByModule) == 0 {
+		return g.applyCandidate(program, g.state.BestCandidate)
+	}
+
+	componentTexts := make(map[string]string, len(bestByModule))
+	for moduleName, candidate := range bestByModule {
+		instruction := candidateInstructionForModule(candidate, moduleName)
+		if instruction == "" {
+			continue
+		}
+		componentTexts[moduleName] = instruction
+	}
+
+	return g.applyComponentTexts(program, componentTexts)
+}
+
+func (g *GEPA) bestCandidatesByModule() map[string]*GEPACandidate {
+	bestByModule := make(map[string]*GEPACandidate)
+
+	g.state.mu.RLock()
+	defer g.state.mu.RUnlock()
+
+	for _, population := range g.state.PopulationHistory {
+		if population == nil {
+			continue
+		}
+
+		for _, candidate := range population.Candidates {
+			if candidate == nil || strings.TrimSpace(candidate.ModuleName) == "" {
+				continue
+			}
+
+			currentBest, exists := bestByModule[candidate.ModuleName]
+			if !exists || candidate.Fitness > currentBest.Fitness {
+				bestByModule[candidate.ModuleName] = candidate
+			}
+		}
+	}
+
+	if len(bestByModule) == 0 && g.state.BestCandidate != nil && strings.TrimSpace(g.state.BestCandidate.ModuleName) != "" {
+		bestByModule[g.state.BestCandidate.ModuleName] = g.state.BestCandidate
+	}
+
+	clonedBestByModule := make(map[string]*GEPACandidate, len(bestByModule))
+	for moduleName, candidate := range bestByModule {
+		clonedBestByModule[moduleName] = g.copyCandidate(candidate)
+	}
+
+	return clonedBestByModule
 }
 
 // LLM-based Self-Critique Implementation

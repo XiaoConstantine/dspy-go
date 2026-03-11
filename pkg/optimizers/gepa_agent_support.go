@@ -110,14 +110,17 @@ func (g *GEPA) HasConverged() bool {
 }
 
 func (g *GEPA) candidateFromSeed(seed *GEPACandidate, instruction string, generation int, parentIDs []string, extraMetadata map[string]interface{}) *GEPACandidate {
+	moduleName := seedModuleName(seed)
+
 	return &GEPACandidate{
-		ID:          g.generateCandidateID(),
-		ModuleName:  seedModuleName(seed),
-		Instruction: instruction,
-		Generation:  generation,
-		ParentIDs:   append([]string(nil), parentIDs...),
-		CreatedAt:   time.Now(),
-		Metadata:    mergeCandidateMetadata(extraMetadata, seed.Metadata),
+		ID:             g.generateCandidateID(),
+		ModuleName:     moduleName,
+		Instruction:    instruction,
+		ComponentTexts: deriveCandidateComponentTexts(seed, moduleName, instruction),
+		Generation:     generation,
+		ParentIDs:      append([]string(nil), parentIDs...),
+		CreatedAt:      time.Now(),
+		Metadata:       mergeCandidateMetadata(extraMetadata, seed.Metadata),
 	}
 }
 
@@ -178,12 +181,13 @@ func CloneCandidate(candidate *GEPACandidate) *GEPACandidate {
 	}
 
 	cloned := &GEPACandidate{
-		ID:          candidate.ID,
-		ModuleName:  candidate.ModuleName,
-		Instruction: candidate.Instruction,
-		Generation:  candidate.Generation,
-		Fitness:     candidate.Fitness,
-		CreatedAt:   candidate.CreatedAt,
+		ID:             candidate.ID,
+		ModuleName:     candidate.ModuleName,
+		Instruction:    candidate.Instruction,
+		ComponentTexts: cloneComponentTexts(candidate.ComponentTexts),
+		Generation:     candidate.Generation,
+		Fitness:        candidate.Fitness,
+		CreatedAt:      candidate.CreatedAt,
 	}
 
 	if len(candidate.ParentIDs) > 0 {

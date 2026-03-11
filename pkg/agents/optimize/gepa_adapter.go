@@ -102,8 +102,11 @@ func (o *GEPAAgentOptimizer) SeedCandidate(seed AgentArtifacts) (*optimizers.GEP
 		ID:          fmt.Sprintf("agent-candidate-%d", time.Now().UnixNano()),
 		ModuleName:  string(primary),
 		Instruction: seed.Text[primary],
-		Generation:  0,
-		CreatedAt:   time.Now(),
+		ComponentTexts: map[string]string{
+			string(primary): seed.Text[primary],
+		},
+		Generation: 0,
+		CreatedAt:  time.Now(),
 		Metadata: map[string]interface{}{
 			gepaMetadataArtifactsKey:       serializeArtifacts(seed),
 			gepaMetadataArtifactKeysKey:    serializeArtifactKeys(artifactKeys),
