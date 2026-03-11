@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,6 +136,47 @@ func (m *staticCandidateTestModule) GetModuleType() string {
 	return "test"
 }
 
+type countingDataset struct {
+	examples    []core.Example
+	index       int
+	resetCalls  int
+	nextCalls   int
+	countsMutex sync.Mutex
+}
+
+func newCountingDataset(examples []core.Example) *countingDataset {
+	return &countingDataset{examples: examples}
+}
+
+func (d *countingDataset) Next() (core.Example, bool) {
+	d.countsMutex.Lock()
+	defer d.countsMutex.Unlock()
+
+	d.nextCalls++
+	if d.index >= len(d.examples) {
+		return core.Example{}, false
+	}
+
+	example := d.examples[d.index]
+	d.index++
+	return example, true
+}
+
+func (d *countingDataset) Reset() {
+	d.countsMutex.Lock()
+	defer d.countsMutex.Unlock()
+
+	d.resetCalls++
+	d.index = 0
+}
+
+func (d *countingDataset) counts() (resetCalls, nextCalls int) {
+	d.countsMutex.Lock()
+	defer d.countsMutex.Unlock()
+
+	return d.resetCalls, d.nextCalls
+}
+
 type countingLLM struct {
 	generateCalls int
 }
@@ -182,6 +224,25 @@ func (c *countingLLM) ModelID() string {
 
 func (c *countingLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion}
+}
+
+func newCandidateEvaluationTestProgram(instruction string) core.Program {
+	return core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule(instruction),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			return map[string]interface{}{
+				"output": modules["alpha"].GetSignature().Instruction,
+			}, nil
+		}
+	})
+}
+
+func exactOutputMetric(expected, actual map[string]interface{}) float64 {
+	if expected["output"] == actual["output"] {
+		return 1.0
+	}
+	return 0.0
 }
 
 func TestNewGEPA(t *testing.T) {
@@ -365,6 +426,59 @@ func TestApplyCandidateOnlyUpdatesTargetModule(t *testing.T) {
 	assert.Equal(t, "beta base", modified.Modules["beta"].GetSignature().Instruction)
 }
 
+func TestNewEvaluationAdapterSnapshotsBatchOnce(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 2
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "one"}},
+		{Outputs: map[string]interface{}{"output": "two"}},
+		{Outputs: map[string]interface{}{"output": "three"}},
+	})
+
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NotNil(t, adapter)
+	assert.Len(t, adapter.batch, 2)
+
+	resetCalls, nextCalls := dataset.counts()
+	assert.Equal(t, 1, resetCalls)
+	assert.Equal(t, 2, nextCalls)
+}
+
+func TestEvaluateCandidateWithAdapterCapturesExampleResults(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 2
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+	})
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+
+	candidate := &GEPACandidate{
+		ID:          "alpha-candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+
+	evaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter)
+	require.NotNil(t, evaluation)
+	assert.Equal(t, candidate, evaluation.Candidate)
+	assert.Equal(t, 1.0, evaluation.AverageScore)
+	require.Len(t, evaluation.Cases, 2)
+	for _, evalCase := range evaluation.Cases {
+		assert.NoError(t, evalCase.Err)
+		assert.Equal(t, "alpha tuned", evalCase.Outputs["output"])
+		assert.Equal(t, 1.0, evalCase.Score)
+	}
+}
+
 func TestCandidateInstructionForModule(t *testing.T) {
 	candidate := &GEPACandidate{
 		ModuleName:  "alpha",
@@ -445,6 +559,89 @@ func TestApplyBestCandidateComposesBestModuleCandidates(t *testing.T) {
 	modified := gepa.applyBestCandidate(program)
 	assert.Equal(t, "alpha tuned", modified.Modules["alpha"].GetSignature().Instruction)
 	assert.Equal(t, "beta tuned", modified.Modules["beta"].GetSignature().Instruction)
+}
+
+func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
+	gepa := &GEPA{
+		config:            DefaultGEPAConfig(),
+		state:             NewGEPAState(),
+		performanceLogger: NewPerformanceLogger(),
+		rng:               rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ConcurrencyLevel = 2
+	gepa.config.EvaluationBatchSize = 2
+
+	candidate1 := &GEPACandidate{
+		ID:          "candidate-1",
+		ModuleName:  "alpha",
+		Instruction: "match",
+		ComponentTexts: map[string]string{
+			"alpha": "match",
+		},
+	}
+	candidate2 := &GEPACandidate{
+		ID:          "candidate-2",
+		ModuleName:  "alpha",
+		Instruction: "miss",
+		ComponentTexts: map[string]string{
+			"alpha": "miss",
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{{
+		Generation: 0,
+		Candidates: []*GEPACandidate{candidate1, candidate2},
+	}}
+
+	program := newCandidateEvaluationTestProgram("alpha base")
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "match"}},
+		{Outputs: map[string]interface{}{"output": "match"}},
+		{Outputs: map[string]interface{}{"output": "unused"}},
+	})
+	fitnessMap, err := gepa.evaluatePopulation(context.Background(), program, dataset, exactOutputMetric)
+	require.NoError(t, err)
+	assert.Empty(t, fitnessMap)
+
+	assert.Equal(t, 1.0, candidate1.Fitness)
+	assert.Equal(t, 0.0, candidate2.Fitness)
+
+	resetCalls, nextCalls := dataset.counts()
+	assert.Equal(t, 1, resetCalls)
+	assert.Equal(t, 2, nextCalls)
+}
+
+func TestMaterializeEvaluationBatchUsesSingleExampleForNonPositiveBatchSize(t *testing.T) {
+	tests := []struct {
+		name      string
+		batchSize int
+	}{
+		{name: "zero", batchSize: 0},
+		{name: "negative", batchSize: -3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gepa := &GEPA{
+				config: DefaultGEPAConfig(),
+				state:  NewGEPAState(),
+			}
+			gepa.config.EvaluationBatchSize = tt.batchSize
+
+			dataset := newCountingDataset([]core.Example{
+				{Outputs: map[string]interface{}{"output": "first"}},
+				{Outputs: map[string]interface{}{"output": "second"}},
+			})
+
+			batch := gepa.materializeEvaluationBatch(dataset)
+			require.Len(t, batch, 1)
+			assert.Equal(t, "first", batch[0].Outputs["output"])
+
+			resetCalls, nextCalls := dataset.counts()
+			assert.Equal(t, 1, resetCalls)
+			assert.Equal(t, 1, nextCalls)
+		})
+	}
 }
 
 func TestBestCandidatesByModuleReturnsCopies(t *testing.T) {
