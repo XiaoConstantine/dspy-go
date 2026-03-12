@@ -12,6 +12,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -306,6 +307,7 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 2, config.ReflectionFreq)
 	assert.Equal(t, 3, config.TournamentSize)
 	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
+	assert.Equal(t, 5, config.MaxMergeInvocations)
 	assert.Zero(t, config.RandomSeed)
 }
 
@@ -398,6 +400,7 @@ func TestGEPAState(t *testing.T) {
 	assert.NotNil(t, state.candidateValidationEvals)
 	assert.NotNil(t, state.ValidationFrontier)
 	assert.NotNil(t, state.ValidationCoverage)
+	assert.NotNil(t, state.PerformedMerges)
 
 	// Test adding trace
 	trace := &ExecutionTrace{
@@ -2777,9 +2780,10 @@ func TestBuildAncestorMergedCandidateAdoptsPartnerOnlyComponents(t *testing.T) {
 	assert.Equal(t, "ancestor_merge", merged.Metadata["proposal_type"])
 	assert.Equal(t, "partner", merged.Metadata["merge_partner_id"])
 	assert.Equal(t, "ancestor", merged.Metadata["merge_common_ancestor_id"])
+	assert.Equal(t, buildAncestorMergeAttemptKey("source", "partner", "ancestor", []string{"beta"}), merged.Metadata["merge_attempt_key"])
 }
 
-func TestProposeNextGenerationCandidateUsesAncestorMergeWhenImproving(t *testing.T) {
+func newAncestorMergeProposalTestFixture() (*GEPA, *Population, *GEPACandidate, *GEPACandidate) {
 	generationLLM := &countingLLM{}
 	gepa := &GEPA{
 		config:        DefaultGEPAConfig(),
@@ -2843,6 +2847,13 @@ func TestProposeNextGenerationCandidateUsesAncestorMergeWhenImproving(t *testing
 	)
 	gepa.setLatestEvaluationAdapter(adapter)
 
+	return gepa, current, source, partner
+}
+
+func TestProposeNextGenerationCandidateUsesAncestorMergeWhenImproving(t *testing.T) {
+	gepa, current, source, _ := newAncestorMergeProposalTestFixture()
+	generationLLM := gepa.generationLLM.(*countingLLM)
+
 	proposed := gepa.proposeNextGenerationCandidate(context.Background(), current, source, 2)
 	require.NotNil(t, proposed)
 
@@ -2857,9 +2868,154 @@ func TestProposeNextGenerationCandidateUsesAncestorMergeWhenImproving(t *testing
 		"beta":  "beta tuned",
 	}, proposed.ComponentTexts)
 	assert.Equal(t, "ancestor_merge", proposed.Metadata["proposal_type"])
+	assert.Equal(t, "stratified", proposed.Metadata["merge_acceptance_mode"])
+	assert.Equal(t, 1, gepa.state.MergeInvocations)
 
 	evaluation := gepa.state.GetCandidateEvaluation(proposed.ID)
 	require.NotNil(t, evaluation)
+	assert.Equal(t, 1.0, evaluation.AverageScore)
+	assert.True(t, gepa.state.PerformedMerges[buildAncestorMergeAttemptKey("source", "partner", "root", []string{"beta"})])
+}
+
+func TestTryAncestorMergeProposalSkipsRecordedMergeAttempts(t *testing.T) {
+	gepa, current, source, _ := newAncestorMergeProposalTestFixture()
+	mergeKey := buildAncestorMergeAttemptKey("source", "partner", "root", []string{"beta"})
+	gepa.state.PerformedMerges[mergeKey] = true
+
+	proposed := gepa.tryAncestorMergeProposal(context.Background(), current, source, 2)
+	assert.Nil(t, proposed)
+	assert.Zero(t, gepa.state.MergeInvocations)
+}
+
+func TestTryAncestorMergeProposalHonorsMergeInvocationCap(t *testing.T) {
+	gepa, current, source, _ := newAncestorMergeProposalTestFixture()
+	gepa.config.MaxMergeInvocations = 1
+	gepa.state.MergeInvocations = 1
+
+	proposed := gepa.tryAncestorMergeProposal(context.Background(), current, source, 2)
+	assert.Nil(t, proposed)
+}
+
+func TestStratifiedMergeAcceptanceCaseIndexesBalancesCases(t *testing.T) {
+	sourceEvaluation := &gepaCandidateEvaluation{
+		Cases: []gepaEvaluationCase{
+			{Score: 1.0},
+			{Score: 1.0},
+			{Score: 1.0},
+			{Score: 1.0},
+			{Score: 1.0},
+			{Score: 0.0},
+			{Score: 0.0},
+		},
+	}
+	partnerEvaluation := &gepaCandidateEvaluation{
+		Cases: []gepaEvaluationCase{
+			{Score: 0.0},
+			{Score: 0.0},
+			{Score: 0.0},
+			{Score: 0.0},
+			{Score: 0.0},
+			{Score: 1.0},
+			{Score: 1.0},
+		},
+	}
+
+	caseIndexes, bucketCounts := stratifiedMergeAcceptanceCaseIndexes(sourceEvaluation, partnerEvaluation)
+	assert.Equal(t, []int{0, 1, 5, 6}, caseIndexes)
+	assert.Equal(t, 5, bucketCounts.sourceBetter)
+	assert.Equal(t, 2, bucketCounts.partnerBetter)
+	assert.Equal(t, 0, bucketCounts.tied)
+}
+
+func TestAcceptMergeProposalReevaluatesAcceptedCandidateOnLatestBatch(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(12)),
+	}
+	gepa.config.EvaluationBatchSize = 7
+
+	source := &GEPACandidate{
+		ID:          "source",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta base",
+		},
+	}
+	partner := &GEPACandidate{
+		ID:          "partner",
+		ModuleName:  "beta",
+		Instruction: "beta tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta tuned",
+		},
+	}
+	proposed := &GEPACandidate{
+		ID:          "merged",
+		ModuleName:  "beta",
+		Instruction: "beta tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta tuned",
+		},
+		Metadata: map[string]interface{}{
+			"proposal_type": "ancestor_merge",
+		},
+	}
+
+	dataset := datasets.NewSimpleDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+	})
+	adapter := gepa.newEvaluationAdapter(
+		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
+		dataset,
+		exactOutputMetric,
+	)
+	gepa.setLatestEvaluationAdapter(adapter)
+	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		"source": {
+			Cases: []gepaEvaluationCase{
+				{Score: 1.0},
+				{Score: 1.0},
+				{Score: 1.0},
+				{Score: 1.0},
+				{Score: 1.0},
+				{Score: 0.0},
+				{Score: 0.0},
+			},
+		},
+		"partner": {
+			Cases: []gepaEvaluationCase{
+				{Score: 0.0},
+				{Score: 0.0},
+				{Score: 0.0},
+				{Score: 0.0},
+				{Score: 0.0},
+				{Score: 1.0},
+				{Score: 1.0},
+			},
+		},
+	})
+
+	accepted := gepa.acceptMergeProposal(context.Background(), source, partner, proposed)
+	require.NotNil(t, accepted)
+	assert.Equal(t, "stratified", accepted.Metadata["merge_acceptance_mode"])
+	assert.Equal(t, 4, accepted.Metadata["merge_acceptance_case_count"])
+	assert.Equal(t, 4.0, accepted.Metadata["proposal_candidate_total"])
+	assert.Equal(t, 1.0, accepted.Metadata["merge_post_accept_full_batch_average"])
+
+	evaluation := gepa.state.GetCandidateEvaluation(proposed.ID)
+	require.NotNil(t, evaluation)
+	assert.Len(t, evaluation.Cases, 7)
 	assert.Equal(t, 1.0, evaluation.AverageScore)
 }
 
