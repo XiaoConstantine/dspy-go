@@ -366,6 +366,8 @@ func TestGEPAState(t *testing.T) {
 	assert.NotNil(t, state.ExecutionTraces)
 	assert.NotNil(t, state.CandidateMetrics)
 	assert.NotNil(t, state.candidateValidationEvals)
+	assert.NotNil(t, state.ValidationFrontier)
+	assert.NotNil(t, state.ValidationCoverage)
 
 	// Test adding trace
 	trace := &ExecutionTrace{
@@ -803,6 +805,11 @@ func TestEvaluateValidationPopulationTracksBestValidationCandidate(t *testing.T)
 	assert.Equal(t, 1.0, gepa.state.BestValidationFitness)
 	require.NotNil(t, gepa.state.GetCandidateValidationEvaluation("candidate-a"))
 	require.NotNil(t, gepa.state.GetCandidateValidationEvaluation("candidate-b"))
+
+	frontier, coverage := gepa.state.ValidationFrontierSnapshot()
+	require.Len(t, frontier, 1)
+	assert.Equal(t, "candidate-b", frontier[0].CandidateID)
+	assert.Equal(t, 1, coverage["candidate-b"])
 }
 
 func TestEvaluateValidationPopulationReusesCachedEvaluations(t *testing.T) {
@@ -945,6 +952,33 @@ func TestEvaluateValidationPopulationPreservesAllTimeBestValidationCandidate(t *
 	assert.Equal(t, 1.0, gepa.state.BestValidationFitness)
 }
 
+func TestBuildValidationFrontierTracksCoverage(t *testing.T) {
+	evaluations := map[string]*gepaCandidateEvaluation{
+		"candidate-a": {
+			Cases: []gepaEvaluationCase{
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-0"}}, Score: 0.4},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-1"}}, Score: 0.4},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-2"}}, Score: 0.0},
+			},
+		},
+		"candidate-b": {
+			Cases: []gepaEvaluationCase{
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-0"}}, Score: 0.3},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-1"}}, Score: 0.3},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-2"}}, Score: 0.9},
+			},
+		},
+	}
+
+	frontier, coverage := buildValidationFrontier(evaluations)
+	require.Len(t, frontier, 3)
+	assert.Equal(t, "candidate-a", frontier[0].CandidateID)
+	assert.Equal(t, "candidate-a", frontier[1].CandidateID)
+	assert.Equal(t, "candidate-b", frontier[2].CandidateID)
+	assert.Equal(t, 2, coverage["candidate-a"])
+	assert.Equal(t, 1, coverage["candidate-b"])
+}
+
 func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
 	gepa := &GEPA{
 		config: DefaultGEPAConfig(),
@@ -990,7 +1024,47 @@ func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
 	require.NotNil(t, gepa.state.BestValidationCandidate)
 }
 
-func TestSelectCandidateForUpdatePrefersValidationScore(t *testing.T) {
+func TestValidationSelectionPopulationUsesFrontierCoverage(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(2)),
+	}
+
+	population := &Population{
+		Candidates: []*GEPACandidate{
+			{ID: "candidate-a", Fitness: 0.9},
+			{ID: "candidate-b", Fitness: 0.4},
+		},
+	}
+	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
+		"candidate-a": {AverageScore: 0.4},
+		"candidate-b": {AverageScore: 0.9},
+	})
+	gepa.state.SetValidationFrontier(
+		map[int]*gepaValidationFrontierEntry{
+			0: {CaseIndex: 0, CandidateID: "candidate-a", Score: 0.4},
+			1: {CaseIndex: 1, CandidateID: "candidate-a", Score: 0.4},
+			2: {CaseIndex: 2, CandidateID: "candidate-b", Score: 0.9},
+		},
+		map[string]int{
+			"candidate-a": 2,
+			"candidate-b": 1,
+		},
+	)
+
+	validationPopulation, validationFitnessMap, ok := gepa.validationSelectionPopulation(population)
+	require.True(t, ok)
+	require.Len(t, validationPopulation.Candidates, 2)
+	assert.InDelta(t, 2.0/3.0, validationPopulation.Candidates[0].Fitness, 1e-9)
+	assert.InDelta(t, 1.0/3.0, validationPopulation.Candidates[1].Fitness, 1e-9)
+	assert.InDelta(t, 2.0/3.0, validationFitnessMap["candidate-a"].SuccessRate, 1e-9)
+	assert.Equal(t, 0.4, validationFitnessMap["candidate-a"].OutputQuality)
+	assert.InDelta(t, 1.0/3.0, validationFitnessMap["candidate-b"].SuccessRate, 1e-9)
+	assert.Equal(t, 0.9, validationFitnessMap["candidate-b"].OutputQuality)
+}
+
+func TestSelectCandidateForUpdatePrefersValidationFrontierContributor(t *testing.T) {
 	gepa := &GEPA{
 		config: &GEPAConfig{
 			SelectionStrategy: "roulette",
@@ -1001,18 +1075,27 @@ func TestSelectCandidateForUpdatePrefersValidationScore(t *testing.T) {
 
 	population := &Population{
 		Candidates: []*GEPACandidate{
-			{ID: "candidate-a", Fitness: 0.9},
-			{ID: "candidate-b", Fitness: 0.4},
+			{ID: "candidate-a", Fitness: 0.1},
+			{ID: "candidate-b", Fitness: 0.9},
 		},
 	}
 	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
-		"candidate-a": {AverageScore: 0.0},
-		"candidate-b": {AverageScore: 1.0},
+		"candidate-a": {AverageScore: 0.4},
+		"candidate-b": {AverageScore: 0.9},
 	})
+	gepa.state.SetValidationFrontier(
+		map[int]*gepaValidationFrontierEntry{
+			0: {CaseIndex: 0, CandidateID: "candidate-a", Score: 0.4},
+		},
+		map[string]int{
+			"candidate-a": 1,
+			"candidate-b": 0,
+		},
+	)
 
 	selected := gepa.selectCandidateForUpdate(population)
 	require.NotNil(t, selected)
-	assert.Equal(t, "candidate-b", selected.ID)
+	assert.Equal(t, "candidate-a", selected.ID)
 }
 
 func TestSelectCandidateForUpdateFallsBackWhenValidationCoverageIsPartial(t *testing.T) {
@@ -1050,17 +1133,17 @@ func TestValidationAdjustedMultiObjectiveFitness(t *testing.T) {
 		Innovation:     0.5,
 	}
 
-	withBase := validationAdjustedMultiObjectiveFitness(base, 0.9)
+	withBase := validationAdjustedMultiObjectiveFitness(base, 0.9, 0.7)
 	require.NotNil(t, withBase)
 	assert.Equal(t, 0.9, withBase.SuccessRate)
-	assert.Equal(t, base.OutputQuality, withBase.OutputQuality)
+	assert.Equal(t, 0.7, withBase.OutputQuality)
 	assert.Equal(t, base.Efficiency, withBase.Efficiency)
 	assert.Equal(t, base.Robustness, withBase.Robustness)
 
-	withoutBase := validationAdjustedMultiObjectiveFitness(nil, 0.7)
+	withoutBase := validationAdjustedMultiObjectiveFitness(nil, 0.7, 0.6)
 	require.NotNil(t, withoutBase)
 	assert.Equal(t, 0.7, withoutBase.SuccessRate)
-	assert.Equal(t, 0.7, withoutBase.OutputQuality)
+	assert.Equal(t, 0.6, withoutBase.OutputQuality)
 	assert.Equal(t, 0.5, withoutBase.Efficiency)
 	assert.Equal(t, 0.5, withoutBase.Robustness)
 }

@@ -320,21 +320,33 @@ type CandidateMetrics struct {
 	Metadata         map[string]interface{} `json:"metadata"`
 }
 
+// gepaValidationFrontierEntry records the current validation-frontier winner
+// for one validation example. This lets GEPA keep example-level coverage
+// instead of collapsing validation to a single scalar score per candidate.
+type gepaValidationFrontierEntry struct {
+	CaseIndex   int          `json:"case_index"`
+	CandidateID string       `json:"candidate_id"`
+	Score       float64      `json:"score"`
+	Example     core.Example `json:"example"`
+}
+
 // GEPAState tracks the complete state of GEPA optimization.
 type GEPAState struct {
-	CurrentGeneration        int                               `json:"current_generation"`
-	BestCandidate            *GEPACandidate                    `json:"best_candidate"`
-	BestFitness              float64                           `json:"best_fitness"`
-	BestValidationCandidate  *GEPACandidate                    `json:"best_validation_candidate,omitempty"`
-	BestValidationFitness    float64                           `json:"best_validation_fitness"`
-	PopulationHistory        []*Population                     `json:"population_history"`
-	ReflectionHistory        []*ReflectionResult               `json:"reflection_history"`
-	ConvergenceStatus        *ConvergenceStatus                `json:"convergence_status"`
-	StartTime                time.Time                         `json:"start_time"`
-	LastImprovement          time.Time                         `json:"last_improvement"`
-	ExecutionTraces          map[string][]ExecutionTrace       `json:"execution_traces"`
-	CandidateMetrics         map[string]*CandidateMetrics      `json:"candidate_metrics"`
-	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness `json:"multi_objective_fitness_map"`
+	CurrentGeneration        int                                  `json:"current_generation"`
+	BestCandidate            *GEPACandidate                       `json:"best_candidate"`
+	BestFitness              float64                              `json:"best_fitness"`
+	BestValidationCandidate  *GEPACandidate                       `json:"best_validation_candidate,omitempty"`
+	BestValidationFitness    float64                              `json:"best_validation_fitness"`
+	PopulationHistory        []*Population                        `json:"population_history"`
+	ReflectionHistory        []*ReflectionResult                  `json:"reflection_history"`
+	ConvergenceStatus        *ConvergenceStatus                   `json:"convergence_status"`
+	StartTime                time.Time                            `json:"start_time"`
+	LastImprovement          time.Time                            `json:"last_improvement"`
+	ExecutionTraces          map[string][]ExecutionTrace          `json:"execution_traces"`
+	CandidateMetrics         map[string]*CandidateMetrics         `json:"candidate_metrics"`
+	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness    `json:"multi_objective_fitness_map"`
+	ValidationFrontier       map[int]*gepaValidationFrontierEntry `json:"validation_frontier,omitempty"`
+	ValidationCoverage       map[string]int                       `json:"validation_coverage,omitempty"`
 	candidateReflections     map[string]*ReflectionResult
 	candidateEvaluations     map[string]*gepaCandidateEvaluation
 	candidateValidationEvals map[string]*gepaCandidateEvaluation
@@ -360,6 +372,8 @@ func NewGEPAState() *GEPAState {
 		ExecutionTraces:          make(map[string][]ExecutionTrace),
 		CandidateMetrics:         make(map[string]*CandidateMetrics),
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
+		ValidationFrontier:       make(map[int]*gepaValidationFrontierEntry),
+		ValidationCoverage:       make(map[string]int),
 		candidateReflections:     make(map[string]*ReflectionResult),
 		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
 		candidateValidationEvals: make(map[string]*gepaCandidateEvaluation),
@@ -516,6 +530,77 @@ func (s *GEPAState) GetCandidateValidationEvaluation(candidateID string) *gepaCa
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneGEPACandidateEvaluation(s.candidateValidationEvals[candidateID])
+}
+
+// SetValidationFrontier replaces the current validation frontier and candidate
+// coverage counts derived from the latest validation pass.
+func (s *GEPAState) SetValidationFrontier(frontier map[int]*gepaValidationFrontierEntry, coverage map[string]int) {
+	if s == nil {
+		return
+	}
+
+	var clonedFrontier map[int]*gepaValidationFrontierEntry
+	if len(frontier) > 0 {
+		clonedFrontier = make(map[int]*gepaValidationFrontierEntry, len(frontier))
+		for caseIndex, entry := range frontier {
+			clonedFrontier[caseIndex] = cloneValidationFrontierEntry(entry)
+		}
+	}
+
+	var clonedCoverage map[string]int
+	if len(coverage) > 0 {
+		clonedCoverage = make(map[string]int, len(coverage))
+		for candidateID, count := range coverage {
+			clonedCoverage[candidateID] = count
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ValidationFrontier = clonedFrontier
+	s.ValidationCoverage = clonedCoverage
+}
+
+// ValidationFrontierSnapshot returns cloned validation-frontier state for
+// selection and tests without exposing shared mutable maps.
+func (s *GEPAState) ValidationFrontierSnapshot() (map[int]*gepaValidationFrontierEntry, map[string]int) {
+	if s == nil {
+		return nil, nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var frontier map[int]*gepaValidationFrontierEntry
+	if len(s.ValidationFrontier) > 0 {
+		frontier = make(map[int]*gepaValidationFrontierEntry, len(s.ValidationFrontier))
+		for caseIndex, entry := range s.ValidationFrontier {
+			frontier[caseIndex] = cloneValidationFrontierEntry(entry)
+		}
+	}
+
+	var coverage map[string]int
+	if len(s.ValidationCoverage) > 0 {
+		coverage = make(map[string]int, len(s.ValidationCoverage))
+		for candidateID, count := range s.ValidationCoverage {
+			coverage[candidateID] = count
+		}
+	}
+
+	return frontier, coverage
+}
+
+func cloneValidationFrontierEntry(entry *gepaValidationFrontierEntry) *gepaValidationFrontierEntry {
+	if entry == nil {
+		return nil
+	}
+
+	return &gepaValidationFrontierEntry{
+		CaseIndex:   entry.CaseIndex,
+		CandidateID: entry.CandidateID,
+		Score:       entry.Score,
+		Example:     cloneEvaluationExample(entry.Example),
+	}
 }
 
 // UpsertCandidateEvaluation updates the cached evaluation for a single
@@ -3040,6 +3125,8 @@ func (g *GEPA) resetValidationState() {
 	g.state.mu.Lock()
 	defer g.state.mu.Unlock()
 	g.state.candidateValidationEvals = make(map[string]*gepaCandidateEvaluation)
+	g.state.ValidationFrontier = make(map[int]*gepaValidationFrontierEntry)
+	g.state.ValidationCoverage = make(map[string]int)
 	g.state.BestValidationCandidate = nil
 	g.state.BestValidationFitness = math.Inf(-1)
 }
@@ -3107,7 +3194,9 @@ func (g *GEPA) evaluateValidationPopulation(ctx context.Context, program core.Pr
 	}
 
 	p.Wait()
+	frontier, coverage := buildValidationFrontier(candidateEvaluations)
 	g.state.SetCandidateValidationEvaluations(candidateEvaluations)
+	g.state.SetValidationFrontier(frontier, coverage)
 	g.setBestValidationCandidate(bestCandidate, bestFitness)
 
 	logger.Info(ctx, "Validation completed: generation=%d, evaluated_candidates=%d, best_validation_fitness=%.3f",
@@ -3131,6 +3220,45 @@ func (g *GEPA) setBestValidationCandidate(candidate *GEPACandidate, fitness floa
 		g.state.BestValidationCandidate = CloneCandidate(candidate)
 		g.state.BestValidationFitness = fitness
 	}
+}
+
+func buildValidationFrontier(evaluations map[string]*gepaCandidateEvaluation) (map[int]*gepaValidationFrontierEntry, map[string]int) {
+	if len(evaluations) == 0 {
+		return nil, nil
+	}
+
+	frontier := make(map[int]*gepaValidationFrontierEntry)
+	coverage := make(map[string]int)
+
+	for candidateID, evaluation := range evaluations {
+		if evaluation == nil {
+			continue
+		}
+
+		for caseIndex, evalCase := range evaluation.Cases {
+			score := evalCase.Score
+			current := frontier[caseIndex]
+			if current != nil && (score < current.Score || (score == current.Score && candidateID >= current.CandidateID)) {
+				continue
+			}
+
+			frontier[caseIndex] = &gepaValidationFrontierEntry{
+				CaseIndex:   caseIndex,
+				CandidateID: candidateID,
+				Score:       score,
+				Example:     cloneEvaluationExample(evalCase.Example),
+			}
+		}
+	}
+
+	for _, entry := range frontier {
+		if entry == nil {
+			continue
+		}
+		coverage[entry.CandidateID]++
+	}
+
+	return frontier, coverage
 }
 
 func (g *GEPA) reflectIfScheduled(ctx context.Context, generation int) error {
@@ -4278,6 +4406,11 @@ func (g *GEPA) validationSelectionPopulation(population *Population) (*Populatio
 	}
 	validationFitnessMap := make(map[string]*MultiObjectiveFitness, len(population.Candidates))
 	currentFitnessMap := g.getCurrentMultiObjectiveFitnessMap()
+	frontier, coverage := g.state.ValidationFrontierSnapshot()
+	if len(frontier) == 0 {
+		return nil, nil, false
+	}
+	totalFrontierCases := float64(len(frontier))
 
 	for _, candidate := range population.Candidates {
 		if candidate == nil {
@@ -4290,9 +4423,10 @@ func (g *GEPA) validationSelectionPopulation(population *Population) (*Populatio
 		}
 
 		cloned := g.copyCandidate(candidate)
-		cloned.Fitness = evaluation.AverageScore
+		coverageScore := float64(coverage[candidate.ID]) / totalFrontierCases
+		cloned.Fitness = coverageScore
 		validationPopulation.Candidates = append(validationPopulation.Candidates, cloned)
-		validationFitnessMap[candidate.ID] = validationAdjustedMultiObjectiveFitness(currentFitnessMap[candidate.ID], evaluation.AverageScore)
+		validationFitnessMap[candidate.ID] = validationAdjustedMultiObjectiveFitness(currentFitnessMap[candidate.ID], coverageScore, evaluation.AverageScore)
 
 		if validationPopulation.BestCandidate == nil || cloned.Fitness > validationPopulation.BestFitness || (cloned.Fitness == validationPopulation.BestFitness && cloned.ID < validationPopulation.BestCandidate.ID) {
 			validationPopulation.BestCandidate = cloned
@@ -4307,9 +4441,9 @@ func (g *GEPA) validationSelectionPopulation(population *Population) (*Populatio
 	return validationPopulation, validationFitnessMap, true
 }
 
-func validationAdjustedMultiObjectiveFitness(base *MultiObjectiveFitness, validationScore float64) *MultiObjectiveFitness {
+func validationAdjustedMultiObjectiveFitness(base *MultiObjectiveFitness, coverageScore, validationScore float64) *MultiObjectiveFitness {
 	fitness := &MultiObjectiveFitness{
-		SuccessRate:    validationScore,
+		SuccessRate:    coverageScore,
 		OutputQuality:  validationScore,
 		Efficiency:     0.5,
 		Robustness:     0.5,
@@ -4320,7 +4454,8 @@ func validationAdjustedMultiObjectiveFitness(base *MultiObjectiveFitness, valida
 
 	if base != nil {
 		*fitness = *base
-		fitness.SuccessRate = validationScore
+		fitness.SuccessRate = coverageScore
+		fitness.OutputQuality = validationScore
 	}
 
 	fitness.WeightedScore = fitness.ComputeWeightedScore(nil)
