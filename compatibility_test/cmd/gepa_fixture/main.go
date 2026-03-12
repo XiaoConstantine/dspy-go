@@ -369,6 +369,9 @@ func runValidationFrontierScenario(ctx context.Context) (validationFrontierResul
 		return validationFrontierResult{}, fmt.Errorf("missing validation frontier after compile")
 	}
 
+	// This fixture summarizes one representative frontier winner per synthetic
+	// validation kind. The dataset intentionally uses one parity bucket for
+	// alpha and one for beta, so deduplicating by kind is sufficient here.
 	winnersByKind := make(map[string]string)
 	for _, entry := range frontier {
 		if entry == nil {

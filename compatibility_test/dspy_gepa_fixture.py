@@ -179,6 +179,9 @@ def run_validation_frontier_fixture() -> dict[str, Any]:
 
     frontier_winner_labels_by_example: list[str] = []
     frontier_coverage_labels: dict[str, int] = {}
+    # This fixture currently depends on DSPy exposing
+    # per_val_instance_best_candidates on detailed_results. Treat that as
+    # upstream-result plumbing rather than a stable public API promise.
     per_val_best = getattr(detailed_results, "per_val_instance_best_candidates", {})
     for case_index in range(len(valset)):
         candidate_indexes = sorted(per_val_best.get(case_index, []))
