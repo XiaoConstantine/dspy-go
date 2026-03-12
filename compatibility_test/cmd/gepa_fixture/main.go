@@ -52,6 +52,10 @@ type fixtureLLM struct{}
 
 func (f *fixtureLLM) Generate(_ context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
 	switch {
+	case strings.Contains(prompt, "Generate 1 diverse variations of the instruction for a classifier module."):
+		return &core.LLMResponse{Content: "1. classifier improved"}, nil
+	case strings.Contains(prompt, "Generate 1 diverse variations of the instruction for a generator module."):
+		return &core.LLMResponse{Content: "1. generator improved"}, nil
 	case strings.Contains(prompt, `Original: "classifier base"`):
 		return &core.LLMResponse{Content: "classifier improved"}, nil
 	case strings.Contains(prompt, `Original: "generator base"`):
@@ -106,10 +110,24 @@ type fixtureScenarioResult struct {
 	CandidateCount                  int               `json:"candidate_count"`
 }
 
-type fixtureReport struct {
-	Runner    string                           `json:"runner"`
-	Fixture   string                           `json:"fixture"`
+type componentSelectionReport struct {
 	Scenarios map[string]fixtureScenarioResult `json:"scenarios"`
+}
+
+type validationFrontierResult struct {
+	FrontierWinnerLabelsByExample []string       `json:"frontier_winner_labels_by_example"`
+	FrontierCoverageLabels        map[string]int `json:"frontier_coverage_labels"`
+	CandidateCount                int            `json:"candidate_count"`
+}
+
+type fixtureCollection struct {
+	ComponentSelection componentSelectionReport `json:"component_selection"`
+	ValidationFrontier validationFrontierResult `json:"validation_frontier"`
+}
+
+type fixtureReport struct {
+	Runner   string            `json:"runner"`
+	Fixtures fixtureCollection `json:"fixtures"`
 }
 
 func newFixtureProgram(classifierInstruction, generatorInstruction string) core.Program {
@@ -118,8 +136,12 @@ func newFixtureProgram(classifierInstruction, generatorInstruction string) core.
 		"generator":  newFixtureModule(generatorInstruction),
 	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
 		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			classifierInstruction := modules["classifier"].GetSignature().Instruction
+			generatorInstruction := modules["generator"].GetSignature().Instruction
 			return map[string]interface{}{
-				"output": modules["classifier"].GetSignature().Instruction + "|" + modules["generator"].GetSignature().Instruction,
+				"output":                 classifierInstruction + "|" + generatorInstruction,
+				"classifier_instruction": classifierInstruction,
+				"generator_instruction":  generatorInstruction,
 			}, nil
 		}
 	})
@@ -134,6 +156,44 @@ func instructionProgressMetric(_ map[string]interface{}, actual map[string]inter
 		}
 	}
 	return score
+}
+
+func frontierProgressMetric(expected, actual map[string]interface{}) float64 {
+	kind, _ := expected["kind"].(string)
+	classifierInstruction, _ := actual["classifier_instruction"].(string)
+	generatorInstruction, _ := actual["generator_instruction"].(string)
+	classifierImproved := strings.Contains(strings.ToLower(classifierInstruction), "improved")
+	generatorImproved := strings.Contains(strings.ToLower(generatorInstruction), "improved")
+
+	switch kind {
+	case "train":
+		return boolToFloat(classifierImproved != generatorImproved)
+	case "alpha":
+		if classifierImproved && !generatorImproved {
+			return 1.0
+		}
+		if !classifierImproved && !generatorImproved {
+			return 0.5
+		}
+		return 0.0
+	case "beta":
+		if generatorImproved && !classifierImproved {
+			return 1.0
+		}
+		if !classifierImproved && !generatorImproved {
+			return 0.5
+		}
+		return 0.0
+	default:
+		return 0.0
+	}
+}
+
+func boolToFloat(value bool) float64 {
+	if value {
+		return 1.0
+	}
+	return 0.0
 }
 
 func programInstructions(program core.Program) map[string]string {
@@ -153,6 +213,38 @@ func updatedComponents(original, current map[string]string) []string {
 	}
 	sort.Strings(updated)
 	return updated
+}
+
+func candidateInstructions(candidate *optimizers.GEPACandidate) map[string]string {
+	if candidate == nil {
+		return nil
+	}
+
+	instructions := make(map[string]string, len(candidate.ComponentTexts))
+	for moduleName, instruction := range candidate.ComponentTexts {
+		instructions[moduleName] = instruction
+	}
+	if len(instructions) > 0 {
+		return instructions
+	}
+	if candidate.ModuleName != "" {
+		instructions[candidate.ModuleName] = candidate.Instruction
+	}
+	return instructions
+}
+
+func candidateLabel(instructions, original map[string]string) string {
+	classifierImproved := instructions["classifier"] != original["classifier"]
+	generatorImproved := instructions["generator"] != original["generator"]
+
+	switch {
+	case classifierImproved && !generatorImproved:
+		return "classifier"
+	case generatorImproved && !classifierImproved:
+		return "generator"
+	default:
+		return "seed"
+	}
 }
 
 func runSelectorScenario(ctx context.Context, selector string) (fixtureScenarioResult, error) {
@@ -220,15 +312,109 @@ func runSelectorScenario(ctx context.Context, selector string) (fixtureScenarioR
 	}, nil
 }
 
+func runValidationFrontierScenario(ctx context.Context) (validationFrontierResult, error) {
+	originalDefault := core.GetDefaultLLM()
+	originalTeacher := core.GetTeacherLLM()
+	llm := &fixtureLLM{}
+	core.SetDefaultLLM(llm)
+	core.GlobalConfig.TeacherLLM = llm
+	defer func() {
+		core.SetDefaultLLM(originalDefault)
+		core.GlobalConfig.TeacherLLM = originalTeacher
+	}()
+
+	config := optimizers.DefaultGEPAConfig()
+	config.PopulationSize = 4
+	config.MaxGenerations = 1
+	config.ReflectionFreq = 0
+	config.ConcurrencyLevel = 1
+	config.EvaluationBatchSize = 1
+	config.ValidationSplit = 0.8
+	config.RandomSeed = 7
+
+	gepa, err := optimizers.NewGEPA(config)
+	if err != nil {
+		return validationFrontierResult{}, err
+	}
+
+	originalInstructions := map[string]string{
+		"classifier": "classifier base",
+		"generator":  "generator base",
+	}
+	program := newFixtureProgram(originalInstructions["classifier"], originalInstructions["generator"])
+	dataset := datasets.NewSimpleDataset([]core.Example{
+		{Inputs: map[string]interface{}{"input": "train"}, Outputs: map[string]interface{}{"kind": "train"}},
+		{Inputs: map[string]interface{}{"input": "alpha-1"}, Outputs: map[string]interface{}{"kind": "alpha"}},
+		{Inputs: map[string]interface{}{"input": "alpha-2"}, Outputs: map[string]interface{}{"kind": "alpha"}},
+		{Inputs: map[string]interface{}{"input": "beta-1"}, Outputs: map[string]interface{}{"kind": "beta"}},
+		{Inputs: map[string]interface{}{"input": "beta-2"}, Outputs: map[string]interface{}{"kind": "beta"}},
+	})
+
+	if _, err := gepa.Compile(ctx, program, dataset, frontierProgressMetric); err != nil {
+		return validationFrontierResult{}, err
+	}
+
+	population := gepa.CurrentPopulation()
+	if population == nil || len(population.Candidates) == 0 {
+		return validationFrontierResult{}, fmt.Errorf("missing GEPA population after compile")
+	}
+
+	candidateStates := make(map[string]map[string]string, len(population.Candidates))
+	for _, candidate := range population.Candidates {
+		candidateStates[candidate.ID] = candidateInstructions(candidate)
+	}
+
+	frontier, _ := gepa.GetOptimizationState().ValidationFrontierSnapshot()
+	if len(frontier) == 0 {
+		return validationFrontierResult{}, fmt.Errorf("missing validation frontier after compile")
+	}
+
+	winnersByKind := make(map[string]string)
+	for _, entry := range frontier {
+		if entry == nil {
+			continue
+		}
+		kind, _ := entry.Example.Outputs["kind"].(string)
+		if kind == "" {
+			continue
+		}
+		instructions := candidateStates[entry.CandidateID]
+		if len(instructions) == 0 {
+			continue
+		}
+		winnersByKind[kind] = candidateLabel(instructions, originalInstructions)
+	}
+
+	winnerLabels := make([]string, 0, 2)
+	coverage := make(map[string]int)
+	for _, kind := range []string{"alpha", "beta"} {
+		label, ok := winnersByKind[kind]
+		if !ok {
+			continue
+		}
+		winnerLabels = append(winnerLabels, label)
+		coverage[label]++
+	}
+
+	return validationFrontierResult{
+		FrontierWinnerLabelsByExample: winnerLabels,
+		FrontierCoverageLabels:        coverage,
+		CandidateCount:                len(population.Candidates),
+	}, nil
+}
+
 func main() {
 	outputPath := flag.String("output", "", "Optional path to write JSON results.")
 	flag.Parse()
 
 	ctx := context.Background()
 	report := fixtureReport{
-		Runner:    "go_dspy_go",
-		Fixture:   "gepa_component_selection",
-		Scenarios: make(map[string]fixtureScenarioResult),
+		Runner: "go_dspy_go",
+		Fixtures: fixtureCollection{
+			ComponentSelection: componentSelectionReport{
+				Scenarios: make(map[string]fixtureScenarioResult),
+			},
+		},
 	}
 
 	for _, selector := range []string{"round_robin", "all"} {
@@ -237,8 +423,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "fixture %s failed: %v\n", selector, err)
 			os.Exit(1)
 		}
-		report.Scenarios[selector] = result
+		report.Fixtures.ComponentSelection.Scenarios[selector] = result
 	}
+
+	frontierResult, err := runValidationFrontierScenario(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fixture validation_frontier failed: %v\n", err)
+		os.Exit(1)
+	}
+	report.Fixtures.ValidationFrontier = frontierResult
 
 	rendered, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
