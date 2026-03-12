@@ -331,14 +331,16 @@ type CandidateMetrics struct {
 	Metadata         map[string]interface{} `json:"metadata"`
 }
 
-// gepaValidationFrontierEntry records the current validation-frontier winner
-// for one validation example. This lets GEPA keep example-level coverage
-// instead of collapsing validation to a single scalar score per candidate.
+// gepaValidationFrontierEntry records the tied-best validation-frontier
+// programs for one validation example. CandidateID remains as a canonical
+// representative for compatibility, while CandidateIDs preserves the full
+// pruned tied-best set used for coverage-based selection.
 type gepaValidationFrontierEntry struct {
-	CaseIndex   int          `json:"case_index"`
-	CandidateID string       `json:"candidate_id"`
-	Score       float64      `json:"score"`
-	Example     core.Example `json:"example"`
+	CaseIndex    int          `json:"case_index"`
+	CandidateID  string       `json:"candidate_id,omitempty"`
+	CandidateIDs []string     `json:"candidate_ids,omitempty"`
+	Score        float64      `json:"score"`
+	Example      core.Example `json:"example"`
 }
 
 // GEPAState tracks the complete state of GEPA optimization.
@@ -607,10 +609,11 @@ func cloneValidationFrontierEntry(entry *gepaValidationFrontierEntry) *gepaValid
 	}
 
 	return &gepaValidationFrontierEntry{
-		CaseIndex:   entry.CaseIndex,
-		CandidateID: entry.CandidateID,
-		Score:       entry.Score,
-		Example:     cloneEvaluationExample(entry.Example),
+		CaseIndex:    entry.CaseIndex,
+		CandidateID:  entry.CandidateID,
+		CandidateIDs: append([]string(nil), entry.CandidateIDs...),
+		Score:        entry.Score,
+		Example:      cloneEvaluationExample(entry.Example),
 	}
 }
 
@@ -3251,37 +3254,177 @@ func buildValidationFrontier(evaluations map[string]*gepaCandidateEvaluation) (m
 	}
 
 	frontier := make(map[int]*gepaValidationFrontierEntry)
-	coverage := make(map[string]int)
+	candidateIDs := make([]string, 0, len(evaluations))
+	candidateScores := make(map[string]float64, len(evaluations))
+	for candidateID := range evaluations {
+		candidateIDs = append(candidateIDs, candidateID)
+	}
+	sort.Strings(candidateIDs)
 
-	for candidateID, evaluation := range evaluations {
+	for _, candidateID := range candidateIDs {
+		evaluation := evaluations[candidateID]
 		if evaluation == nil {
 			continue
 		}
+		candidateScores[candidateID] = evaluation.AverageScore
 
 		for caseIndex, evalCase := range evaluation.Cases {
 			score := evalCase.Score
 			current := frontier[caseIndex]
-			if current != nil && (score < current.Score || (score == current.Score && candidateID >= current.CandidateID)) {
-				continue
-			}
-
-			frontier[caseIndex] = &gepaValidationFrontierEntry{
-				CaseIndex:   caseIndex,
-				CandidateID: candidateID,
-				Score:       score,
-				Example:     cloneEvaluationExample(evalCase.Example),
+			switch {
+			case current == nil || score > current.Score:
+				frontier[caseIndex] = &gepaValidationFrontierEntry{
+					CaseIndex:    caseIndex,
+					CandidateID:  candidateID,
+					CandidateIDs: []string{candidateID},
+					Score:        score,
+					Example:      cloneEvaluationExample(evalCase.Example),
+				}
+			case score == current.Score:
+				current.CandidateIDs = append(current.CandidateIDs, candidateID)
+				if current.CandidateID == "" || candidateID < current.CandidateID {
+					current.CandidateID = candidateID
+				}
 			}
 		}
 	}
 
+	prunedFrontier := pruneValidationFrontier(frontier, candidateScores)
+	coverage := make(map[string]int)
+	for _, entry := range prunedFrontier {
+		if entry == nil {
+			continue
+		}
+		for _, candidateID := range entry.CandidateIDs {
+			coverage[candidateID]++
+		}
+	}
+
+	return prunedFrontier, coverage
+}
+
+func pruneValidationFrontier(frontier map[int]*gepaValidationFrontierEntry, candidateScores map[string]float64) map[int]*gepaValidationFrontierEntry {
+	if len(frontier) == 0 {
+		return nil
+	}
+
+	orderedCandidateIDs := validationFrontierCandidateIDs(frontier)
+	if len(orderedCandidateIDs) <= 1 {
+		return frontier
+	}
+
+	sort.SliceStable(orderedCandidateIDs, func(i, j int) bool {
+		left := orderedCandidateIDs[i]
+		right := orderedCandidateIDs[j]
+		leftScore := candidateScores[left]
+		rightScore := candidateScores[right]
+		if leftScore == rightScore {
+			return left < right
+		}
+		return leftScore < rightScore
+	})
+
+	remaining := make(map[string]struct{}, len(orderedCandidateIDs))
+	for _, candidateID := range orderedCandidateIDs {
+		remaining[candidateID] = struct{}{}
+	}
+
+	for _, candidateID := range orderedCandidateIDs {
+		if _, ok := remaining[candidateID]; !ok {
+			continue
+		}
+		if isValidationFrontierCandidateDominated(candidateID, remaining, frontier) {
+			delete(remaining, candidateID)
+		}
+	}
+
+	prunedFrontier := make(map[int]*gepaValidationFrontierEntry, len(frontier))
+	for caseIndex, entry := range frontier {
+		if entry == nil {
+			continue
+		}
+
+		candidateIDs := make([]string, 0, len(entry.CandidateIDs))
+		for _, candidateID := range entry.CandidateIDs {
+			if _, ok := remaining[candidateID]; ok {
+				candidateIDs = append(candidateIDs, candidateID)
+			}
+		}
+		if len(candidateIDs) == 0 {
+			continue
+		}
+
+		prunedFrontier[caseIndex] = &gepaValidationFrontierEntry{
+			CaseIndex:    entry.CaseIndex,
+			CandidateID:  candidateIDs[0],
+			CandidateIDs: candidateIDs,
+			Score:        entry.Score,
+			Example:      cloneEvaluationExample(entry.Example),
+		}
+	}
+
+	return prunedFrontier
+}
+
+func validationFrontierCandidateIDs(frontier map[int]*gepaValidationFrontierEntry) []string {
+	seen := make(map[string]struct{})
+	candidateIDs := make([]string, 0)
 	for _, entry := range frontier {
 		if entry == nil {
 			continue
 		}
-		coverage[entry.CandidateID]++
+		for _, candidateID := range entry.CandidateIDs {
+			if candidateID == "" {
+				continue
+			}
+			if _, ok := seen[candidateID]; ok {
+				continue
+			}
+			seen[candidateID] = struct{}{}
+			candidateIDs = append(candidateIDs, candidateID)
+		}
+	}
+	return candidateIDs
+}
+
+func isValidationFrontierCandidateDominated(candidateID string, remaining map[string]struct{}, frontier map[int]*gepaValidationFrontierEntry) bool {
+	if candidateID == "" || len(remaining) <= 1 {
+		return false
 	}
 
-	return frontier, coverage
+	for _, entry := range frontier {
+		if entry == nil || !validationFrontierEntryContainsCandidate(entry, candidateID) {
+			continue
+		}
+
+		coveredByOther := false
+		for _, otherCandidateID := range entry.CandidateIDs {
+			if otherCandidateID == candidateID {
+				continue
+			}
+			if _, ok := remaining[otherCandidateID]; ok {
+				coveredByOther = true
+				break
+			}
+		}
+		if !coveredByOther {
+			return false
+		}
+	}
+
+	return true
+}
+
+func validationFrontierEntryContainsCandidate(entry *gepaValidationFrontierEntry, candidateID string) bool {
+	if entry == nil || candidateID == "" {
+		return false
+	}
+	for _, currentCandidateID := range entry.CandidateIDs {
+		if currentCandidateID == candidateID {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *GEPA) reflectIfScheduled(ctx context.Context, generation int) error {

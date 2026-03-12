@@ -1037,27 +1037,72 @@ func TestBuildValidationFrontierTracksCoverage(t *testing.T) {
 	evaluations := map[string]*gepaCandidateEvaluation{
 		"candidate-a": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-0"}}, Score: 0.4},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-1"}}, Score: 0.4},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-1"}}, Score: 0.0},
 				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-2"}}, Score: 0.0},
 			},
+			AverageScore: 1.0 / 3.0,
 		},
 		"candidate-b": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-0"}}, Score: 0.3},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-1"}}, Score: 0.3},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-2"}}, Score: 0.9},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-1"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-2"}}, Score: 0.0},
 			},
+			AverageScore: 2.0 / 3.0,
+		},
+		"candidate-c": {
+			Cases: []gepaEvaluationCase{
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-0"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-1"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-2"}}, Score: 1.0},
+			},
+			AverageScore: 2.0 / 3.0,
 		},
 	}
 
 	frontier, coverage := buildValidationFrontier(evaluations)
 	require.Len(t, frontier, 3)
-	assert.Equal(t, "candidate-a", frontier[0].CandidateID)
-	assert.Equal(t, "candidate-a", frontier[1].CandidateID)
-	assert.Equal(t, "candidate-b", frontier[2].CandidateID)
-	assert.Equal(t, 2, coverage["candidate-a"])
-	assert.Equal(t, 1, coverage["candidate-b"])
+	assert.Equal(t, []string{"candidate-b"}, frontier[0].CandidateIDs)
+	assert.Equal(t, []string{"candidate-b", "candidate-c"}, frontier[1].CandidateIDs)
+	assert.Equal(t, []string{"candidate-c"}, frontier[2].CandidateIDs)
+	assert.Equal(t, 2, coverage["candidate-b"])
+	assert.Equal(t, 2, coverage["candidate-c"])
+	assert.NotContains(t, coverage, "candidate-a")
+}
+
+func TestBuildValidationFrontierPrunesDominatedTiedWinners(t *testing.T) {
+	evaluations := map[string]*gepaCandidateEvaluation{
+		"candidate-a": {
+			Cases: []gepaEvaluationCase{
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-1"}}, Score: 0.0},
+			},
+			AverageScore: 0.5,
+		},
+		"candidate-b": {
+			Cases: []gepaEvaluationCase{
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-1"}}, Score: 1.0},
+			},
+			AverageScore: 1.0,
+		},
+		"candidate-c": {
+			Cases: []gepaEvaluationCase{
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-0"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-1"}}, Score: 1.0},
+			},
+			AverageScore: 0.5,
+		},
+	}
+
+	frontier, coverage := buildValidationFrontier(evaluations)
+	require.Len(t, frontier, 2)
+	assert.Equal(t, []string{"candidate-b"}, frontier[0].CandidateIDs)
+	assert.Equal(t, []string{"candidate-b"}, frontier[1].CandidateIDs)
+	assert.Equal(t, 2, coverage["candidate-b"])
+	assert.NotContains(t, coverage, "candidate-a")
+	assert.NotContains(t, coverage, "candidate-c")
 }
 
 func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
@@ -1124,9 +1169,9 @@ func TestValidationSelectionPopulationUsesFrontierCoverage(t *testing.T) {
 	})
 	gepa.state.SetValidationFrontier(
 		map[int]*gepaValidationFrontierEntry{
-			0: {CaseIndex: 0, CandidateID: "candidate-a", Score: 0.4},
-			1: {CaseIndex: 1, CandidateID: "candidate-a", Score: 0.4},
-			2: {CaseIndex: 2, CandidateID: "candidate-b", Score: 0.9},
+			0: {CaseIndex: 0, CandidateID: "candidate-a", CandidateIDs: []string{"candidate-a"}, Score: 0.4},
+			1: {CaseIndex: 1, CandidateID: "candidate-a", CandidateIDs: []string{"candidate-a", "candidate-b"}, Score: 0.4},
+			2: {CaseIndex: 2, CandidateID: "candidate-b", CandidateIDs: []string{"candidate-b"}, Score: 0.9},
 		},
 		map[string]int{
 			"candidate-a": 2,
@@ -1166,7 +1211,7 @@ func TestSelectCandidateForUpdatePrefersValidationFrontierContributor(t *testing
 	})
 	gepa.state.SetValidationFrontier(
 		map[int]*gepaValidationFrontierEntry{
-			0: {CaseIndex: 0, CandidateID: "candidate-a", Score: 0.4},
+			0: {CaseIndex: 0, CandidateID: "candidate-a", CandidateIDs: []string{"candidate-a"}, Score: 0.4},
 		},
 		map[string]int{
 			"candidate-a": 1,
