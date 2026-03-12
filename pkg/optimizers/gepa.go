@@ -104,6 +104,7 @@ type GEPAConfig struct {
 	ValidationFrequency int     `json:"validation_frequency"`  // Default: 1
 	ValidationSplit     float64 `json:"validation_split"`      // Default: 0.0 (disabled)
 	RandomSeed          int64   `json:"random_seed"`           // Default: 0 (time-based)
+	MaxMergeInvocations int     `json:"max_merge_invocations"` // Default: 5
 
 	// LLM parameters
 	GenerationModel string  `json:"generation_model"` // Default: uses core.GetDefaultLLM()
@@ -132,6 +133,7 @@ func DefaultGEPAConfig() *GEPAConfig {
 		ConcurrencyLevel:     3,
 		ValidationFrequency:  1,
 		ValidationSplit:      0.0,
+		MaxMergeInvocations:  5,
 		Temperature:          0.8,
 		MaxTokens:            500,
 	}
@@ -360,6 +362,8 @@ type GEPAState struct {
 	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness    `json:"multi_objective_fitness_map"`
 	ValidationFrontier       map[int]*gepaValidationFrontierEntry `json:"validation_frontier,omitempty"`
 	ValidationCoverage       map[string]int                       `json:"validation_coverage,omitempty"`
+	MergeInvocations         int                                  `json:"merge_invocations,omitempty"`
+	PerformedMerges          map[string]bool                      `json:"performed_merges,omitempty"`
 	candidateReflections     map[string]*ReflectionResult
 	candidateEvaluations     map[string]*gepaCandidateEvaluation
 	candidateValidationEvals map[string]*gepaCandidateEvaluation
@@ -387,6 +391,7 @@ func NewGEPAState() *GEPAState {
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
 		ValidationFrontier:       make(map[int]*gepaValidationFrontierEntry),
 		ValidationCoverage:       make(map[string]int),
+		PerformedMerges:          make(map[string]bool),
 		candidateReflections:     make(map[string]*ReflectionResult),
 		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
 		candidateValidationEvals: make(map[string]*gepaCandidateEvaluation),
@@ -601,6 +606,52 @@ func (s *GEPAState) ValidationFrontierSnapshot() (map[int]*gepaValidationFrontie
 	}
 
 	return frontier, coverage
+}
+
+func (s *GEPAState) HasRecordedMerge(key string) bool {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.PerformedMerges[key]
+}
+
+func (s *GEPAState) MergeBudgetAvailable(maxInvocations int) bool {
+	if s == nil {
+		return false
+	}
+	if maxInvocations <= 0 {
+		return true
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.MergeInvocations < maxInvocations
+}
+
+func (s *GEPAState) RecordMergeInvocation(key string, maxInvocations int) bool {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if maxInvocations > 0 && s.MergeInvocations >= maxInvocations {
+		return false
+	}
+	if s.PerformedMerges == nil {
+		s.PerformedMerges = make(map[string]bool)
+	}
+	if s.PerformedMerges[key] {
+		return false
+	}
+
+	s.PerformedMerges[key] = true
+	s.MergeInvocations++
+	return true
 }
 
 func cloneValidationFrontierEntry(entry *gepaValidationFrontierEntry) *gepaValidationFrontierEntry {
@@ -2908,6 +2959,9 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	}
 	if config.TournamentSize <= 0 {
 		config.TournamentSize = defaults.TournamentSize
+	}
+	if config.MaxMergeInvocations <= 0 {
+		config.MaxMergeInvocations = defaults.MaxMergeInvocations
 	}
 	if config.SelectionStrategy == "" {
 		config.SelectionStrategy = defaults.SelectionStrategy

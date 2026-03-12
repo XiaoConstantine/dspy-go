@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -12,11 +13,19 @@ type gepaAncestorMergeChoice struct {
 	adoptedComponents     []string
 	conflictingComponents []string
 	coverage              int
+	mergeKey              string
 }
 
 func (g *GEPA) tryAncestorMergeProposal(ctx context.Context, population *Population, source *GEPACandidate, nextGeneration int) *GEPACandidate {
+	if g == nil || g.state == nil || !g.state.MergeBudgetAvailable(g.config.MaxMergeInvocations) {
+		return nil
+	}
+
 	choice := g.selectAncestorMergePartner(population, source)
 	if choice == nil {
+		return nil
+	}
+	if !g.state.RecordMergeInvocation(choice.mergeKey, g.config.MaxMergeInvocations) {
 		return nil
 	}
 
@@ -25,7 +34,7 @@ func (g *GEPA) tryAncestorMergeProposal(ctx context.Context, population *Populat
 		return nil
 	}
 
-	accepted := g.acceptCandidateProposal(ctx, source, merged)
+	accepted := g.acceptMergeProposal(ctx, source, choice.partner, merged)
 	if accepted == nil || accepted == source {
 		return nil
 	}
@@ -68,6 +77,10 @@ func (g *GEPA) selectAncestorMergePartner(population *Population, source *GEPACa
 			adoptedComponents:     adopted,
 			conflictingComponents: conflicts,
 			coverage:              coverage[candidate.ID],
+			mergeKey:              buildAncestorMergeAttemptKey(source.ID, candidate.ID, ancestor.ID, adopted),
+		}
+		if g.state.HasRecordedMerge(choice.mergeKey) {
+			continue
 		}
 		if isBetterAncestorMergeChoice(choice, best) {
 			best = choice
@@ -102,6 +115,9 @@ func (g *GEPA) buildAncestorMergedCandidate(source *GEPACandidate, choice *gepaA
 	if source == nil || choice == nil || choice.partner == nil || choice.ancestor == nil || len(choice.adoptedComponents) == 0 {
 		return nil
 	}
+	if choice.mergeKey == "" {
+		choice.mergeKey = buildAncestorMergeAttemptKey(source.ID, choice.partner.ID, choice.ancestor.ID, choice.adoptedComponents)
+	}
 
 	componentTexts := cloneCandidateComponentTexts(source)
 	if len(componentTexts) == 0 {
@@ -130,10 +146,34 @@ func (g *GEPA) buildAncestorMergedCandidate(source *GEPACandidate, choice *gepaA
 			"proposal_type":                "ancestor_merge",
 			"merge_partner_id":             choice.partner.ID,
 			"merge_common_ancestor_id":     choice.ancestor.ID,
+			"merge_attempt_key":            choice.mergeKey,
 			"merge_adopted_components":     append([]string(nil), choice.adoptedComponents...),
 			"merge_conflicting_components": append([]string(nil), choice.conflictingComponents...),
 		}, source.Metadata, choice.partner.Metadata),
 	}
+}
+
+func buildAncestorMergeAttemptKey(sourceID, partnerID, ancestorID string, adoptedComponents []string) string {
+	components := append([]string(nil), adoptedComponents...)
+	if len(components) > 0 {
+		components = componentModuleNames(stringSliceSet(components))
+	}
+	return fmt.Sprintf("%s|%s|%s|%s", sourceID, partnerID, ancestorID, strings.Join(components, ","))
+}
+
+func stringSliceSet(values []string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	set := make(map[string]string, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		set[value] = value
+	}
+	return set
 }
 
 func mergeableAncestorComponents(source, partner, ancestor *GEPACandidate) ([]string, []string) {

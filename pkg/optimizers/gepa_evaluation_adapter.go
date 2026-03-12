@@ -32,6 +32,32 @@ type gepaEvaluationAdapter struct {
 	metric      core.Metric
 }
 
+func (a *gepaEvaluationAdapter) subset(caseIndexes []int) *gepaEvaluationAdapter {
+	if a == nil {
+		return nil
+	}
+	if len(caseIndexes) == 0 || len(caseIndexes) >= len(a.batch) {
+		return a
+	}
+
+	batch := make([]core.Example, 0, len(caseIndexes))
+	for _, caseIndex := range caseIndexes {
+		if caseIndex < 0 || caseIndex >= len(a.batch) {
+			continue
+		}
+		batch = append(batch, cloneEvaluationExample(a.batch[caseIndex]))
+	}
+	if len(batch) == 0 {
+		return a
+	}
+
+	return &gepaEvaluationAdapter{
+		baseProgram: a.baseProgram,
+		batch:       batch,
+		metric:      a.metric,
+	}
+}
+
 func (g *GEPA) newEvaluationAdapter(program core.Program, dataset core.Dataset, metric core.Metric) *gepaEvaluationAdapter {
 	return &gepaEvaluationAdapter{
 		baseProgram: program,
