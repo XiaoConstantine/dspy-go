@@ -27,13 +27,27 @@ This framework provides side-by-side comparison between the Python DSPy package 
 
 ## 🧬 GEPA (Generative Evolutionary Prompt Adaptation) Results
 
+### Current GEPA Parity Harness
+The historical dashboard below is retained for reference, but current GEPA parity work should use the deterministic fixture harness instead of the older live-Gemini benchmark path.
+
+Run the fixture harness:
+```bash
+./run_gepa_fixture.sh
+```
+
+This harness:
+- uses upstream `dspy` with `DummyLM`, not a local DSPy fork
+- does not require `GEMINI_API_KEY`
+- compares stable GEPA behaviors instead of benchmark scores
+- currently covers component-selection parity (`round_robin` vs `all`)
+
 ### Test Status: ✅ COMPATIBLE
 *Last Updated: 2025-08-12 | Dataset Size: 10 | Model: gemini-2.0-flash*
 
 #### GEPA Compatibility Results (Cache Disabled)
 | Implementation | Score | Compilation Time | Status | Notes |
 |----------------|-------|------------------|--------|--------|
-| Python DSPy (Local Fork) | 66.7% | 99.24s | ✅ Working | Using local fork from `/Users/xiao/development/github.com/XiaoConstantine/dspy` |
+| Python DSPy (Local Fork) | 66.7% | 99.24s | ✅ Working | Historical run against a local DSPy fork |
 | Go dspy-go | 66.7% | 82.35s | ✅ Working | Advanced evolutionary algorithm with multi-objective optimization |
 
 ### GEPA Key Features
@@ -60,15 +74,8 @@ This framework provides side-by-side comparison between the Python DSPy package 
 
 ### GEPA Setup Requirements
 **For Python GEPA:**
-- Requires local DSPy fork with GEPA implementation
-- Update `dspy_comparison.py` dependencies:
-  ```python
-  # dependencies = [
-  #     "dspy @ file:///Users/xiao/development/github.com/XiaoConstantine/dspy",
-  #     "google-generativeai>=0.3.0",
-  #     "numpy>=1.21.0",
-  # ]
-  ```
+- Deterministic parity fixtures use upstream `dspy` and install it via `uv`
+- No local DSPy fork is required for the new GEPA fixture harness
 
 **For Go GEPA:**
 - Fully integrated in dspy-go package
@@ -139,6 +146,8 @@ The compatibility testing framework consists of:
 export GEMINI_API_KEY=your_api_key_here
 ```
 
+The deterministic GEPA fixture harness does not require any environment variables.
+
 ## Installation
 
 1. Install uv (if not already installed):
@@ -184,7 +193,7 @@ Available optimizer options:
 - `mipro`: MIPRO/MIPROv2 only
 - `simba`: SIMBA only
 - `copro`: COPRO only
-- `gepa`: GEPA only (requires local DSPy fork for Python)
+- `gepa`: GEPA only (legacy benchmark path; deterministic parity uses `./run_gepa_fixture.sh`)
 - `all`: All optimizers (default)
 
 ### Manual Execution

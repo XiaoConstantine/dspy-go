@@ -22,6 +22,9 @@ go_comparison_results.json
 compatibility_report.json
 api_validation_report.json
 benchmark_results.json
+dspy_gepa_fixture_results.json
+go_gepa_fixture_results.json
+gepa_fixture_report.json
 
 # Logs
 *.log
