@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -250,6 +251,19 @@ func newTwoModuleCandidateEvaluationTestProgram(alphaInstruction, betaInstructio
 	})
 }
 
+func newCountingCandidateEvaluationProgram(instruction string, executions *int) core.Program {
+	return core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule(instruction),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			*executions = *executions + 1
+			return map[string]interface{}{
+				"output": modules["alpha"].GetSignature().Instruction,
+			}, nil
+		}
+	})
+}
+
 func exactOutputMetric(expected, actual map[string]interface{}) float64 {
 	if expected["output"] == actual["output"] {
 		return 1.0
@@ -347,9 +361,11 @@ func TestGEPAState(t *testing.T) {
 
 	assert.Equal(t, 0, state.CurrentGeneration)
 	assert.Equal(t, 0.0, state.BestFitness)
+	assert.True(t, math.IsInf(state.BestValidationFitness, -1))
 	assert.NotNil(t, state.PopulationHistory)
 	assert.NotNil(t, state.ExecutionTraces)
 	assert.NotNil(t, state.CandidateMetrics)
+	assert.NotNil(t, state.candidateValidationEvals)
 
 	// Test adding trace
 	trace := &ExecutionTrace{
@@ -545,6 +561,171 @@ func TestApplyBestCandidateUsesWholeProgramState(t *testing.T) {
 	assert.Equal(t, "beta tuned", modified.Modules["beta"].GetSignature().Instruction)
 }
 
+func TestApplyBestCandidatePrefersValidationWinner(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+
+	trainBest := &GEPACandidate{
+		ID:          "train-best",
+		ModuleName:  "alpha",
+		Instruction: "alpha train",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha train",
+			"beta":  "beta base",
+		},
+		Fitness: 0.95,
+	}
+	validationBest := &GEPACandidate{
+		ID:          "validation-best",
+		ModuleName:  "alpha",
+		Instruction: "alpha val",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha val",
+			"beta":  "beta val",
+		},
+		Fitness: 0.70,
+	}
+	gepa.state.BestCandidate = trainBest
+	gepa.state.BestValidationCandidate = validationBest
+	gepa.state.BestValidationFitness = 0.90
+	gepa.state.PopulationHistory = []*Population{{
+		Candidates: []*GEPACandidate{trainBest, validationBest},
+	}}
+	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
+		"train-best":      {AverageScore: 0.10},
+		"validation-best": {AverageScore: 0.90},
+	})
+
+	program := core.Program{
+		Modules: map[string]core.Module{
+			"alpha": newStaticCandidateTestModule("alpha base"),
+			"beta":  newStaticCandidateTestModule("beta base"),
+		},
+	}
+
+	modified := gepa.applyBestCandidate(program)
+	assert.Equal(t, "alpha val", modified.Modules["alpha"].GetSignature().Instruction)
+	assert.Equal(t, "beta val", modified.Modules["beta"].GetSignature().Instruction)
+}
+
+func TestPrepareOptimizationDatasetsUsesValidationSplit(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ValidationSplit = 0.4
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "one"}},
+		{Outputs: map[string]interface{}{"output": "two"}},
+		{Outputs: map[string]interface{}{"output": "three"}},
+		{Outputs: map[string]interface{}{"output": "four"}},
+		{Outputs: map[string]interface{}{"output": "five"}},
+	})
+
+	trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(dataset)
+	require.NoError(t, err)
+
+	trainExamples := core.DatasetToSlice(trainDataset)
+	require.Len(t, trainExamples, 3)
+	require.Len(t, validationExamples, 2)
+
+	seen := make(map[string]int)
+	for _, example := range trainExamples {
+		seen[example.Outputs["output"].(string)]++
+	}
+	for _, example := range validationExamples {
+		seen[example.Outputs["output"].(string)]++
+	}
+	assert.Len(t, seen, 5)
+	assert.Equal(t, 1, seen["one"])
+	assert.Equal(t, 1, seen["two"])
+	assert.Equal(t, 1, seen["three"])
+	assert.Equal(t, 1, seen["four"])
+	assert.Equal(t, 1, seen["five"])
+
+	validationOutputs := []string{
+		validationExamples[0].Outputs["output"].(string),
+		validationExamples[1].Outputs["output"].(string),
+	}
+	assert.NotEqual(t, []string{"four", "five"}, validationOutputs)
+}
+
+func TestPrepareOptimizationDatasetsDisabledValidationSplit(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "one"}},
+		{Outputs: map[string]interface{}{"output": "two"}},
+	})
+
+	trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(dataset)
+	require.NoError(t, err)
+	assert.Same(t, dataset, trainDataset)
+	assert.Nil(t, validationExamples)
+}
+
+func TestPrepareOptimizationDatasetsBoundarySizes(t *testing.T) {
+	tests := []struct {
+		name             string
+		examples         []core.Example
+		validationSplit  float64
+		expectedTrainLen int
+		expectedValLen   int
+	}{
+		{
+			name:             "single example stays in train",
+			examples:         []core.Example{{Outputs: map[string]interface{}{"output": "one"}}},
+			validationSplit:  0.5,
+			expectedTrainLen: 1,
+			expectedValLen:   0,
+		},
+		{
+			name: "two examples split one and one",
+			examples: []core.Example{
+				{Outputs: map[string]interface{}{"output": "one"}},
+				{Outputs: map[string]interface{}{"output": "two"}},
+			},
+			validationSplit:  0.5,
+			expectedTrainLen: 1,
+			expectedValLen:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gepa := &GEPA{
+				config: DefaultGEPAConfig(),
+				state:  NewGEPAState(),
+				rng:    rand.New(rand.NewSource(1)),
+			}
+			gepa.config.ValidationSplit = tt.validationSplit
+
+			trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(newCountingDataset(tt.examples))
+			require.NoError(t, err)
+
+			trainExamples := core.DatasetToSlice(trainDataset)
+			assert.Len(t, trainExamples, tt.expectedTrainLen)
+			assert.Len(t, validationExamples, tt.expectedValLen)
+
+			seen := make(map[string]int)
+			for _, example := range trainExamples {
+				seen[example.Outputs["output"].(string)]++
+			}
+			for _, example := range validationExamples {
+				seen[example.Outputs["output"].(string)]++
+			}
+			assert.Len(t, seen, len(tt.examples))
+		})
+	}
+}
+
 func TestEvaluateCandidateWithAdapterUsesWholeProgramComponentTexts(t *testing.T) {
 	gepa := &GEPA{
 		config: DefaultGEPAConfig(),
@@ -573,6 +754,315 @@ func TestEvaluateCandidateWithAdapterUsesWholeProgramComponentTexts(t *testing.T
 	assert.Equal(t, 1.0, evaluation.AverageScore)
 	require.Len(t, evaluation.Cases, 1)
 	assert.Equal(t, "alpha tuned|beta tuned", evaluation.Cases[0].Outputs["output"])
+}
+
+func TestEvaluateValidationPopulationTracksBestValidationCandidate(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ConcurrencyLevel = 1
+
+	population := &Population{
+		Generation: 0,
+		Candidates: []*GEPACandidate{
+			{
+				ID:          "candidate-a",
+				ModuleName:  "alpha",
+				Instruction: "alpha a",
+				ComponentTexts: map[string]string{
+					"alpha": "alpha a",
+				},
+				Fitness: 0.5,
+			},
+			{
+				ID:          "candidate-b",
+				ModuleName:  "alpha",
+				Instruction: "alpha b",
+				ComponentTexts: map[string]string{
+					"alpha": "alpha b",
+				},
+				Fitness: 0.4,
+			},
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{population}
+
+	err := gepa.evaluateValidationPopulation(
+		context.Background(),
+		newCandidateEvaluationTestProgram("alpha base"),
+		[]core.Example{{Outputs: map[string]interface{}{"output": "alpha b"}}},
+		exactOutputMetric,
+	)
+	require.NoError(t, err)
+
+	best := gepa.state.BestValidationCandidate
+	require.NotNil(t, best)
+	assert.Equal(t, "candidate-b", best.ID)
+	assert.Equal(t, 1.0, gepa.state.BestValidationFitness)
+	require.NotNil(t, gepa.state.GetCandidateValidationEvaluation("candidate-a"))
+	require.NotNil(t, gepa.state.GetCandidateValidationEvaluation("candidate-b"))
+}
+
+func TestEvaluateValidationPopulationReusesCachedEvaluations(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ConcurrencyLevel = 1
+
+	population := &Population{
+		Generation: 0,
+		Candidates: []*GEPACandidate{
+			{
+				ID:          "candidate-a",
+				ModuleName:  "alpha",
+				Instruction: "alpha a",
+				ComponentTexts: map[string]string{
+					"alpha": "alpha a",
+				},
+			},
+			{
+				ID:          "candidate-b",
+				ModuleName:  "alpha",
+				Instruction: "alpha b",
+				ComponentTexts: map[string]string{
+					"alpha": "alpha b",
+				},
+			},
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{population}
+
+	executions := 0
+	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
+	validationExamples := []core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}}
+
+	err := gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
+	require.NoError(t, err)
+	assert.Equal(t, 2, executions)
+
+	err = gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
+	require.NoError(t, err)
+	assert.Equal(t, 2, executions)
+}
+
+func TestEvaluateValidationPopulationHandlesMixedCachedAndUncachedCandidates(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ConcurrencyLevel = 2
+
+	population := &Population{
+		Generation: 1,
+		Candidates: []*GEPACandidate{
+			{
+				ID:          "candidate-a",
+				ModuleName:  "alpha",
+				Instruction: "alpha a",
+				ComponentTexts: map[string]string{
+					"alpha": "alpha a",
+				},
+			},
+			{
+				ID:          "candidate-b",
+				ModuleName:  "alpha",
+				Instruction: "alpha b",
+				ComponentTexts: map[string]string{
+					"alpha": "alpha b",
+				},
+			},
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{population}
+	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
+		"candidate-a": {
+			AverageScore: 1.0,
+			Cases: []gepaEvaluationCase{
+				{Outputs: map[string]interface{}{"output": "alpha a"}, Score: 1.0},
+			},
+		},
+	})
+
+	executions := 0
+	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
+	validationExamples := []core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}}
+
+	err := gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
+	require.NoError(t, err)
+	assert.Equal(t, 1, executions)
+	require.NotNil(t, gepa.state.GetCandidateValidationEvaluation("candidate-a"))
+	require.NotNil(t, gepa.state.GetCandidateValidationEvaluation("candidate-b"))
+}
+
+func TestEvaluateValidationPopulationPreservesAllTimeBestValidationCandidate(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ConcurrencyLevel = 1
+
+	validationExamples := []core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}}
+	program := newCandidateEvaluationTestProgram("alpha base")
+
+	gepa.state.PopulationHistory = []*Population{{
+		Generation: 0,
+		Candidates: []*GEPACandidate{{
+			ID:          "candidate-a",
+			ModuleName:  "alpha",
+			Instruction: "alpha a",
+			ComponentTexts: map[string]string{
+				"alpha": "alpha a",
+			},
+		}},
+	}}
+	err := gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
+	require.NoError(t, err)
+	require.NotNil(t, gepa.state.BestValidationCandidate)
+	assert.Equal(t, "candidate-a", gepa.state.BestValidationCandidate.ID)
+	assert.Equal(t, 1.0, gepa.state.BestValidationFitness)
+
+	gepa.state.PopulationHistory = []*Population{{
+		Generation: 1,
+		Candidates: []*GEPACandidate{{
+			ID:          "candidate-b",
+			ModuleName:  "alpha",
+			Instruction: "alpha b",
+			ComponentTexts: map[string]string{
+				"alpha": "alpha b",
+			},
+		}},
+	}}
+	err = gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
+	require.NoError(t, err)
+	require.NotNil(t, gepa.state.BestValidationCandidate)
+	assert.Equal(t, "candidate-a", gepa.state.BestValidationCandidate.ID)
+	assert.Equal(t, 1.0, gepa.state.BestValidationFitness)
+}
+
+func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ValidationFrequency = 2
+	gepa.config.ConcurrencyLevel = 1
+
+	candidate := &GEPACandidate{
+		ID:          "candidate-a",
+		ModuleName:  "alpha",
+		Instruction: "alpha a",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha a",
+		},
+	}
+	gepa.state.PopulationHistory = []*Population{{
+		Generation: 1,
+		Candidates: []*GEPACandidate{candidate},
+	}}
+
+	validated, err := gepa.validateIfScheduled(
+		context.Background(),
+		newCandidateEvaluationTestProgram("alpha base"),
+		exactOutputMetric,
+		[]core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}},
+		1,
+	)
+	require.NoError(t, err)
+	assert.False(t, validated)
+	assert.Nil(t, gepa.state.BestValidationCandidate)
+
+	validated, err = gepa.validateIfScheduled(
+		context.Background(),
+		newCandidateEvaluationTestProgram("alpha base"),
+		exactOutputMetric,
+		[]core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}},
+		2,
+	)
+	require.NoError(t, err)
+	assert.True(t, validated)
+	require.NotNil(t, gepa.state.BestValidationCandidate)
+}
+
+func TestSelectCandidateForUpdatePrefersValidationScore(t *testing.T) {
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			SelectionStrategy: "roulette",
+		},
+		state: NewGEPAState(),
+		rng:   rand.New(rand.NewSource(2)),
+	}
+
+	population := &Population{
+		Candidates: []*GEPACandidate{
+			{ID: "candidate-a", Fitness: 0.9},
+			{ID: "candidate-b", Fitness: 0.4},
+		},
+	}
+	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
+		"candidate-a": {AverageScore: 0.0},
+		"candidate-b": {AverageScore: 1.0},
+	})
+
+	selected := gepa.selectCandidateForUpdate(population)
+	require.NotNil(t, selected)
+	assert.Equal(t, "candidate-b", selected.ID)
+}
+
+func TestSelectCandidateForUpdateFallsBackWhenValidationCoverageIsPartial(t *testing.T) {
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			SelectionStrategy: "roulette",
+		},
+		state: NewGEPAState(),
+		rng:   rand.New(rand.NewSource(2)),
+	}
+
+	population := &Population{
+		Candidates: []*GEPACandidate{
+			{ID: "candidate-a", Fitness: 1.0},
+			{ID: "candidate-b", Fitness: 0.0},
+		},
+	}
+	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
+		"candidate-b": {AverageScore: 1.0},
+	})
+
+	selected := gepa.selectCandidateForUpdate(population)
+	require.NotNil(t, selected)
+	assert.Equal(t, "candidate-a", selected.ID)
+}
+
+func TestValidationAdjustedMultiObjectiveFitness(t *testing.T) {
+	base := &MultiObjectiveFitness{
+		SuccessRate:    0.2,
+		OutputQuality:  0.8,
+		Efficiency:     0.4,
+		Robustness:     0.6,
+		Generalization: 0.7,
+		Diversity:      0.3,
+		Innovation:     0.5,
+	}
+
+	withBase := validationAdjustedMultiObjectiveFitness(base, 0.9)
+	require.NotNil(t, withBase)
+	assert.Equal(t, 0.9, withBase.SuccessRate)
+	assert.Equal(t, base.OutputQuality, withBase.OutputQuality)
+	assert.Equal(t, base.Efficiency, withBase.Efficiency)
+	assert.Equal(t, base.Robustness, withBase.Robustness)
+
+	withoutBase := validationAdjustedMultiObjectiveFitness(nil, 0.7)
+	require.NotNil(t, withoutBase)
+	assert.Equal(t, 0.7, withoutBase.SuccessRate)
+	assert.Equal(t, 0.7, withoutBase.OutputQuality)
+	assert.Equal(t, 0.5, withoutBase.Efficiency)
+	assert.Equal(t, 0.5, withoutBase.Robustness)
 }
 
 func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {

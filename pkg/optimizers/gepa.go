@@ -90,8 +90,10 @@ type GEPAConfig struct {
 	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3
 
 	// Performance parameters
-	EvaluationBatchSize int `json:"evaluation_batch_size"` // Default: 5
-	ConcurrencyLevel    int `json:"concurrency_level"`     // Default: 3
+	EvaluationBatchSize int     `json:"evaluation_batch_size"` // Default: 5
+	ConcurrencyLevel    int     `json:"concurrency_level"`     // Default: 3
+	ValidationFrequency int     `json:"validation_frequency"`  // Default: 1
+	ValidationSplit     float64 `json:"validation_split"`      // Default: 0.0 (disabled)
 
 	// LLM parameters
 	GenerationModel string  `json:"generation_model"` // Default: uses core.GetDefaultLLM()
@@ -117,6 +119,8 @@ func DefaultGEPAConfig() *GEPAConfig {
 		StagnationLimit:      3,
 		EvaluationBatchSize:  5,
 		ConcurrencyLevel:     3,
+		ValidationFrequency:  1,
+		ValidationSplit:      0.0,
 		Temperature:          0.8,
 		MaxTokens:            500,
 	}
@@ -321,6 +325,8 @@ type GEPAState struct {
 	CurrentGeneration        int                               `json:"current_generation"`
 	BestCandidate            *GEPACandidate                    `json:"best_candidate"`
 	BestFitness              float64                           `json:"best_fitness"`
+	BestValidationCandidate  *GEPACandidate                    `json:"best_validation_candidate,omitempty"`
+	BestValidationFitness    float64                           `json:"best_validation_fitness"`
 	PopulationHistory        []*Population                     `json:"population_history"`
 	ReflectionHistory        []*ReflectionResult               `json:"reflection_history"`
 	ConvergenceStatus        *ConvergenceStatus                `json:"convergence_status"`
@@ -331,6 +337,7 @@ type GEPAState struct {
 	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness `json:"multi_objective_fitness_map"`
 	candidateReflections     map[string]*ReflectionResult
 	candidateEvaluations     map[string]*gepaCandidateEvaluation
+	candidateValidationEvals map[string]*gepaCandidateEvaluation
 
 	// Pareto archive for elite solution management
 	ParetoArchive     []*GEPACandidate                  `json:"pareto_archive"`
@@ -345,6 +352,7 @@ func NewGEPAState() *GEPAState {
 	return &GEPAState{
 		CurrentGeneration:        0,
 		BestFitness:              0.0,
+		BestValidationFitness:    math.Inf(-1),
 		PopulationHistory:        make([]*Population, 0),
 		ReflectionHistory:        make([]*ReflectionResult, 0),
 		StartTime:                time.Now(),
@@ -354,6 +362,7 @@ func NewGEPAState() *GEPAState {
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
 		candidateReflections:     make(map[string]*ReflectionResult),
 		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
+		candidateValidationEvals: make(map[string]*gepaCandidateEvaluation),
 		ParetoArchive:            make([]*GEPACandidate, 0),
 		ArchiveFitnessMap:        make(map[string]*MultiObjectiveFitness),
 		MaxArchiveSize:           50, // Configurable archive size
@@ -474,6 +483,39 @@ func (s *GEPAState) GetCandidateEvaluation(candidateID string) *gepaCandidateEva
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneGEPACandidateEvaluation(s.candidateEvaluations[candidateID])
+}
+
+// SetCandidateValidationEvaluations replaces the current validation-evaluation
+// cache. Validation selection and final candidate choice consult this
+// separately from minibatch/training evaluations.
+func (s *GEPAState) SetCandidateValidationEvaluations(evaluations map[string]*gepaCandidateEvaluation) {
+	if s == nil {
+		return
+	}
+
+	var cloned map[string]*gepaCandidateEvaluation
+	if len(evaluations) > 0 {
+		cloned = make(map[string]*gepaCandidateEvaluation, len(evaluations))
+		for candidateID, evaluation := range evaluations {
+			cloned[candidateID] = cloneGEPACandidateEvaluation(evaluation)
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.candidateValidationEvals = cloned
+}
+
+// GetCandidateValidationEvaluation returns the cached validation evaluation for
+// a candidate from the latest validation pass.
+func (s *GEPAState) GetCandidateValidationEvaluation(candidateID string) *gepaCandidateEvaluation {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneGEPACandidateEvaluation(s.candidateValidationEvals[candidateID])
 }
 
 // UpsertCandidateEvaluation updates the cached evaluation for a single
@@ -2756,6 +2798,15 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	if config.EvaluationBatchSize <= 0 {
 		config.EvaluationBatchSize = defaults.EvaluationBatchSize
 	}
+	if config.ValidationFrequency <= 0 {
+		config.ValidationFrequency = defaults.ValidationFrequency
+	}
+	if config.ValidationSplit < 0 {
+		config.ValidationSplit = defaults.ValidationSplit
+	}
+	if config.ValidationSplit > 1 {
+		config.ValidationSplit = 0.9
+	}
 	if config.TournamentSize <= 0 {
 		config.TournamentSize = defaults.TournamentSize
 	}
@@ -2839,13 +2890,27 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		return fmt.Errorf("optimizers: max generations must be positive")
 	}
 
+	trainDataset, validationExamples, err := g.prepareOptimizationDatasets(dataset)
+	if err != nil {
+		return err
+	}
+	g.resetValidationState()
+	lastValidatedGeneration := -1
+
 	if err := g.initializePopulation(ctx, program); err != nil {
 		return fmt.Errorf("failed to initialize population: %w", err)
 	}
 
 	g.state.CurrentGeneration = 0
-	if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, dataset, metric); err != nil {
+	if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, trainDataset, metric); err != nil {
 		return fmt.Errorf("evaluation failed at generation 0: %w", err)
+	}
+	validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, 0)
+	if err != nil {
+		return fmt.Errorf("validation failed at generation 0: %w", err)
+	}
+	if validated {
+		lastValidatedGeneration = 0
 	}
 	if err := g.reflectIfScheduled(ctx, 0); err != nil {
 		logger.Error(ctx, "reflection failed at generation 0: %v", err)
@@ -2871,6 +2936,13 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		if currentPop != nil {
 			g.state.UpdateParetoArchive(currentPop.Candidates, g.getCurrentMultiObjectiveFitnessMap())
 		}
+		validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, generation)
+		if err != nil {
+			return fmt.Errorf("validation failed at generation %d: %w", generation, err)
+		}
+		if validated {
+			lastValidatedGeneration = generation
+		}
 		if err := g.reflectIfScheduled(ctx, generation); err != nil {
 			logger.Error(ctx, "reflection failed at generation %d: %v", generation, err)
 		}
@@ -2880,6 +2952,12 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		if g.hasConverged() {
 			logger.Info(ctx, "Convergence achieved at generation %d", generation)
 			break
+		}
+	}
+
+	if len(validationExamples) > 0 && lastValidatedGeneration != g.state.CurrentGeneration {
+		if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
+			return fmt.Errorf("final validation failed: %w", err)
 		}
 	}
 
@@ -2899,6 +2977,160 @@ func (g *GEPA) evaluateAndArchiveCurrentPopulation(ctx context.Context, program 
 	}
 
 	return nil
+}
+
+func (g *GEPA) prepareOptimizationDatasets(dataset core.Dataset) (core.Dataset, []core.Example, error) {
+	if dataset == nil || g.config.ValidationSplit <= 0 {
+		return dataset, nil, nil
+	}
+
+	allExamples := core.DatasetToSlice(dataset)
+	if len(allExamples) <= 1 {
+		return newGEPAExampleDataset(allExamples), nil, nil
+	}
+
+	allExamples = cloneEvaluationExamples(allExamples)
+	rng := g.rng
+	if rng == nil {
+		rng = rand.New(rand.NewSource(0))
+	}
+	// Validation uses a shuffled holdout slice so ordered datasets do not bias the
+	// tail examples into becoming the validation set by construction.
+	rng.Shuffle(len(allExamples), func(i, j int) {
+		allExamples[i], allExamples[j] = allExamples[j], allExamples[i]
+	})
+
+	validationCount := int(math.Ceil(float64(len(allExamples)) * g.config.ValidationSplit))
+	if validationCount >= len(allExamples) {
+		validationCount = len(allExamples) - 1
+	}
+	if validationCount <= 0 {
+		return newGEPAExampleDataset(allExamples), nil, nil
+	}
+
+	split := len(allExamples) - validationCount
+	trainExamples := allExamples[:split]
+	validationExamples := allExamples[split:]
+	if len(trainExamples) == 0 {
+		return nil, nil, fmt.Errorf("optimizers: validation split consumed all training examples")
+	}
+
+	return newGEPAExampleDataset(trainExamples), validationExamples, nil
+}
+
+func (g *GEPA) validateIfScheduled(ctx context.Context, program core.Program, metric core.Metric, validationExamples []core.Example, generation int) (bool, error) {
+	if len(validationExamples) == 0 {
+		return false, nil
+	}
+	frequency := g.config.ValidationFrequency
+	if frequency <= 0 {
+		frequency = 1
+	}
+	if generation != 0 && generation%frequency != 0 {
+		return false, nil
+	}
+	return true, g.evaluateValidationPopulation(ctx, program, validationExamples, metric)
+}
+
+func (g *GEPA) resetValidationState() {
+	if g == nil || g.state == nil {
+		return
+	}
+
+	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
+	g.state.candidateValidationEvals = make(map[string]*gepaCandidateEvaluation)
+	g.state.BestValidationCandidate = nil
+	g.state.BestValidationFitness = math.Inf(-1)
+}
+
+func (g *GEPA) evaluateValidationPopulation(ctx context.Context, program core.Program, validationExamples []core.Example, metric core.Metric) error {
+	if len(validationExamples) == 0 {
+		g.resetValidationState()
+		return nil
+	}
+
+	population := g.getCurrentPopulation()
+	if population == nil {
+		return fmt.Errorf("no current population to validate")
+	}
+
+	logger := logging.GetLogger()
+	logger.Info(ctx, "Validating population: generation=%d, candidates=%d, examples=%d",
+		population.Generation,
+		len(population.Candidates),
+		len(validationExamples))
+
+	adapter := g.newEvaluationAdapterForExamples(program, validationExamples, metric)
+	p := pool.New().WithMaxGoroutines(g.config.ConcurrencyLevel)
+
+	var mu sync.Mutex
+	bestFitness := math.Inf(-1)
+	var bestCandidate *GEPACandidate
+	candidateEvaluations := make(map[string]*gepaCandidateEvaluation, len(population.Candidates))
+	recordValidationEvaluation := func(candidate *GEPACandidate, evaluation *gepaCandidateEvaluation) {
+		if candidate == nil || evaluation == nil {
+			return
+		}
+
+		score := evaluation.AverageScore
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		candidateEvaluations[candidate.ID] = evaluation
+		if bestCandidate == nil || score > bestFitness || (score == bestFitness && candidate.ID < bestCandidate.ID) {
+			bestCandidate = g.copyCandidate(candidate)
+			bestFitness = score
+			if bestCandidate.Metadata == nil {
+				bestCandidate.Metadata = make(map[string]interface{})
+			}
+			bestCandidate.Metadata["validation_score"] = score
+		}
+	}
+
+	for _, candidate := range population.Candidates {
+		if candidate == nil {
+			continue
+		}
+
+		if cachedEvaluation := g.state.GetCandidateValidationEvaluation(candidate.ID); cachedEvaluation != nil {
+			recordValidationEvaluation(candidate, cachedEvaluation)
+			continue
+		}
+
+		candidate := candidate
+		p.Go(func() {
+			evaluation := g.evaluateCandidateWithAdapter(ctx, candidate, adapter)
+			recordValidationEvaluation(candidate, evaluation)
+		})
+	}
+
+	p.Wait()
+	g.state.SetCandidateValidationEvaluations(candidateEvaluations)
+	g.setBestValidationCandidate(bestCandidate, bestFitness)
+
+	logger.Info(ctx, "Validation completed: generation=%d, evaluated_candidates=%d, best_validation_fitness=%.3f",
+		population.Generation,
+		len(candidateEvaluations),
+		bestFitness)
+
+	return nil
+}
+
+func (g *GEPA) setBestValidationCandidate(candidate *GEPACandidate, fitness float64) {
+	if g == nil || g.state == nil || candidate == nil || math.IsInf(fitness, -1) {
+		return
+	}
+
+	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
+
+	if g.state.BestValidationCandidate == nil || fitness > g.state.BestValidationFitness ||
+		(fitness == g.state.BestValidationFitness && candidate.ID < g.state.BestValidationCandidate.ID) {
+		g.state.BestValidationCandidate = CloneCandidate(candidate)
+		g.state.BestValidationFitness = fitness
+	}
 }
 
 func (g *GEPA) reflectIfScheduled(ctx context.Context, generation int) error {
@@ -3574,6 +3806,13 @@ func (g *GEPA) logOptimizationResults(ctx context.Context) {
 			g.state.BestCandidate.Fitness,
 			g.state.BestCandidate.Instruction)
 	}
+	if g.state.BestValidationCandidate != nil {
+		logger.Info(ctx, "Best validation candidate found: id=%s, generation=%d, validation_fitness=%.3f, instruction=%s",
+			g.state.BestValidationCandidate.ID,
+			g.state.BestValidationCandidate.Generation,
+			g.state.BestValidationFitness,
+			g.state.BestValidationCandidate.Instruction)
+	}
 }
 
 // Population Management Methods
@@ -3988,6 +4227,10 @@ func (g *GEPA) selectCandidates(population *Population, count int) []*GEPACandid
 }
 
 func (g *GEPA) selectCandidateForUpdate(population *Population) *GEPACandidate {
+	if selected := g.selectValidationCandidateForUpdate(population); selected != nil {
+		return selected
+	}
+
 	selected := g.selectCandidates(population, 1)
 	if len(selected) > 0 && selected[0] != nil {
 		return selected[0]
@@ -3996,6 +4239,123 @@ func (g *GEPA) selectCandidateForUpdate(population *Population) *GEPACandidate {
 		return nil
 	}
 	return population.Candidates[g.rng.Intn(len(population.Candidates))]
+}
+
+func (g *GEPA) selectValidationCandidateForUpdate(population *Population) *GEPACandidate {
+	validationPopulation, validationFitnessMap, ok := g.validationSelectionPopulation(population)
+	if !ok {
+		return nil
+	}
+
+	var selected []*GEPACandidate
+	switch g.config.SelectionStrategy {
+	case "roulette":
+		selected = g.rouletteSelection(validationPopulation, 1)
+	case "pareto":
+		selected = g.selectWithParetoRanking(validationPopulation.Candidates, validationFitnessMap, 1)
+	case "adaptive_pareto":
+		selected = g.adaptiveParetoSelectionWithFitnessMap(validationPopulation, validationFitnessMap, 1)
+	default:
+		selected = g.tournamentSelection(validationPopulation, 1)
+	}
+
+	if len(selected) == 0 || selected[0] == nil {
+		return nil
+	}
+
+	return g.findPopulationCandidateByID(population, selected[0].ID)
+}
+
+func (g *GEPA) validationSelectionPopulation(population *Population) (*Population, map[string]*MultiObjectiveFitness, bool) {
+	if population == nil || len(population.Candidates) == 0 {
+		return nil, nil, false
+	}
+
+	validationPopulation := &Population{
+		Candidates:  make([]*GEPACandidate, 0, len(population.Candidates)),
+		Generation:  population.Generation,
+		BestFitness: math.Inf(-1),
+	}
+	validationFitnessMap := make(map[string]*MultiObjectiveFitness, len(population.Candidates))
+	currentFitnessMap := g.getCurrentMultiObjectiveFitnessMap()
+
+	for _, candidate := range population.Candidates {
+		if candidate == nil {
+			continue
+		}
+
+		evaluation := g.state.GetCandidateValidationEvaluation(candidate.ID)
+		if evaluation == nil {
+			return nil, nil, false
+		}
+
+		cloned := g.copyCandidate(candidate)
+		cloned.Fitness = evaluation.AverageScore
+		validationPopulation.Candidates = append(validationPopulation.Candidates, cloned)
+		validationFitnessMap[candidate.ID] = validationAdjustedMultiObjectiveFitness(currentFitnessMap[candidate.ID], evaluation.AverageScore)
+
+		if validationPopulation.BestCandidate == nil || cloned.Fitness > validationPopulation.BestFitness || (cloned.Fitness == validationPopulation.BestFitness && cloned.ID < validationPopulation.BestCandidate.ID) {
+			validationPopulation.BestCandidate = cloned
+			validationPopulation.BestFitness = cloned.Fitness
+		}
+	}
+
+	if len(validationPopulation.Candidates) == 0 {
+		return nil, nil, false
+	}
+
+	return validationPopulation, validationFitnessMap, true
+}
+
+func validationAdjustedMultiObjectiveFitness(base *MultiObjectiveFitness, validationScore float64) *MultiObjectiveFitness {
+	fitness := &MultiObjectiveFitness{
+		SuccessRate:    validationScore,
+		OutputQuality:  validationScore,
+		Efficiency:     0.5,
+		Robustness:     0.5,
+		Generalization: 0.5,
+		Diversity:      0.5,
+		Innovation:     0.5,
+	}
+
+	if base != nil {
+		*fitness = *base
+		fitness.SuccessRate = validationScore
+	}
+
+	fitness.WeightedScore = fitness.ComputeWeightedScore(nil)
+	return fitness
+}
+
+func (g *GEPA) adaptiveParetoSelectionWithFitnessMap(population *Population, fitnessMap map[string]*MultiObjectiveFitness, selectionSize int) []*GEPACandidate {
+	if population == nil || len(population.Candidates) <= selectionSize {
+		return population.Candidates
+	}
+
+	diversityScore := g.assessPopulationDiversity(population.Candidates, fitnessMap)
+	convergenceProgress := float64(g.state.CurrentGeneration) / float64(g.config.MaxGenerations)
+
+	if diversityScore < 0.3 && convergenceProgress > 0.5 {
+		return g.adaptiveWeightedSelection(population.Candidates, fitnessMap, selectionSize, g.state.CurrentGeneration)
+	}
+	if convergenceProgress < 0.3 {
+		return g.diversityEnhancedParetoSelection(population.Candidates, fitnessMap, selectionSize)
+	}
+	return g.selectWithParetoRanking(population.Candidates, fitnessMap, selectionSize)
+}
+
+func (g *GEPA) findPopulationCandidateByID(population *Population, candidateID string) *GEPACandidate {
+	if population == nil || strings.TrimSpace(candidateID) == "" {
+		return nil
+	}
+
+	for _, candidate := range population.Candidates {
+		if candidate != nil && candidate.ID == candidateID {
+			return candidate
+		}
+	}
+
+	return nil
 }
 
 func (g *GEPA) populationSnapshotWithReplacement(current *Population, sourceID string, replacement *GEPACandidate, generation int) (*Population, bool) {
@@ -5157,18 +5517,45 @@ func (g *GEPA) hasConverged() bool {
 // GEPA semantics even when that means a module-specific local winner from a
 // different candidate is not stitched into the final result.
 func (g *GEPA) applyBestCandidate(program core.Program) core.Program {
-	if g.state.BestCandidate == nil {
+	bestCandidate, bestFitness, usingValidation := g.bestCandidateForApplication()
+	if bestCandidate == nil {
 		logging.GetLogger().Warn(context.Background(), "No best candidate found, returning original program")
 		return program
 	}
 
 	logger := logging.GetLogger()
-	logger.Info(context.Background(), "Applying best candidate to program: id=%s, fitness=%.3f, instruction=%s",
-		g.state.BestCandidate.ID,
-		g.state.BestCandidate.Fitness,
-		g.state.BestCandidate.Instruction)
+	if usingValidation {
+		logger.Info(context.Background(), "Applying best validation candidate to program: id=%s, validation_fitness=%.3f, training_fitness=%.3f, instruction=%s",
+			bestCandidate.ID,
+			bestFitness,
+			bestCandidate.Fitness,
+			bestCandidate.Instruction)
+	} else {
+		logger.Info(context.Background(), "Applying best candidate to program: id=%s, fitness=%.3f, instruction=%s",
+			bestCandidate.ID,
+			bestCandidate.Fitness,
+			bestCandidate.Instruction)
+	}
 
-	return g.applyCandidate(program, g.state.BestCandidate)
+	return g.applyCandidate(program, bestCandidate)
+}
+
+func (g *GEPA) bestCandidateForApplication() (*GEPACandidate, float64, bool) {
+	if g == nil || g.state == nil {
+		return nil, 0, false
+	}
+
+	g.state.mu.RLock()
+	defer g.state.mu.RUnlock()
+
+	switch {
+	case g.state.BestValidationCandidate != nil:
+		return CloneCandidate(g.state.BestValidationCandidate), g.state.BestValidationFitness, true
+	case g.state.BestCandidate != nil:
+		return CloneCandidate(g.state.BestCandidate), g.state.BestFitness, false
+	default:
+		return nil, 0, false
+	}
 }
 
 // LLM-based Self-Critique Implementation
