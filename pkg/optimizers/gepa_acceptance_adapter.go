@@ -22,7 +22,7 @@ func (g *GEPA) getLatestEvaluationAdapter() *gepaEvaluationAdapter {
 	return g.latestEvaluationAdapter
 }
 
-func (g *GEPA) acceptMutationProposal(ctx context.Context, baseline, proposed *GEPACandidate) *GEPACandidate {
+func (g *GEPA) acceptCandidateProposal(ctx context.Context, baseline, proposed *GEPACandidate) *GEPACandidate {
 	if baseline == nil || proposed == nil {
 		if proposed != nil {
 			return proposed
@@ -66,6 +66,10 @@ func (g *GEPA) acceptMutationProposal(ctx context.Context, baseline, proposed *G
 	}, proposed.Metadata)
 
 	return proposed
+}
+
+func (g *GEPA) acceptMutationProposal(ctx context.Context, baseline, proposed *GEPACandidate) *GEPACandidate {
+	return g.acceptCandidateProposal(ctx, baseline, proposed)
 }
 
 func (g *GEPA) cachedOrEvaluateCandidate(ctx context.Context, candidate *GEPACandidate, adapter *gepaEvaluationAdapter) *gepaCandidateEvaluation {

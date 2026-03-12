@@ -2466,6 +2466,177 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
+func TestFindClosestCommonAncestorPrefersNearestSharedAncestor(t *testing.T) {
+	gepa := &GEPA{state: NewGEPAState()}
+
+	root := &GEPACandidate{
+		ID:             "root",
+		ComponentTexts: map[string]string{"alpha": "alpha base", "beta": "beta base"},
+	}
+	ancestor := &GEPACandidate{
+		ID:             "ancestor",
+		ComponentTexts: map[string]string{"alpha": "alpha base", "beta": "beta base"},
+		ParentIDs:      []string{"root"},
+	}
+	left := &GEPACandidate{
+		ID:             "left",
+		ComponentTexts: map[string]string{"alpha": "alpha tuned", "beta": "beta base"},
+		ParentIDs:      []string{"ancestor"},
+	}
+	right := &GEPACandidate{
+		ID:             "right",
+		ComponentTexts: map[string]string{"alpha": "alpha base", "beta": "beta tuned"},
+		ParentIDs:      []string{"ancestor"},
+	}
+
+	gepa.state.PopulationHistory = []*Population{
+		{Generation: 0, Candidates: []*GEPACandidate{root, ancestor}},
+		{Generation: 1, Candidates: []*GEPACandidate{left, right}},
+	}
+
+	commonAncestor := gepa.findClosestCommonAncestor(left, right)
+	require.NotNil(t, commonAncestor)
+	assert.Equal(t, "ancestor", commonAncestor.ID)
+}
+
+func TestBuildAncestorMergedCandidateAdoptsPartnerOnlyComponents(t *testing.T) {
+	gepa := &GEPA{
+		state: NewGEPAState(),
+		rng:   rand.New(rand.NewSource(7)),
+	}
+
+	source := &GEPACandidate{
+		ID:          "source",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta base",
+		},
+		Fitness: 0.4,
+	}
+	partner := &GEPACandidate{
+		ID:          "partner",
+		ModuleName:  "beta",
+		Instruction: "beta tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta tuned",
+		},
+	}
+	ancestor := &GEPACandidate{
+		ID: "ancestor",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta base",
+		},
+	}
+
+	merged := gepa.buildAncestorMergedCandidate(source, &gepaAncestorMergeChoice{
+		partner:           partner,
+		ancestor:          ancestor,
+		adoptedComponents: []string{"beta"},
+		coverage:          1,
+	}, 3)
+	require.NotNil(t, merged)
+
+	assert.Equal(t, 3, merged.Generation)
+	assert.Equal(t, "beta", merged.ModuleName)
+	assert.Equal(t, "beta tuned", merged.Instruction)
+	assert.Equal(t, map[string]string{
+		"alpha": "alpha tuned",
+		"beta":  "beta tuned",
+	}, merged.ComponentTexts)
+	assert.Equal(t, []string{"source", "partner"}, merged.ParentIDs)
+	assert.Equal(t, "ancestor_merge", merged.Metadata["proposal_type"])
+	assert.Equal(t, "partner", merged.Metadata["merge_partner_id"])
+	assert.Equal(t, "ancestor", merged.Metadata["merge_common_ancestor_id"])
+}
+
+func TestProposeNextGenerationCandidateUsesAncestorMergeWhenImproving(t *testing.T) {
+	generationLLM := &countingLLM{}
+	gepa := &GEPA{
+		config:        DefaultGEPAConfig(),
+		state:         NewGEPAState(),
+		generationLLM: generationLLM,
+		rng:           rand.New(rand.NewSource(9)),
+	}
+
+	root := &GEPACandidate{
+		ID:          "root",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta base",
+		},
+		Fitness: 0.0,
+	}
+	source := &GEPACandidate{
+		ID:          "source",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha tuned",
+			"beta":  "beta base",
+		},
+		ParentIDs: []string{"root"},
+		Fitness:   0.0,
+	}
+	partner := &GEPACandidate{
+		ID:          "partner",
+		ModuleName:  "beta",
+		Instruction: "beta tuned",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta tuned",
+		},
+		ParentIDs: []string{"root"},
+		Fitness:   0.0,
+	}
+	current := &Population{
+		Generation: 1,
+		Candidates: []*GEPACandidate{source, partner},
+	}
+	gepa.state.PopulationHistory = []*Population{
+		{Generation: 0, Candidates: []*GEPACandidate{root}},
+		current,
+	}
+	gepa.state.SetValidationFrontier(nil, map[string]int{
+		"source":  2,
+		"partner": 1,
+	})
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+	})
+	adapter := gepa.newEvaluationAdapter(
+		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
+		dataset,
+		exactOutputMetric,
+	)
+	gepa.setLatestEvaluationAdapter(adapter)
+
+	proposed := gepa.proposeNextGenerationCandidate(context.Background(), current, source, 2)
+	require.NotNil(t, proposed)
+
+	assert.Equal(t, 0, generationLLM.generateCalls)
+	assert.Equal(t, 2, proposed.Generation)
+	assert.Equal(t, 1.0, proposed.Fitness)
+	assert.Equal(t, "beta", proposed.ModuleName)
+	assert.Equal(t, "beta tuned", proposed.Instruction)
+	assert.Equal(t, []string{"source", "partner"}, proposed.ParentIDs)
+	assert.Equal(t, map[string]string{
+		"alpha": "alpha tuned",
+		"beta":  "beta tuned",
+	}, proposed.ComponentTexts)
+	assert.Equal(t, "ancestor_merge", proposed.Metadata["proposal_type"])
+
+	evaluation := gepa.state.GetCandidateEvaluation(proposed.ID)
+	require.NotNil(t, evaluation)
+	assert.Equal(t, 1.0, evaluation.AverageScore)
+}
+
 func TestEvolvePopulationCarriesForwardCandidatesWithoutSelectedParents(t *testing.T) {
 	gepa := &GEPA{
 		config: &GEPAConfig{
