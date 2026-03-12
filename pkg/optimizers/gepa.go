@@ -4248,7 +4248,7 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 		return fmt.Errorf("no candidates available for proposal evolution")
 	}
 
-	nextCandidate := g.proposeNextGenerationCandidate(ctx, source, nextGeneration)
+	nextCandidate := g.proposeNextGenerationCandidate(ctx, currentPop, source, nextGeneration)
 	g.ensureCandidateMetrics(nextCandidate.ID)
 	g.syncCandidateUpdateState(ctx, source, nextCandidate)
 
@@ -4275,9 +4275,13 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	return nil
 }
 
-func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, source *GEPACandidate, nextGeneration int) *GEPACandidate {
-	if source == nil {
+func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, population *Population, source *GEPACandidate, nextGeneration int) *GEPACandidate {
+	if population == nil || source == nil {
 		return nil
+	}
+
+	if merged := g.tryAncestorMergeProposal(ctx, population, source, nextGeneration); merged != nil {
+		return merged
 	}
 
 	focusedSource := g.prepareCandidateForComponentUpdate(source)
