@@ -46,9 +46,9 @@ var modelNameMapping = map[string]anthropic.Model{
 	"claude-sonnet-4.5": anthropic.ModelClaudeSonnet4_5_20250929,
 	"claude-sonnet-4-5": anthropic.ModelClaudeSonnet4_5,
 	// Sonnet 4.6 aliases
-	"sonnet-4.6":        "claude-sonnet-4-6",
-	"sonnet-4-6":        "claude-sonnet-4-6",
-	"claude-sonnet-4.6": "claude-sonnet-4-6",
+	"sonnet-4.6":        anthropic.ModelClaudeSonnet4_6,
+	"sonnet-4-6":        anthropic.ModelClaudeSonnet4_6,
+	"claude-sonnet-4.6": anthropic.ModelClaudeSonnet4_6,
 	// Opus 4.6 aliases
 	"opus-4.6":        anthropic.ModelClaudeOpus4_6,
 	"opus-4-6":        anthropic.ModelClaudeOpus4_6,

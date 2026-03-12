@@ -589,7 +589,7 @@ const (
 	ModelAnthropicClaude45Sonnet      ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
 	ModelAnthropicClaude45Opus        ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
 	// Claude 4.6 series.
-	ModelAnthropicClaude46Sonnet ModelID = "claude-sonnet-4-6"
+	ModelAnthropicClaude46Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
 	ModelAnthropicClaude46Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_6)
 
 	// Google Gemini models (existing).
