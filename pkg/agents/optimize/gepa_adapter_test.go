@@ -140,6 +140,65 @@ func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T
 	assert.Contains(t, evaluation.Traces[1].ContextData, "diagnostics")
 }
 
+func TestGEPAAgentOptimizer_EvaluateCandidate_AppliesStableIntMutationPlans(t *testing.T) {
+	baseAgent := newMockOptimizableAgent()
+	baseAgent.outputs["turn-budget"] = map[string]interface{}{
+		"answer": "ok",
+	}
+
+	optimizer := NewGEPAAgentOptimizer(baseAgent, NewDeterministicEvaluator(nil), GEPAAdapterConfig{
+		PassThreshold:   1.0,
+		PrimaryArtifact: ArtifactToolPolicy,
+		IntMutationPlans: map[string]IntMutationConfig{
+			"max_turns": {Min: 8, Max: 24, Step: 4},
+		},
+	})
+
+	candidate := &optimizers.GEPACandidate{
+		ID:          "candidate-stable-int",
+		ModuleName:  string(ArtifactToolPolicy),
+		Instruction: "Prefer focused terminal actions.",
+		Metadata: map[string]interface{}{
+			gepaMetadataArtifactsKey: serializeArtifacts(AgentArtifacts{
+				Text: map[ArtifactKey]string{
+					ArtifactToolPolicy: "Prefer focused terminal actions.",
+				},
+				Int: map[string]int{
+					"max_turns": 20,
+				},
+				Bool: map[string]bool{},
+			}),
+		},
+	}
+
+	examples := []AgentExample{{
+		ID: "turn-budget",
+		Inputs: map[string]interface{}{
+			"id": "turn-budget",
+		},
+		Outputs: map[string]interface{}{
+			"answer": "ok",
+		},
+	}}
+
+	firstEval, err := optimizer.EvaluateCandidate(context.Background(), candidate, examples)
+	require.NoError(t, err)
+	firstTurns := firstEval.Artifacts.Int["max_turns"]
+	assert.GreaterOrEqual(t, firstTurns, 8)
+	assert.LessOrEqual(t, firstTurns, 24)
+
+	secondEval, err := optimizer.EvaluateCandidate(context.Background(), candidate, examples)
+	require.NoError(t, err)
+	assert.Equal(t, firstTurns, secondEval.Artifacts.Int["max_turns"])
+
+	records, ok := candidate.Metadata[gepaMetadataIntMutationsKey].(map[string]interface{})
+	require.True(t, ok)
+	maxTurnRecord, ok := records["max_turns"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "candidate-stable-int", maxTurnRecord["candidate_id"])
+	assert.Equal(t, firstTurns, int(maxTurnRecord["value"].(int)))
+}
+
 func TestBuildMultiObjectiveFitness_CountsEvaluationFailuresOnce(t *testing.T) {
 	run := &HarnessRunResult{
 		Results: []HarnessExampleResult{

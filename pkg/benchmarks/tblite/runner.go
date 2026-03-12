@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
@@ -28,16 +29,18 @@ type Agent interface {
 // TerminalTaskRequest is the benchmark execution contract that a dspy-go
 // terminal-capable agent must expose for TBLite-style tasks.
 type TerminalTaskRequest struct {
-	TaskID           string
-	Instruction      string
-	TaskDir          string
-	WorkingDirectory string
-	EnvironmentDir   string
-	TestsDir         string
-	TestScriptPath   string
-	DockerImage      string
-	MaxTurns         int
-	AgentTimeout     time.Duration
+	TaskID           string        `json:"task_id"`
+	Instruction      string        `json:"instruction"`
+	TaskDir          string        `json:"task_dir"`
+	WorkingDirectory string        `json:"working_directory"`
+	EnvironmentDir   string        `json:"environment_dir"`
+	TestsDir         string        `json:"tests_dir"`
+	TestScriptPath   string        `json:"test_script_path"`
+	DockerImage      string        `json:"docker_image,omitempty"`
+	ContainerID      string        `json:"container_id,omitempty"`
+	ContainerEnv     []string      `json:"container_env,omitempty"`
+	MaxTurns         int           `json:"max_turns,omitempty"`
+	AgentTimeout     time.Duration `json:"agent_timeout,omitempty"`
 }
 
 // TokenUsage reports model usage for a benchmark task run.
@@ -78,9 +81,11 @@ type EvaluationResult struct {
 
 // RunnerConfig configures TBLite benchmark execution.
 type RunnerConfig struct {
-	MaxTurns int
-	ShellPath string
-	ExtraEnv []string
+	MaxTurns            int
+	ShellPath           string
+	ExtraEnv            []string
+	UseTaskContainers   bool
+	RespectAgentMaxTurns bool
 }
 
 // Runner materializes and evaluates TBLite tasks using a benchmark agent.
@@ -95,7 +100,7 @@ func NewRunner(agent Agent, cfg RunnerConfig) *Runner {
 		cfg.MaxTurns = 60
 	}
 	if cfg.ShellPath == "" {
-		cfg.ShellPath = "/bin/sh"
+		cfg.ShellPath = defaultShellPath
 	}
 	return &Runner{
 		agent:  agent,
@@ -123,8 +128,27 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 		TestsDir:         materialized.TestsDir,
 		TestScriptPath:   materialized.TestScriptPath,
 		DockerImage:      task.DockerImage,
-		MaxTurns:         r.config.MaxTurns,
 		AgentTimeout:     time.Duration(task.AgentTimeoutSec) * time.Second,
+	}
+	if !r.config.RespectAgentMaxTurns {
+		req.MaxTurns = r.config.MaxTurns
+	}
+
+	var runtime *dockerTaskRuntime
+	if r.config.UseTaskContainers && strings.TrimSpace(task.DockerImage) != "" {
+		runtime, err = startDockerTaskRuntime(ctx, materialized, task.DockerImage)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			_ = runtime.Close(context.Background())
+		}()
+		req.ContainerID = runtime.containerID
+		req.ContainerEnv = []string{
+			EnvTaskRoot + "=" + containerTaskRoot,
+			EnvTaskEnvDir + "=" + containerEnvDir,
+			EnvTaskTestsDir + "=" + containerTestsDir,
+		}
 	}
 
 	agentResult, err := r.agent.RunTask(ctx, req)
@@ -138,7 +162,7 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 		}
 	}
 
-	testResult, err := r.executeVerifier(ctx, materialized)
+	testResult, err := r.executeVerifier(ctx, materialized, runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -151,24 +175,33 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 	}, nil
 }
 
-func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask) (*TestResult, error) {
+func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, runtime *dockerTaskRuntime) (*TestResult, error) {
 	startedAt := time.Now()
-
-	cmd := exec.CommandContext(ctx, r.config.ShellPath, task.TestScriptPath)
-	cmd.Dir = task.EnvironmentDir
-	cmd.Env = append(os.Environ(), r.config.ExtraEnv...)
-	cmd.Env = append(cmd.Env,
-		EnvTaskRoot+"="+task.RootDir,
-		EnvTaskEnvDir+"="+task.EnvironmentDir,
-		EnvTaskTestsDir+"="+task.TestsDir,
-	)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
+	var runErr error
+	if runtime != nil {
+		var output []byte
+		output, runErr = runtime.Exec(ctx, task.EnvironmentDir, r.config.ShellPath, fmt.Sprintf("%s %s", r.config.ShellPath, containerTaskRoot+"/test.sh"), append([]string{}, r.config.ExtraEnv...))
+		if runErr != nil {
+			stderr.Write(output)
+		} else {
+			stdout.Write(output)
+		}
+	} else {
+		cmd := exec.CommandContext(ctx, r.config.ShellPath, task.TestScriptPath)
+		cmd.Dir = task.EnvironmentDir
+		cmd.Env = append(os.Environ(), r.config.ExtraEnv...)
+		cmd.Env = append(cmd.Env,
+			EnvTaskRoot+"="+task.RootDir,
+			EnvTaskEnvDir+"="+task.EnvironmentDir,
+			EnvTaskTestsDir+"="+task.TestsDir,
+		)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr = cmd.Run()
+	}
 	duration := time.Since(startedAt)
 	result := &TestResult{
 		Passed:   runErr == nil,
@@ -176,6 +209,25 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask) (*
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		Duration: duration,
+	}
+
+	if runtime != nil {
+		reward, err := runtime.ReadFile(ctx, "/logs/verifier/reward.txt")
+		if err != nil {
+			result.Passed = false
+			if result.ExitCode == 0 {
+				result.ExitCode = 1
+			}
+			if result.Stderr != "" {
+				result.Stderr += "\n"
+			}
+			result.Stderr += fmt.Sprintf("missing verifier reward: %v", err)
+		} else {
+			result.Passed = reward == "1"
+			if !result.Passed && result.ExitCode == 0 {
+				result.ExitCode = 1
+			}
+		}
 	}
 
 	if runErr == nil {

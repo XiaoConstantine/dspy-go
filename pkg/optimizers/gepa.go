@@ -5272,17 +5272,44 @@ func (g *GEPA) semanticMutation(ctx context.Context, candidate *GEPACandidate) *
 
 	mutationType := mutationTypes[g.rng.Intn(len(mutationTypes))]
 
-	prompt := fmt.Sprintf(`Apply a "%s" mutation to this instruction:
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString(fmt.Sprintf(`Apply a "%s" mutation to this instruction:
 Original: "%s"
 
 Mutation requirements for "%s":
-%s
-
-Generate a mutated version that maintains the core intent while applying the specified change:`,
+%s`,
 		mutationType,
 		candidate.Instruction,
 		mutationType,
-		g.getMutationDescription(mutationType))
+		g.getMutationDescription(mutationType)))
+
+	if reflection := g.latestReflectionForCandidate(candidate.ID); reflection != nil {
+		if len(reflection.Weaknesses) > 0 {
+			promptBuilder.WriteString("\n\nRecent weaknesses to address:\n")
+			for _, weakness := range reflection.Weaknesses {
+				if strings.TrimSpace(weakness) == "" {
+					continue
+				}
+				promptBuilder.WriteString("- ")
+				promptBuilder.WriteString(strings.TrimSpace(weakness))
+				promptBuilder.WriteString("\n")
+			}
+		}
+		if len(reflection.Suggestions) > 0 {
+			promptBuilder.WriteString("\nRecent improvement suggestions to incorporate:\n")
+			for _, suggestion := range reflection.Suggestions {
+				if strings.TrimSpace(suggestion) == "" {
+					continue
+				}
+				promptBuilder.WriteString("- ")
+				promptBuilder.WriteString(strings.TrimSpace(suggestion))
+				promptBuilder.WriteString("\n")
+			}
+		}
+	}
+
+	promptBuilder.WriteString("\nGenerate a mutated version that keeps the core intent but explicitly addresses the recent weaknesses and suggestions when they are relevant.")
+	prompt := promptBuilder.String()
 
 	response, err := g.generationLLM.Generate(ctx, prompt)
 	if err != nil {
@@ -5321,6 +5348,28 @@ func (g *GEPA) getMutationDescription(mutationType string) string {
 		"modify_emphasis":     "Change what aspects are emphasized or prioritized",
 	}
 	return descriptions[mutationType]
+}
+
+func (g *GEPA) latestReflectionForCandidate(candidateID string) *ReflectionResult {
+	if g == nil || candidateID == "" {
+		return nil
+	}
+
+	g.state.mu.RLock()
+	defer g.state.mu.RUnlock()
+
+	for i := len(g.state.ReflectionHistory) - 1; i >= 0; i-- {
+		reflection := g.state.ReflectionHistory[i]
+		if reflection == nil || reflection.CandidateID != candidateID {
+			continue
+		}
+		cloned := *reflection
+		cloned.Strengths = append([]string(nil), reflection.Strengths...)
+		cloned.Weaknesses = append([]string(nil), reflection.Weaknesses...)
+		cloned.Suggestions = append([]string(nil), reflection.Suggestions...)
+		return &cloned
+	}
+	return nil
 }
 
 // extractMutatedInstruction extracts the mutated instruction from LLM response.

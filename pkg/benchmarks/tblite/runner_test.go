@@ -76,3 +76,26 @@ func TestRunnerEvaluateTask_RequiresAgent(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "agent is required")
 }
+
+func TestRunnerEvaluateTask_RespectsAgentMaxTurns(t *testing.T) {
+	task := datasets.TBLiteTask{
+		TaskName:    "respect-agent-turns",
+		Instruction: "No-op task",
+		TestScript:  "#!/bin/sh\nset -eu\nexit 0\n",
+	}
+
+	runner := NewRunner(fakeAgent{
+		run: func(ctx context.Context, req TerminalTaskRequest) (*TerminalTaskResult, error) {
+			assert.Zero(t, req.MaxTurns)
+			return &TerminalTaskResult{Completed: true}, nil
+		},
+	}, RunnerConfig{
+		MaxTurns:             99,
+		RespectAgentMaxTurns: true,
+	})
+
+	result, err := runner.EvaluateTask(context.Background(), task, t.TempDir())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.TestResult.Passed)
+}
