@@ -44,6 +44,14 @@ const (
 	objectiveInnovation     = "innovation"
 )
 
+const (
+	componentSelectionRandom     = "random"
+	componentSelectionRoundRobin = "round_robin"
+	componentSelectionAll        = "all"
+)
+
+const gepaComponentSelectionCursorMetadataKey = "component_selection_cursor"
+
 var multiObjectiveNames = []string{
 	objectiveSuccess,
 	objectiveQuality,
@@ -82,8 +90,9 @@ type GEPAConfig struct {
 	SelfCritiqueTemp float64 `json:"self_critique_temp"`   // Default: 0.7
 
 	// Selection parameters
-	TournamentSize    int    `json:"tournament_size"`    // Default: 3
-	SelectionStrategy string `json:"selection_strategy"` // Default: "tournament" | "roulette" | "pareto" | "adaptive_pareto"
+	TournamentSize     int    `json:"tournament_size"`     // Default: 3
+	SelectionStrategy  string `json:"selection_strategy"`  // Default: "tournament" | "roulette" | "pareto" | "adaptive_pareto"
+	ComponentSelection string `json:"component_selection"` // Default: "round_robin" | "random" | "all"
 
 	// Convergence parameters
 	ConvergenceThreshold float64 `json:"convergence_threshold"` // Default: 0.01
@@ -115,6 +124,7 @@ func DefaultGEPAConfig() *GEPAConfig {
 		SelfCritiqueTemp:     0.7,
 		TournamentSize:       3,
 		SelectionStrategy:    "adaptive_pareto", // Use adaptive Pareto as default for sophisticated multi-objective optimization
+		ComponentSelection:   componentSelectionRoundRobin,
 		ConvergenceThreshold: 0.01,
 		StagnationLimit:      3,
 		EvaluationBatchSize:  5,
@@ -2898,6 +2908,14 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	if config.SelectionStrategy == "" {
 		config.SelectionStrategy = defaults.SelectionStrategy
 	}
+	switch config.ComponentSelection {
+	case "", componentSelectionRandom, componentSelectionRoundRobin, componentSelectionAll:
+		if config.ComponentSelection == "" {
+			config.ComponentSelection = defaults.ComponentSelection
+		}
+	default:
+		config.ComponentSelection = defaults.ComponentSelection
+	}
 
 	// Initialize LLMs
 	generationLLM := core.GetDefaultLLM()
@@ -4280,52 +4298,183 @@ func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, population *P
 		return nil
 	}
 
+	componentSelection := g.selectComponentsForUpdate(source)
+
 	if merged := g.tryAncestorMergeProposal(ctx, population, source, nextGeneration); merged != nil {
-		return merged
+		return g.applyComponentSelectionState(merged, componentSelection.nextCursor)
 	}
 
-	focusedSource := g.prepareCandidateForComponentUpdate(source)
-	proposed := g.mutate(ctx, focusedSource)
-	if proposed == nil || proposed == source || proposed == focusedSource {
+	var proposed *GEPACandidate
+	switch len(componentSelection.modules) {
+	case 0:
+		proposed = nil
+	case 1:
+		focusedSource := g.prepareCandidateForComponentUpdate(source, componentSelection.modules[0])
+		proposed = g.mutate(ctx, focusedSource)
+		if proposed == focusedSource {
+			proposed = source
+		}
+	default:
+		proposed = g.proposeMultiComponentCandidate(ctx, source, componentSelection.modules, nextGeneration)
+	}
+
+	if proposed == nil || proposed == source {
 		carried := g.copyCandidate(source)
 		carried.Generation = nextGeneration
-		return carried
+		return g.applyComponentSelectionState(carried, componentSelection.nextCursor)
 	}
 
 	if proposed.Generation < nextGeneration {
 		proposed.Generation = nextGeneration
 	}
 
-	return proposed
+	return g.applyComponentSelectionState(proposed, componentSelection.nextCursor)
 }
 
-func (g *GEPA) prepareCandidateForComponentUpdate(source *GEPACandidate) *GEPACandidate {
+func (g *GEPA) prepareCandidateForComponentUpdate(source *GEPACandidate, moduleName string) *GEPACandidate {
 	if source == nil {
 		return nil
 	}
 
-	moduleName := g.selectComponentForUpdate(source)
 	focused := g.copyCandidate(source)
 	focused.ModuleName = moduleName
 	focused.Instruction = candidateInstructionForModule(source, moduleName)
 	return focused
 }
 
-func (g *GEPA) selectComponentForUpdate(candidate *GEPACandidate) string {
+type gepaComponentSelectionPlan struct {
+	modules    []string
+	nextCursor int
+}
+
+func (g *GEPA) selectComponentsForUpdate(candidate *GEPACandidate) gepaComponentSelectionPlan {
 	if candidate == nil {
-		return ""
+		return gepaComponentSelectionPlan{}
 	}
 
 	moduleNames := componentModuleNames(cloneCandidateComponentTexts(candidate))
 	if len(moduleNames) == 0 {
-		return strings.TrimSpace(candidate.ModuleName)
+		moduleName := strings.TrimSpace(candidate.ModuleName)
+		if moduleName == "" {
+			return gepaComponentSelectionPlan{}
+		}
+		return gepaComponentSelectionPlan{
+			modules:    []string{moduleName},
+			nextCursor: 0,
+		}
 	}
 
-	// The current whole-program refactor keeps component focus selection simple:
-	// choose one module uniformly at random from the candidate state. This keeps
-	// the iterative update path lightweight for now; round-robin or "update all"
-	// strategies can layer on top of the same whole-program candidate model later.
-	return moduleNames[g.rng.Intn(len(moduleNames))]
+	switch g.config.ComponentSelection {
+	case componentSelectionAll:
+		return gepaComponentSelectionPlan{
+			modules:    moduleNames,
+			nextCursor: componentSelectionCursor(candidate),
+		}
+	case componentSelectionRandom:
+		return gepaComponentSelectionPlan{
+			modules:    []string{moduleNames[g.rng.Intn(len(moduleNames))]},
+			nextCursor: componentSelectionCursor(candidate),
+		}
+	default:
+		cursor := componentSelectionCursor(candidate)
+		index := cursor % len(moduleNames)
+		return gepaComponentSelectionPlan{
+			modules:    []string{moduleNames[index]},
+			nextCursor: (index + 1) % len(moduleNames),
+		}
+	}
+}
+
+func componentSelectionCursor(candidate *GEPACandidate) int {
+	if candidate == nil || candidate.Metadata == nil {
+		return 0
+	}
+
+	switch value := candidate.Metadata[gepaComponentSelectionCursorMetadataKey].(type) {
+	case int:
+		if value >= 0 {
+			return value
+		}
+	case float64:
+		if value >= 0 {
+			return int(value)
+		}
+	}
+
+	return 0
+}
+
+func (g *GEPA) applyComponentSelectionState(candidate *GEPACandidate, nextCursor int) *GEPACandidate {
+	if candidate == nil {
+		return nil
+	}
+	if candidate.Metadata == nil {
+		candidate.Metadata = make(map[string]interface{})
+	}
+	candidate.Metadata[gepaComponentSelectionCursorMetadataKey] = nextCursor
+	return candidate
+}
+
+func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPACandidate, modules []string, nextGeneration int) *GEPACandidate {
+	if source == nil || len(modules) == 0 {
+		return nil
+	}
+
+	working := g.copyCandidate(source)
+	componentTexts := cloneCandidateComponentTexts(source)
+	if len(componentTexts) == 0 {
+		return nil
+	}
+
+	appliedModules := make([]string, 0, len(modules))
+	metadataSources := []map[string]interface{}{source.Metadata}
+	focusedModule := strings.TrimSpace(source.ModuleName)
+
+	for _, moduleName := range modules {
+		focused := g.copyCandidate(working)
+		focused.ComponentTexts = cloneComponentTexts(componentTexts)
+		focused.ModuleName = moduleName
+		focused.Instruction = candidateInstructionForModule(working, moduleName)
+
+		proposed := g.proposeMutationCandidate(ctx, focused)
+		if proposed == nil || proposed == focused {
+			continue
+		}
+
+		componentTexts = cloneCandidateComponentTexts(proposed)
+		working.ComponentTexts = cloneComponentTexts(componentTexts)
+		working.ModuleName = moduleName
+		working.Instruction = candidateInstructionForModule(proposed, moduleName)
+		metadataSources = append(metadataSources, proposed.Metadata)
+		appliedModules = append(appliedModules, moduleName)
+		focusedModule = moduleName
+	}
+
+	if len(appliedModules) == 0 {
+		return nil
+	}
+
+	proposed := &GEPACandidate{
+		ID:             g.generateCandidateID(),
+		ModuleName:     focusedModule,
+		Instruction:    candidateInstructionForModule(working, focusedModule),
+		ComponentTexts: cloneComponentTexts(componentTexts),
+		Generation:     nextGeneration,
+		Fitness:        source.Fitness,
+		ParentIDs:      []string{source.ID},
+		CreatedAt:      time.Now(),
+		Metadata: mergeCandidateMetadata(map[string]interface{}{
+			"proposal_type":        "multi_component_update",
+			"updated_components":   append([]string(nil), appliedModules...),
+			"component_update_all": true,
+		}, metadataSources...),
+	}
+
+	accepted := g.acceptCandidateProposal(ctx, source, proposed)
+	if accepted == source {
+		return nil
+	}
+	return accepted
 }
 
 // selectCandidates returns candidates sampled according to the configured
@@ -4806,23 +4955,24 @@ func (g *GEPA) selectParetoElite(candidates []*GEPACandidate, fitnessMap map[str
 
 // mutate applies mutation to a candidate.
 func (g *GEPA) mutate(ctx context.Context, candidate *GEPACandidate) *GEPACandidate {
-	if g.rng.Float64() > g.config.MutationRate {
-		return candidate // No mutation
-	}
-
-	if proposed := g.reflectionGuidedMutation(ctx, candidate); proposed != nil {
-		if proposed == candidate {
-			return candidate
-		}
-		return g.acceptMutationProposal(ctx, candidate, proposed)
-	}
-
-	proposed := g.semanticMutation(ctx, candidate)
+	proposed := g.proposeMutationCandidate(ctx, candidate)
 	if proposed == candidate {
 		return candidate
 	}
 
 	return g.acceptMutationProposal(ctx, candidate, proposed)
+}
+
+func (g *GEPA) proposeMutationCandidate(ctx context.Context, candidate *GEPACandidate) *GEPACandidate {
+	if g.rng.Float64() > g.config.MutationRate {
+		return candidate // No mutation
+	}
+
+	if proposed := g.reflectionGuidedMutation(ctx, candidate); proposed != nil {
+		return proposed
+	}
+
+	return g.semanticMutation(ctx, candidate)
 }
 
 // semanticMutation performs LLM-based semantic mutation.

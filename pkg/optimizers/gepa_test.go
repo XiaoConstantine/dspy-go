@@ -305,6 +305,7 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 0.1, config.ElitismRate)
 	assert.Equal(t, 2, config.ReflectionFreq)
 	assert.Equal(t, 3, config.TournamentSize)
+	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
 }
 
 func TestDefaultMultiObjectiveWeights(t *testing.T) {
@@ -530,6 +531,57 @@ func TestCandidateInstructionForModule(t *testing.T) {
 		Instruction: "alpha inline",
 	}
 	assert.Equal(t, "alpha inline", candidateInstructionForModule(inlineOnly, "alpha"))
+}
+
+func TestSelectComponentsForUpdateRoundRobinCyclesModules(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ComponentSelection = componentSelectionRoundRobin
+
+	candidate := &GEPACandidate{
+		ID:          "candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta base",
+		},
+	}
+
+	first := gepa.selectComponentsForUpdate(candidate)
+	require.Equal(t, []string{"alpha"}, first.modules)
+	assert.Equal(t, 1, first.nextCursor)
+
+	candidate.Metadata = map[string]interface{}{gepaComponentSelectionCursorMetadataKey: first.nextCursor}
+	second := gepa.selectComponentsForUpdate(candidate)
+	require.Equal(t, []string{"beta"}, second.modules)
+	assert.Equal(t, 0, second.nextCursor)
+}
+
+func TestSelectComponentsForUpdateAllReturnsAllModules(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
+	}
+	gepa.config.ComponentSelection = componentSelectionAll
+
+	candidate := &GEPACandidate{
+		ID:          "candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta base",
+		},
+	}
+
+	selection := gepa.selectComponentsForUpdate(candidate)
+	assert.Equal(t, []string{"alpha", "beta"}, selection.modules)
+	assert.Equal(t, 0, selection.nextCursor)
 }
 
 func TestApplyBestCandidateUsesWholeProgramState(t *testing.T) {
@@ -2464,6 +2516,106 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 	assert.Equal(t, 1, unchangedCount)
 
 	mockLLM.AssertExpectations(t)
+}
+
+func TestProposeNextGenerationCandidateAllSelectionUpdatesBothComponents(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		return strings.Contains(prompt, `Original: "alpha base"`)
+	}), mock.Anything).Return(&core.LLMResponse{
+		Content: "alpha improved",
+	}, nil).Once()
+	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		return strings.Contains(prompt, `Original: "beta base"`)
+	}), mock.Anything).Return(&core.LLMResponse{
+		Content: "beta improved",
+	}, nil).Once()
+
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			PopulationSize:      1,
+			MutationRate:        1.0,
+			SelectionStrategy:   "tournament",
+			TournamentSize:      1,
+			ComponentSelection:  componentSelectionAll,
+			ConcurrencyLevel:    1,
+			EvaluationBatchSize: 1,
+		},
+		state:         NewGEPAState(),
+		generationLLM: mockLLM,
+		rng:           rand.New(rand.NewSource(5)),
+	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha improved|beta improved"}},
+	})
+	adapter := gepa.newEvaluationAdapter(
+		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
+		dataset,
+		exactOutputMetric,
+	)
+	gepa.setLatestEvaluationAdapter(adapter)
+
+	source := &GEPACandidate{
+		ID:          "candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta base",
+		},
+		Fitness: 0.0,
+	}
+	population := &Population{
+		Generation: 1,
+		Candidates: []*GEPACandidate{source},
+	}
+
+	proposed := gepa.proposeNextGenerationCandidate(context.Background(), population, source, 2)
+	require.NotNil(t, proposed)
+	assert.Equal(t, 2, proposed.Generation)
+	assert.Equal(t, 1.0, proposed.Fitness)
+	assert.Equal(t, "beta", proposed.ModuleName)
+	assert.Equal(t, "beta improved", proposed.Instruction)
+	assert.Equal(t, map[string]string{
+		"alpha": "alpha improved",
+		"beta":  "beta improved",
+	}, proposed.ComponentTexts)
+	assert.Equal(t, "multi_component_update", proposed.Metadata["proposal_type"])
+	assert.Equal(t, true, proposed.Metadata["component_update_all"])
+	assert.Equal(t, 0, proposed.Metadata[gepaComponentSelectionCursorMetadataKey])
+
+	mockLLM.AssertExpectations(t)
+}
+
+func TestProposeNextGenerationCandidateCarriesRoundRobinCursorForward(t *testing.T) {
+	gepa := &GEPA{
+		config: &GEPAConfig{
+			MutationRate:       0.0,
+			ComponentSelection: componentSelectionRoundRobin,
+		},
+		state: NewGEPAState(),
+		rng:   rand.New(rand.NewSource(1)),
+	}
+
+	source := &GEPACandidate{
+		ID:          "candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha base",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha base",
+			"beta":  "beta base",
+		},
+		Metadata: map[string]interface{}{
+			gepaComponentSelectionCursorMetadataKey: 0,
+		},
+	}
+	population := &Population{Generation: 1, Candidates: []*GEPACandidate{source}}
+
+	proposed := gepa.proposeNextGenerationCandidate(context.Background(), population, source, 2)
+	require.NotNil(t, proposed)
+	assert.Equal(t, source.ID, proposed.ID)
+	assert.Equal(t, 1, proposed.Metadata[gepaComponentSelectionCursorMetadataKey])
 }
 
 func TestFindClosestCommonAncestorPrefersNearestSharedAncestor(t *testing.T) {
