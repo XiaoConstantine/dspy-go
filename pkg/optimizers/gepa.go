@@ -103,6 +103,7 @@ type GEPAConfig struct {
 	ConcurrencyLevel    int     `json:"concurrency_level"`     // Default: 3
 	ValidationFrequency int     `json:"validation_frequency"`  // Default: 1
 	ValidationSplit     float64 `json:"validation_split"`      // Default: 0.0 (disabled)
+	RandomSeed          int64   `json:"random_seed"`           // Default: 0 (time-based)
 
 	// LLM parameters
 	GenerationModel string  `json:"generation_model"` // Default: uses core.GetDefaultLLM()
@@ -2929,7 +2930,11 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	}
 
 	// Initialize random number generator
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	seed := config.RandomSeed
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+	rng := rand.New(rand.NewSource(seed))
 
 	gepa := &GEPA{
 		config:            config,

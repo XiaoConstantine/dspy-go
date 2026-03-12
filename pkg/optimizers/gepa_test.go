@@ -306,6 +306,35 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 2, config.ReflectionFreq)
 	assert.Equal(t, 3, config.TournamentSize)
 	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
+	assert.Zero(t, config.RandomSeed)
+}
+
+func TestNewGEPAHonorsRandomSeed(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+
+	originalDefault := core.GetDefaultLLM()
+	originalTeacher := core.GetTeacherLLM()
+	core.SetDefaultLLM(mockLLM)
+	core.GlobalConfig.TeacherLLM = mockLLM
+	t.Cleanup(func() {
+		core.SetDefaultLLM(originalDefault)
+		core.GlobalConfig.TeacherLLM = originalTeacher
+	})
+
+	configA := DefaultGEPAConfig()
+	configA.RandomSeed = 123
+	gepaA, err := NewGEPA(configA)
+	require.NoError(t, err)
+
+	configB := DefaultGEPAConfig()
+	configB.RandomSeed = 123
+	gepaB, err := NewGEPA(configB)
+	require.NoError(t, err)
+
+	require.NotNil(t, gepaA.rng)
+	require.NotNil(t, gepaB.rng)
+	assert.Equal(t, gepaA.rng.Int63(), gepaB.rng.Int63())
+	assert.Equal(t, gepaA.rng.Int63(), gepaB.rng.Int63())
 }
 
 func TestDefaultMultiObjectiveWeights(t *testing.T) {

@@ -16,6 +16,8 @@ EXPECTED_COMPONENTS = {
     "round_robin": ["classifier"],
     "all": ["classifier", "generator"],
 }
+EXPECTED_FRONTIER_WINNERS = ["classifier", "generator"]
+EXPECTED_FRONTIER_COVERAGE = {"classifier": 1, "generator": 1}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -42,25 +44,49 @@ def compare_scenario(name: str, python_result: dict[str, Any], go_result: dict[s
     }
 
 
+def compare_validation_frontier(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
+    python_winners = python_result.get("frontier_winner_labels_by_example", [])
+    go_winners = go_result.get("frontier_winner_labels_by_example", [])
+    python_coverage = python_result.get("frontier_coverage_labels", {})
+    go_coverage = go_result.get("frontier_coverage_labels", {})
+
+    return {
+        "expected_frontier_winners": EXPECTED_FRONTIER_WINNERS,
+        "expected_frontier_coverage": EXPECTED_FRONTIER_COVERAGE,
+        "python_frontier_winners": python_winners,
+        "go_frontier_winners": go_winners,
+        "python_frontier_coverage": python_coverage,
+        "go_frontier_coverage": go_coverage,
+        "frontier_winners_match": python_winners == go_winners == EXPECTED_FRONTIER_WINNERS,
+        "frontier_coverage_match": python_coverage == go_coverage == EXPECTED_FRONTIER_COVERAGE,
+    }
+
+
 def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> dict[str, Any]:
-    scenarios = {}
+    fixtures = {"component_selection": {"scenarios": {}}}
     compatible = True
 
     for scenario_name in sorted(EXPECTED_COMPONENTS):
         scenario_report = compare_scenario(
             scenario_name,
-            python_results["scenarios"][scenario_name],
-            go_results["scenarios"][scenario_name],
+            python_results["fixtures"]["component_selection"]["scenarios"][scenario_name],
+            go_results["fixtures"]["component_selection"]["scenarios"][scenario_name],
         )
-        scenarios[scenario_name] = scenario_report
+        fixtures["component_selection"]["scenarios"][scenario_name] = scenario_report
         compatible = compatible and scenario_report["first_candidate_match"] and scenario_report["final_program_match"]
 
+    frontier_report = compare_validation_frontier(
+        python_results["fixtures"]["validation_frontier"],
+        go_results["fixtures"]["validation_frontier"],
+    )
+    fixtures["validation_frontier"] = frontier_report
+    compatible = compatible and frontier_report["frontier_winners_match"] and frontier_report["frontier_coverage_match"]
+
     return {
-        "fixture": "gepa_component_selection",
         "python_runner": python_results.get("runner"),
         "go_runner": go_results.get("runner"),
         "compatible": compatible,
-        "scenarios": scenarios,
+        "fixtures": fixtures,
     }
 
 

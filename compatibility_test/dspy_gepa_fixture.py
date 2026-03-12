@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import dspy
+import dspy.clients
 from dspy.predict import Predict
 from dspy.utils.dummies import DummyLM
 
@@ -33,14 +34,32 @@ class MultiComponentModule(dspy.Module):
         return dspy.Prediction(category=category, output=output)
 
 
-def component_instructions(program: MultiComponentModule) -> dict[str, str]:
+class FrontierTaskLM(dspy.clients.lm.LM):
+    """Task LM that encodes component state into predictor outputs deterministically."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del prompt, kwargs
+        content = "\n".join(str(message.get("content", "")) for message in messages or [])
+        classifier_state = "classifier_improved" if "Updated classifier instruction" in content else "classifier_base"
+        generator_state = "generator_improved" if "Updated generator instruction" in content else "generator_base"
+
+        if "Your output fields are:\n1. `category`" in content:
+            return [{"text": json.dumps({"category": classifier_state})}]
+
+        return [{"text": json.dumps({"output": generator_state})}]
+
+
+def component_instructions(program: dspy.Module) -> dict[str, str]:
     return {
         "classifier": program.classifier.signature.instructions,
         "generator": program.generator.signature.instructions,
     }
 
 
-def updated_components(program: MultiComponentModule, original_instructions: dict[str, str]) -> list[str]:
+def updated_components(program: dspy.Module, original_instructions: dict[str, str]) -> list[str]:
     updated = [
         component
         for component, instruction in component_instructions(program).items()
@@ -48,6 +67,15 @@ def updated_components(program: MultiComponentModule, original_instructions: dic
     ]
     updated.sort()
     return updated
+
+
+def candidate_label(program: dspy.Module, original_instructions: dict[str, str]) -> str:
+    updated = updated_components(program, original_instructions)
+    if updated == ["classifier"]:
+        return "classifier"
+    if updated == ["generator"]:
+        return "generator"
+    return "seed"
 
 
 def run_selector_fixture(selector: str) -> dict[str, Any]:
@@ -58,6 +86,7 @@ def run_selector_fixture(selector: str) -> dict[str, Any]:
 
     def improving_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
         nonlocal call_count
+        del example, prediction, trace, pred_name, pred_trace
         call_count += 1
         score = min(0.3 + (call_count * 0.1), 1.0)
         return dspy.Prediction(score=score, feedback="Improving feedback")
@@ -100,14 +129,88 @@ def run_selector_fixture(selector: str) -> dict[str, Any]:
     }
 
 
+def run_validation_frontier_fixture() -> dict[str, Any]:
+    student = MultiComponentModule()
+    original_instructions = component_instructions(student)
+
+    def frontier_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        classifier_state = prediction.category
+        generator_state = prediction.output
+
+        if example.kind == "train":
+            score = 1.0 if (classifier_state == "classifier_improved") ^ (generator_state == "generator_improved") else 0.0
+        elif example.kind == "alpha":
+            score = 1.0 if classifier_state == "classifier_improved" and generator_state == "generator_base" else 0.5 if classifier_state == "classifier_base" and generator_state == "generator_base" else 0.0
+        else:
+            score = 1.0 if generator_state == "generator_improved" and classifier_state == "classifier_base" else 0.5 if classifier_state == "classifier_base" and generator_state == "generator_base" else 0.0
+
+        return dspy.Prediction(score=score, feedback=f"frontier feedback for {example.kind}")
+
+    task_lm = FrontierTaskLM()
+    reflection_lm = DummyLM(
+        [
+            {"improved_instruction": "Updated classifier instruction"},
+            {"improved_instruction": "Updated generator instruction"},
+        ]
+        * 100
+    )
+
+    trainset = [dspy.Example(kind="train", input="fixture train input", output="fixture output").with_inputs("input")]
+    valset = [
+        dspy.Example(kind="alpha", input="fixture alpha input", output="fixture output").with_inputs("input"),
+        dspy.Example(kind="beta", input="fixture beta input", output="fixture output").with_inputs("input"),
+    ]
+
+    with dspy.context(lm=task_lm):
+        optimizer = dspy.GEPA(
+            metric=frontier_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=24,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+        )
+        optimized_program = optimizer.compile(student, trainset=trainset, valset=valset)
+
+    detailed_results = getattr(optimized_program, "detailed_results", None)
+    if detailed_results is None:
+        raise RuntimeError("DSPy GEPA did not expose detailed_results for validation frontier fixture")
+
+    frontier_winner_labels_by_example: list[str] = []
+    frontier_coverage_labels: dict[str, int] = {}
+    # This fixture currently depends on DSPy exposing
+    # per_val_instance_best_candidates on detailed_results. Treat that as
+    # upstream-result plumbing rather than a stable public API promise.
+    per_val_best = getattr(detailed_results, "per_val_instance_best_candidates", {})
+    for case_index in range(len(valset)):
+        candidate_indexes = sorted(per_val_best.get(case_index, []))
+        if not candidate_indexes:
+            continue
+
+        winner_label = candidate_label(detailed_results.candidates[candidate_indexes[0]], original_instructions)
+        frontier_winner_labels_by_example.append(winner_label)
+        frontier_coverage_labels[winner_label] = frontier_coverage_labels.get(winner_label, 0) + 1
+
+    return {
+        "frontier_winner_labels_by_example": frontier_winner_labels_by_example,
+        "frontier_coverage_labels": frontier_coverage_labels,
+        "candidate_count": len(getattr(detailed_results, "candidates", [])),
+    }
+
+
 def build_fixture_report() -> dict[str, Any]:
     return {
         "runner": "python_dspy",
         "dspy_version": getattr(dspy, "__version__", "unknown"),
-        "fixture": "gepa_component_selection",
-        "scenarios": {
-            "round_robin": run_selector_fixture("round_robin"),
-            "all": run_selector_fixture("all"),
+        "fixtures": {
+            "component_selection": {
+                "scenarios": {
+                    "round_robin": run_selector_fixture("round_robin"),
+                    "all": run_selector_fixture("all"),
+                },
+            },
+            "validation_frontier": run_validation_frontier_fixture(),
         },
     }
 
