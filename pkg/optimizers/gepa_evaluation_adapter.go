@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 )
 
 // gepaEvaluationCase captures one example-level evaluation. Future reflective
@@ -37,6 +38,18 @@ func (g *GEPA) newEvaluationAdapter(program core.Program, dataset core.Dataset, 
 		batch:       g.materializeEvaluationBatch(dataset),
 		metric:      metric,
 	}
+}
+
+func (g *GEPA) newEvaluationAdapterForExamples(program core.Program, examples []core.Example, metric core.Metric) *gepaEvaluationAdapter {
+	return &gepaEvaluationAdapter{
+		baseProgram: program,
+		batch:       cloneEvaluationExamples(examples),
+		metric:      metric,
+	}
+}
+
+func newGEPAExampleDataset(examples []core.Example) core.Dataset {
+	return datasets.NewSimpleDataset(examples)
 }
 
 func (g *GEPA) materializeEvaluationBatch(dataset core.Dataset) []core.Example {
@@ -137,6 +150,18 @@ func cloneGEPACandidateEvaluation(evaluation *gepaCandidateEvaluation) *gepaCand
 		}
 	}
 
+	return cloned
+}
+
+func cloneEvaluationExamples(examples []core.Example) []core.Example {
+	if len(examples) == 0 {
+		return nil
+	}
+
+	cloned := make([]core.Example, len(examples))
+	for i, example := range examples {
+		cloned[i] = cloneEvaluationExample(example)
+	}
 	return cloned
 }
 
