@@ -21,6 +21,7 @@ EXPECTED_FRONTIER_COVERAGE = {"classifier": 1, "generator": 1}
 EXPECTED_MERGE_COMPONENTS = ["classifier", "generator"]
 EXPECTED_MERGE_PARENT_LABELS = ["classifier", "generator"]
 EXPECTED_FEEDBACK_INSTRUCTION = "feedback tuned classifier instruction"
+EXPECTED_FORMAT_FAILURE_INSTRUCTION = "format tuned classifier instruction"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -113,6 +114,23 @@ def compare_feedback_guided(python_result: dict[str, Any], go_result: dict[str, 
     }
 
 
+def compare_format_failure_feedback(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
+    python_candidate = python_result.get("candidate_instruction", "")
+    go_candidate = go_result.get("candidate_instruction", "")
+    python_final = python_result.get("final_program_instruction", "")
+    go_final = go_result.get("final_program_instruction", "")
+
+    return {
+        "expected_format_failure_instruction": EXPECTED_FORMAT_FAILURE_INSTRUCTION,
+        "python_candidate_instruction": python_candidate,
+        "go_candidate_instruction": go_candidate,
+        "python_final_program_instruction": python_final,
+        "go_final_program_instruction": go_final,
+        "candidate_instruction_match": python_candidate == go_candidate == EXPECTED_FORMAT_FAILURE_INSTRUCTION,
+        "final_program_instruction_match": python_final == go_final == EXPECTED_FORMAT_FAILURE_INSTRUCTION,
+    }
+
+
 def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> dict[str, Any]:
     fixtures = {"component_selection": {"scenarios": {}}}
     compatible = True
@@ -146,6 +164,13 @@ def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> 
     )
     fixtures["feedback_guided"] = feedback_report
     compatible = compatible and feedback_report["candidate_instruction_match"] and feedback_report["final_program_instruction_match"]
+
+    format_failure_report = compare_format_failure_feedback(
+        python_results["fixtures"]["format_failure_feedback"],
+        go_results["fixtures"]["format_failure_feedback"],
+    )
+    fixtures["format_failure_feedback"] = format_failure_report
+    compatible = compatible and format_failure_report["candidate_instruction_match"] and format_failure_report["final_program_instruction_match"]
 
     return {
         "python_runner": python_results.get("runner"),

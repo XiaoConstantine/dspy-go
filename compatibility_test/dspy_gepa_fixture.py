@@ -94,6 +94,40 @@ class FeedbackReflectionLM(dspy.clients.lm.LM):
         return [{"text": "```feedback fallback classifier instruction```"}]
 
 
+class FormatTaskLM(dspy.clients.lm.LM):
+    """Task LM that starts with malformed output and only succeeds after a format fix."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        if "format tuned classifier instruction" in content:
+            return [{"text": json.dumps({"category": "correct"})}]
+        return [{"text": "not json at all"}]
+
+
+class FormatReflectionLM(dspy.clients.lm.LM):
+    """Reflection LM that reacts only to parse-failure-as-feedback evidence.
+
+    This fixture matches on DSPy's built-in parse-failure feedback wording.
+    The Go fixture uses the equivalent dspy-go feedback text instead, so this
+    scenario asserts semantic rewrite parity rather than exact feedback-string
+    parity across implementations.
+    """
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        if "Your output failed to parse." in content:
+            return [{"text": "```format tuned classifier instruction```"}]
+        return [{"text": "```format fallback classifier instruction```"}]
+
+
 def component_instructions(program: dspy.Module) -> dict[str, str]:
     return {
         "classifier": program.classifier.signature.instructions,
@@ -368,6 +402,43 @@ def run_feedback_guided_fixture() -> dict[str, Any]:
     }
 
 
+def run_format_failure_feedback_fixture() -> dict[str, Any]:
+    student = FeedbackModule()
+    original_instruction = student.classifier.signature.instructions
+
+    def format_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        score = 1.0 if prediction.category == example.category else 0.0
+        return dspy.Prediction(score=score, feedback="metric feedback should not be needed")
+
+    task_lm = FormatTaskLM()
+    reflection_lm = FormatReflectionLM()
+    example = dspy.Example(input="format fixture input", category="correct").with_inputs("input")
+
+    with dspy.context(lm=task_lm):
+        optimizer = dspy.GEPA(
+            metric=format_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=4,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+            seed=7,
+            add_format_failure_as_feedback=True,
+        )
+        optimized_program = optimizer.compile(student, trainset=[example], valset=[example])
+
+    candidates = list(getattr(getattr(optimized_program, "detailed_results", None), "candidates", []))
+    candidate_instruction = candidates[1].classifier.signature.instructions if len(candidates) > 1 else optimized_program.classifier.signature.instructions
+    final_instruction = optimized_program.classifier.signature.instructions
+    return {
+        "original_instruction": original_instruction,
+        "candidate_instruction": candidate_instruction,
+        "final_program_instruction": final_instruction,
+        "candidate_count": len(candidates),
+    }
+
+
 def build_fixture_report() -> dict[str, Any]:
     return {
         "runner": "python_dspy",
@@ -382,6 +453,7 @@ def build_fixture_report() -> dict[str, Any]:
             "validation_frontier": run_validation_frontier_fixture(),
             "ancestor_merge": run_ancestor_merge_fixture(),
             "feedback_guided": run_feedback_guided_fixture(),
+            "format_failure_feedback": run_format_failure_feedback_fixture(),
         },
     }
 
