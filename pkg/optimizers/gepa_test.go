@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -365,6 +366,33 @@ func TestSaveAndLoadRunStateRoundTrip(t *testing.T) {
 	assert.Empty(t, resumed.state.StopReason)
 	assert.NotNil(t, resumed.state.candidateEvaluations)
 	assert.NotNil(t, resumed.state.evaluationCaseCache)
+}
+
+func TestLoadRunStateRejectsUnsupportedVersions(t *testing.T) {
+	runDir := t.TempDir()
+	path := filepath.Join(runDir, "gepa_state.json")
+
+	writeSnapshot := func(version int) error {
+		rendered := fmt.Sprintf(`{"version":%d,"state":{"current_generation":1}}`, version)
+		return os.WriteFile(path, []byte(rendered), 0o644)
+	}
+
+	gepa := &GEPA{
+		config: &GEPAConfig{RunDir: runDir},
+		state:  NewGEPAState(),
+	}
+
+	require.NoError(t, writeSnapshot(gepaRunStateVersion+1))
+	loaded, err := gepa.loadRunState()
+	require.Error(t, err)
+	assert.False(t, loaded)
+	assert.Contains(t, err.Error(), "newer than supported version")
+
+	require.NoError(t, writeSnapshot(gepaRunStateVersion-1))
+	loaded, err = gepa.loadRunState()
+	require.Error(t, err)
+	assert.False(t, loaded)
+	assert.Contains(t, err.Error(), "older than supported version")
 }
 
 func TestNewGEPAHonorsRandomSeed(t *testing.T) {

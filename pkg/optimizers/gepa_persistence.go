@@ -22,6 +22,10 @@ func (g *GEPA) prepareRunState() (bool, error) {
 		return false, nil
 	}
 
+	// Resumed runs assume the caller is providing the same program shape,
+	// dataset, and metric semantics as the original run. GEPA does not try to
+	// fingerprint those inputs, so changing them under the same RunDir can
+	// invalidate the persisted optimization history.
 	return g.loadRunState()
 }
 
@@ -96,7 +100,18 @@ func (g *GEPA) loadRunState() (bool, error) {
 		return false, fmt.Errorf("optimizers: unmarshal GEPA run state: %w", err)
 	}
 	if snapshot.Version != gepaRunStateVersion {
-		return false, fmt.Errorf("optimizers: unsupported GEPA run-state version %d", snapshot.Version)
+		if snapshot.Version > gepaRunStateVersion {
+			return false, fmt.Errorf(
+				"optimizers: GEPA run-state version %d is newer than supported version %d",
+				snapshot.Version,
+				gepaRunStateVersion,
+			)
+		}
+		return false, fmt.Errorf(
+			"optimizers: GEPA run-state version %d is older than supported version %d",
+			snapshot.Version,
+			gepaRunStateVersion,
+		)
 	}
 	if snapshot.State == nil {
 		return false, fmt.Errorf("optimizers: GEPA run state missing optimizer state")
