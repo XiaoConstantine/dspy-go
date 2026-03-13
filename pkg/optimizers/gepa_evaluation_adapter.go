@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
@@ -13,16 +14,22 @@ import (
 // gepaEvaluationCase captures one example-level evaluation. Future reflective
 // mutation can reuse these records to construct failure-focused minibatches.
 type gepaEvaluationCase struct {
-	Example core.Example
-	Outputs map[string]interface{}
-	Score   float64
-	Err     error
+	Example          core.Example
+	Outputs          map[string]interface{}
+	Score            float64
+	Err              error
+	Feedback         string
+	FeedbackTarget   string
+	FeedbackMetadata map[string]interface{}
 }
 
 type gepaCachedEvaluationCase struct {
-	Outputs map[string]interface{}
-	Score   float64
-	Err     error
+	Outputs          map[string]interface{}
+	Score            float64
+	Err              error
+	Feedback         string
+	FeedbackTarget   string
+	FeedbackMetadata map[string]interface{}
 }
 
 // gepaCandidateEvaluation captures a candidate evaluation against a stable
@@ -147,6 +154,9 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				evalCase.Outputs = cloneStringAnyMap(cached.Outputs)
 				evalCase.Err = cached.Err
 				evalCase.Score = cached.Score
+				evalCase.Feedback = cached.Feedback
+				evalCase.FeedbackTarget = cached.FeedbackTarget
+				evalCase.FeedbackMetadata = cloneStringAnyMap(cached.FeedbackMetadata)
 			} else {
 				outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
 				evalCase.Outputs = outputs
@@ -154,11 +164,15 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				if err == nil {
 					evalCase.Score = adapter.metric(example.Outputs, outputs)
 				}
+				g.populateEvaluationCaseFeedback(ctx, candidate, &evalCase)
 				spentMetricCalls++
 				g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
-					Outputs: outputs,
-					Score:   evalCase.Score,
-					Err:     err,
+					Outputs:          outputs,
+					Score:            evalCase.Score,
+					Err:              err,
+					Feedback:         evalCase.Feedback,
+					FeedbackTarget:   evalCase.FeedbackTarget,
+					FeedbackMetadata: evalCase.FeedbackMetadata,
 				})
 			}
 		} else {
@@ -168,6 +182,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 			if err == nil {
 				evalCase.Score = adapter.metric(example.Outputs, outputs)
 			}
+			g.populateEvaluationCaseFeedback(ctx, candidate, &evalCase)
 			spentMetricCalls++
 		}
 		if evalCase.Err == nil {
@@ -189,15 +204,77 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	return result
 }
 
+func (g *GEPA) populateEvaluationCaseFeedback(ctx context.Context, candidate *GEPACandidate, evalCase *gepaEvaluationCase) {
+	if evalCase == nil {
+		return
+	}
+
+	var feedback *GEPAFeedback
+	if g != nil && g.config != nil && g.config.FeedbackEvaluator != nil {
+		feedback = normalizeGEPAFeedback(g.config.FeedbackEvaluator.EvaluateFeedback(
+			ctx,
+			evalCase.Example.Outputs,
+			evalCase.Outputs,
+			&GEPAFeedbackContext{
+				Candidate: candidate,
+				Example:   cloneEvaluationExample(evalCase.Example),
+				Outputs:   cloneStringAnyMap(evalCase.Outputs),
+				Err:       evalCase.Err,
+			},
+		))
+	}
+
+	if evalCase.Err != nil && g != nil && g.config != nil && g.config.AddFormatFailureAsFeedback {
+		target := ""
+		if feedback != nil {
+			target = feedback.TargetComponent
+		}
+		if target == "" && candidate != nil {
+			target = strings.TrimSpace(candidate.ModuleName)
+		}
+
+		failureFeedback := "Execution failure: " + strings.TrimSpace(evalCase.Err.Error())
+		switch {
+		case feedback == nil:
+			feedback = &GEPAFeedback{
+				Feedback:        failureFeedback,
+				TargetComponent: target,
+			}
+		case feedback.Feedback == "":
+			feedback.Feedback = failureFeedback
+			if feedback.TargetComponent == "" {
+				feedback.TargetComponent = target
+			}
+		default:
+			feedback.Feedback = strings.TrimSpace(feedback.Feedback + "\n" + failureFeedback)
+			if feedback.TargetComponent == "" {
+				feedback.TargetComponent = target
+			}
+		}
+	}
+
+	feedback = normalizeGEPAFeedback(feedback)
+	if feedback == nil {
+		return
+	}
+
+	evalCase.Feedback = feedback.Feedback
+	evalCase.FeedbackTarget = feedback.TargetComponent
+	evalCase.FeedbackMetadata = cloneStringAnyMap(feedback.Metadata)
+}
+
 func cloneCachedEvaluationCase(cached *gepaCachedEvaluationCase) *gepaCachedEvaluationCase {
 	if cached == nil {
 		return nil
 	}
 
 	return &gepaCachedEvaluationCase{
-		Outputs: cloneStringAnyMap(cached.Outputs),
-		Score:   cached.Score,
-		Err:     cached.Err,
+		Outputs:          cloneStringAnyMap(cached.Outputs),
+		Score:            cached.Score,
+		Err:              cached.Err,
+		Feedback:         cached.Feedback,
+		FeedbackTarget:   cached.FeedbackTarget,
+		FeedbackMetadata: cloneStringAnyMap(cached.FeedbackMetadata),
 	}
 }
 
@@ -246,10 +323,13 @@ func cloneGEPACandidateEvaluation(evaluation *gepaCandidateEvaluation) *gepaCand
 		cloned.Cases = make([]gepaEvaluationCase, len(evaluation.Cases))
 		for i, evalCase := range evaluation.Cases {
 			cloned.Cases[i] = gepaEvaluationCase{
-				Example: cloneEvaluationExample(evalCase.Example),
-				Outputs: cloneStringAnyMap(evalCase.Outputs),
-				Score:   evalCase.Score,
-				Err:     evalCase.Err,
+				Example:          cloneEvaluationExample(evalCase.Example),
+				Outputs:          cloneStringAnyMap(evalCase.Outputs),
+				Score:            evalCase.Score,
+				Err:              evalCase.Err,
+				Feedback:         evalCase.Feedback,
+				FeedbackTarget:   evalCase.FeedbackTarget,
+				FeedbackMetadata: cloneStringAnyMap(evalCase.FeedbackMetadata),
 			}
 		}
 	}

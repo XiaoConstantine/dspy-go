@@ -99,17 +99,19 @@ type GEPAConfig struct {
 	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3
 
 	// Performance parameters
-	EvaluationBatchSize int           `json:"evaluation_batch_size"` // Default: 5
-	ConcurrencyLevel    int           `json:"concurrency_level"`     // Default: 3
-	ValidationFrequency int           `json:"validation_frequency"`  // Default: 1
-	ValidationSplit     float64       `json:"validation_split"`      // Default: 0.0 (disabled)
-	RandomSeed          int64         `json:"random_seed"`           // Default: 0 (time-based)
-	MaxMergeInvocations int           `json:"max_merge_invocations"` // Default: 5
-	MaxMetricCalls      int           `json:"max_metric_calls"`      // Default: 0 (disabled)
-	ScoreThreshold      float64       `json:"score_threshold"`       // Default: 0.0 (disabled)
-	MaxRuntime          time.Duration `json:"max_runtime"`           // Default: 0 (disabled)
-	RunDir              string        `json:"run_dir,omitempty"`
-	StopCallbacks       []GEPAStopper `json:"-"`
+	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
+	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Default: 3
+	ValidationFrequency        int                   `json:"validation_frequency"`  // Default: 1
+	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (disabled)
+	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
+	MaxMergeInvocations        int                   `json:"max_merge_invocations"` // Default: 5
+	MaxMetricCalls             int                   `json:"max_metric_calls"`      // Default: 0 (disabled)
+	ScoreThreshold             float64               `json:"score_threshold"`       // Default: 0.0 (disabled)
+	MaxRuntime                 time.Duration         `json:"max_runtime"`           // Default: 0 (disabled)
+	RunDir                     string                `json:"run_dir,omitempty"`
+	StopCallbacks              []GEPAStopper         `json:"-"`
+	FeedbackEvaluator          GEPAFeedbackEvaluator `json:"-"`
+	AddFormatFailureAsFeedback bool                  `json:"add_format_failure_as_feedback"`
 
 	// LLM parameters
 	GenerationModel string  `json:"generation_model"` // Default: uses core.GetDefaultLLM()
