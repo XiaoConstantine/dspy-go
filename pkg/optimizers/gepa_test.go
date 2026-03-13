@@ -308,6 +308,10 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 3, config.TournamentSize)
 	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
 	assert.Equal(t, 5, config.MaxMergeInvocations)
+	assert.Zero(t, config.MaxMetricCalls)
+	assert.Zero(t, config.ScoreThreshold)
+	assert.Zero(t, config.MaxRuntime)
+	assert.Empty(t, config.StopCallbacks)
 	assert.Zero(t, config.RandomSeed)
 }
 
@@ -622,6 +626,46 @@ func TestEvaluateCandidateWithAdapterReusesCachedCasesAcrossSubsetAdapters(t *te
 	assert.Equal(t, 2, executions)
 	require.Len(t, subsetEvaluation.Cases, 1)
 	assert.Equal(t, "alpha tuned", subsetEvaluation.Cases[0].Outputs["output"])
+}
+
+func TestEvaluateCandidateWithAdapterCountsOnlyUncachedMetricCalls(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 2
+
+	executions := 0
+	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
+	dataset := newCountingDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"input": "one"},
+			Outputs: map[string]interface{}{"output": "alpha tuned"},
+		},
+		{
+			Inputs:  map[string]interface{}{"input": "two"},
+			Outputs: map[string]interface{}{"output": "alpha tuned"},
+		},
+	})
+	adapter := gepa.newEvaluationAdapter(program, dataset, exactOutputMetric)
+
+	first := &GEPACandidate{
+		ID:          "candidate-a",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+	second := &GEPACandidate{
+		ID:          "candidate-b",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+
+	gepa.evaluateCandidateWithAdapter(context.Background(), first, adapter)
+	assert.Equal(t, 2, gepa.state.MetricCallCount())
+
+	gepa.evaluateCandidateWithAdapter(context.Background(), second, adapter)
+	assert.Equal(t, 2, gepa.state.MetricCallCount())
+	assert.Equal(t, 2, executions)
 }
 
 func TestCandidateInstructionForModule(t *testing.T) {
@@ -1658,6 +1702,117 @@ func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
 	resetCalls, nextCalls := dataset.counts()
 	assert.Equal(t, 1, resetCalls)
 	assert.Equal(t, 2, nextCalls)
+}
+
+func TestCompileStopsWhenMetricBudgetReached(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	config := DefaultGEPAConfig()
+	config.PopulationSize = 2
+	config.MaxGenerations = 5
+	config.MutationRate = 0.0
+	config.ReflectionFreq = 0
+	config.EvaluationBatchSize = 2
+	config.MaxMetricCalls = 2
+
+	gepa, err := NewGEPA(config)
+	require.NoError(t, err)
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+	})
+
+	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, gepa.state.MetricCallCount())
+	assert.Equal(t, gepaStopReasonMetricBudget, gepa.state.StopReason)
+	assert.Equal(t, 0, gepa.state.CurrentGeneration)
+}
+
+func TestCompileStopsWhenScoreThresholdReached(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	config := DefaultGEPAConfig()
+	config.PopulationSize = 1
+	config.MaxGenerations = 5
+	config.MutationRate = 0.0
+	config.ReflectionFreq = 0
+	config.EvaluationBatchSize = 1
+	config.ScoreThreshold = 1.0
+
+	gepa, err := NewGEPA(config)
+	require.NoError(t, err)
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+	})
+
+	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NoError(t, err)
+
+	assert.Equal(t, gepaStopReasonScoreThreshold, gepa.state.StopReason)
+	assert.Equal(t, 0, gepa.state.CurrentGeneration)
+	require.NotNil(t, gepa.state.StopMetadata)
+	assert.Equal(t, gepaStopScoreSourceTraining, gepa.state.StopMetadata["score_source"])
+}
+
+func TestCompileStopsWithCustomStopper(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	config := DefaultGEPAConfig()
+	config.PopulationSize = 1
+	config.MaxGenerations = 5
+	config.MutationRate = 0.0
+	config.ReflectionFreq = 0
+	config.EvaluationBatchSize = 1
+	config.StopCallbacks = []GEPAStopper{
+		func(ctx context.Context, gepa *GEPA) *GEPAStopDecision {
+			if gepa.state.MetricCallCount() == 0 {
+				return nil
+			}
+			return &GEPAStopDecision{
+				Reason: "unit_test_stop",
+				Metadata: map[string]interface{}{
+					"metric_calls": gepa.state.MetricCallCount(),
+				},
+			}
+		},
+	}
+
+	gepa, err := NewGEPA(config)
+	require.NoError(t, err)
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+	})
+
+	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NoError(t, err)
+
+	assert.Equal(t, "unit_test_stop", gepa.state.StopReason)
+	require.NotNil(t, gepa.state.StopMetadata)
+	assert.Equal(t, 1, gepa.state.StopMetadata["metric_calls"])
+}
+
+func TestEvaluateStopDecisionHonorsMaxRuntime(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.MaxRuntime = 10 * time.Millisecond
+	gepa.state.StartTime = time.Now().Add(-20 * time.Millisecond)
+
+	decision := gepa.evaluateStopDecision(context.Background())
+	require.NotNil(t, decision)
+	assert.Equal(t, gepaStopReasonMaxRuntime, decision.Reason)
 }
 
 func TestEvolutionaryOperators(t *testing.T) {

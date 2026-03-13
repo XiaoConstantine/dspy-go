@@ -135,6 +135,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	candidateCtx := context.WithValue(ctx, candidateIDKey, candidate.ID)
 	totalScore := 0.0
 	scoredCases := 0
+	spentMetricCalls := 0
 
 	for _, example := range adapter.batch {
 		evalCase := gepaEvaluationCase{
@@ -153,6 +154,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				if err == nil {
 					evalCase.Score = adapter.metric(example.Outputs, outputs)
 				}
+				spentMetricCalls++
 				g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
 					Outputs: outputs,
 					Score:   evalCase.Score,
@@ -166,6 +168,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 			if err == nil {
 				evalCase.Score = adapter.metric(example.Outputs, outputs)
 			}
+			spentMetricCalls++
 		}
 		if evalCase.Err == nil {
 			totalScore += evalCase.Score
@@ -178,6 +181,9 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	if scoredCases > 0 {
 		result.TotalScore = totalScore
 		result.AverageScore = totalScore / float64(scoredCases)
+	}
+	if spentMetricCalls > 0 && g != nil && g.state != nil {
+		g.state.AddMetricCalls(spentMetricCalls)
 	}
 
 	return result
