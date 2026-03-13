@@ -267,6 +267,21 @@ func newCountingCandidateEvaluationProgram(instruction string, executions *int) 
 	})
 }
 
+func newErrorCandidateEvaluationProgram(instruction string, executions *int, err error) core.Program {
+	return core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule(instruction),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			if executions != nil {
+				*executions = *executions + 1
+			}
+			return map[string]interface{}{
+				"output": modules["alpha"].GetSignature().Instruction,
+			}, err
+		}
+	})
+}
+
 func exactOutputMetric(expected, actual map[string]interface{}) float64 {
 	if expected["output"] == actual["output"] {
 		return 1.0
@@ -316,6 +331,8 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Empty(t, config.RunDir)
 	assert.Empty(t, config.StopCallbacks)
 	assert.Zero(t, config.RandomSeed)
+	assert.Nil(t, config.FeedbackEvaluator)
+	assert.False(t, config.AddFormatFailureAsFeedback)
 }
 
 func TestSaveAndLoadRunStateRoundTrip(t *testing.T) {
@@ -627,12 +644,83 @@ func TestEvaluateCandidateWithAdapterCapturesExampleResults(t *testing.T) {
 	}
 }
 
+func TestEvaluateCandidateWithAdapterCapturesMetricFeedback(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 1
+	gepa.config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, expected, actual map[string]interface{}, info *GEPAFeedbackContext) *GEPAFeedback {
+		return &GEPAFeedback{
+			Feedback:        fmt.Sprintf("expected %v but got %v", expected["output"], actual["output"]),
+			TargetComponent: info.Candidate.ModuleName,
+			Metadata: map[string]interface{}{
+				"source": "test",
+			},
+		}
+	})
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha expected"}},
+	})
+	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+
+	candidate := &GEPACandidate{
+		ID:          "alpha-feedback-candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+
+	evaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter)
+	require.NotNil(t, evaluation)
+	require.Len(t, evaluation.Cases, 1)
+	assert.Equal(t, "expected alpha expected but got alpha tuned", evaluation.Cases[0].Feedback)
+	assert.Equal(t, "alpha", evaluation.Cases[0].FeedbackTarget)
+	assert.Equal(t, "test", evaluation.Cases[0].FeedbackMetadata["source"])
+}
+
+func TestEvaluateCandidateWithAdapterAddsFormatFailureFeedback(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 1
+	gepa.config.AddFormatFailureAsFeedback = true
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+	})
+	adapter := gepa.newEvaluationAdapter(
+		newErrorCandidateEvaluationProgram("alpha base", nil, fmt.Errorf("parse failed: invalid json")),
+		dataset,
+		exactOutputMetric,
+	)
+
+	candidate := &GEPACandidate{
+		ID:          "alpha-error-candidate",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+
+	evaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter)
+	require.NotNil(t, evaluation)
+	require.Len(t, evaluation.Cases, 1)
+	assert.Error(t, evaluation.Cases[0].Err)
+	assert.Contains(t, evaluation.Cases[0].Feedback, "Execution failure: parse failed: invalid json")
+	assert.Equal(t, "alpha", evaluation.Cases[0].FeedbackTarget)
+}
+
 func TestEvaluateCandidateWithAdapterCachesEquivalentCandidateContent(t *testing.T) {
 	gepa := &GEPA{
 		config: DefaultGEPAConfig(),
 		state:  NewGEPAState(),
 	}
 	gepa.config.EvaluationBatchSize = 2
+	gepa.config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, expected, actual map[string]interface{}, _ *GEPAFeedbackContext) *GEPAFeedback {
+		return &GEPAFeedback{
+			Feedback: fmt.Sprintf("expected %v but got %v", expected["output"], actual["output"]),
+		}
+	})
 
 	executions := 0
 	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
@@ -668,6 +756,7 @@ func TestEvaluateCandidateWithAdapterCachesEquivalentCandidateContent(t *testing
 	assert.Equal(t, 2, executions)
 	assert.Equal(t, 1.0, secondEvaluation.AverageScore)
 	require.Len(t, secondEvaluation.Cases, 2)
+	assert.Equal(t, "expected alpha tuned but got alpha tuned", secondEvaluation.Cases[0].Feedback)
 }
 
 func TestEvaluateCandidateWithAdapterReusesCachedCasesAcrossSubsetAdapters(t *testing.T) {
@@ -2521,6 +2610,51 @@ func TestBuildReflectionPromptIncludesExampleLevelEvidence(t *testing.T) {
 	assert.Contains(t, prompt, `{"output":"wrong"}`)
 	assert.Contains(t, prompt, "Representative Successes:")
 	assert.Contains(t, prompt, `{"question":"What is GEPA?"}`)
+}
+
+func TestBuildReflectionPromptIncludesMetricFeedbackEvidence(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+
+	candidate := &GEPACandidate{
+		ID:          "reflection-feedback-candidate",
+		ModuleName:  "alpha",
+		Instruction: "Return the tuned answer.",
+		Fitness:     0.4,
+		Generation:  2,
+	}
+	patterns := &ExecutionPatterns{
+		SuccessRate:         0.0,
+		SuccessCount:        0,
+		TotalExecutions:     1,
+		AverageResponseTime: 120 * time.Millisecond,
+		CommonFailures:      []string{"comparison_error"},
+		QualityIndicators:   []string{"variable_performance"},
+	}
+	evaluation := &gepaCandidateEvaluation{
+		Candidate: candidate,
+		Cases: []gepaEvaluationCase{
+			{
+				Example: core.Example{
+					Inputs:  map[string]interface{}{"question": "What is DSPy?"},
+					Outputs: map[string]interface{}{"output": "framework"},
+				},
+				Outputs:        map[string]interface{}{"output": "library"},
+				Score:          0.0,
+				Feedback:       "Use the framework terminology, not a generic library label.",
+				FeedbackTarget: "alpha",
+			},
+		},
+	}
+
+	reflectionInput := gepa.buildReflectionInput(evaluation)
+	require.NotNil(t, reflectionInput)
+	prompt := gepa.buildReflectionPrompt(candidate, patterns, reflectionInput)
+
+	assert.Contains(t, prompt, "Feedback Target: alpha")
+	assert.Contains(t, prompt, "Feedback: Use the framework terminology, not a generic library label.")
 }
 
 func TestBuildReflectionInputBoundsWorstCases(t *testing.T) {

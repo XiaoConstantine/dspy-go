@@ -18,6 +18,8 @@ type gepaReflectionCaseEvidence struct {
 	ExpectedSummary string
 	OutputSummary   string
 	ErrorSummary    string
+	FeedbackSummary string
+	FeedbackTarget  string
 	Score           float64
 }
 
@@ -54,6 +56,8 @@ func (g *GEPA) buildReflectionInput(evaluation *gepaCandidateEvaluation) *gepaRe
 			InputSummary:    summarizeReflectionMap(evalCase.Example.Inputs),
 			ExpectedSummary: summarizeReflectionMap(evalCase.Example.Outputs),
 			OutputSummary:   summarizeReflectionMap(evalCase.Outputs),
+			FeedbackSummary: truncateEvidence(evalCase.Feedback, maxReflectionValueChars),
+			FeedbackTarget:  truncateEvidence(evalCase.FeedbackTarget, maxReflectionValueChars),
 			Score:           evalCase.Score,
 		}
 		if evalCase.Err != nil {
@@ -131,6 +135,12 @@ func (g *GEPA) formatReflectionCaseEvidence(input *gepaReflectionInput) string {
 				evidence.Score,
 				evidence.ErrorSummary,
 			)
+			if evidence.FeedbackTarget != "" {
+				fmt.Fprintf(&builder, "   Feedback Target: %s\n", evidence.FeedbackTarget)
+			}
+			if evidence.FeedbackSummary != "" {
+				fmt.Fprintf(&builder, "   Feedback: %s\n", evidence.FeedbackSummary)
+			}
 		}
 	}
 
@@ -145,6 +155,12 @@ func (g *GEPA) formatReflectionCaseEvidence(input *gepaReflectionInput) string {
 				evidence.OutputSummary,
 				evidence.Score,
 			)
+			if evidence.FeedbackTarget != "" {
+				fmt.Fprintf(&builder, "   Feedback Target: %s\n", evidence.FeedbackTarget)
+			}
+			if evidence.FeedbackSummary != "" {
+				fmt.Fprintf(&builder, "   Feedback: %s\n", evidence.FeedbackSummary)
+			}
 		}
 	}
 
