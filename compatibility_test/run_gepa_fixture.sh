@@ -8,6 +8,7 @@ PYTHON_RESULTS="$FIXTURE_DIR/dspy_gepa_fixture_results.json"
 GO_RESULTS="$FIXTURE_DIR/go_gepa_fixture_results.json"
 REPORT_RESULTS="$FIXTURE_DIR/gepa_fixture_report.json"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/dspy-go-gepa-compat-uv-cache}"
+export DSPY_CACHEDIR="${DSPY_CACHEDIR:-${TMPDIR:-/tmp}/dspy-go-gepa-cache}"
 export GOCACHE="${GOCACHE:-${TMPDIR:-/tmp}/dspy-go-gepa-compat-gocache}"
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -24,7 +25,7 @@ echo "Running deterministic DSPy GEPA fixture..."
 echo "Running deterministic dspy-go GEPA fixture..."
 (
     cd "$ROOT_DIR"
-    go run ./compatibility_test/cmd/gepa_fixture --output "$GO_RESULTS"
+    GEPA_FIXTURE_OUTPUT="$GO_RESULTS" go test ./pkg/optimizers -run TestWriteGEPAFixtureReport -count=1
 )
 
 echo "Comparing GEPA fixture outputs..."
