@@ -99,12 +99,16 @@ type GEPAConfig struct {
 	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3
 
 	// Performance parameters
-	EvaluationBatchSize int     `json:"evaluation_batch_size"` // Default: 5
-	ConcurrencyLevel    int     `json:"concurrency_level"`     // Default: 3
-	ValidationFrequency int     `json:"validation_frequency"`  // Default: 1
-	ValidationSplit     float64 `json:"validation_split"`      // Default: 0.0 (disabled)
-	RandomSeed          int64   `json:"random_seed"`           // Default: 0 (time-based)
-	MaxMergeInvocations int     `json:"max_merge_invocations"` // Default: 5
+	EvaluationBatchSize int           `json:"evaluation_batch_size"` // Default: 5
+	ConcurrencyLevel    int           `json:"concurrency_level"`     // Default: 3
+	ValidationFrequency int           `json:"validation_frequency"`  // Default: 1
+	ValidationSplit     float64       `json:"validation_split"`      // Default: 0.0 (disabled)
+	RandomSeed          int64         `json:"random_seed"`           // Default: 0 (time-based)
+	MaxMergeInvocations int           `json:"max_merge_invocations"` // Default: 5
+	MaxMetricCalls      int           `json:"max_metric_calls"`      // Default: 0 (disabled)
+	ScoreThreshold      float64       `json:"score_threshold"`       // Default: 0.0 (disabled)
+	MaxRuntime          time.Duration `json:"max_runtime"`           // Default: 0 (disabled)
+	StopCallbacks       []GEPAStopper `json:"-"`
 
 	// LLM parameters
 	GenerationModel string  `json:"generation_model"` // Default: uses core.GetDefaultLLM()
@@ -134,6 +138,9 @@ func DefaultGEPAConfig() *GEPAConfig {
 		ValidationFrequency:  1,
 		ValidationSplit:      0.0,
 		MaxMergeInvocations:  5,
+		MaxMetricCalls:       0,
+		ScoreThreshold:       0.0,
+		MaxRuntime:           0,
 		Temperature:          0.8,
 		MaxTokens:            500,
 	}
@@ -364,6 +371,9 @@ type GEPAState struct {
 	ValidationCoverage       map[string]int                       `json:"validation_coverage,omitempty"`
 	MergeInvocations         int                                  `json:"merge_invocations,omitempty"`
 	PerformedMerges          map[string]bool                      `json:"performed_merges,omitempty"`
+	MetricCalls              int                                  `json:"metric_calls,omitempty"`
+	StopReason               string                               `json:"stop_reason,omitempty"`
+	StopMetadata             map[string]interface{}               `json:"stop_metadata,omitempty"`
 	candidateReflections     map[string]*ReflectionResult
 	candidateEvaluations     map[string]*gepaCandidateEvaluation
 	candidateValidationEvals map[string]*gepaCandidateEvaluation
@@ -3065,6 +3075,7 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	logger.Info(ctx, "Starting GEPA optimization with population_size=%d, max_generations=%d",
 		g.config.PopulationSize,
 		g.config.MaxGenerations)
+	g.state.ResetRunControls(time.Now())
 	g.state.ResetEvaluationCaseCache()
 
 	// Initialize GEPA state in context
@@ -3114,12 +3125,16 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 	if validated {
 		lastValidatedGeneration = 0
 	}
+	if decision := g.evaluateStopDecision(ctx); decision != nil {
+		g.recordStopDecision(decision)
+		return nil
+	}
 	if err := g.reflectIfScheduled(ctx, 0); err != nil {
 		logger.Error(ctx, "reflection failed at generation 0: %v", err)
 	}
 	g.reportOptimizationProgress("GEPA Evolution", 1, g.config.MaxGenerations)
 
-	if g.hasConverged() || g.config.MaxGenerations == 1 {
+	if g.config.MaxGenerations == 1 {
 		return nil
 	}
 
@@ -3145,16 +3160,15 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		if validated {
 			lastValidatedGeneration = generation
 		}
+		if decision := g.evaluateStopDecision(ctx); decision != nil {
+			g.recordStopDecision(decision)
+			break
+		}
 		if err := g.reflectIfScheduled(ctx, generation); err != nil {
 			logger.Error(ctx, "reflection failed at generation %d: %v", generation, err)
 		}
 
 		g.reportOptimizationProgress("GEPA Evolution", generation+1, g.config.MaxGenerations)
-
-		if g.hasConverged() {
-			logger.Info(ctx, "Convergence achieved at generation %d", generation)
-			break
-		}
 	}
 
 	if len(validationExamples) > 0 && lastValidatedGeneration != g.state.CurrentGeneration {
@@ -4183,6 +4197,9 @@ func (g *GEPA) logOptimizationResults(ctx context.Context) {
 		g.state.CurrentGeneration,
 		g.state.BestFitness,
 		g.config.PopulationSize)
+	logger.Info(ctx, "GEPA run control summary: metric_calls=%d, stop_reason=%s",
+		g.state.MetricCalls,
+		g.state.StopReason)
 
 	if g.state.BestCandidate != nil {
 		logger.Info(ctx, "Best candidate found: id=%s, generation=%d, fitness=%.3f, instruction=%s",
@@ -6004,8 +6021,8 @@ func (g *GEPA) identifyQualityIndicators(trends []float64) []string {
 
 // hasConverged checks if the optimization has converged.
 func (g *GEPA) hasConverged() bool {
-	g.state.mu.RLock()
-	defer g.state.mu.RUnlock()
+	g.state.mu.Lock()
+	defer g.state.mu.Unlock()
 
 	if g.state.ConvergenceStatus.IsConverged {
 		return true
