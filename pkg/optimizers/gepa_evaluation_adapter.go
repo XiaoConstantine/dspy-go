@@ -2,6 +2,9 @@ package optimizers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
@@ -11,6 +14,12 @@ import (
 // mutation can reuse these records to construct failure-focused minibatches.
 type gepaEvaluationCase struct {
 	Example core.Example
+	Outputs map[string]interface{}
+	Score   float64
+	Err     error
+}
+
+type gepaCachedEvaluationCase struct {
 	Outputs map[string]interface{}
 	Score   float64
 	Err     error
@@ -131,12 +140,34 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 		evalCase := gepaEvaluationCase{
 			Example: example,
 		}
-
-		outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
-		evalCase.Outputs = outputs
-		evalCase.Err = err
-		if err == nil {
-			evalCase.Score = adapter.metric(example.Outputs, outputs)
+		cacheKey := evaluationCaseCacheKey(candidate, example)
+		if g != nil && g.state != nil {
+			if cached := g.state.GetEvaluationCaseCache(cacheKey); cached != nil {
+				evalCase.Outputs = cloneStringAnyMap(cached.Outputs)
+				evalCase.Err = cached.Err
+				evalCase.Score = cached.Score
+			} else {
+				outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
+				evalCase.Outputs = outputs
+				evalCase.Err = err
+				if err == nil {
+					evalCase.Score = adapter.metric(example.Outputs, outputs)
+				}
+				g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
+					Outputs: outputs,
+					Score:   evalCase.Score,
+					Err:     err,
+				})
+			}
+		} else {
+			outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
+			evalCase.Outputs = outputs
+			evalCase.Err = err
+			if err == nil {
+				evalCase.Score = adapter.metric(example.Outputs, outputs)
+			}
+		}
+		if evalCase.Err == nil {
 			totalScore += evalCase.Score
 			scoredCases++
 		}
@@ -150,6 +181,47 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	}
 
 	return result
+}
+
+func cloneCachedEvaluationCase(cached *gepaCachedEvaluationCase) *gepaCachedEvaluationCase {
+	if cached == nil {
+		return nil
+	}
+
+	return &gepaCachedEvaluationCase{
+		Outputs: cloneStringAnyMap(cached.Outputs),
+		Score:   cached.Score,
+		Err:     cached.Err,
+	}
+}
+
+func evaluationCaseCacheKey(candidate *GEPACandidate, example core.Example) string {
+	return candidateComponentCacheKey(candidate) + "|" + exampleCacheKey(example)
+}
+
+func candidateComponentCacheKey(candidate *GEPACandidate) string {
+	return stableHashStringAnyMap(map[string]interface{}{
+		"component_texts": cloneCandidateComponentTexts(candidate),
+	})
+}
+
+func exampleCacheKey(example core.Example) string {
+	return stableHashStringAnyMap(map[string]interface{}{
+		"inputs":  example.Inputs,
+		"outputs": example.Outputs,
+	})
+}
+
+func stableHashStringAnyMap(value map[string]interface{}) string {
+	// json.Marshal currently emits deterministic map-key ordering for string
+	// keys, which is the stability guarantee this cache key depends on.
+	rendered, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("fallback:%v", value)
+	}
+
+	sum := sha256.Sum256(rendered)
+	return fmt.Sprintf("%x", sum)
 }
 
 func cloneGEPACandidateEvaluation(evaluation *gepaCandidateEvaluation) *gepaCandidateEvaluation {

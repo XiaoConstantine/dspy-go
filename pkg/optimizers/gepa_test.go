@@ -543,6 +543,87 @@ func TestEvaluateCandidateWithAdapterCapturesExampleResults(t *testing.T) {
 	}
 }
 
+func TestEvaluateCandidateWithAdapterCachesEquivalentCandidateContent(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 2
+
+	executions := 0
+	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
+	dataset := newCountingDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"input": "one"},
+			Outputs: map[string]interface{}{"output": "alpha tuned"},
+		},
+		{
+			Inputs:  map[string]interface{}{"input": "two"},
+			Outputs: map[string]interface{}{"output": "alpha tuned"},
+		},
+	})
+	adapter := gepa.newEvaluationAdapter(program, dataset, exactOutputMetric)
+
+	first := &GEPACandidate{
+		ID:          "candidate-a",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+	second := &GEPACandidate{
+		ID:          "candidate-b",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+
+	firstEvaluation := gepa.evaluateCandidateWithAdapter(context.Background(), first, adapter)
+	require.NotNil(t, firstEvaluation)
+	assert.Equal(t, 2, executions)
+
+	secondEvaluation := gepa.evaluateCandidateWithAdapter(context.Background(), second, adapter)
+	require.NotNil(t, secondEvaluation)
+	assert.Equal(t, 2, executions)
+	assert.Equal(t, 1.0, secondEvaluation.AverageScore)
+	require.Len(t, secondEvaluation.Cases, 2)
+}
+
+func TestEvaluateCandidateWithAdapterReusesCachedCasesAcrossSubsetAdapters(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.EvaluationBatchSize = 2
+
+	executions := 0
+	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
+	dataset := newCountingDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"input": "one"},
+			Outputs: map[string]interface{}{"output": "alpha tuned"},
+		},
+		{
+			Inputs:  map[string]interface{}{"input": "two"},
+			Outputs: map[string]interface{}{"output": "alpha tuned"},
+		},
+	})
+	adapter := gepa.newEvaluationAdapter(program, dataset, exactOutputMetric)
+
+	candidate := &GEPACandidate{
+		ID:          "candidate-a",
+		ModuleName:  "alpha",
+		Instruction: "alpha tuned",
+	}
+
+	fullEvaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter)
+	require.NotNil(t, fullEvaluation)
+	assert.Equal(t, 2, executions)
+
+	subsetEvaluation := gepa.evaluateCandidateWithAdapter(context.Background(), candidate, adapter.subset([]int{1}))
+	require.NotNil(t, subsetEvaluation)
+	assert.Equal(t, 2, executions)
+	require.Len(t, subsetEvaluation.Cases, 1)
+	assert.Equal(t, "alpha tuned", subsetEvaluation.Cases[0].Outputs["output"])
+}
+
 func TestCandidateInstructionForModule(t *testing.T) {
 	candidate := &GEPACandidate{
 		ModuleName:  "alpha",

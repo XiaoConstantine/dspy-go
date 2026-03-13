@@ -539,7 +539,7 @@ func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	return report
 }
 
-func TestWriteGEPAFixtureReport(t *testing.T) {
+func TestGEPAFixtureReport_WritesWhenEnvSet(t *testing.T) {
 	outputPath := strings.TrimSpace(os.Getenv(gepaFixtureOutputEnv))
 	if outputPath == "" {
 		t.Skipf("%s is not set", gepaFixtureOutputEnv)
