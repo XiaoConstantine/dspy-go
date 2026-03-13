@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -12,7 +11,6 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/benchmarks/tblite"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
-	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 	"github.com/spf13/cobra"
 )
 
@@ -41,6 +39,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	var populationSize int
 	var generations int
 	var reflectionFreq int
+	var gepaEvalConcurrency int
 	var validationSplit float64
 	var testSplit float64
 
@@ -97,7 +96,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 				return nil
 			}
 
-			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, reflectionFreq, validationSplit, testSplit)
+			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, reflectionFreq, gepaEvalConcurrency, validationSplit, testSplit)
 		},
 	}
 
@@ -122,6 +121,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	cmd.Flags().IntVar(&populationSize, "population", 4, "GEPA population size for --gepa runs")
 	cmd.Flags().IntVar(&generations, "generations", 2, "GEPA generations for --gepa runs")
 	cmd.Flags().IntVar(&reflectionFreq, "reflection-freq", 1, "GEPA reflection frequency for --gepa runs")
+	cmd.Flags().IntVar(&gepaEvalConcurrency, "gepa-eval-concurrency", 4, "Concurrent GEPA candidate evaluations for --gepa runs")
 	cmd.Flags().Float64Var(&validationSplit, "validation-split", 0.2, "Validation split used inside the optimization set for --gepa runs")
 	cmd.Flags().Float64Var(&testSplit, "test-split", 0.2, "Held-out test split used for baseline vs tuned comparison")
 
@@ -143,6 +143,7 @@ func runTBLiteGEPABenchmark(
 	populationSize int,
 	generations int,
 	reflectionFreq int,
+	gepaEvalConcurrency int,
 	validationSplit float64,
 	testSplit float64,
 ) error {
@@ -199,7 +200,7 @@ func runTBLiteGEPABenchmark(
 			MaxGenerations:  generations,
 			ReflectionFreq:  reflectionFreq,
 			ValidationSplit: validationSplit,
-			EvalConcurrency: 1,
+			EvalConcurrency: gepaEvalConcurrency,
 			PassThreshold:   1.0,
 			ArtifactKeys:    []optimize.ArtifactKey{optimize.ArtifactSkillPack, optimize.ArtifactToolPolicy},
 			PrimaryArtifact: optimize.ArtifactToolPolicy,
@@ -220,19 +221,6 @@ func runTBLiteGEPABenchmark(
 
 	bestArtifacts := optimizeResult.BestArtifacts.Clone()
 	bestValidation := optimizeResult.BestValidationEvaluation
-	if len(validationTasks) > 0 && optimizeResult.OptimizationState != nil {
-		if selectedEvaluation, err := selectBestTBLiteValidationCandidate(
-			cmd.Context(),
-			optimizer,
-			optimizeResult.OptimizationState,
-			tblite.ExamplesFromTasks(validationTasks),
-		); err != nil {
-			return err
-		} else if selectedEvaluation != nil {
-			bestArtifacts = selectedEvaluation.Artifacts.Clone()
-			bestValidation = selectedEvaluation
-		}
-	}
 
 	tunedClone, err := baselineAgent.Clone()
 	if err != nil {
@@ -332,44 +320,6 @@ func shuffledTBLiteTasks(tasks []datasets.TBLiteTask, seed int64) []datasets.TBL
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
 	return shuffled
-}
-
-func selectBestTBLiteValidationCandidate(
-	ctx context.Context,
-	optimizer *optimize.GEPAAgentOptimizer,
-	state *optimizers.GEPAState,
-	validationExamples []optimize.AgentExample,
-) (*optimize.GEPACandidateEvaluation, error) {
-	if optimizer == nil || state == nil || len(validationExamples) == 0 {
-		return nil, nil
-	}
-
-	candidates := state.ParetoArchive
-	if len(candidates) == 0 && state.BestCandidate != nil {
-		candidates = []*optimizers.GEPACandidate{state.BestCandidate}
-	}
-	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no GEPA candidates available for TBLite validation selection")
-	}
-
-	var best *optimize.GEPACandidateEvaluation
-	for _, candidate := range candidates {
-		evaluation, err := optimizer.EvaluateCandidate(ctx, optimizers.CloneCandidate(candidate), validationExamples)
-		if err != nil {
-			return nil, err
-		}
-		if evaluation == nil || evaluation.Fitness == nil {
-			continue
-		}
-		if best == nil || evaluation.AverageScore > best.AverageScore || (evaluation.AverageScore == best.AverageScore && evaluation.Fitness.WeightedScore > best.Fitness.WeightedScore) {
-			best = evaluation
-		}
-	}
-
-	if best == nil {
-		return nil, fmt.Errorf("no successful GEPA validation evaluation found")
-	}
-	return best, nil
 }
 
 func partitionTBLiteTasks(tasks []datasets.TBLiteTask, validationSplit, testSplit float64) ([]datasets.TBLiteTask, []datasets.TBLiteTask, []datasets.TBLiteTask, error) {

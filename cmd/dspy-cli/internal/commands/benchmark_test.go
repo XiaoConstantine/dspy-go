@@ -43,3 +43,10 @@ func TestPartitionTBLiteTasks_SmallSliceKeepsTrainingRoom(t *testing.T) {
 	assert.Equal(t, "t3", validation[0].TaskName)
 	assert.Equal(t, "t4", test[0].TaskName)
 }
+
+func TestTBLiteBenchmarkCommand_DefaultGEPAEvalConcurrency(t *testing.T) {
+	cmd := newTBLiteBenchmarkCommand(defaultTerminalTaskAgentFactory)
+	flag := cmd.Flags().Lookup("gepa-eval-concurrency")
+	require.NotNil(t, flag)
+	assert.Equal(t, "4", flag.DefValue)
+}
