@@ -34,6 +34,21 @@ class MultiComponentModule(dspy.Module):
         return dspy.Prediction(category=category, output=output)
 
 
+class FeedbackModule(dspy.Module):
+    """Single-component module for deterministic feedback-guided GEPA fixtures."""
+
+    def __init__(self):
+        super().__init__()
+        self.classifier = Predict("input -> category")
+
+    def forward(self, input: str):
+        return dspy.Prediction(category=self.classifier(input=input).category)
+
+
+def lm_content(prompt=None, messages=None) -> str:
+    return (prompt or "") + "\n".join(str(message.get("content", "")) for message in messages or [])
+
+
 class FrontierTaskLM(dspy.clients.lm.LM):
     """Task LM that encodes component state into predictor outputs deterministically."""
 
@@ -42,7 +57,7 @@ class FrontierTaskLM(dspy.clients.lm.LM):
 
     def __call__(self, prompt=None, messages=None, **kwargs):
         del prompt, kwargs
-        content = "\n".join(str(message.get("content", "")) for message in messages or [])
+        content = lm_content(messages=messages)
         classifier_state = "classifier_improved" if "Updated classifier instruction" in content else "classifier_base"
         generator_state = "generator_improved" if "Updated generator instruction" in content else "generator_base"
 
@@ -50,6 +65,33 @@ class FrontierTaskLM(dspy.clients.lm.LM):
             return [{"text": json.dumps({"category": classifier_state})}]
 
         return [{"text": json.dumps({"output": generator_state})}]
+
+
+class FeedbackTaskLM(dspy.clients.lm.LM):
+    """Task LM whose outputs improve only after the feedback-guided rewrite lands."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        category = "correct" if "feedback tuned classifier instruction" in content else "wrong"
+        return [{"text": json.dumps({"category": category})}]
+
+
+class FeedbackReflectionLM(dspy.clients.lm.LM):
+    """Reflection LM that only emits the improved instruction when feedback is present."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        if "Use classifier terminology exactly" in content:
+            return [{"text": "```feedback tuned classifier instruction```"}]
+        return [{"text": "```feedback fallback classifier instruction```"}]
 
 
 def component_instructions(program: dspy.Module) -> dict[str, str]:
@@ -290,6 +332,42 @@ def run_ancestor_merge_fixture() -> dict[str, Any]:
     }
 
 
+def run_feedback_guided_fixture() -> dict[str, Any]:
+    student = FeedbackModule()
+    original_instruction = student.classifier.signature.instructions
+
+    def feedback_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        score = 1.0 if prediction.category == example.category else 0.0
+        return dspy.Prediction(score=score, feedback="Use classifier terminology exactly")
+
+    task_lm = FeedbackTaskLM()
+    reflection_lm = FeedbackReflectionLM()
+    example = dspy.Example(input="feedback fixture input", category="correct").with_inputs("input")
+
+    with dspy.context(lm=task_lm):
+        optimizer = dspy.GEPA(
+            metric=feedback_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=4,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+            seed=7,
+        )
+        optimized_program = optimizer.compile(student, trainset=[example], valset=[example])
+
+    candidates = list(getattr(getattr(optimized_program, "detailed_results", None), "candidates", []))
+    candidate_instruction = candidates[1].classifier.signature.instructions if len(candidates) > 1 else optimized_program.classifier.signature.instructions
+    final_instruction = optimized_program.classifier.signature.instructions
+    return {
+        "original_instruction": original_instruction,
+        "candidate_instruction": candidate_instruction,
+        "final_program_instruction": final_instruction,
+        "candidate_count": len(candidates),
+    }
+
+
 def build_fixture_report() -> dict[str, Any]:
     return {
         "runner": "python_dspy",
@@ -303,6 +381,7 @@ def build_fixture_report() -> dict[str, Any]:
             },
             "validation_frontier": run_validation_frontier_fixture(),
             "ancestor_merge": run_ancestor_merge_fixture(),
+            "feedback_guided": run_feedback_guided_fixture(),
         },
     }
 
