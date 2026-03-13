@@ -109,7 +109,13 @@ class FormatTaskLM(dspy.clients.lm.LM):
 
 
 class FormatReflectionLM(dspy.clients.lm.LM):
-    """Reflection LM that reacts only to parse-failure-as-feedback evidence."""
+    """Reflection LM that reacts only to parse-failure-as-feedback evidence.
+
+    This fixture matches on DSPy's built-in parse-failure feedback wording.
+    The Go fixture uses the equivalent dspy-go feedback text instead, so this
+    scenario asserts semantic rewrite parity rather than exact feedback-string
+    parity across implementations.
+    """
 
     def __init__(self):
         super().__init__("dummy", "chat", 0.0, 1000, True)

@@ -189,6 +189,10 @@ CONFIDENCE: 0.9`,
 		}, nil
 	case strings.Contains(prompt, "You are improving a GEPA instruction using reflection-guided evidence.") &&
 		strings.Contains(prompt, "Execution failure: couldn't parse category output"):
+		// This fixture keys off dspy-go's current format-failure feedback text.
+		// The companion Python fixture matches DSPy's built-in wording instead,
+		// so the parity target here is the rewritten instruction, not identical
+		// feedback strings across implementations.
 		return &core.LLMResponse{Content: "```format tuned classifier instruction```"}, nil
 	default:
 		return &core.LLMResponse{Content: "classifier base"}, nil
