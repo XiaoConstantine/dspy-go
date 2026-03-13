@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -311,8 +312,59 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Zero(t, config.MaxMetricCalls)
 	assert.Zero(t, config.ScoreThreshold)
 	assert.Zero(t, config.MaxRuntime)
+	assert.Empty(t, config.RunDir)
 	assert.Empty(t, config.StopCallbacks)
 	assert.Zero(t, config.RandomSeed)
+}
+
+func TestSaveAndLoadRunStateRoundTrip(t *testing.T) {
+	runDir := t.TempDir()
+
+	candidate := &GEPACandidate{
+		ID:          "candidate-a",
+		ModuleName:  "alpha",
+		Instruction: "alpha improved",
+		ComponentTexts: map[string]string{
+			"alpha": "alpha improved",
+		},
+		Fitness:    1.0,
+		Generation: 2,
+	}
+
+	gepa := &GEPA{
+		config: &GEPAConfig{RunDir: runDir},
+		state:  NewGEPAState(),
+	}
+	gepa.state.CurrentGeneration = 2
+	gepa.state.MetricCalls = 7
+	gepa.state.LastValidatedGeneration = 1
+	gepa.state.BestCandidate = CloneCandidate(candidate)
+	gepa.state.BestFitness = 1.0
+	gepa.state.PopulationHistory = []*Population{{
+		Generation: 2,
+		Candidates: []*GEPACandidate{candidate},
+	}}
+
+	require.NoError(t, gepa.saveRunState())
+
+	resumed := &GEPA{
+		config: &GEPAConfig{RunDir: runDir},
+		state:  NewGEPAState(),
+	}
+	loaded, err := resumed.loadRunState()
+	require.NoError(t, err)
+	assert.True(t, loaded)
+	assert.Equal(t, 2, resumed.state.CurrentGeneration)
+	assert.Equal(t, 7, resumed.state.MetricCalls)
+	assert.Equal(t, 1, resumed.state.LastValidatedGeneration)
+	require.NotNil(t, resumed.state.BestCandidate)
+	assert.Equal(t, "candidate-a", resumed.state.BestCandidate.ID)
+	require.Len(t, resumed.state.PopulationHistory, 1)
+	require.Len(t, resumed.state.PopulationHistory[0].Candidates, 1)
+	assert.Equal(t, "candidate-a", resumed.state.PopulationHistory[0].Candidates[0].ID)
+	assert.Empty(t, resumed.state.StopReason)
+	assert.NotNil(t, resumed.state.candidateEvaluations)
+	assert.NotNil(t, resumed.state.evaluationCaseCache)
 }
 
 func TestNewGEPAHonorsRandomSeed(t *testing.T) {
@@ -1702,6 +1754,61 @@ func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
 	resetCalls, nextCalls := dataset.counts()
 	assert.Equal(t, 1, resetCalls)
 	assert.Equal(t, 2, nextCalls)
+}
+
+func TestCompileResumesFromSavedRunState(t *testing.T) {
+	mockLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(mockLLM)
+	core.SetDefaultLLM(mockLLM)
+
+	runDir := t.TempDir()
+	config := DefaultGEPAConfig()
+	config.RunDir = runDir
+	config.PopulationSize = 1
+	config.MaxGenerations = 3
+	config.MutationRate = 0.0
+	config.ReflectionFreq = 0
+	config.EvaluationBatchSize = 1
+	config.StopCallbacks = []GEPAStopper{
+		func(ctx context.Context, gepa *GEPA) *GEPAStopDecision {
+			if gepa.state.CurrentGeneration > 0 {
+				return nil
+			}
+			if gepa.state.MetricCallCount() == 0 {
+				return nil
+			}
+			return &GEPAStopDecision{Reason: "unit_test_resume_stop"}
+		},
+	}
+
+	firstRun, err := NewGEPA(config)
+	require.NoError(t, err)
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "alpha base"}},
+	})
+	_, err = firstRun.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NoError(t, err)
+	assert.Equal(t, "unit_test_resume_stop", firstRun.state.StopReason)
+	assert.Equal(t, 0, firstRun.state.CurrentGeneration)
+	assert.FileExists(t, filepath.Join(runDir, "gepa_state.json"))
+
+	resumeConfig := DefaultGEPAConfig()
+	resumeConfig.RunDir = runDir
+	resumeConfig.PopulationSize = 1
+	resumeConfig.MaxGenerations = 3
+	resumeConfig.MutationRate = 0.0
+	resumeConfig.ReflectionFreq = 0
+	resumeConfig.EvaluationBatchSize = 1
+
+	secondRun, err := NewGEPA(resumeConfig)
+	require.NoError(t, err)
+
+	_, err = secondRun.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
+	require.NoError(t, err)
+	assert.Equal(t, 2, secondRun.state.CurrentGeneration)
+	assert.Greater(t, secondRun.state.MetricCallCount(), 1)
+	assert.NotEqual(t, "unit_test_resume_stop", secondRun.state.StopReason)
 }
 
 func TestCompileStopsWhenMetricBudgetReached(t *testing.T) {

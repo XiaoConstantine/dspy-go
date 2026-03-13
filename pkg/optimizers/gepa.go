@@ -108,6 +108,7 @@ type GEPAConfig struct {
 	MaxMetricCalls      int           `json:"max_metric_calls"`      // Default: 0 (disabled)
 	ScoreThreshold      float64       `json:"score_threshold"`       // Default: 0.0 (disabled)
 	MaxRuntime          time.Duration `json:"max_runtime"`           // Default: 0 (disabled)
+	RunDir              string        `json:"run_dir,omitempty"`
 	StopCallbacks       []GEPAStopper `json:"-"`
 
 	// LLM parameters
@@ -364,6 +365,7 @@ type GEPAState struct {
 	ConvergenceStatus        *ConvergenceStatus                   `json:"convergence_status"`
 	StartTime                time.Time                            `json:"start_time"`
 	LastImprovement          time.Time                            `json:"last_improvement"`
+	LastValidatedGeneration  int                                  `json:"last_validated_generation"`
 	ExecutionTraces          map[string][]ExecutionTrace          `json:"execution_traces"`
 	CandidateMetrics         map[string]*CandidateMetrics         `json:"candidate_metrics"`
 	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness    `json:"multi_objective_fitness_map"`
@@ -397,6 +399,7 @@ func NewGEPAState() *GEPAState {
 		ReflectionHistory:        make([]*ReflectionResult, 0),
 		StartTime:                time.Now(),
 		LastImprovement:          time.Now(),
+		LastValidatedGeneration:  -1,
 		ExecutionTraces:          make(map[string][]ExecutionTrace),
 		CandidateMetrics:         make(map[string]*CandidateMetrics),
 		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
@@ -3075,7 +3078,13 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	logger.Info(ctx, "Starting GEPA optimization with population_size=%d, max_generations=%d",
 		g.config.PopulationSize,
 		g.config.MaxGenerations)
-	g.state.ResetRunControls(time.Now())
+	resumed, err := g.prepareRunState()
+	if err != nil {
+		return program, err
+	}
+	if !resumed {
+		g.state.ResetRunControls(time.Now())
+	}
 	g.state.ResetEvaluationCaseCache()
 
 	// Initialize GEPA state in context
@@ -3083,7 +3092,7 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 
 	// Install interceptors on the program
 	optimizedProgram := g.installInterceptors(program)
-	err := g.runIterativeOptimizationLoop(ctx, optimizedProgram, dataset, metric)
+	err = g.runIterativeOptimizationLoop(ctx, optimizedProgram, dataset, metric)
 	if err != nil {
 		return program, err
 	}
@@ -3107,38 +3116,44 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 	if err != nil {
 		return err
 	}
-	g.resetValidationState()
-	lastValidatedGeneration := -1
+	if g.getCurrentPopulation() == nil {
+		g.resetValidationState()
+		if err := g.initializePopulation(ctx, program); err != nil {
+			return fmt.Errorf("failed to initialize population: %w", err)
+		}
 
-	if err := g.initializePopulation(ctx, program); err != nil {
-		return fmt.Errorf("failed to initialize population: %w", err)
+		g.state.CurrentGeneration = 0
+		if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, trainDataset, metric); err != nil {
+			return fmt.Errorf("evaluation failed at generation 0: %w", err)
+		}
+		validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, 0)
+		if err != nil {
+			return fmt.Errorf("validation failed at generation 0: %w", err)
+		}
+		if validated {
+			g.state.LastValidatedGeneration = 0
+		}
+		if decision := g.evaluateStopDecision(ctx); decision != nil {
+			g.recordStopDecision(decision)
+			return g.saveRunState()
+		}
+		if err := g.reflectIfScheduled(ctx, 0); err != nil {
+			logger.Error(ctx, "reflection failed at generation 0: %v", err)
+		}
+		if err := g.saveRunState(); err != nil {
+			return err
+		}
+		g.reportOptimizationProgress("GEPA Evolution", 1, g.config.MaxGenerations)
+
+		if g.config.MaxGenerations == 1 {
+			return g.saveRunState()
+		}
+	} else {
+		g.setLatestEvaluationAdapter(g.newEvaluationAdapter(program, trainDataset, metric))
+		logger.Info(ctx, "Resuming GEPA optimization from generation %d", g.state.CurrentGeneration)
 	}
 
-	g.state.CurrentGeneration = 0
-	if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, trainDataset, metric); err != nil {
-		return fmt.Errorf("evaluation failed at generation 0: %w", err)
-	}
-	validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, 0)
-	if err != nil {
-		return fmt.Errorf("validation failed at generation 0: %w", err)
-	}
-	if validated {
-		lastValidatedGeneration = 0
-	}
-	if decision := g.evaluateStopDecision(ctx); decision != nil {
-		g.recordStopDecision(decision)
-		return nil
-	}
-	if err := g.reflectIfScheduled(ctx, 0); err != nil {
-		logger.Error(ctx, "reflection failed at generation 0: %v", err)
-	}
-	g.reportOptimizationProgress("GEPA Evolution", 1, g.config.MaxGenerations)
-
-	if g.config.MaxGenerations == 1 {
-		return nil
-	}
-
-	for generation := 1; generation < g.config.MaxGenerations; generation++ {
+	for generation := g.state.CurrentGeneration + 1; generation < g.config.MaxGenerations; generation++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -3158,22 +3173,31 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 			return fmt.Errorf("validation failed at generation %d: %w", generation, err)
 		}
 		if validated {
-			lastValidatedGeneration = generation
+			g.state.LastValidatedGeneration = generation
 		}
 		if decision := g.evaluateStopDecision(ctx); decision != nil {
 			g.recordStopDecision(decision)
+			if err := g.saveRunState(); err != nil {
+				return err
+			}
 			break
 		}
 		if err := g.reflectIfScheduled(ctx, generation); err != nil {
 			logger.Error(ctx, "reflection failed at generation %d: %v", generation, err)
 		}
+		if err := g.saveRunState(); err != nil {
+			return err
+		}
 
 		g.reportOptimizationProgress("GEPA Evolution", generation+1, g.config.MaxGenerations)
 	}
 
-	if len(validationExamples) > 0 && lastValidatedGeneration != g.state.CurrentGeneration {
+	if len(validationExamples) > 0 && g.state.LastValidatedGeneration != g.state.CurrentGeneration {
 		if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
 			return fmt.Errorf("final validation failed: %w", err)
+		}
+		if err := g.saveRunState(); err != nil {
+			return err
 		}
 	}
 
@@ -3260,6 +3284,7 @@ func (g *GEPA) resetValidationState() {
 	g.state.ValidationCoverage = make(map[string]int)
 	g.state.BestValidationCandidate = nil
 	g.state.BestValidationFitness = math.Inf(-1)
+	g.state.LastValidatedGeneration = -1
 }
 
 func (g *GEPA) evaluateValidationPopulation(ctx context.Context, program core.Program, validationExamples []core.Example, metric core.Metric) error {
