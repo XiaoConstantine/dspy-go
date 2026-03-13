@@ -182,6 +182,7 @@ func formatPromptList(items []string, limit int) string {
 }
 
 func (g *GEPA) extractInstructionCandidate(content string) string {
+	content = unwrapInstructionCodeFence(content)
 	lines := strings.Split(content, "\n")
 	for _, rawLine := range lines {
 		line := strings.TrimSpace(rawLine)
@@ -210,13 +211,51 @@ func (g *GEPA) extractInstructionCandidate(content string) string {
 		line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
 		line = stripLeadingNumberedMarker(line)
 
-		line = strings.Trim(line, "\"'")
+		line = strings.Trim(line, "`\"'")
 		if len(line) > 10 {
 			return line
 		}
 	}
 
 	return ""
+}
+
+func unwrapInstructionCodeFence(content string) string {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "```") {
+		return content
+	}
+
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSpace(content)
+	if strings.HasSuffix(content, "```") {
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	}
+
+	lines := strings.Split(content, "\n")
+	if len(lines) <= 1 {
+		return content
+	}
+
+	firstLine := strings.TrimSpace(lines[0])
+	if isInstructionFenceLanguage(firstLine) {
+		return strings.TrimSpace(strings.Join(lines[1:], "\n"))
+	}
+
+	return content
+}
+
+func isInstructionFenceLanguage(line string) bool {
+	if line == "" {
+		return true
+	}
+	for _, r := range line {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' && r != '+' {
+			return false
+		}
+	}
+	return true
 }
 
 func stripLeadingNumberedMarker(line string) string {

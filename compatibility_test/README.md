@@ -42,6 +42,7 @@ This harness:
 - currently covers component-selection parity (`round_robin` vs `all`)
 - also covers validation-frontier parity for complementary classifier/generator winners
 - also covers ancestor-merge parity for deterministic two-parent merge proposals
+- also covers feedback-guided rewrite parity for example-level metric feedback
 
 ### Test Status: ✅ COMPATIBLE
 *Last Updated: 2025-08-12 | Dataset Size: 10 | Model: gemini-2.0-flash*
