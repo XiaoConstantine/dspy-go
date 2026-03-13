@@ -29,6 +29,9 @@ type GEPAStopDecision struct {
 // Returning nil means the run should continue.
 type GEPAStopper func(context.Context, *GEPA) *GEPAStopDecision
 
+// ResetRunControls clears run-scoped stop/budget bookkeeping before a fresh
+// Compile call. Merge dedup state is intentionally reset here too, because
+// each Compile invocation is treated as an independent GEPA optimization run.
 func (s *GEPAState) ResetRunControls(now time.Time) {
 	if s == nil {
 		return
@@ -167,6 +170,7 @@ func (g *GEPA) maxRuntimeStopDecision() *GEPAStopDecision {
 }
 
 func (g *GEPA) scoreThresholdStopDecision() *GEPAStopDecision {
+	// A non-positive threshold disables this stopper by config contract.
 	if g == nil || g.state == nil || g.config.ScoreThreshold <= 0 {
 		return nil
 	}
