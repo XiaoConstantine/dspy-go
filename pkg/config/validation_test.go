@@ -109,6 +109,22 @@ func TestValidateLLMProviderConfig(t *testing.T) {
 			errorText:   "invalid Anthropic model ID",
 		},
 		{
+			name: "valid anthropic 4.6 model",
+			provider: LLMProviderConfig{
+				Provider: "anthropic",
+				ModelID:  "claude-sonnet-4-6",
+			},
+			expectError: false,
+		},
+		{
+			name: "valid anthropic 4.6 alias",
+			provider: LLMProviderConfig{
+				Provider: "anthropic",
+				ModelID:  "sonnet-4.6",
+			},
+			expectError: false,
+		},
+		{
 			name: "google missing API key",
 			provider: LLMProviderConfig{
 				Provider: "google",
@@ -249,6 +265,19 @@ func TestIsValidAnthropicModel(t *testing.T) {
 		"claude-3-opus-20240229",
 		"claude-3-5-sonnet-20241022",
 		"claude-3-5-haiku-20241022",
+		// Official 4.6 IDs
+		"claude-sonnet-4-6",
+		"claude-opus-4-6",
+		// 4.6 aliases
+		"sonnet-4.6",
+		"sonnet-4-6",
+		"claude-sonnet-4.6",
+		"opus-4.6",
+		"opus-4-6",
+		"claude-opus-4.6",
+		// 4.5 aliases
+		"claude-sonnet-4-5",
+		"opus-4.5",
 	}
 
 	for _, model := range validModels {

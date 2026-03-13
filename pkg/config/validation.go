@@ -476,10 +476,22 @@ func validateExporterType(fl validator.FieldLevel) bool {
 // Note: These functions provide basic validation. Full validation is performed
 // by the provider-specific packages during LLM initialization.
 func isValidAnthropicModel(modelID string) bool {
-	// Allow claude-3, claude-4, and claude-3.5 models
-	return strings.HasPrefix(modelID, "claude-3") ||
-	       strings.HasPrefix(modelID, "claude-4") ||
-	       strings.HasPrefix(modelID, "claude-3.5")
+	validPrefixes := []string{
+		"claude-3",
+		"claude-4",
+		"claude-3.5",
+		"claude-haiku",
+		"claude-sonnet",
+		"claude-opus",
+		"opus-",
+		"sonnet-",
+	}
+	for _, prefix := range validPrefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isValidGoogleModel(modelID string) bool {
