@@ -75,6 +75,8 @@ def candidate_label(program: dspy.Module, original_instructions: dict[str, str])
         return "classifier"
     if updated == ["generator"]:
         return "generator"
+    if updated == ["classifier", "generator"]:
+        return "merged"
     return "seed"
 
 
@@ -199,6 +201,95 @@ def run_validation_frontier_fixture() -> dict[str, Any]:
     }
 
 
+def run_ancestor_merge_fixture() -> dict[str, Any]:
+    student = MultiComponentModule()
+    original_instructions = component_instructions(student)
+
+    def merge_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        classifier_improved = prediction.category == "classifier_improved"
+        generator_improved = prediction.output == "generator_improved"
+
+        if example.kind == "train":
+            score = 1.0 if classifier_improved ^ generator_improved else 0.0
+        elif example.kind == "alpha":
+            score = 1.0 if classifier_improved else 0.5 if (not classifier_improved and not generator_improved) else 0.0
+        else:
+            score = 1.0 if generator_improved else 0.5 if (not classifier_improved and not generator_improved) else 0.0
+
+        return dspy.Prediction(score=score, feedback=f"merge feedback for {example.kind}")
+
+    task_lm = FrontierTaskLM()
+    reflection_lm = DummyLM(
+        [
+            {"improved_instruction": "Updated classifier instruction"},
+            {"improved_instruction": "Updated generator instruction"},
+        ]
+        * 100
+    )
+
+    trainset = [dspy.Example(kind="train", input="merge train input", output="fixture output").with_inputs("input")]
+    valset = [
+        dspy.Example(kind="alpha", input="merge alpha-1 input", output="fixture output").with_inputs("input"),
+        dspy.Example(kind="alpha", input="merge alpha-2 input", output="fixture output").with_inputs("input"),
+        dspy.Example(kind="beta", input="merge beta-1 input", output="fixture output").with_inputs("input"),
+        dspy.Example(kind="beta", input="merge beta-2 input", output="fixture output").with_inputs("input"),
+    ]
+
+    with dspy.context(lm=task_lm):
+        optimizer = dspy.GEPA(
+            metric=merge_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=40,
+            reflection_minibatch_size=4,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+            seed=7,
+            use_merge=True,
+            max_merge_invocations=2,
+            gepa_kwargs={"merge_val_overlap_floor": 1},
+        )
+        optimized_program = optimizer.compile(student, trainset=trainset, valset=valset)
+
+    detailed_results = getattr(optimized_program, "detailed_results", None)
+    if detailed_results is None:
+        raise RuntimeError("DSPy GEPA did not expose detailed_results for ancestor merge fixture")
+
+    # This fixture currently depends on DSPy exposing parent indexes on
+    # detailed_results. Treat that as upstream-result plumbing rather than a
+    # stable public API promise.
+    parent_lists = list(getattr(detailed_results, "parents", []))
+    merged_index = next(
+        (
+            index
+            for index, parents in enumerate(parent_lists)
+            if len([parent for parent in parents if parent is not None]) == 2
+        ),
+        None,
+    )
+    if merged_index is None:
+        return {
+            "merged_candidate_present": False,
+            "merged_candidate_updated_components": [],
+            "merged_candidate_parent_labels": [],
+            "merged_candidate_parent_count": 0,
+        }
+
+    merged_candidate = detailed_results.candidates[merged_index]
+    merged_parent_labels = sorted(
+        candidate_label(detailed_results.candidates[parent], original_instructions)
+        for parent in parent_lists[merged_index]
+        if parent is not None
+    )
+    return {
+        "merged_candidate_present": True,
+        "merged_candidate_updated_components": updated_components(merged_candidate, original_instructions),
+        "merged_candidate_parent_labels": merged_parent_labels,
+        "merged_candidate_parent_count": len(merged_parent_labels),
+    }
+
+
 def build_fixture_report() -> dict[str, Any]:
     return {
         "runner": "python_dspy",
@@ -211,6 +302,7 @@ def build_fixture_report() -> dict[str, Any]:
                 },
             },
             "validation_frontier": run_validation_frontier_fixture(),
+            "ancestor_merge": run_ancestor_merge_fixture(),
         },
     }
 

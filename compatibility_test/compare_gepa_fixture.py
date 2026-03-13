@@ -18,6 +18,8 @@ EXPECTED_COMPONENTS = {
 }
 EXPECTED_FRONTIER_WINNERS = ["classifier", "generator"]
 EXPECTED_FRONTIER_COVERAGE = {"classifier": 1, "generator": 1}
+EXPECTED_MERGE_COMPONENTS = ["classifier", "generator"]
+EXPECTED_MERGE_PARENT_LABELS = ["classifier", "generator"]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -62,6 +64,37 @@ def compare_validation_frontier(python_result: dict[str, Any], go_result: dict[s
     }
 
 
+def compare_ancestor_merge(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
+    python_components = sorted(python_result.get("merged_candidate_updated_components", []))
+    go_components = sorted(go_result.get("merged_candidate_updated_components", []))
+    python_parent_labels = sorted(python_result.get("merged_candidate_parent_labels", []))
+    go_parent_labels = sorted(go_result.get("merged_candidate_parent_labels", []))
+    python_parent_count = python_result.get("merged_candidate_parent_count", 0)
+    go_parent_count = go_result.get("merged_candidate_parent_count", 0)
+    python_present = bool(python_result.get("merged_candidate_present"))
+    go_present = bool(go_result.get("merged_candidate_present"))
+
+    return {
+        "expected_merged_candidate_components": EXPECTED_MERGE_COMPONENTS,
+        "expected_merged_candidate_parent_labels": EXPECTED_MERGE_PARENT_LABELS,
+        "python_merged_candidate_present": python_present,
+        "go_merged_candidate_present": go_present,
+        "python_merged_candidate_components": python_components,
+        "go_merged_candidate_components": go_components,
+        "python_merged_candidate_parent_labels": python_parent_labels,
+        "go_merged_candidate_parent_labels": go_parent_labels,
+        "python_merged_candidate_parent_count": python_parent_count,
+        "go_merged_candidate_parent_count": go_parent_count,
+        "merged_candidate_match": (
+            python_present
+            and go_present
+            and python_components == go_components == EXPECTED_MERGE_COMPONENTS
+            and python_parent_labels == go_parent_labels == EXPECTED_MERGE_PARENT_LABELS
+            and python_parent_count == go_parent_count == 2
+        ),
+    }
+
+
 def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> dict[str, Any]:
     fixtures = {"component_selection": {"scenarios": {}}}
     compatible = True
@@ -81,6 +114,13 @@ def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> 
     )
     fixtures["validation_frontier"] = frontier_report
     compatible = compatible and frontier_report["frontier_winners_match"] and frontier_report["frontier_coverage_match"]
+
+    merge_report = compare_ancestor_merge(
+        python_results["fixtures"]["ancestor_merge"],
+        go_results["fixtures"]["ancestor_merge"],
+    )
+    fixtures["ancestor_merge"] = merge_report
+    compatible = compatible and merge_report["merged_candidate_match"]
 
     return {
         "python_runner": python_results.get("runner"),
