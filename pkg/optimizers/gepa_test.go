@@ -2865,6 +2865,13 @@ func TestExtractInstructionCandidateStripsMultiDigitNumbering(t *testing.T) {
 	assert.Equal(t, "Return the answer in a labeled format.", instruction)
 }
 
+func TestExtractInstructionCandidateStripsCodeFences(t *testing.T) {
+	gepa := &GEPA{}
+
+	instruction := gepa.extractInstructionCandidate("```feedback tuned classifier instruction```")
+	assert.Equal(t, "feedback tuned classifier instruction", instruction)
+}
+
 func TestSelfCritiqueSystem(t *testing.T) {
 	// Set up mock LLM with critique response
 	mockLLM := &testutil.MockLLM{}

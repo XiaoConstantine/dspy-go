@@ -126,7 +126,7 @@ CONFIDENCE: 0.9`,
 		}, nil
 	case strings.Contains(prompt, "You are improving a GEPA instruction using reflection-guided evidence.") &&
 		strings.Contains(prompt, "Use classifier terminology exactly"):
-		return &core.LLMResponse{Content: "feedback tuned classifier instruction"}, nil
+		return &core.LLMResponse{Content: "```feedback tuned classifier instruction```"}, nil
 	default:
 		return &core.LLMResponse{Content: "classifier base"}, nil
 	}
