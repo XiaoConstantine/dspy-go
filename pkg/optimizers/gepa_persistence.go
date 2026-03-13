@@ -159,6 +159,8 @@ func (g *GEPA) hydrateLoadedState() {
 	}
 
 	// Transient caches are rebuilt on the next evaluation/validation cycle.
+	// This intentionally drops cached example-level feedback evidence because it
+	// is re-derived from the configured feedback evaluator and execution results.
 	g.state.candidateReflections = make(map[string]*ReflectionResult)
 	g.state.candidateEvaluations = make(map[string]*gepaCandidateEvaluation)
 	g.state.candidateValidationEvals = make(map[string]*gepaCandidateEvaluation)

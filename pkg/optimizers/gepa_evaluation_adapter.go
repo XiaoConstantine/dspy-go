@@ -208,9 +208,15 @@ func (g *GEPA) populateEvaluationCaseFeedback(ctx context.Context, candidate *GE
 	if evalCase == nil {
 		return
 	}
+	if g == nil || g.config == nil {
+		return
+	}
+	if g.config.FeedbackEvaluator == nil && !g.config.AddFormatFailureAsFeedback {
+		return
+	}
 
 	var feedback *GEPAFeedback
-	if g != nil && g.config != nil && g.config.FeedbackEvaluator != nil {
+	if g.config.FeedbackEvaluator != nil {
 		feedback = normalizeGEPAFeedback(g.config.FeedbackEvaluator.EvaluateFeedback(
 			ctx,
 			evalCase.Example.Outputs,
@@ -224,7 +230,7 @@ func (g *GEPA) populateEvaluationCaseFeedback(ctx context.Context, candidate *GE
 		))
 	}
 
-	if evalCase.Err != nil && g != nil && g.config != nil && g.config.AddFormatFailureAsFeedback {
+	if evalCase.Err != nil && g.config.AddFormatFailureAsFeedback {
 		target := ""
 		if feedback != nil {
 			target = feedback.TargetComponent
