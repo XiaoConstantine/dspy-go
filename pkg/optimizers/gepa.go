@@ -367,6 +367,7 @@ type GEPAState struct {
 	candidateReflections     map[string]*ReflectionResult
 	candidateEvaluations     map[string]*gepaCandidateEvaluation
 	candidateValidationEvals map[string]*gepaCandidateEvaluation
+	evaluationCaseCache      map[string]*gepaCachedEvaluationCase
 
 	// Pareto archive for elite solution management
 	ParetoArchive     []*GEPACandidate                  `json:"pareto_archive"`
@@ -395,6 +396,7 @@ func NewGEPAState() *GEPAState {
 		candidateReflections:     make(map[string]*ReflectionResult),
 		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
 		candidateValidationEvals: make(map[string]*gepaCandidateEvaluation),
+		evaluationCaseCache:      make(map[string]*gepaCachedEvaluationCase),
 		ParetoArchive:            make([]*GEPACandidate, 0),
 		ArchiveFitnessMap:        make(map[string]*MultiObjectiveFitness),
 		MaxArchiveSize:           50, // Configurable archive size
@@ -548,6 +550,40 @@ func (s *GEPAState) GetCandidateValidationEvaluation(candidateID string) *gepaCa
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneGEPACandidateEvaluation(s.candidateValidationEvals[candidateID])
+}
+
+func (s *GEPAState) ResetEvaluationCaseCache() {
+	if s == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evaluationCaseCache = make(map[string]*gepaCachedEvaluationCase)
+}
+
+func (s *GEPAState) GetEvaluationCaseCache(key string) *gepaCachedEvaluationCase {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneCachedEvaluationCase(s.evaluationCaseCache[key])
+}
+
+func (s *GEPAState) UpsertEvaluationCaseCache(key string, cached *gepaCachedEvaluationCase) {
+	if s == nil || strings.TrimSpace(key) == "" || cached == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.evaluationCaseCache == nil {
+		s.evaluationCaseCache = make(map[string]*gepaCachedEvaluationCase)
+	}
+	s.evaluationCaseCache[key] = cloneCachedEvaluationCase(cached)
 }
 
 // SetValidationFrontier replaces the current validation frontier and candidate
@@ -3029,6 +3065,7 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	logger.Info(ctx, "Starting GEPA optimization with population_size=%d, max_generations=%d",
 		g.config.PopulationSize,
 		g.config.MaxGenerations)
+	g.state.ResetEvaluationCaseCache()
 
 	// Initialize GEPA state in context
 	ctx = g.withGEPAState(ctx)
