@@ -213,6 +213,8 @@ func exampleCacheKey(example core.Example) string {
 }
 
 func stableHashStringAnyMap(value map[string]interface{}) string {
+	// json.Marshal currently emits deterministic map-key ordering for string
+	// keys, which is the stability guarantee this cache key depends on.
 	rendered, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Sprintf("fallback:%v", value)

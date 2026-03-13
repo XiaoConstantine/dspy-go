@@ -25,7 +25,7 @@ echo "Running deterministic DSPy GEPA fixture..."
 echo "Running deterministic dspy-go GEPA fixture..."
 (
     cd "$ROOT_DIR"
-    GEPA_FIXTURE_OUTPUT="$GO_RESULTS" go test ./pkg/optimizers -run TestWriteGEPAFixtureReport -count=1
+    GEPA_FIXTURE_OUTPUT="$GO_RESULTS" go test ./pkg/optimizers -run TestGEPAFixtureReport_WritesWhenEnvSet -count=1
 )
 
 echo "Comparing GEPA fixture outputs..."
