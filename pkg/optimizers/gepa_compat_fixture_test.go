@@ -168,6 +168,69 @@ func (f *compatFeedbackFixtureLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion}
 }
 
+type compatFormatFixtureLLM struct{}
+
+func (f *compatFormatFixtureLLM) Generate(_ context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
+	switch {
+	case strings.Contains(prompt, "Generate 1 diverse variations of the instruction for a classifier module."):
+		return &core.LLMResponse{Content: "1. classifier base"}, nil
+	case strings.Contains(prompt, "As an expert prompt engineer, critically analyze this instruction"):
+		return &core.LLMResponse{
+			Content: `STRENGTHS:
+- Clear task framing
+
+WEAKNESSES:
+- Output format is invalid
+
+SUGGESTIONS:
+- Fix the response format so the category field parses cleanly
+
+CONFIDENCE: 0.9`,
+		}, nil
+	case strings.Contains(prompt, "You are improving a GEPA instruction using reflection-guided evidence.") &&
+		strings.Contains(prompt, "Execution failure: couldn't parse category output"):
+		return &core.LLMResponse{Content: "```format tuned classifier instruction```"}, nil
+	default:
+		return &core.LLMResponse{Content: "classifier base"}, nil
+	}
+}
+
+func (f *compatFormatFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) CreateEmbedding(context.Context, string, ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) CreateEmbeddings(context.Context, []string, ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) StreamGenerate(context.Context, string, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) GenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.LLMResponse, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) StreamGenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (f *compatFormatFixtureLLM) ProviderName() string { return "fixture" }
+
+func (f *compatFormatFixtureLLM) ModelID() string { return "fixture-gepa-format" }
+
+func (f *compatFormatFixtureLLM) Capabilities() []core.Capability {
+	return []core.Capability{core.CapabilityCompletion}
+}
+
 type compatFixtureScenarioResult struct {
 	Selector                        string            `json:"selector"`
 	FirstCandidateUpdatedComponents []string          `json:"first_candidate_updated_components"`
@@ -206,6 +269,7 @@ type compatFixtureCollection struct {
 	ValidationFrontier compatValidationFrontierResult `json:"validation_frontier"`
 	AncestorMerge      compatMergeResult              `json:"ancestor_merge"`
 	FeedbackGuided     compatFeedbackResult           `json:"feedback_guided"`
+	FormatFailure      compatFeedbackResult           `json:"format_failure_feedback"`
 }
 
 type compatFixtureReport struct {
@@ -238,6 +302,20 @@ func newCompatFeedbackFixtureProgram(classifierInstruction string) core.Program 
 			return map[string]interface{}{
 				"output": modules["classifier"].GetSignature().Instruction,
 			}, nil
+		}
+	})
+}
+
+func newCompatFormatFixtureProgram(classifierInstruction string) core.Program {
+	return core.NewProgramWithForwardFactory(map[string]core.Module{
+		"classifier": newCompatFixtureModule(classifierInstruction),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			instruction := modules["classifier"].GetSignature().Instruction
+			if strings.Contains(instruction, "format tuned classifier instruction") {
+				return map[string]interface{}{"output": "format tuned classifier instruction"}, nil
+			}
+			return map[string]interface{}{"output": "not json at all"}, fmt.Errorf("couldn't parse category output")
 		}
 	})
 }
@@ -664,6 +742,62 @@ func runCompatFeedbackScenario(t *testing.T, ctx context.Context) compatFeedback
 	}
 }
 
+func runCompatFormatFailureScenario(t *testing.T, ctx context.Context) compatFeedbackResult {
+	t.Helper()
+
+	originalDefault := core.GetDefaultLLM()
+	originalTeacher := core.GetTeacherLLM()
+	llm := &compatFormatFixtureLLM{}
+	core.SetDefaultLLM(llm)
+	core.GlobalConfig.TeacherLLM = llm
+	defer func() {
+		core.SetDefaultLLM(originalDefault)
+		core.GlobalConfig.TeacherLLM = originalTeacher
+	}()
+
+	config := DefaultGEPAConfig()
+	config.PopulationSize = 1
+	config.MaxGenerations = 2
+	config.ReflectionFreq = 1
+	config.SelectionStrategy = "tournament"
+	config.TournamentSize = 1
+	config.ConcurrencyLevel = 1
+	config.EvaluationBatchSize = 1
+	config.RandomSeed = 7
+	config.AddFormatFailureAsFeedback = true
+
+	gepa, err := NewGEPA(config)
+	if err != nil {
+		t.Fatalf("new GEPA: %v", err)
+	}
+
+	originalInstruction := "classifier base"
+	program := newCompatFormatFixtureProgram(originalInstruction)
+	dataset := datasets.NewSimpleDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"input": "format fixture input"},
+			Outputs: map[string]interface{}{"output": "format tuned classifier instruction"},
+		},
+	})
+
+	optimizedProgram, err := gepa.Compile(ctx, program, dataset, exactOutputMetric)
+	if err != nil {
+		t.Fatalf("compile format fixture: %v", err)
+	}
+
+	population := gepa.CurrentPopulation()
+	if population == nil || len(population.Candidates) == 0 {
+		t.Fatalf("missing GEPA population after format fixture compile")
+	}
+
+	return compatFeedbackResult{
+		OriginalInstruction:     originalInstruction,
+		CandidateInstruction:    candidateInstructionForModule(population.Candidates[0], "classifier"),
+		FinalProgramInstruction: optimizedProgram.Modules["classifier"].GetSignature().Instruction,
+		CandidateCount:          len(population.Candidates),
+	}
+}
+
 func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	t.Helper()
 
@@ -683,6 +817,7 @@ func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	report.Fixtures.ValidationFrontier = runCompatValidationFrontierScenario(t, ctx)
 	report.Fixtures.AncestorMerge = runCompatMergeScenario(t, ctx)
 	report.Fixtures.FeedbackGuided = runCompatFeedbackScenario(t, ctx)
+	report.Fixtures.FormatFailure = runCompatFormatFailureScenario(t, ctx)
 	return report
 }
 
