@@ -110,6 +110,21 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) {
 					Name:         "Claude 3 Opus",
 					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
 				},
+				string(core.ModelAnthropicClaude45Opus): {
+					ID:           string(core.ModelAnthropicClaude45Opus),
+					Name:         "Claude Opus 4.5",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+				},
+				string(core.ModelAnthropicClaude46Sonnet): {
+					ID:           string(core.ModelAnthropicClaude46Sonnet),
+					Name:         "Claude Sonnet 4.6",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+				},
+				string(core.ModelAnthropicClaude46Opus): {
+					ID:           string(core.ModelAnthropicClaude46Opus),
+					Name:         "Claude Opus 4.6",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+				},
 			},
 		},
 		"google": {
