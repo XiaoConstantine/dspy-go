@@ -354,6 +354,8 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		finalizeRLMTrace(trace, nil, "repl_create_error", fmt.Errorf("failed to create REPL: %w", err))
 		return nil, trace, fmt.Errorf("failed to create REPL: %w", err)
 	}
+	replEnv.SetContextInfoPreviewChars(r.config.ContextInfoPreviewChars)
+	replEnv.SetMaxFullContextQueryChars(r.config.MaxFullContextQueryChars)
 
 	// Load context into REPL
 	if err := replEnv.LoadContext(contextPayload); err != nil {

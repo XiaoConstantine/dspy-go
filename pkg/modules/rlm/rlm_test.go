@@ -319,6 +319,8 @@ func TestConfig(t *testing.T) {
 	assert.True(t, cfg.CompactIterationInstructions)
 	require.NotNil(t, cfg.OutputTruncation)
 	assert.Equal(t, DefaultOutputTruncationConfig(), *cfg.OutputTruncation)
+	assert.Equal(t, 160, cfg.ContextInfoPreviewChars)
+	assert.Equal(t, 0, cfg.MaxFullContextQueryChars)
 
 	// Test options
 	cfg = DefaultConfig()
@@ -348,6 +350,14 @@ func TestConfig(t *testing.T) {
 	cfg = DefaultConfig()
 	WithREPLSetup(func(repl *YaegiREPL) error { return nil })(&cfg)
 	assert.NotNil(t, cfg.REPLSetup)
+
+	cfg = DefaultConfig()
+	WithContextInfoPreviewChars(0)(&cfg)
+	assert.Equal(t, 0, cfg.ContextInfoPreviewChars)
+
+	cfg = DefaultConfig()
+	WithMaxFullContextQueryChars(50000)(&cfg)
+	assert.Equal(t, 50000, cfg.MaxFullContextQueryChars)
 }
 
 // TestRLMNew tests the RLM constructor.
@@ -1126,6 +1136,47 @@ fmt.Println(result)
 	assert.Contains(t, execResult.Stdout, "interpreted async response")
 }
 
+func TestAsyncQueryFromInterpreterBlockedAboveFullContextThreshold(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "should not be used"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+	repl.SetMaxFullContextQueryChars(10)
+
+	err = repl.LoadContext("FULL_CONTEXT_MARKER")
+	require.NoError(t, err)
+
+	execResult, err := repl.Execute(context.Background(), `
+handleID := QueryAsync("test async prompt")
+result := WaitAsync(handleID)
+fmt.Println(result)
+`)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "QueryAsync() is disabled for contexts larger than 10 chars")
+	assert.Empty(t, capturingMock.getCapturedPrompts())
+}
+
+func TestAsyncBatchQueryFromInterpreterBlockedAboveFullContextThreshold(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "should not be used"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+	repl.SetMaxFullContextQueryChars(10)
+
+	err = repl.LoadContext("FULL_CONTEXT_MARKER")
+	require.NoError(t, err)
+
+	execResult, err := repl.Execute(context.Background(), `
+handleIDs := QueryBatchedAsync([]string{"prompt1", "prompt2"})
+for _, handleID := range handleIDs {
+    fmt.Println(WaitAsync(handleID))
+}
+`)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "QueryBatchedAsync() is disabled for contexts larger than 10 chars")
+	assert.Empty(t, capturingMock.getCapturedPrompts())
+}
+
 // TestPendingAsyncQueries tests tracking of pending queries.
 func TestPendingAsyncQueries(t *testing.T) {
 	// Create a slow mock client for testing pending state
@@ -1438,6 +1489,25 @@ fmt.Println(result1, result2)
 	// Second prompt (QueryRaw) should NOT have context
 	assert.NotContains(t, prompts[1], "FULL_CONTEXT_MARKER")
 	assert.Equal(t, "Second query", prompts[1])
+}
+
+func TestQueryBlockedAboveFullContextThreshold(t *testing.T) {
+	capturingMock := &promptCapturingMockSubLLMClient{response: "should not be used"}
+
+	repl, err := NewYaegiREPL(capturingMock)
+	require.NoError(t, err)
+	repl.SetMaxFullContextQueryChars(10)
+
+	err = repl.LoadContext("FULL_CONTEXT_MARKER")
+	require.NoError(t, err)
+
+	execResult, err := repl.Execute(context.Background(), `
+result := Query("First query")
+fmt.Println(result)
+`)
+	require.NoError(t, err)
+	assert.Contains(t, execResult.Stdout, "Query() is disabled for contexts larger than 10 chars")
+	assert.Empty(t, capturingMock.getCapturedPrompts())
 }
 
 // TestQueryBatchedRaw tests batched queries without context prepending.
@@ -1872,6 +1942,22 @@ func TestContextInfoString(t *testing.T) {
 	assert.Contains(t, info, "lines=3")
 	assert.Contains(t, info, "chunks=1")
 	assert.Contains(t, info, `preview="alpha beta gamma"`)
+}
+
+func TestContextInfoStringWithoutPreview(t *testing.T) {
+	client := &mockSubLLMClient{queryResponse: "test"}
+	repl, err := NewYaegiREPL(client)
+	require.NoError(t, err)
+	repl.SetContextInfoPreviewChars(0)
+
+	err = repl.LoadContext("alpha\nbeta\ngamma")
+	require.NoError(t, err)
+
+	info := repl.ContextInfo()
+
+	assert.Contains(t, info, "type=string")
+	assert.Contains(t, info, "chars=16")
+	assert.NotContains(t, info, "preview=")
 }
 
 func TestContextInfoStructured(t *testing.T) {
