@@ -346,16 +346,18 @@ func (bh *AsyncBatchHandle) TotalCount() int {
 // additional OS-level resource limits (e.g., cgroups, containers) or running
 // the interpreter in a separate process with strict memory limits.
 type YaegiREPL struct {
-	interp       *interp.Interpreter
-	stdout       *bytes.Buffer
-	stderr       *bytes.Buffer
-	llmClient    SubLLMClient
-	ctx          context.Context
-	mu           sync.Mutex
-	llmCalls     []LLMCall
-	llmCallsMu   sync.Mutex // Separate mutex for async LLM call recording
-	asyncQueries map[string]*AsyncQueryHandle
-	asyncMu      sync.RWMutex
+	interp                   *interp.Interpreter
+	stdout                   *bytes.Buffer
+	stderr                   *bytes.Buffer
+	llmClient                SubLLMClient
+	ctx                      context.Context
+	mu                       sync.Mutex
+	llmCalls                 []LLMCall
+	llmCallsMu               sync.Mutex // Separate mutex for async LLM call recording
+	asyncQueries             map[string]*AsyncQueryHandle
+	asyncMu                  sync.RWMutex
+	contextInfoPreviewChars  int
+	maxFullContextQueryChars int
 
 	// State-verified completion (Nightjar Algorithm 1 Gap 1)
 	// These fields allow programmatic detection of completion via FINAL()/FINAL_VAR()
@@ -411,12 +413,13 @@ func NewYaegiREPL(client SubLLMClient) (*YaegiREPL, error) {
 	}
 
 	r := &YaegiREPL{
-		interp:       i,
-		stdout:       stdout,
-		stderr:       stderr,
-		llmClient:    client,
-		ctx:          context.Background(),
-		asyncQueries: make(map[string]*AsyncQueryHandle),
+		interp:                  i,
+		stdout:                  stdout,
+		stderr:                  stderr,
+		llmClient:               client,
+		ctx:                     context.Background(),
+		asyncQueries:            make(map[string]*AsyncQueryHandle),
+		contextInfoPreviewChars: contextInfoPreviewLen,
 	}
 	if err := r.injectBuiltins(); err != nil {
 		return nil, fmt.Errorf("failed to inject builtins: %w", err)
@@ -516,6 +519,28 @@ func (r *YaegiREPL) isBuiltinName(name string) bool {
 		}
 	}
 	return false
+}
+
+// SetContextInfoPreviewChars sets how many raw context characters may appear in context_info.
+// Use 0 to expose only structural metadata.
+func (r *YaegiREPL) SetContextInfoPreviewChars(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n < 0 {
+		n = 0
+	}
+	r.contextInfoPreviewChars = n
+}
+
+// SetMaxFullContextQueryChars limits Query()/QueryBatched() calls that auto-prepend the full context.
+// Use 0 to disable the guardrail.
+func (r *YaegiREPL) SetMaxFullContextQueryChars(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n < 0 {
+		n = 0
+	}
+	r.maxFullContextQueryChars = n
 }
 
 // finalAnswer handles FINAL(value) calls from within code blocks.
@@ -800,6 +825,10 @@ func getValuePreview(val any, maxLen int) string {
 }
 
 func formatContextInfo(val any, idx *ContextIndex) string {
+	return formatContextInfoWithPreviewLen(val, idx, contextInfoPreviewLen)
+}
+
+func formatContextInfoWithPreviewLen(val any, idx *ContextIndex, previewLen int) string {
 	parts := []string{fmt.Sprintf("type=%s", getTypeName(val))}
 
 	rv := reflect.ValueOf(val)
@@ -821,7 +850,7 @@ func formatContextInfo(val any, idx *ContextIndex) string {
 		parts = append(parts, fmt.Sprintf("chunks=%d", idx.ChunkCount()))
 	}
 
-	preview := normalizeContextPreview(getValuePreview(val, contextInfoPreviewLen))
+	preview := normalizeContextPreview(getValuePreview(val, previewLen), previewLen)
 	if preview != "" {
 		parts = append(parts, fmt.Sprintf("preview=%q", preview))
 	}
@@ -829,14 +858,14 @@ func formatContextInfo(val any, idx *ContextIndex) string {
 	return strings.Join(parts, ", ")
 }
 
-func normalizeContextPreview(preview string) string {
-	if preview == "" {
+func normalizeContextPreview(preview string, maxLen int) string {
+	if preview == "" || maxLen <= 0 {
 		return ""
 	}
 
 	normalized := strings.Join(strings.Fields(preview), " ")
-	if len(normalized) > contextInfoPreviewLen {
-		return normalized[:contextInfoPreviewLen] + "..."
+	if len(normalized) > maxLen {
+		return normalized[:maxLen] + "..."
 	}
 	return normalized
 }
@@ -888,6 +917,11 @@ func (r *YaegiREPL) buildPromptWithContext(prompt string) string {
 // It automatically includes the context variable (if loaded) in the prompt.
 func (r *YaegiREPL) llmQuery(prompt string) string {
 	start := time.Now()
+
+	if blockedMsg, blocked := r.fullContextQueryBlocked("Query"); blocked {
+		r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+		return blockedMsg
+	}
 
 	// Get the context variable from the interpreter and include it in the prompt
 	fullPrompt := r.buildPromptWithContext(prompt)
@@ -956,6 +990,15 @@ func (r *YaegiREPL) llmQueryWith(contextSlice, prompt string) string {
 func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	if len(prompts) == 0 {
 		return []string{}
+	}
+
+	if blockedMsg, blocked := r.fullContextQueryBlocked("QueryBatched"); blocked {
+		responses := make([]string, len(prompts))
+		for i, prompt := range prompts {
+			responses[i] = blockedMsg
+			r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+		}
+		return responses
 	}
 
 	start := time.Now()
@@ -1257,7 +1300,21 @@ func (r *YaegiREPL) ContextInfo() string {
 		return "context not loaded"
 	}
 
-	return formatContextInfo(v.Interface(), r.contextIndex)
+	return formatContextInfoWithPreviewLen(v.Interface(), r.contextIndex, r.contextInfoPreviewChars)
+}
+
+func (r *YaegiREPL) fullContextQueryBlocked(fnName string) (string, bool) {
+	if r.maxFullContextQueryChars <= 0 || r.contextIndex == nil {
+		return "", false
+	}
+
+	contextSize := len(r.contextIndex.GetRawContent())
+	if contextSize <= r.maxFullContextQueryChars {
+		return "", false
+	}
+
+	return fmt.Sprintf("Error: %s() is disabled for contexts larger than %d chars (loaded context=%d). Use QueryWith or QueryRaw instead.",
+		fnName, r.maxFullContextQueryChars, contextSize), true
 }
 
 // FormatExecutionResult formats an execution result for display.
@@ -1279,6 +1336,11 @@ func FormatExecutionResult(result *ExecutionResult) string {
 // This is called from interpreted code via QueryAsync().
 // It automatically includes the context variable (if loaded) in the prompt.
 func (r *YaegiREPL) llmQueryAsync(prompt string) string {
+	if blockedMsg, blocked := r.fullContextQueryBlocked("QueryAsync"); blocked {
+		r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+		return r.completedAsyncHandle(blockedMsg)
+	}
+
 	handle := newAsyncQueryHandle()
 
 	// Build full prompt with context included (capture before goroutine)
@@ -1322,6 +1384,15 @@ func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 // llmQueryBatchedAsync starts batch async queries and returns handle IDs.
 // This is called from interpreted code via QueryBatchedAsync().
 func (r *YaegiREPL) llmQueryBatchedAsync(prompts []string) []string {
+	if blockedMsg, blocked := r.fullContextQueryBlocked("QueryBatchedAsync"); blocked {
+		handleIDs := make([]string, len(prompts))
+		for i, prompt := range prompts {
+			r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+			handleIDs[i] = r.completedAsyncHandle(blockedMsg)
+		}
+		return handleIDs
+	}
+
 	handleIDs := make([]string, len(prompts))
 
 	for i, prompt := range prompts {
@@ -1329,6 +1400,17 @@ func (r *YaegiREPL) llmQueryBatchedAsync(prompts []string) []string {
 	}
 
 	return handleIDs
+}
+
+func (r *YaegiREPL) completedAsyncHandle(response string) string {
+	handle := newAsyncQueryHandle()
+
+	r.asyncMu.Lock()
+	r.asyncQueries[handle.id] = handle
+	r.asyncMu.Unlock()
+
+	handle.complete(QueryResponse{Response: response}, nil)
+	return handle.id
 }
 
 // waitAsync blocks until the async query with the given ID completes.

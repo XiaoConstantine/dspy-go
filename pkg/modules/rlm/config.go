@@ -57,6 +57,14 @@ type Config struct {
 	// Controls max lengths for execution output, variable previews, and history entries.
 	OutputTruncation *OutputTruncationConfig
 
+	// ContextInfoPreviewChars controls how many characters of the loaded context are
+	// exposed in context_info metadata. Set to 0 to disable raw preview text.
+	ContextInfoPreviewChars int
+
+	// MaxFullContextQueryChars limits Query()/QueryBatched() calls that auto-prepend the
+	// full loaded context. Zero disables the guardrail.
+	MaxFullContextQueryChars int
+
 	// OnProgress is called at the start of each iteration with progress info.
 	// Can be used to display progress to users or implement custom termination logic.
 	OnProgress func(progress IterationProgress)
@@ -179,6 +187,8 @@ func DefaultConfig() Config {
 		UseIterationDemos:            false,
 		CompactIterationInstructions: true,
 		OutputTruncation:             outputTruncationConfigPtr(DefaultOutputTruncationConfig()),
+		ContextInfoPreviewChars:      160,
+		MaxFullContextQueryChars:     0,
 	}
 }
 
@@ -385,6 +395,28 @@ func WithOutputTruncationConfig(cfg OutputTruncationConfig) Option {
 			cfg.MaxHistoryEntryLen = 1000
 		}
 		c.OutputTruncation = &cfg
+	}
+}
+
+// WithContextInfoPreviewChars sets the maximum number of raw context characters
+// exposed in context_info metadata. Use 0 to disable preview text entirely.
+func WithContextInfoPreviewChars(n int) Option {
+	return func(c *Config) {
+		if n < 0 {
+			n = 0
+		}
+		c.ContextInfoPreviewChars = n
+	}
+}
+
+// WithMaxFullContextQueryChars limits Query()/QueryBatched() calls that auto-prepend
+// the full loaded context. Use 0 to disable the guardrail.
+func WithMaxFullContextQueryChars(n int) Option {
+	return func(c *Config) {
+		if n < 0 {
+			n = 0
+		}
+		c.MaxFullContextQueryChars = n
 	}
 }
 

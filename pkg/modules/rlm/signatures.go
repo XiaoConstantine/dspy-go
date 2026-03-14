@@ -34,6 +34,7 @@ Available functions:
 
 Rules:
 - Large contexts: prefer FindRelevant + QueryWith or QueryRaw; avoid Query on large payloads
+- Query() already prepends the full context; do not concatenate context into its prompt
 - Write short executable Go statements only; no imports, no type declarations, no top-level funcs
 - Declare every variable before use
 - When you know the answer from code, call FINAL() or FINAL_VAR() immediately
@@ -82,13 +83,14 @@ COMPLETION FUNCTIONS:
 STANDARD GO: fmt, strings, regexp, strconv, encoding/json, sort
 
 CRITICAL - CONTEXT SIZE HANDLING:
-- Context < 50K chars: Use Query(prompt + context) directly
+- Context < 50K chars: Use Query(prompt) directly
 - Context 50K-200K chars: Use QueryWith(context, prompt) to control what's sent
 - Context > 200K chars: MUST chunk! Use FindRelevant() or split manually, then QueryWith() or QueryRaw()
 
 WARNING: Query() auto-prepends the ENTIRE context (~4 chars = 1 token). For a 500K char context:
   Query("analyze: " + context[:100000])  // WRONG! Sends 500K + 100K = 600K chars (overflow!)
   QueryWith(context[:100000], "analyze") // CORRECT! Sends only 100K chars
+  Query("analyze")                        // CORRECT for small contexts only; full context is added automatically
 
 LARGE CONTEXT PATTERN:
 // For contexts > 200K chars, chunk and query separately:
@@ -109,6 +111,7 @@ CRITICAL CODE RULES (violations cause errors):
 - Write ONLY executable statements (assignments, function calls, loops, conditionals)
 - EVERY variable must be declared with := before use
 - Keep code blocks SHORT (under 15 lines)
+- Do NOT append context or chunk text to Query() prompts; use QueryWith or QueryRaw when you need explicit slices
 
 CRITICAL - SIGNALING COMPLETION:
 When you have the answer, IMMEDIATELY call FINAL() in the SAME code block!
@@ -320,7 +323,7 @@ func IterationDemos() []core.Example {
 				"repl_state":   "context: <loaded>",
 			},
 			Outputs: map[string]interface{}{
-				"reasoning": "Context is too large to process at once. I'll chunk it and use QueryBatched for parallel analysis.",
+				"reasoning": "Context is too large to process at once. I'll chunk it and use QueryBatchedRaw so each prompt carries only its own slice.",
 				"action":    "query",
 				"code": `chunkSize := len(context) / 5
 var prompts []string
@@ -329,7 +332,7 @@ for i := 0; i < 5; i++ {
     if i == 4 { end = len(context) }
     prompts = append(prompts, fmt.Sprintf("Find any secret codes in this text. Return ONLY the code if found, or 'none' if not found: %s", context[start:end]))
 }
-results := QueryBatched(prompts)
+results := QueryBatchedRaw(prompts)
 for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 				"subquery": "",
 				"answer":   "",
@@ -361,7 +364,7 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 			Outputs: map[string]interface{}{
 				"reasoning": "Small context that fits in one Query call. I'll ask the sub-LLM to determine the label and IMMEDIATELY call FINAL with the result.",
 				"action":    "query",
-				"code": `answer := Query("What is the label in this text? Return ONLY 'correct' or 'incorrect': " + context)
+				"code": `answer := Query("What is the label in this text? Return ONLY 'correct' or 'incorrect'.")
 FINAL(answer)`,
 				"subquery": "",
 				"answer":   "",
