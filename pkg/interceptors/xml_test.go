@@ -499,3 +499,64 @@ func BenchmarkXMLModuleInterceptor_FullPipeline(b *testing.B) {
 		}
 	}
 }
+
+func TestXMLParser_Robustness(t *testing.T) {
+	config := DefaultXMLConfig()
+	parser := &XMLParser{
+		config: config,
+		cache:  make(map[string]*ParsedSignature),
+	}
+
+	signature := core.NewSignature(
+		[]core.InputField{},
+		[]core.OutputField{
+			{Field: core.NewField("tasks")},
+			{Field: core.NewField("content")},
+		},
+	)
+
+	t.Run("nested_elements", func(t *testing.T) {
+		xmlResponse := `<response>
+			<tasks>
+				<task id="1">First task</task>
+				<task id="2">Second task</task>
+			</tasks>
+			<content>Some text</content>
+		</response>`
+
+		fields, err := parser.parseXML(xmlResponse, signature)
+		if err != nil {
+			t.Fatalf("Parsing failed: %v", err)
+		}
+
+		tasks, ok := fields["tasks"].(string)
+		if !ok {
+			t.Fatal("tasks should be a string (preserved inner XML)")
+		}
+
+		if !strings.Contains(tasks, "<task id=\"1\">") || !strings.Contains(tasks, "<task id=\"2\">") {
+			t.Errorf("Expected tasks to contain nested XML, got: %s", tasks)
+		}
+	})
+
+	t.Run("unescaped_entities", func(t *testing.T) {
+		// LLMs often forget to escape & in XML
+		xmlResponse := `<response>
+			<tasks>Task A & Task B</tasks>
+			<content>Research & Development</content>
+		</response>`
+
+		fields, err := parser.parseXML(xmlResponse, signature)
+		if err != nil {
+			t.Fatalf("Parsing should handle unescaped & gracefully: %v", err)
+		}
+
+		if fields["tasks"] != "Task A & Task B" {
+			t.Errorf("Expected 'Task A & Task B', got %v", fields["tasks"])
+		}
+
+		if fields["content"] != "Research & Development" {
+			t.Errorf("Expected 'Research & Development', got %v", fields["content"])
+		}
+	})
+}

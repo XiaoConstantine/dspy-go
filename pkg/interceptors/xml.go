@@ -188,17 +188,10 @@ type parseResult struct {
 	err    error
 }
 
-// parseXML performs the actual XML parsing.
+// parseXML performs the actual XML parsing in a single pass.
 func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map[string]any, error) {
 	// Get or create cached signature info
 	sigInfo := p.getSignatureInfo(signature)
-
-	// Pre-validate XML if enabled
-	if p.config.ValidateXML {
-		if err := p.validateXMLSyntax(responseText); err != nil {
-			return nil, fmt.Errorf("XML validation failed: %w", err)
-		}
-	}
 
 	// Extract XML content (handle cases where XML is embedded in text)
 	xmlContent := p.extractXMLContent(responseText)
@@ -209,66 +202,85 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 	// Pre-process XML to escape common unescaped entities from LLM output
 	xmlContent = p.escapeXMLEntities(xmlContent)
 
-	// Parse XML using Go's encoding/xml
-	decoder := xml.NewDecoder(strings.NewReader(xmlContent))
-	decoder.CharsetReader = p.charsetReader
-
 	fields := make(map[string]any)
-	depth := 0
-	var currentTag string
+	decoder := xml.NewDecoder(strings.NewReader(xmlContent))
+
+	type tagState struct {
+		name       string
+		startIndex int64
+	}
+
+	var stack []tagState
 
 	for {
-		token, err := decoder.Token()
+		// Get current byte offset before reading next token
+		tokenPos := decoder.InputOffset()
+
+		tok, err := decoder.Token()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("XML parsing error: %w", err)
+			return nil, fmt.Errorf("XML decoding error: %w", err)
 		}
 
-		switch t := token.(type) {
+		switch t := tok.(type) {
 		case xml.StartElement:
-			depth++
-			if depth > p.config.MaxDepth {
-				return nil, fmt.Errorf("XML depth limit exceeded: %d", depth)
-			}
-			switch depth {
-			case 1:
-				// Skip root tag (typically <response>)
-				currentTag = ""
-			case 2:
-				currentTag = t.Name.Local
+			tagName := t.Name.Local
+			stack = append(stack, tagState{
+				name:       tagName,
+				startIndex: decoder.InputOffset(),
+			})
+
+			if p.config.MaxDepth > 0 && len(stack) > p.config.MaxDepth {
+				return nil, fmt.Errorf("XML depth limit exceeded: %d", len(stack))
 			}
 
 		case xml.EndElement:
-			depth--
-			if depth == 1 {
-				currentTag = ""
+			if len(stack) == 0 {
+				return nil, fmt.Errorf("unexpected end element: %s", t.Name.Local)
 			}
 
-		case xml.CharData:
-			if currentTag != "" {
-				if fieldName, exists := sigInfo.TagMap[currentTag]; exists {
-					content := string(t)
+			currentTag := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+
+			if currentTag.name != t.Name.Local {
+				return nil, fmt.Errorf("mismatched end element: expected %s, got %s", currentTag.name, t.Name.Local)
+			}
+
+			// Check if this tag matches one of our expected fields
+			if fieldName, ok := sigInfo.TagMap[currentTag.name]; ok {
+				endIndex := tokenPos
+				if int(currentTag.startIndex) < len(xmlContent) && int(endIndex) <= len(xmlContent) {
+					inner := xmlContent[currentTag.startIndex:endIndex]
+
 					if !p.config.PreserveWhitespace {
-						content = strings.TrimSpace(content)
+						inner = strings.TrimSpace(inner)
 					}
 
-					// Strip field name prefix if present (e.g., "answer: 366" -> "366")
-					// This is needed because LLM includes both XML structure and text prefixes for stability
-					content = p.stripFieldPrefix(content, fieldName)
+					// Strip any field prefix
+					inner = p.stripFieldPrefix(inner, fieldName)
 
-					// Type conversion based on field type
+					// Unescape XML entities
+					inner = p.unescapeXMLEntities(inner)
+
+					// Convert to expected type
 					if field, exists := sigInfo.FieldMap[fieldName]; exists {
-						typedValue, err := p.convertFieldValue(content, field)
+						typedValue, err := p.convertFieldValue(inner, field)
 						if err != nil {
 							return nil, fmt.Errorf("field %s conversion failed: %w", fieldName, err)
 						}
 						fields[fieldName] = typedValue
+					} else {
+						fields[fieldName] = inner
 					}
 				}
 			}
 		}
+	}
+
+	if len(stack) > 0 {
+		return nil, fmt.Errorf("%d unclosed XML tags: %s", len(stack), stack[0].name)
 	}
 
 	// Validate required fields if strict parsing is enabled
@@ -451,6 +463,19 @@ func (p *XMLParser) escapeXMLEntities(xmlContent string) string {
 	}
 
 	return xmlContent
+}
+
+// unescapeXMLEntities reverses the escaping of XML entities.
+func (p *XMLParser) unescapeXMLEntities(xmlContent string) string {
+	// Simple replacement for basic XML entities
+	replacer := strings.NewReplacer(
+		"&amp;", "&",
+		"&lt;", "<",
+		"&gt;", ">",
+		"&quot;", "\"",
+		"&apos;", "'",
+	)
+	return replacer.Replace(xmlContent)
 }
 
 // e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking...".
