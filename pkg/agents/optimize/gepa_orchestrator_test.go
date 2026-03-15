@@ -107,7 +107,6 @@ func TestGEPAAgentOptimizer_Optimize_EvaluatesBestCandidateOnValidationExamples(
 	optimizer := NewGEPAAgentOptimizer(
 		newMockOptimizableAgent(),
 		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
-			skill := strings.ToLower(agent.GetArtifacts().Text[ArtifactSkillPack])
 			score := 0.8
 			if ex.ID == "validation" {
 				score = 0.4
