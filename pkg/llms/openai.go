@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -821,8 +823,116 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 	}, nil
 }
 
+type openAIMessageDebugSummary struct {
+	Role            string `json:"role"`
+	ContentBytes    int    `json:"content_bytes"`
+	ToolCalls       int    `json:"tool_calls,omitempty"`
+	HasFunctionCall bool   `json:"has_function_call,omitempty"`
+	HasToolCallID   bool   `json:"has_tool_call_id,omitempty"`
+}
+
+type openAIRequestDebugSummary struct {
+	Model               string                      `json:"model"`
+	BodyBytes           int                         `json:"body_bytes"`
+	BodySHA256          string                      `json:"body_sha256"`
+	MessageCount        int                         `json:"message_count"`
+	Messages            []openAIMessageDebugSummary `json:"messages"`
+	ToolCount           int                         `json:"tool_count,omitempty"`
+	ToolNames           []string                    `json:"tool_names,omitempty"`
+	ToolChoice          string                      `json:"tool_choice,omitempty"`
+	MaxTokens           *int                        `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int                        `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64                    `json:"temperature,omitempty"`
+}
+
+type openAIInvalidRequestDebugDump struct {
+	Summary        openAIRequestDebugSummary `json:"summary"`
+	RequestBody    json.RawMessage           `json:"request_body"`
+	ResponseStatus int                       `json:"response_status"`
+	ResponseBody   string                    `json:"response_body"`
+}
+
+func summarizeOpenAIRequest(request *openai.ChatCompletionRequest, jsonData []byte) openAIRequestDebugSummary {
+	summary := openAIRequestDebugSummary{
+		BodyBytes: len(jsonData),
+	}
+	if len(jsonData) > 0 {
+		hash := sha256.Sum256(jsonData)
+		summary.BodySHA256 = hex.EncodeToString(hash[:])
+	}
+	if request == nil {
+		return summary
+	}
+
+	summary.Model = request.Model
+	summary.MessageCount = len(request.Messages)
+	summary.ToolCount = len(request.Tools)
+	summary.ToolChoice = fmt.Sprint(request.ToolChoice)
+	summary.MaxTokens = request.MaxTokens
+	summary.MaxCompletionTokens = request.MaxCompletionTokens
+	summary.Temperature = request.Temperature
+	if summary.ToolChoice == "<nil>" {
+		summary.ToolChoice = ""
+	}
+
+	if len(request.Messages) > 0 {
+		summary.Messages = make([]openAIMessageDebugSummary, 0, len(request.Messages))
+		for _, message := range request.Messages {
+			summary.Messages = append(summary.Messages, openAIMessageDebugSummary{
+				Role:            message.Role,
+				ContentBytes:    len(message.Content),
+				ToolCalls:       len(message.ToolCalls),
+				HasFunctionCall: message.FunctionCall != nil,
+				HasToolCallID:   strings.TrimSpace(message.ToolCallID) != "",
+			})
+		}
+	}
+
+	if len(request.Tools) > 0 {
+		summary.ToolNames = make([]string, 0, len(request.Tools))
+		for _, tool := range request.Tools {
+			name := strings.TrimSpace(tool.Function.Name)
+			if name == "" {
+				name = "<unnamed>"
+			}
+			summary.ToolNames = append(summary.ToolNames, name)
+		}
+	}
+
+	return summary
+}
+
+func writeOpenAIInvalidRequestDebug(request *openai.ChatCompletionRequest, jsonData []byte, responseStatus int, responseBody []byte) (string, error) {
+	file, err := os.CreateTemp(os.TempDir(), "dspy-openai-invalid-request-*.json")
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	dump := openAIInvalidRequestDebugDump{
+		Summary:        summarizeOpenAIRequest(request, jsonData),
+		RequestBody:    json.RawMessage(append([]byte(nil), jsonData...)),
+		ResponseStatus: responseStatus,
+		ResponseBody:   string(responseBody),
+	}
+
+	encoded, err := json.MarshalIndent(dump, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if _, err := file.Write(encoded); err != nil {
+		return "", err
+	}
+	return file.Name(), nil
+}
+
 // makeRequest sends a chat completion request to the OpenAI API.
 func (o *OpenAILLM) makeRequest(ctx context.Context, request *openai.ChatCompletionRequest) (*openai.ChatCompletionResponse, error) {
+	return o.makeRequestWithRetry(ctx, request, true)
+}
+
+func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.ChatCompletionRequest, allowRetry bool) (*openai.ChatCompletionResponse, error) {
+	logger := logging.GetLogger()
 	jsonData, err := json.Marshal(request)
 	if err != nil {
 		return nil, errors.Wrap(err, errors.InvalidInput, "failed to marshal request")
@@ -834,6 +944,10 @@ func (o *OpenAILLM) makeRequest(ctx context.Context, request *openai.ChatComplet
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, errors.Wrap(err, errors.Unknown, "failed to create request")
+	}
+	if !allowRetry {
+		req.Close = true
+		req.Header.Set("Connection", "close")
 	}
 
 	// Set headers
@@ -859,9 +973,50 @@ func (o *OpenAILLM) makeRequest(ctx context.Context, request *openai.ChatComplet
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
 		}
+		fields := errors.Fields{
+			"type": errorResp.Error.Type,
+			"code": errorResp.Error.Code,
+		}
+		if errorResp.Error.Type == "invalid_request_error" {
+			summary := summarizeOpenAIRequest(request, jsonData)
+			dumpPath, dumpErr := writeOpenAIInvalidRequestDebug(request, jsonData, resp.StatusCode, body)
+			logger.Error(
+				ctx,
+				"OpenAI invalid request: model=%s body_bytes=%d messages=%d tools=%d tool_choice=%s max_tokens=%v max_completion_tokens=%v dump=%s response=%s",
+				summary.Model,
+				summary.BodyBytes,
+				summary.MessageCount,
+				summary.ToolCount,
+				summary.ToolChoice,
+				summary.MaxTokens,
+				summary.MaxCompletionTokens,
+				dumpPath,
+				strings.TrimSpace(errorResp.Error.Message),
+			)
+			fields["request_body_bytes"] = summary.BodyBytes
+			fields["request_body_sha256"] = summary.BodySHA256
+			fields["message_count"] = summary.MessageCount
+			fields["tool_count"] = summary.ToolCount
+			fields["tool_choice"] = summary.ToolChoice
+			if dumpPath != "" {
+				fields["debug_dump"] = dumpPath
+			}
+			if dumpErr != nil {
+				fields["debug_dump_error"] = dumpErr.Error()
+			}
+			if allowRetry && shouldRetryOpenAIInvalidJSON(errorResp.Error) {
+				logger.Warn(
+					ctx,
+					"Retrying OpenAI request after transient invalid_request_error with a fresh connection: model=%s dump=%s",
+					summary.Model,
+					dumpPath,
+				)
+				return o.makeRequestWithRetry(ctx, request, false)
+			}
+		}
 		return nil, errors.WithFields(
 			errors.New(errors.LLMGenerationFailed, errorResp.Error.Message),
-			errors.Fields{"type": errorResp.Error.Type, "code": errorResp.Error.Code})
+			fields)
 	}
 
 	var response openai.ChatCompletionResponse
@@ -870,6 +1025,14 @@ func (o *OpenAILLM) makeRequest(ctx context.Context, request *openai.ChatComplet
 	}
 
 	return &response, nil
+}
+
+func shouldRetryOpenAIInvalidJSON(apiError openai.APIError) bool {
+	if apiError.Type != "invalid_request_error" {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(apiError.Message))
+	return strings.Contains(message, "parse the json body")
 }
 
 // makeEmbeddingRequest sends an embedding request to the OpenAI API.

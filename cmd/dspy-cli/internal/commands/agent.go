@@ -42,7 +42,7 @@ func newRunTerminalTaskCommand(factory func(*terminalTaskCommandConfig) (tblite.
 		Use:   "run-terminal-task",
 		Short: "Run one TBLite-style terminal task from JSON stdin",
 		Long: `Read a tblite.TerminalTaskRequest from stdin, execute it with the native
-tool-calling benchmark agent, and emit tblite.TerminalTaskResult JSON on stdout.`,
+benchmark agent, and emit tblite.TerminalTaskResult JSON on stdout.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req, err := decodeTerminalTaskRequest(cmd.InOrStdin())
 			if err != nil {
@@ -104,19 +104,19 @@ func decodeTerminalTaskRequest(r io.Reader) (tblite.TerminalTaskRequest, error) 
 }
 
 func defaultTerminalTaskAgentFactory(cfg *terminalTaskCommandConfig) (tblite.Agent, error) {
-	return newToolCallingBenchmarkAgent(cfg)
+	return newNativeBenchmarkAgent(cfg)
 }
 
-func newToolCallingBenchmarkAgent(cfg *terminalTaskCommandConfig) (*tblite.ToolCallingAgent, error) {
+func newNativeBenchmarkAgent(cfg *terminalTaskCommandConfig) (*tblite.NativeAgent, error) {
 	llm, err := newTerminalTaskLLM(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return newToolCallingBenchmarkAgentWithLLM(llm, cfg)
+	return newNativeBenchmarkAgentWithLLM(llm, cfg)
 }
 
-func newToolCallingBenchmarkAgentWithLLM(llm core.LLM, cfg *terminalTaskCommandConfig) (*tblite.ToolCallingAgent, error) {
-	return tblite.NewToolCallingAgent(llm, tblite.ToolCallingAgentConfig{
+func newNativeBenchmarkAgentWithLLM(llm core.LLM, cfg *terminalTaskCommandConfig) (*tblite.NativeAgent, error) {
+	return tblite.NewNativeAgent(llm, tblite.NativeAgentConfig{
 		MaxTurns:    cfg.MaxTurns,
 		MaxTokens:   cfg.MaxTokens,
 		Temperature: cfg.Temperature,
@@ -167,7 +167,7 @@ func defaultModelForProvider(provider string) core.ModelID {
 func resolveProviderAPIKey(provider string) string {
 	switch provider {
 	case "anthropic":
-		return firstNonEmpty(os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("DSPY_API_KEY"))
+		return firstNonEmpty(os.Getenv("ANTHROPIC_OAUTH_TOKEN"), os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("DSPY_API_KEY"))
 	case "openai":
 		return firstNonEmpty(os.Getenv("OPENAI_API_KEY"), os.Getenv("DSPY_API_KEY"))
 	case "google", "gemini":
@@ -178,6 +178,7 @@ func resolveProviderAPIKey(provider string) string {
 			os.Getenv("GEMINI_API_KEY"),
 			os.Getenv("GOOGLE_API_KEY"),
 			os.Getenv("OPENAI_API_KEY"),
+			os.Getenv("ANTHROPIC_OAUTH_TOKEN"),
 			os.Getenv("ANTHROPIC_API_KEY"),
 		)
 	}

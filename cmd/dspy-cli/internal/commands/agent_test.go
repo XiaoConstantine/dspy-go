@@ -49,6 +49,27 @@ func TestRunTerminalTaskCommand_EncodesResult(t *testing.T) {
 	}`, out.String())
 }
 
+func TestResolveProviderAPIKey_PrefersAnthropicOAuthToken(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("ANTHROPIC_API_KEY", "api-token")
+	t.Setenv("DSPY_API_KEY", "dspy-token")
+
+	key := resolveProviderAPIKey("anthropic")
+	assert.Equal(t, "oauth-token", key)
+}
+
+func TestResolveProviderAPIKey_DefaultIncludesAnthropicOAuthToken(t *testing.T) {
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("DSPY_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	key := resolveProviderAPIKey("unknown")
+	assert.Equal(t, "oauth-token", key)
+}
+
 type stubTerminalTaskAgent struct {
 	result *tblite.TerminalTaskResult
 	err    error

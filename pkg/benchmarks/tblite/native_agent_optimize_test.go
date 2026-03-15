@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestToolCallingAgent_ArtifactsCloneAndTrace(t *testing.T) {
+func TestNativeAgent_ArtifactsCloneAndTrace(t *testing.T) {
 	llm := &toolCallingStubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -29,7 +29,7 @@ func TestToolCallingAgent_ArtifactsCloneAndTrace(t *testing.T) {
 		},
 	}
 
-	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{
 		MaxTurns:     4,
 		SystemPrompt: "original prompt",
 		ToolPolicy:   "read narrow files first and verify before finishing",
@@ -53,7 +53,7 @@ func TestToolCallingAgent_ArtifactsCloneAndTrace(t *testing.T) {
 
 	clonedAny, err := agent.Clone()
 	require.NoError(t, err)
-	cloned := clonedAny.(*ToolCallingAgent)
+	cloned := clonedAny.(*NativeAgent)
 	assert.Equal(t, "updated prompt", cloned.GetArtifacts().Text[optimize.ArtifactSkillPack])
 	assert.Equal(t, "prefer short commands and focused verification", cloned.GetArtifacts().Text[optimize.ArtifactToolPolicy])
 	assert.Equal(t, 7, cloned.GetArtifacts().Int["max_turns"])

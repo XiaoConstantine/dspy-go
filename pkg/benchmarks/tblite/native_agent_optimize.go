@@ -10,10 +10,10 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
-var _ optimize.OptimizableAgent = (*ToolCallingAgent)(nil)
+var _ optimize.OptimizableAgent = (*NativeAgent)(nil)
 
 // Execute adapts the benchmark task contract to the generic agents.Agent API.
-func (a *ToolCallingAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (a *NativeAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
 	req, err := terminalTaskRequestFromInput(input)
 	if err != nil {
 		return nil, err
@@ -24,7 +24,7 @@ func (a *ToolCallingAgent) Execute(ctx context.Context, input map[string]interfa
 		return nil, err
 	}
 	if result == nil {
-		return map[string]interface{}{"completed": false, "error": "tool agent returned nil result"}, nil
+		return map[string]interface{}{"completed": false, "error": "native agent returned nil result"}, nil
 	}
 
 	return map[string]interface{}{
@@ -36,18 +36,18 @@ func (a *ToolCallingAgent) Execute(ctx context.Context, input map[string]interfa
 	}, nil
 }
 
-func (a *ToolCallingAgent) GetCapabilities() []core.Tool {
+func (a *NativeAgent) GetCapabilities() []core.Tool {
 	return nil
 }
 
-func (a *ToolCallingAgent) GetMemory() agents.Memory {
+func (a *NativeAgent) GetMemory() agents.Memory {
 	if a == nil {
 		return nil
 	}
 	return a.memory
 }
 
-func (a *ToolCallingAgent) GetArtifacts() optimize.AgentArtifacts {
+func (a *NativeAgent) GetArtifacts() optimize.AgentArtifacts {
 	artifacts := optimize.AgentArtifacts{
 		Text: make(map[optimize.ArtifactKey]string),
 		Int:  make(map[string]int),
@@ -62,9 +62,9 @@ func (a *ToolCallingAgent) GetArtifacts() optimize.AgentArtifacts {
 	return artifacts
 }
 
-func (a *ToolCallingAgent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
+func (a *NativeAgent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
 	if a == nil {
-		return fmt.Errorf("tblite tool agent is nil")
+		return fmt.Errorf("tblite native agent is nil")
 	}
 	if prompt, ok := artifacts.Text[optimize.ArtifactSkillPack]; ok && prompt != "" {
 		a.config.SystemPrompt = prompt
@@ -78,18 +78,18 @@ func (a *ToolCallingAgent) SetArtifacts(artifacts optimize.AgentArtifacts) error
 	return nil
 }
 
-func (a *ToolCallingAgent) Clone() (optimize.OptimizableAgent, error) {
+func (a *NativeAgent) Clone() (optimize.OptimizableAgent, error) {
 	if a == nil {
-		return nil, fmt.Errorf("tblite tool agent is nil")
+		return nil, fmt.Errorf("tblite native agent is nil")
 	}
-	return &ToolCallingAgent{
+	return &NativeAgent{
 		llm:    a.llm,
 		config: a.config,
 		memory: agents.NewInMemoryStore(),
 	}, nil
 }
 
-func (a *ToolCallingAgent) LastExecutionTrace() *agents.ExecutionTrace {
+func (a *NativeAgent) LastExecutionTrace() *agents.ExecutionTrace {
 	if a == nil {
 		return nil
 	}
@@ -100,7 +100,7 @@ func (a *ToolCallingAgent) LastExecutionTrace() *agents.ExecutionTrace {
 
 func terminalTaskRequestFromInput(input map[string]interface{}) (TerminalTaskRequest, error) {
 	if input == nil {
-		return TerminalTaskRequest{}, fmt.Errorf("tool agent input is required")
+		return TerminalTaskRequest{}, fmt.Errorf("native agent input is required")
 	}
 
 	req := TerminalTaskRequest{

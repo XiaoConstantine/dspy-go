@@ -1235,6 +1235,139 @@ func TestOpenAILLM_GenerateWithTools(t *testing.T) {
 	assert.Equal(t, 20, result["_usage"].(*core.TokenInfo).TotalTokens)
 }
 
+func TestOpenAILLM_GenerateWithTools_InvalidRequestIncludesDebugDump(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"We could not parse the JSON body of your request.","type":"invalid_request_error","code":"invalid_json"}}`)
+	}))
+	defer server.Close()
+
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT52,
+		WithAPIKey("test-api-key"),
+		WithOpenAIBaseURL(server.URL),
+	)
+	require.NoError(t, err)
+
+	_, err = llm.GenerateWithTools(context.Background(), []core.ChatMessage{
+		{
+			Role:    "user",
+			Content: []core.ContentBlock{core.NewTextBlock("Solve task")},
+		},
+	}, []map[string]any{
+		{
+			"name":        "Finish",
+			"description": "Complete the task",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"answer": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}, core.WithMaxTokens(128))
+	require.Error(t, err)
+
+	dspyErr, ok := err.(*errors.Error)
+	require.True(t, ok)
+	fields := dspyErr.Fields()
+	assert.Equal(t, "invalid_request_error", fields["type"])
+	assert.Equal(t, 1, fields["message_count"])
+	assert.Equal(t, 1, fields["tool_count"])
+
+	dumpPath, ok := fields["debug_dump"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, dumpPath)
+	defer os.Remove(dumpPath)
+
+	dumpBytes, readErr := os.ReadFile(dumpPath)
+	require.NoError(t, readErr)
+	assert.Contains(t, string(dumpBytes), `"model": "gpt-5.2"`)
+	assert.Contains(t, string(dumpBytes), `"response_status": 400`)
+	assert.Contains(t, string(dumpBytes), `"tool_choice": "auto"`)
+}
+
+func TestOpenAILLM_GenerateWithTools_RetriesTransientInvalidJSONOnce(t *testing.T) {
+	requestCount := 0
+	var sawClose bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if strings.EqualFold(r.Header.Get("Connection"), "close") {
+			sawClose = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"We could not parse the JSON body of your request.","type":"invalid_request_error","code":"invalid_json"}}`)
+			return
+		}
+		response := openai.ChatCompletionResponse{
+			ID:      "chatcmpl-retry",
+			Object:  "chat.completion",
+			Created: 1234567892,
+			Model:   "gpt-5.2",
+			Choices: []openai.ChatChoice{
+				{
+					Index: 0,
+					Message: openai.ChatCompletionMessage{
+						Role: "assistant",
+						ToolCalls: []openai.ChatCompletionToolCall{
+							{
+								ID:   "call_finish",
+								Type: "function",
+								Function: openai.ChatCompletionFunctionCallDelta{
+									Name:      "Finish",
+									Arguments: `{"answer":"done"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+			Usage: openai.CompletionUsage{
+				PromptTokens:     12,
+				CompletionTokens: 4,
+				TotalTokens:      16,
+			},
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(response))
+	}))
+	defer server.Close()
+
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT52,
+		WithAPIKey("test-api-key"),
+		WithOpenAIBaseURL(server.URL),
+	)
+	require.NoError(t, err)
+
+	result, err := llm.GenerateWithTools(context.Background(), []core.ChatMessage{
+		{
+			Role:    "user",
+			Content: []core.ContentBlock{core.NewTextBlock("Solve task")},
+		},
+	}, []map[string]any{
+		{
+			"name":        "Finish",
+			"description": "Complete the task",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"answer": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}, core.WithMaxTokens(128))
+	require.NoError(t, err)
+	require.Equal(t, 2, requestCount)
+	require.True(t, sawClose)
+	functionCall, ok := result["function_call"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Finish", functionCall["name"])
+}
+
 // Tests for new functional options pattern
 
 func TestNewOpenAILLM_Options(t *testing.T) {

@@ -17,7 +17,7 @@ require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/XiaoConstantine/mcp-go v0.3.1 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.22.1 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
 	github.com/apache/arrow/go/v13 v13.0.0 // indirect
 	github.com/apache/thrift v0.22.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

@@ -15,10 +15,13 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
-const traceFileName = ".dspy_tblite_trace.json"
+const (
+	traceFileName = ".dspy_tblite_trace.json"
+	debugFileName = ".dspy_tblite_debug.json"
+)
 
-// ToolCallingAgentConfig controls the native tool-calling benchmark agent.
-type ToolCallingAgentConfig struct {
+// NativeAgentConfig controls the TBLite adapter over the shared native agent.
+type NativeAgentConfig struct {
 	MaxTurns       int
 	MaxTokens      int
 	Temperature    float64
@@ -28,10 +31,10 @@ type ToolCallingAgentConfig struct {
 	FinishToolText string
 }
 
-// ToolCallingAgent adapts the shared dspy-go native tool-calling harness to TBLite tasks.
-type ToolCallingAgent struct {
+// NativeAgent adapts the shared dspy-go native tool-calling harness to TBLite tasks.
+type NativeAgent struct {
 	llm       core.LLM
-	config    ToolCallingAgentConfig
+	config    NativeAgentConfig
 	memory    agents.Memory
 	traceMu   sync.RWMutex
 	lastTrace *agents.ExecutionTrace
@@ -63,8 +66,22 @@ type ToolCallTraceStep struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-// NewToolCallingAgent creates a benchmark agent that uses the shared native tool-calling harness.
-func NewToolCallingAgent(llm core.LLM, cfg ToolCallingAgentConfig) (*ToolCallingAgent, error) {
+type taskDebugSnapshot struct {
+	TaskID         string `json:"task_id"`
+	Model          string `json:"model"`
+	Provider       string `json:"provider"`
+	Error          string `json:"error"`
+	Instruction    string `json:"instruction"`
+	TaskPrompt     string `json:"task_prompt"`
+	SystemPrompt   string `json:"system_prompt"`
+	ToolPolicy     string `json:"tool_policy"`
+	FinishToolText string `json:"finish_tool_text"`
+	MaxTurns       int    `json:"max_turns"`
+	TracePath      string `json:"trace_path,omitempty"`
+}
+
+// NewNativeAgent creates a benchmark agent that uses the shared native harness.
+func NewNativeAgent(llm core.LLM, cfg NativeAgentConfig) (*NativeAgent, error) {
 	if llm == nil {
 		return nil, fmt.Errorf("llm is required")
 	}
@@ -86,7 +103,7 @@ func NewToolCallingAgent(llm core.LLM, cfg ToolCallingAgentConfig) (*ToolCalling
 	if strings.TrimSpace(cfg.ToolPolicy) == "" {
 		cfg.ToolPolicy = defaultToolCallingToolPolicy
 	}
-	return &ToolCallingAgent{
+	return &NativeAgent{
 		llm:    llm,
 		config: cfg,
 		memory: agents.NewInMemoryStore(),
@@ -94,7 +111,7 @@ func NewToolCallingAgent(llm core.LLM, cfg ToolCallingAgentConfig) (*ToolCalling
 }
 
 // RunTask executes one materialized terminal benchmark task.
-func (a *ToolCallingAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*TerminalTaskResult, error) {
+func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*TerminalTaskResult, error) {
 	runCtx := ctx
 	var cancel context.CancelFunc
 	if req.AgentTimeout > 0 {
@@ -141,28 +158,47 @@ func (a *ToolCallingAgent) RunTask(ctx context.Context, req TerminalTaskRequest)
 		}
 	}
 
+	taskPrompt := a.buildTaskPrompt(req)
 	resultMap, err := sharedAgent.Execute(runCtx, map[string]interface{}{
-		"task":      a.buildTaskPrompt(req),
+		"task":      taskPrompt,
 		"task_id":   req.TaskID,
 		"max_turns": a.maxTurns(req),
 	})
+	a.traceMu.Lock()
+	a.lastTrace = sharedAgent.LastExecutionTrace()
+	a.traceMu.Unlock()
 	if err != nil {
+		nativeTrace := sharedAgent.LastNativeTrace()
+		traceFile := ""
+		if nativeTrace != nil {
+			trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
+			traceFile, _ = writeTrace(req.TaskDir, trace)
+		}
+		_ = writeDebugSnapshot(req.TaskDir, taskDebugSnapshot{
+			TaskID:         req.TaskID,
+			Model:          a.llm.ModelID(),
+			Provider:       a.llm.ProviderName(),
+			Error:          err.Error(),
+			Instruction:    req.Instruction,
+			TaskPrompt:     taskPrompt,
+			SystemPrompt:   a.config.SystemPrompt,
+			ToolPolicy:     a.config.ToolPolicy,
+			FinishToolText: a.config.FinishToolText,
+			MaxTurns:       a.maxTurns(req),
+			TracePath:      traceFile,
+		})
 		return nil, err
 	}
 
 	nativeTrace := sharedAgent.LastNativeTrace()
 	if nativeTrace == nil {
-		return nil, fmt.Errorf("shared tool-calling agent did not record a trace")
+		return nil, fmt.Errorf("shared native agent did not record a trace")
 	}
 	trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
 	traceFile, err := writeTrace(req.TaskDir, trace)
 	if err != nil {
 		return nil, err
 	}
-
-	a.traceMu.Lock()
-	a.lastTrace = sharedAgent.LastExecutionTrace()
-	a.traceMu.Unlock()
 
 	result := &TerminalTaskResult{
 		Completed:   boolValue(resultMap["completed"]),
@@ -193,7 +229,7 @@ func (r dockerCommandRunner) Run(ctx context.Context, workingDir string, command
 	return r.runtime.Exec(ctx, workingDir, r.shellPath, command, env)
 }
 
-func (a *ToolCallingAgent) buildTaskPrompt(req TerminalTaskRequest) string {
+func (a *NativeAgent) buildTaskPrompt(req TerminalTaskRequest) string {
 	var b strings.Builder
 	b.WriteString("TASK INSTRUCTION:\n")
 	b.WriteString(req.Instruction)
@@ -236,7 +272,7 @@ func promptTestScript(req TerminalTaskRequest) string {
 	return req.TestScriptPath
 }
 
-func (a *ToolCallingAgent) maxTurns(req TerminalTaskRequest) int {
+func (a *NativeAgent) maxTurns(req TerminalTaskRequest) int {
 	if req.MaxTurns > 0 {
 		return req.MaxTurns
 	}
@@ -253,6 +289,18 @@ func writeTrace(taskDir string, trace ToolCallTrace) (string, error) {
 		return "", fmt.Errorf("write trace file: %w", err)
 	}
 	return tracePath, nil
+}
+
+func writeDebugSnapshot(taskDir string, snapshot taskDebugSnapshot) string {
+	debugPath := filepath.Join(taskDir, debugFileName)
+	debugBytes, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return ""
+	}
+	if err := os.WriteFile(debugPath, debugBytes, 0o644); err != nil {
+		return ""
+	}
+	return debugPath
 }
 
 func nativeTraceToToolCallTrace(trace *sharednative.Trace, instruction string) ToolCallTrace {

@@ -47,7 +47,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 
 	cmd := &cobra.Command{
 		Use:   "tblite",
-		Short: "Run a fixed-slice TBLite evaluation with the native tool-calling benchmark agent",
+		Short: "Run a fixed-slice TBLite evaluation with the native benchmark agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tasks, err := datasets.FetchTBLiteTasksFromHuggingFaceRange(split, offset, limit)
 			if err != nil {
@@ -172,7 +172,7 @@ func runTBLiteGEPABenchmark(
 		core.GlobalConfig.TeacherLLM = originalTeacher
 	}()
 
-	baselineAgent, err := newToolCallingBenchmarkAgentWithLLM(llm, agentCfg)
+	baselineAgent, err := newNativeBenchmarkAgentWithLLM(llm, agentCfg)
 	if err != nil {
 		return err
 	}
@@ -229,12 +229,25 @@ func runTBLiteGEPABenchmark(
 
 	bestArtifacts := optimizeResult.BestArtifacts.Clone()
 	bestValidation := optimizeResult.BestValidationEvaluation
+	if err := tblite.WriteOptimizationCheckpoint(filepath.Join(rootDir, "gepa_best_artifacts.json"), &tblite.OptimizationCheckpoint{
+		WrittenAt:                time.Now(),
+		BestArtifacts:            bestArtifacts,
+		BestValidationEvaluation: bestValidation,
+		BestCandidateID: func() string {
+			if optimizeResult.BestCandidate == nil {
+				return ""
+			}
+			return optimizeResult.BestCandidate.ID
+		}(),
+	}); err != nil {
+		return err
+	}
 
 	tunedClone, err := baselineAgent.Clone()
 	if err != nil {
 		return err
 	}
-	tunedAgent, ok := tunedClone.(*tblite.ToolCallingAgent)
+	tunedAgent, ok := tunedClone.(*tblite.NativeAgent)
 	if !ok {
 		return fmt.Errorf("unexpected tuned agent type %T", tunedClone)
 	}

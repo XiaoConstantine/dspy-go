@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewToolCallingAgent_RequiresToolCalling(t *testing.T) {
-	_, err := NewToolCallingAgent(&toolCallingStubLLM{}, ToolCallingAgentConfig{})
+func TestNewNativeAgent_RequiresToolCalling(t *testing.T) {
+	_, err := NewNativeAgent(&toolCallingStubLLM{}, NativeAgentConfig{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not support tool calling")
 }
 
-func TestToolCallingAgent_RunTask_WritesTraceAndCompletes(t *testing.T) {
+func TestNativeAgent_RunTask_WritesTraceAndCompletes(t *testing.T) {
 	llm := &toolCallingStubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -44,7 +44,7 @@ func TestToolCallingAgent_RunTask_WritesTraceAndCompletes(t *testing.T) {
 		},
 	}
 
-	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 4})
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{MaxTurns: 4})
 	require.NoError(t, err)
 
 	taskDir := t.TempDir()
@@ -84,7 +84,7 @@ func TestToolCallingAgent_RunTask_WritesTraceAndCompletes(t *testing.T) {
 	assert.Contains(t, string(traceBytes), "\"final_answer\": \"updated answer.txt\"")
 }
 
-func TestToolCallingAgent_RunTask_FailsAfterMaxTurns(t *testing.T) {
+func TestNativeAgent_RunTask_FailsAfterMaxTurns(t *testing.T) {
 	llm := &toolCallingStubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -92,7 +92,7 @@ func TestToolCallingAgent_RunTask_FailsAfterMaxTurns(t *testing.T) {
 		},
 	}
 
-	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 1})
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{MaxTurns: 1})
 	require.NoError(t, err)
 
 	taskDir := t.TempDir()
@@ -113,10 +113,10 @@ func TestToolCallingAgent_RunTask_FailsAfterMaxTurns(t *testing.T) {
 	assert.Contains(t, result.Error, "max turns reached")
 }
 
-func TestToolCallingAgent_BuildTaskPrompt_IncludesFinishGuidance(t *testing.T) {
-	agent, err := NewToolCallingAgent(&toolCallingStubLLM{
+func TestNativeAgent_BuildTaskPrompt_IncludesFinishGuidance(t *testing.T) {
+	agent, err := NewNativeAgent(&toolCallingStubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
-	}, ToolCallingAgentConfig{MaxTurns: 20})
+	}, NativeAgentConfig{MaxTurns: 20})
 	require.NoError(t, err)
 
 	prompt := agent.buildTaskPrompt(TerminalTaskRequest{
@@ -134,7 +134,7 @@ func TestToolCallingAgent_BuildTaskPrompt_IncludesFinishGuidance(t *testing.T) {
 	assert.Contains(t, prompt, "health check, evaluation script, or verifier-style command succeeds")
 }
 
-func TestToolCallingAgent_RunTask_UsesNativeToolCallingWhenAvailable(t *testing.T) {
+func TestNativeAgent_RunTask_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	llm := &nativeToolCallingStubLLM{
 		toolCallingStubLLM: toolCallingStubLLM{
 			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
@@ -162,7 +162,7 @@ func TestToolCallingAgent_RunTask_UsesNativeToolCallingWhenAvailable(t *testing.
 		},
 	}
 
-	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 4})
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{MaxTurns: 4})
 	require.NoError(t, err)
 
 	taskDir := t.TempDir()
@@ -187,7 +187,7 @@ func TestToolCallingAgent_RunTask_UsesNativeToolCallingWhenAvailable(t *testing.
 	assert.Empty(t, llm.prompts)
 }
 
-func TestToolCallingAgent_RunTask_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
+func TestNativeAgent_RunTask_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
 	llm := &toolCallingStubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -221,7 +221,7 @@ func TestToolCallingAgent_RunTask_FailsFastAfterRepeatedNoCallResponses(t *testi
 		},
 	}
 
-	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 20})
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{MaxTurns: 20})
 	require.NoError(t, err)
 
 	taskDir := t.TempDir()
@@ -248,7 +248,46 @@ func TestToolCallingAgent_RunTask_FailsFastAfterRepeatedNoCallResponses(t *testi
 	assert.Contains(t, string(traceBytes), "\"finish_reason\": \"STOP\"")
 }
 
-func TestToolCallingAgent_RunTask_PromptUsesContainerAliases(t *testing.T) {
+func TestNativeAgent_RunTask_WritesTraceAndDebugSnapshotOnEarlyAgentError(t *testing.T) {
+	llm := &toolCallingStubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		generateErr:  fmt.Errorf("synthetic provider failure"),
+	}
+
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{MaxTurns: 3})
+	require.NoError(t, err)
+
+	taskDir := t.TempDir()
+	envDir := filepath.Join(taskDir, "environment")
+	testsDir := filepath.Join(taskDir, "tests")
+	require.NoError(t, os.MkdirAll(envDir, 0o755))
+	require.NoError(t, os.MkdirAll(testsDir, 0o755))
+
+	_, err = agent.RunTask(context.Background(), TerminalTaskRequest{
+		TaskID:           "task-error",
+		Instruction:      "Inspect and fix the workspace.",
+		TaskDir:          taskDir,
+		WorkingDirectory: envDir,
+		EnvironmentDir:   envDir,
+		TestsDir:         testsDir,
+		TestScriptPath:   filepath.Join(taskDir, "test.sh"),
+		MaxTurns:         3,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "synthetic provider failure")
+
+	traceBytes, readErr := os.ReadFile(filepath.Join(taskDir, traceFileName))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(traceBytes), "\"error\": \"synthetic provider failure\"")
+
+	debugBytes, readErr := os.ReadFile(filepath.Join(taskDir, debugFileName))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(debugBytes), "\"error\": \"synthetic provider failure\"")
+	assert.Contains(t, string(debugBytes), "\"tool_policy\"")
+	assert.Contains(t, string(debugBytes), "\"task_prompt\"")
+}
+
+func TestNativeAgent_RunTask_PromptUsesContainerAliases(t *testing.T) {
 	llm := &toolCallingStubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -263,7 +302,7 @@ func TestToolCallingAgent_RunTask_PromptUsesContainerAliases(t *testing.T) {
 		},
 	}
 
-	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 1})
+	agent, err := NewNativeAgent(llm, NativeAgentConfig{MaxTurns: 1})
 	require.NoError(t, err)
 
 	taskDir := t.TempDir()
@@ -304,6 +343,7 @@ type toolCallingStubLLM struct {
 	capabilities []core.Capability
 	prompts      []string
 	lastOptions  *core.GenerateOptions
+	generateErr  error
 }
 
 func (m *toolCallingStubLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
@@ -321,6 +361,9 @@ func (m *toolCallingStubLLM) GenerateWithFunctions(ctx context.Context, prompt s
 		option(opts)
 	}
 	m.lastOptions = opts
+	if m.generateErr != nil {
+		return nil, m.generateErr
+	}
 	if m.index >= len(m.results) {
 		return nil, fmt.Errorf("no more stubbed results")
 	}
