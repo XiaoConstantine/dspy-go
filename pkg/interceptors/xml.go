@@ -236,7 +236,7 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 			tagName := t.Name.Local
 			stack = append(stack, tagState{
 				name:       tagName,
-				startIndex: decoder.InputOffset(),
+				startIndex: tokenPos,
 			})
 
 			if p.config.MaxDepth > 0 && len(stack) > p.config.MaxDepth {
@@ -257,21 +257,21 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 
 			// Check if this tag matches one of our expected fields
 			if fieldName, ok := sigInfo.TagMap[currentTag.name]; ok {
-				endIndex := tokenPos
+				endIndex := decoder.InputOffset()
 				if int(currentTag.startIndex) < len(xmlContent) && int(endIndex) <= len(xmlContent) {
-					inner := xmlContent[currentTag.startIndex:endIndex]
+					content := xmlContent[currentTag.startIndex:endIndex]
 
 					if !p.config.PreserveWhitespace {
-						inner = strings.TrimSpace(inner)
+						content = strings.TrimSpace(content)
 					}
 
 					// Strip field name prefix if present (e.g., "answer: 366" -> "366")
 					// This is needed because LLM includes both XML structure and text prefixes for stability
-					inner = p.stripFieldPrefix(inner, fieldName)
+					content = p.stripFieldPrefix(content, fieldName)
 
 					// Convert to expected type
 					if field, exists := sigInfo.FieldMap[fieldName]; exists {
-						typedValue, err := p.convertFieldValue(inner, field)
+						typedValue, err := p.convertFieldValue(content, field)
 						if err != nil {
 							return nil, fmt.Errorf("field %s conversion failed: %w", fieldName, err)
 						}

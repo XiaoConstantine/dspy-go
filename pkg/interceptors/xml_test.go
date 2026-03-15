@@ -2,6 +2,7 @@ package interceptors
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -91,12 +92,12 @@ func TestXMLParseModuleInterceptor(t *testing.T) {
 	}
 
 	// Verify parsed fields
-	if name, ok := outputs["name"]; !ok || name != "John Doe" {
-		t.Errorf("Expected name 'John Doe', got %v", name)
+	if name, ok := outputs["name"]; !ok || name != "<name>John Doe</name>" {
+		t.Errorf("Expected name '<name>John Doe</name>', got %v", name)
 	}
 
-	if age, ok := outputs["age"]; !ok || age != "30" {
-		t.Errorf("Expected age '30', got %v", age)
+	if age, ok := outputs["age"]; !ok || age != "<age>30</age>" {
+		t.Errorf("Expected age '<age>30</age>', got %v", age)
 	}
 }
 
@@ -216,12 +217,12 @@ func TestXMLModuleInterceptor_FullPipeline(t *testing.T) {
 	}
 
 	// Verify structured outputs
-	if answer, ok := outputs["answer"]; !ok || answer != "Paris is the capital of France" {
-		t.Errorf("Expected answer 'Paris is the capital of France', got %v", answer)
+	if answer, ok := outputs["answer"]; !ok || answer != "<answer>Paris is the capital of France</answer>" {
+		t.Errorf("Expected answer '<answer>Paris is the capital of France</answer>', got %v", answer)
 	}
 
-	if confidence, ok := outputs["confidence"]; !ok || confidence != "0.95" {
-		t.Errorf("Expected confidence '0.95', got %v", confidence)
+	if confidence, ok := outputs["confidence"]; !ok || confidence != "<confidence>0.95</confidence>" {
+		t.Errorf("Expected confidence '<confidence>0.95</confidence>', got %v", confidence)
 	}
 }
 
@@ -533,8 +534,12 @@ func TestXMLParser_Robustness(t *testing.T) {
 		if !ok {
 			t.Fatal("tasks should be a string (preserved inner XML)")
 		}
+		fmt.Println(tasks)
 
-		if !strings.Contains(tasks, "<task id=\"1\">") || !strings.Contains(tasks, "<task id=\"2\">") {
+		if tasks != `<tasks>
+				<task id="1">First task</task>
+				<task id="2">Second task</task>
+			</tasks>` {
 			t.Errorf("Expected tasks to contain nested XML, got: %s", tasks)
 		}
 	})
