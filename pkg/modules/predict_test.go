@@ -975,7 +975,7 @@ func TestPredict_AnalyzerTasksParsing(t *testing.T) {
 		predict.SetLLM(mockLLM)
 
 		// Use the parallel execution analyzer response from orchestrator_test.go wrapped in a markdown fence
-		xmlResp := "```xml\n<response>\n<analysis>Task has been analyzed and decomposed for parallel execution</analysis>\n<tasks><tasks>\n     <task id=\"task1\" type=\"test\" processor=\"test\" priority=\"1\">\n         <description>Parallel task 1</description>\n         <metadata>\n             <item key=\"key\">value</item>\n         </metadata>\n     </task>\n     <task id=\"task2\" type=\"test\" processor=\"test\" priority=\"1\">\n         <description>Parallel task 2</description>\n         <metadata>\n             <item key=\"key\">value</item>\n         </metadata>\n     </task>\n</tasks></tasks>\n</response>\n```"
+		xmlResp := "```xml\n<response>\n<analysis>Task has been analyzed and decomposed for parallel execution</analysis>\n<tasks>\n     <task id=\"task1\" type=\"test\" processor=\"test\" priority=\"1\">\n         <description>Parallel task 1</description>\n         <metadata>\n             <item key=\"key\">value</item>\n         </metadata>\n     </task>\n     <task id=\"task2\" type=\"test\" processor=\"test\" priority=\"1\">\n         <description>Parallel task 2</description>\n         <metadata>\n             <item key=\"key\">value</item>\n         </metadata>\n     </task>\n</tasks>\n</response>\n```"
 
 		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
 			Return(&core.LLMResponse{Content: xmlResp}, nil)
