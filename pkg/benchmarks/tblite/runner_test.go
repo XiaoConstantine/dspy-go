@@ -22,7 +22,7 @@ func TestRunnerEvaluateTask_RunsAgentAndVerifier(t *testing.T) {
 	task := datasets.TBLiteTask{
 		TaskName:    "echo-success",
 		Instruction: "Write the expected file",
-		TestScript: "#!/bin/sh\nset -eu\n[ \"$(cat \"$DSPY_TBLITE_ENV_DIR/output.txt\")\" = \"done\" ]\n",
+		TestScript:  "#!/bin/sh\nset -eu\n[ \"$(cat \"$DSPY_TBLITE_ENV_DIR/output.txt\")\" = \"done\" ]\n",
 	}
 
 	runner := NewRunner(fakeAgent{
@@ -51,7 +51,7 @@ func TestRunnerEvaluateTask_RecordsVerifierFailure(t *testing.T) {
 	task := datasets.TBLiteTask{
 		TaskName:    "echo-failure",
 		Instruction: "Write the wrong value",
-		TestScript: "#!/bin/sh\nset -eu\n[ \"$(cat \"$DSPY_TBLITE_ENV_DIR/output.txt\")\" = \"expected\" ]\n",
+		TestScript:  "#!/bin/sh\nset -eu\n[ \"$(cat \"$DSPY_TBLITE_ENV_DIR/output.txt\")\" = \"expected\" ]\n",
 	}
 
 	runner := NewRunner(fakeAgent{
@@ -98,4 +98,13 @@ func TestRunnerEvaluateTask_RespectsAgentMaxTurns(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.True(t, result.TestResult.Passed)
+}
+
+func TestVerifierRewardPassed(t *testing.T) {
+	assert.True(t, verifierRewardPassed("1"))
+	assert.True(t, verifierRewardPassed("1.0"))
+	assert.True(t, verifierRewardPassed("1.000\n"))
+	assert.False(t, verifierRewardPassed("0.5"))
+	assert.False(t, verifierRewardPassed("0"))
+	assert.False(t, verifierRewardPassed("not-a-number"))
 }

@@ -39,7 +39,9 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	var populationSize int
 	var generations int
 	var reflectionFreq int
+	var gepaSearchBatchSize int
 	var gepaEvalConcurrency int
+	var gepaStagnationLimit int
 	var validationSplit float64
 	var testSplit float64
 
@@ -96,7 +98,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 				return nil
 			}
 
-			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, reflectionFreq, gepaEvalConcurrency, validationSplit, testSplit)
+			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, reflectionFreq, gepaSearchBatchSize, gepaEvalConcurrency, gepaStagnationLimit, validationSplit, testSplit)
 		},
 	}
 
@@ -121,7 +123,9 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	cmd.Flags().IntVar(&populationSize, "population", 4, "GEPA population size for --gepa runs")
 	cmd.Flags().IntVar(&generations, "generations", 2, "GEPA generations for --gepa runs")
 	cmd.Flags().IntVar(&reflectionFreq, "reflection-freq", 1, "GEPA reflection frequency for --gepa runs")
+	cmd.Flags().IntVar(&gepaSearchBatchSize, "gepa-search-batch-size", 4, "Training tasks scored per GEPA candidate evaluation during search")
 	cmd.Flags().IntVar(&gepaEvalConcurrency, "gepa-eval-concurrency", 4, "Concurrent GEPA candidate evaluations for --gepa runs")
+	cmd.Flags().IntVar(&gepaStagnationLimit, "gepa-stagnation-limit-minutes", 60, "Wall-clock stagnation window in minutes before GEPA stops early")
 	cmd.Flags().Float64Var(&validationSplit, "validation-split", 0.2, "Validation split used inside the optimization set for --gepa runs")
 	cmd.Flags().Float64Var(&testSplit, "test-split", 0.2, "Held-out test split used for baseline vs tuned comparison")
 
@@ -143,7 +147,9 @@ func runTBLiteGEPABenchmark(
 	populationSize int,
 	generations int,
 	reflectionFreq int,
+	gepaSearchBatchSize int,
 	gepaEvalConcurrency int,
+	gepaStagnationLimit int,
 	validationSplit float64,
 	testSplit float64,
 ) error {
@@ -199,6 +205,8 @@ func runTBLiteGEPABenchmark(
 			PopulationSize:  populationSize,
 			MaxGenerations:  generations,
 			ReflectionFreq:  reflectionFreq,
+			SearchBatchSize: gepaSearchBatchSize,
+			StagnationLimit: gepaStagnationLimit,
 			ValidationSplit: validationSplit,
 			EvalConcurrency: gepaEvalConcurrency,
 			PassThreshold:   1.0,

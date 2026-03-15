@@ -357,31 +357,32 @@ type gepaValidationFrontierEntry struct {
 
 // GEPAState tracks the complete state of GEPA optimization.
 type GEPAState struct {
-	CurrentGeneration        int                                  `json:"current_generation"`
-	BestCandidate            *GEPACandidate                       `json:"best_candidate"`
-	BestFitness              float64                              `json:"best_fitness"`
-	BestValidationCandidate  *GEPACandidate                       `json:"best_validation_candidate,omitempty"`
-	BestValidationFitness    float64                              `json:"best_validation_fitness"`
-	PopulationHistory        []*Population                        `json:"population_history"`
-	ReflectionHistory        []*ReflectionResult                  `json:"reflection_history"`
-	ConvergenceStatus        *ConvergenceStatus                   `json:"convergence_status"`
-	StartTime                time.Time                            `json:"start_time"`
-	LastImprovement          time.Time                            `json:"last_improvement"`
-	LastValidatedGeneration  int                                  `json:"last_validated_generation"`
-	ExecutionTraces          map[string][]ExecutionTrace          `json:"execution_traces"`
-	CandidateMetrics         map[string]*CandidateMetrics         `json:"candidate_metrics"`
-	MultiObjectiveFitnessMap map[string]*MultiObjectiveFitness    `json:"multi_objective_fitness_map"`
-	ValidationFrontier       map[int]*gepaValidationFrontierEntry `json:"validation_frontier,omitempty"`
-	ValidationCoverage       map[string]int                       `json:"validation_coverage,omitempty"`
-	MergeInvocations         int                                  `json:"merge_invocations,omitempty"`
-	PerformedMerges          map[string]bool                      `json:"performed_merges,omitempty"`
-	MetricCalls              int                                  `json:"metric_calls,omitempty"`
-	StopReason               string                               `json:"stop_reason,omitempty"`
-	StopMetadata             map[string]interface{}               `json:"stop_metadata,omitempty"`
-	candidateReflections     map[string]*ReflectionResult
-	candidateEvaluations     map[string]*gepaCandidateEvaluation
-	candidateValidationEvals map[string]*gepaCandidateEvaluation
-	evaluationCaseCache      map[string]*gepaCachedEvaluationCase
+	CurrentGeneration         int                                  `json:"current_generation"`
+	BestCandidate             *GEPACandidate                       `json:"best_candidate"`
+	BestFitness               float64                              `json:"best_fitness"`
+	BestValidationCandidate   *GEPACandidate                       `json:"best_validation_candidate,omitempty"`
+	BestValidationFitness     float64                              `json:"best_validation_fitness"`
+	PopulationHistory         []*Population                        `json:"population_history"`
+	ReflectionHistory         []*ReflectionResult                  `json:"reflection_history"`
+	ConvergenceStatus         *ConvergenceStatus                   `json:"convergence_status"`
+	StartTime                 time.Time                            `json:"start_time"`
+	LastImprovement           time.Time                            `json:"last_improvement"`
+	LastValidatedGeneration   int                                  `json:"last_validated_generation"`
+	ExecutionTraces           map[string][]ExecutionTrace          `json:"execution_traces"`
+	CandidateMetrics          map[string]*CandidateMetrics         `json:"candidate_metrics"`
+	MultiObjectiveFitnessMap  map[string]*MultiObjectiveFitness    `json:"multi_objective_fitness_map"`
+	ValidationFrontier        map[int]*gepaValidationFrontierEntry `json:"validation_frontier,omitempty"`
+	ValidationCoverage        map[string]int                       `json:"validation_coverage,omitempty"`
+	MergeInvocations          int                                  `json:"merge_invocations,omitempty"`
+	PerformedMerges           map[string]bool                      `json:"performed_merges,omitempty"`
+	MetricCalls               int                                  `json:"metric_calls,omitempty"`
+	StopReason                string                               `json:"stop_reason,omitempty"`
+	StopMetadata              map[string]interface{}               `json:"stop_metadata,omitempty"`
+	candidateReflections      map[string]*ReflectionResult
+	candidateEvaluations      map[string]*gepaCandidateEvaluation
+	candidateValidationEvals  map[string]*gepaCandidateEvaluation
+	evaluationCaseCache       map[string]*gepaCachedEvaluationCase
+	candidateCaseObservations map[string][]CandidateCaseObservation
 
 	// Pareto archive for elite solution management
 	ParetoArchive     []*GEPACandidate                  `json:"pareto_archive"`
@@ -394,27 +395,28 @@ type GEPAState struct {
 // NewGEPAState creates a new GEPA optimization state.
 func NewGEPAState() *GEPAState {
 	return &GEPAState{
-		CurrentGeneration:        0,
-		BestFitness:              0.0,
-		BestValidationFitness:    math.Inf(-1),
-		PopulationHistory:        make([]*Population, 0),
-		ReflectionHistory:        make([]*ReflectionResult, 0),
-		StartTime:                time.Now(),
-		LastImprovement:          time.Now(),
-		LastValidatedGeneration:  -1,
-		ExecutionTraces:          make(map[string][]ExecutionTrace),
-		CandidateMetrics:         make(map[string]*CandidateMetrics),
-		MultiObjectiveFitnessMap: make(map[string]*MultiObjectiveFitness),
-		ValidationFrontier:       make(map[int]*gepaValidationFrontierEntry),
-		ValidationCoverage:       make(map[string]int),
-		PerformedMerges:          make(map[string]bool),
-		candidateReflections:     make(map[string]*ReflectionResult),
-		candidateEvaluations:     make(map[string]*gepaCandidateEvaluation),
-		candidateValidationEvals: make(map[string]*gepaCandidateEvaluation),
-		evaluationCaseCache:      make(map[string]*gepaCachedEvaluationCase),
-		ParetoArchive:            make([]*GEPACandidate, 0),
-		ArchiveFitnessMap:        make(map[string]*MultiObjectiveFitness),
-		MaxArchiveSize:           50, // Configurable archive size
+		CurrentGeneration:         0,
+		BestFitness:               0.0,
+		BestValidationFitness:     math.Inf(-1),
+		PopulationHistory:         make([]*Population, 0),
+		ReflectionHistory:         make([]*ReflectionResult, 0),
+		StartTime:                 time.Now(),
+		LastImprovement:           time.Now(),
+		LastValidatedGeneration:   -1,
+		ExecutionTraces:           make(map[string][]ExecutionTrace),
+		CandidateMetrics:          make(map[string]*CandidateMetrics),
+		MultiObjectiveFitnessMap:  make(map[string]*MultiObjectiveFitness),
+		ValidationFrontier:        make(map[int]*gepaValidationFrontierEntry),
+		ValidationCoverage:        make(map[string]int),
+		PerformedMerges:           make(map[string]bool),
+		candidateReflections:      make(map[string]*ReflectionResult),
+		candidateEvaluations:      make(map[string]*gepaCandidateEvaluation),
+		candidateValidationEvals:  make(map[string]*gepaCandidateEvaluation),
+		evaluationCaseCache:       make(map[string]*gepaCachedEvaluationCase),
+		candidateCaseObservations: make(map[string][]CandidateCaseObservation),
+		ParetoArchive:             make([]*GEPACandidate, 0),
+		ArchiveFitnessMap:         make(map[string]*MultiObjectiveFitness),
+		MaxArchiveSize:            50, // Configurable archive size
 		ConvergenceStatus: &ConvergenceStatus{
 			StagnationCount:                0,
 			PrematureConvergenceRisk:       "low",
@@ -3761,6 +3763,15 @@ func (g *GEPA) getCurrentCandidateID(ctx context.Context) string {
 	return "unknown"
 }
 
+// CurrentCandidateID returns the GEPA candidate ID attached to the context, or
+// "unknown" when the context is outside an active GEPA evaluation.
+func CurrentCandidateID(ctx context.Context) string {
+	if candidateID, ok := ctx.Value(candidateIDKey).(string); ok {
+		return candidateID
+	}
+	return "unknown"
+}
+
 // Real-time tracking support methods
 
 // getCurrentSystemLoad gets current system load for context-aware tracking.
@@ -5511,11 +5522,10 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 			evaluatedCount++
 			candidateEvaluations[candidate.ID] = evaluation
 
-			// Get multi-objective fitness from candidate metrics
-			if metrics := g.performanceLogger.GetCandidateMetrics(candidate.ID); metrics != nil {
-				if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok {
-					multiObjFitnessMap[candidate.ID] = multiObjFitness
-				}
+			// Prefer interceptor-derived multi-objective fitness when available,
+			// but fall back to state-recorded values from external adapter paths.
+			if multiObjFitness := g.lookupStoredMultiObjectiveFitness(candidate.ID); multiObjFitness != nil {
+				multiObjFitnessMap[candidate.ID] = multiObjFitness
 			}
 
 			// Update best candidate
@@ -5548,6 +5558,29 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 		len(multiObjFitnessMap))
 
 	return multiObjFitnessMap, nil
+}
+
+func (g *GEPA) lookupStoredMultiObjectiveFitness(candidateID string) *MultiObjectiveFitness {
+	if g == nil || strings.TrimSpace(candidateID) == "" {
+		return nil
+	}
+
+	if metrics := g.performanceLogger.GetCandidateMetrics(candidateID); metrics != nil && metrics.Metadata != nil {
+		if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok && multiObjFitness != nil {
+			return multiObjFitness
+		}
+	}
+
+	g.state.mu.RLock()
+	defer g.state.mu.RUnlock()
+
+	if metrics, exists := g.state.CandidateMetrics[candidateID]; exists && metrics != nil && metrics.Metadata != nil {
+		if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok && multiObjFitness != nil {
+			return multiObjFitness
+		}
+	}
+
+	return nil
 }
 
 func (g *GEPA) applyComponentTexts(program core.Program, componentTexts map[string]string) core.Program {

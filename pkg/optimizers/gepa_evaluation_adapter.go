@@ -129,6 +129,10 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 		return &gepaCandidateEvaluation{Candidate: candidate}
 	}
 
+	if g != nil && g.state != nil && candidate != nil {
+		g.state.BeginCandidateCaseRecording(candidate.ID)
+	}
+
 	modifiedProgram := g.applyCandidate(adapter.baseProgram, candidate)
 	result := &gepaCandidateEvaluation{
 		Candidate: candidate,
@@ -199,6 +203,11 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	}
 	if spentMetricCalls > 0 && g != nil && g.state != nil {
 		g.state.AddMetricCalls(spentMetricCalls)
+	}
+
+	if g != nil && g.state != nil && candidate != nil {
+		candidate.Fitness = result.AverageScore
+		g.state.FinalizeCandidateCaseFitness(candidate, result.AverageScore)
 	}
 
 	return result

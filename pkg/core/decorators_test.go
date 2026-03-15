@@ -36,6 +36,11 @@ func (m *MockBaseLLM) GenerateWithFunctions(ctx context.Context, prompt string, 
 	return nil, nil
 }
 
+func (m *MockBaseLLM) GenerateWithTools(ctx context.Context, messages []ChatMessage, tools []map[string]any, opts ...GenerateOption) (map[string]any, error) {
+	args := m.Called(ctx, messages, tools, opts)
+	return args.Get(0).(map[string]any), args.Error(1)
+}
+
 func (m *MockBaseLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
 	args := m.Called(ctx, prompt, options)
 	return args.Get(0).(map[string]interface{}), args.Error(1)
@@ -304,6 +309,34 @@ func TestModelContextDecorator_Generate(t *testing.T) {
 		// Verify mock expectations were met
 		baseLLM.AssertExpectations(t)
 	})
+}
+
+func TestModelContextDecorator_GenerateWithTools(t *testing.T) {
+	baseLLM := new(MockBaseLLM)
+	expectedModelID := "test-model"
+	expectedResponse := map[string]any{
+		"function_call": map[string]any{
+			"name": "Finish",
+		},
+	}
+	messages := []ChatMessage{{Role: "user", Content: []ContentBlock{NewTextBlock("solve task")}}}
+	tools := []map[string]any{{"name": "Finish"}}
+
+	baseLLM.On("ModelID").Return(expectedModelID)
+	baseLLM.On("GenerateWithTools", mock.Anything, messages, tools, mock.Anything).Return(expectedResponse, nil)
+
+	decorator := NewModelContextDecorator(baseLLM)
+	ctx := WithExecutionState(context.Background())
+
+	response, err := decorator.GenerateWithTools(ctx, messages, tools)
+
+	assert.NoError(t, err)
+	assert.Equal(t, expectedResponse, response)
+	assert.Equal(t, expectedModelID, GetExecutionState(ctx).GetModelID())
+
+	_, ok := interface{}(decorator).(ToolCallingChatLLM)
+	assert.True(t, ok)
+	baseLLM.AssertExpectations(t)
 }
 
 func TestChain(t *testing.T) {

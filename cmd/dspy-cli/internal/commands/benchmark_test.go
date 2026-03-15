@@ -50,3 +50,15 @@ func TestTBLiteBenchmarkCommand_DefaultGEPAEvalConcurrency(t *testing.T) {
 	require.NotNil(t, flag)
 	assert.Equal(t, "4", flag.DefValue)
 }
+
+func TestTBLiteBenchmarkCommand_DefaultGEPASearchControls(t *testing.T) {
+	cmd := newTBLiteBenchmarkCommand(defaultTerminalTaskAgentFactory)
+
+	searchBatchFlag := cmd.Flags().Lookup("gepa-search-batch-size")
+	require.NotNil(t, searchBatchFlag)
+	assert.Equal(t, "4", searchBatchFlag.DefValue)
+
+	stagnationFlag := cmd.Flags().Lookup("gepa-stagnation-limit-minutes")
+	require.NotNil(t, stagnationFlag)
+	assert.Equal(t, "60", stagnationFlag.DefValue)
+}

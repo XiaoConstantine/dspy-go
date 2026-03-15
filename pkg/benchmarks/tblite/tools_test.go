@@ -91,6 +91,118 @@ func TestNewTerminalToolset_SandboxAndCommand(t *testing.T) {
 	assert.Contains(t, stringifyToolResult(sandboxResult), "escapes benchmark workspace")
 }
 
+func TestNewTerminalToolset_ResolvesTaskAndContainerAliases(t *testing.T) {
+	taskRoot := t.TempDir()
+	envRoot := filepath.Join(taskRoot, "environment")
+	testsDir := filepath.Join(taskRoot, "tests")
+	require.NoError(t, os.MkdirAll(filepath.Join(envRoot, "api"), 0o755))
+	require.NoError(t, os.MkdirAll(testsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(envRoot, "api", "app.py"), []byte("print('ok')"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(taskRoot, "test.sh"), []byte("#!/bin/sh\necho test\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(taskRoot, "instruction.txt"), []byte("do the task"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(testsDir, "check.txt"), []byte("check"), 0o644))
+
+	toolset, err := NewTerminalToolset(envRoot, ToolsetConfig{
+		TaskRoot:         taskRoot,
+		TestsDir:         testsDir,
+		ContainerEnvRoot: "/app",
+	})
+	require.NoError(t, err)
+
+	byName := map[string]core.Tool{}
+	for _, tool := range toolset {
+		byName[tool.Name()] = tool
+	}
+
+	ctx := context.Background()
+
+	readApp, err := byName["read_file"].Execute(ctx, map[string]any{"path": "/app/api/app.py"})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(readApp), "print('ok')")
+
+	readAppRelative, err := byName["read_file"].Execute(ctx, map[string]any{"path": "app/api/app.py"})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(readAppRelative), "print('ok')")
+
+	readTests, err := byName["read_file"].Execute(ctx, map[string]any{"path": "tests/check.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, "check", stringifyToolResult(readTests))
+
+	readTaskScript, err := byName["read_file"].Execute(ctx, map[string]any{"path": "test.sh"})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(readTaskScript), "echo test")
+
+	readInstruction, err := byName["read_file"].Execute(ctx, map[string]any{"path": "instruction.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, "do the task", stringifyToolResult(readInstruction))
+
+	readEnvironmentAlias, err := byName["read_file"].Execute(ctx, map[string]any{"path": "environment/api/app.py"})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(readEnvironmentAlias), "print('ok')")
+
+	readHostPath, err := byName["read_file"].Execute(ctx, map[string]any{"path": filepath.Join(taskRoot, "test.sh")})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(readHostPath), "echo test")
+}
+
+func TestNewTerminalToolset_SanitizesToolErrors(t *testing.T) {
+	taskRoot := t.TempDir()
+	envRoot := filepath.Join(taskRoot, "environment")
+	testsDir := filepath.Join(taskRoot, "tests")
+	require.NoError(t, os.MkdirAll(envRoot, 0o755))
+	require.NoError(t, os.MkdirAll(testsDir, 0o755))
+
+	toolset, err := NewTerminalToolset(envRoot, ToolsetConfig{
+		TaskRoot:         taskRoot,
+		TestsDir:         testsDir,
+		ContainerEnvRoot: "/app",
+	})
+	require.NoError(t, err)
+
+	byName := map[string]core.Tool{}
+	for _, tool := range toolset {
+		byName[tool.Name()] = tool
+	}
+
+	result, err := byName["read_file"].Execute(context.Background(), map[string]any{
+		"path": "/app/missing.txt",
+	})
+	require.NoError(t, err)
+	output := stringifyToolResult(result)
+	assert.Contains(t, output, "/app/missing.txt")
+	assert.NotContains(t, output, filepath.ToSlash(taskRoot))
+	assert.NotContains(t, output, filepath.ToSlash(envRoot))
+}
+
+func TestNewTerminalToolset_RunCommandUsesAliasWorkingDirectory(t *testing.T) {
+	taskRoot := t.TempDir()
+	envRoot := filepath.Join(taskRoot, "environment")
+	testsDir := filepath.Join(taskRoot, "tests")
+	require.NoError(t, os.MkdirAll(envRoot, 0o755))
+	require.NoError(t, os.MkdirAll(testsDir, 0o755))
+
+	runner := &recordingCommandRunner{}
+	toolset, err := NewTerminalToolset(envRoot, ToolsetConfig{
+		TaskRoot:      taskRoot,
+		TestsDir:      testsDir,
+		CommandRunner: runner,
+	})
+	require.NoError(t, err)
+
+	byName := map[string]core.Tool{}
+	for _, tool := range toolset {
+		byName[tool.Name()] = tool
+	}
+
+	result, err := byName["run_command"].Execute(context.Background(), map[string]any{
+		"command":           "pwd",
+		"working_directory": "tests",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(testsDir), runner.workingDir)
+	assert.Equal(t, "ok", strings.TrimSpace(stringifyToolResult(result)))
+}
+
 func assertToolNames(t *testing.T, toolset []core.Tool, names ...string) {
 	t.Helper()
 
@@ -99,4 +211,15 @@ func assertToolNames(t *testing.T, toolset []core.Tool, names ...string) {
 		actual = append(actual, tool.Name())
 	}
 	assert.ElementsMatch(t, names, actual)
+}
+
+type recordingCommandRunner struct {
+	workingDir string
+	command    string
+}
+
+func (r *recordingCommandRunner) Run(ctx context.Context, workingDir string, command string, extraEnv []string) ([]byte, error) {
+	r.workingDir = workingDir
+	r.command = command
+	return []byte("ok"), nil
 }

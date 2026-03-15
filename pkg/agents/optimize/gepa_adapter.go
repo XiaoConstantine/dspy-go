@@ -2,8 +2,8 @@ package optimize
 
 import (
 	"context"
-	"hash/fnv"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
 	"strconv"
@@ -20,10 +20,11 @@ import (
 const (
 	gepaMetadataArtifactsKey       = "artifacts"
 	gepaMetadataArtifactKeysKey    = "artifact_keys"
+	gepaMetadataIntArtifactKeysKey = "int_artifact_keys"
+	gepaMetadataIntMutationsKey    = "int_mutations"
 	gepaMetadataPrimaryArtifactKey = "primary_artifact"
 	gepaMetadataTraceSummaryKey    = "rich_trace_summary"
 	gepaMetadataTraceEvidenceKey   = "rich_trace_evidence"
-	gepaMetadataIntMutationsKey    = "int_mutations"
 	maxTraceSummarySteps           = 5
 	maxTraceEvidenceItems          = 12
 	maxFailedStepEvidence          = 4
@@ -39,14 +40,16 @@ type IntMutationConfig struct {
 
 // GEPAAdapterConfig configures the agent-to-GEPA bridge layer.
 type GEPAAdapterConfig struct {
-	PopulationSize  int
-	MaxGenerations  int
-	ReflectionFreq  int
-	ValidationSplit float64
-	ArtifactKeys    []ArtifactKey
-	EvalConcurrency int
-	PassThreshold   float64
-	PrimaryArtifact ArtifactKey
+	PopulationSize   int
+	MaxGenerations   int
+	ReflectionFreq   int
+	SearchBatchSize  int
+	StagnationLimit  int
+	ValidationSplit  float64
+	ArtifactKeys     []ArtifactKey
+	EvalConcurrency  int
+	PassThreshold    float64
+	PrimaryArtifact  ArtifactKey
 	IntMutationPlans map[string]IntMutationConfig
 }
 
@@ -56,10 +59,11 @@ func DefaultGEPAAdapterConfig() GEPAAdapterConfig {
 		PopulationSize:  8,
 		MaxGenerations:  4,
 		ReflectionFreq:  1,
+		SearchBatchSize: 4,
+		StagnationLimit: 60,
 		ValidationSplit: 0.2,
 		EvalConcurrency: 1,
 		PassThreshold:   1.0,
-		PrimaryArtifact: ArtifactSkillPack,
 	}
 }
 
@@ -109,18 +113,25 @@ func (o *GEPAAgentOptimizer) SeedCandidate(seed AgentArtifacts) (*optimizers.GEP
 	}
 
 	artifactKeys := o.config.resolveArtifactKeys(seed)
+	specs, err := o.buildArtifactProgramSpecs(seed)
+	if err != nil {
+		return nil, err
+	}
+	componentTexts := make(map[string]string, len(specs))
+	for _, spec := range specs {
+		componentTexts[spec.moduleName] = spec.instruction(seed)
+	}
 	candidate := &optimizers.GEPACandidate{
-		ID:          fmt.Sprintf("agent-candidate-%d", time.Now().UnixNano()),
-		ModuleName:  string(primary),
-		Instruction: seed.Text[primary],
-		ComponentTexts: map[string]string{
-			string(primary): seed.Text[primary],
-		},
-		Generation: 0,
-		CreatedAt:  time.Now(),
+		ID:             fmt.Sprintf("agent-candidate-%d", time.Now().UnixNano()),
+		ModuleName:     string(primary),
+		Instruction:    seed.Text[primary],
+		ComponentTexts: componentTexts,
+		Generation:     0,
+		CreatedAt:      time.Now(),
 		Metadata: map[string]interface{}{
 			gepaMetadataArtifactsKey:       serializeArtifacts(seed),
 			gepaMetadataArtifactKeysKey:    serializeArtifactKeys(artifactKeys),
+			gepaMetadataIntArtifactKeysKey: sortedIntArtifactKeys(o.config.normalizedIntMutationPlans()),
 			gepaMetadataPrimaryArtifactKey: string(primary),
 		},
 	}
@@ -130,14 +141,23 @@ func (o *GEPAAgentOptimizer) SeedCandidate(seed AgentArtifacts) (*optimizers.GEP
 
 // CandidateArtifacts reconstructs the full artifact set represented by a GEPA candidate.
 func (o *GEPAAgentOptimizer) CandidateArtifacts(candidate *optimizers.GEPACandidate) (AgentArtifacts, error) {
+	return o.candidateArtifactsWithBase(candidate, AgentArtifacts{})
+}
+
+func (o *GEPAAgentOptimizer) candidateArtifactsWithBase(candidate *optimizers.GEPACandidate, base AgentArtifacts) (AgentArtifacts, error) {
 	if candidate == nil {
 		return AgentArtifacts{}, fmt.Errorf("optimize: nil GEPA candidate")
 	}
 
-	artifacts := AgentArtifacts{
-		Text: make(map[ArtifactKey]string),
-		Int:  make(map[string]int),
-		Bool: make(map[string]bool),
+	artifacts := base.Clone()
+	if artifacts.Text == nil {
+		artifacts.Text = make(map[ArtifactKey]string)
+	}
+	if artifacts.Int == nil {
+		artifacts.Int = make(map[string]int)
+	}
+	if artifacts.Bool == nil {
+		artifacts.Bool = make(map[string]bool)
 	}
 
 	if candidate.Metadata != nil {
@@ -146,18 +166,39 @@ func (o *GEPAAgentOptimizer) CandidateArtifacts(candidate *optimizers.GEPACandid
 			if err != nil {
 				return AgentArtifacts{}, err
 			}
-			artifacts = decoded
+			artifacts = mergeArtifacts(artifacts, decoded)
 		}
 	}
 
-	primary := ArtifactKey(candidate.ModuleName)
-	if primary == "" {
-		primary = o.config.PrimaryArtifact
+	specs, err := o.buildArtifactProgramSpecs(artifacts)
+	if err != nil && len(candidate.ComponentTexts) > 0 {
+		return AgentArtifacts{}, err
 	}
-	if artifacts.Text == nil {
-		artifacts.Text = make(map[ArtifactKey]string)
+
+	for _, spec := range specs {
+		instruction, exists := candidate.ComponentTexts[spec.moduleName]
+		if !exists {
+			continue
+		}
+		switch spec.kind {
+		case artifactProgramKindText:
+			artifacts.Text[spec.textKey] = instruction
+		case artifactProgramKindInt:
+			artifacts.Int[spec.intKey] = parseIntArtifactInstruction(spec.intKey, instruction, artifacts.Int[spec.intKey], spec.intPlan)
+		}
 	}
-	artifacts.Text[primary] = candidate.Instruction
+
+	if strings.TrimSpace(candidate.Instruction) != "" {
+		switch moduleName := strings.TrimSpace(candidate.ModuleName); {
+		case moduleName == "":
+		case strings.HasPrefix(moduleName, "__int__:"):
+			intKey := strings.TrimPrefix(moduleName, "__int__:")
+			plan := o.config.normalizedIntMutationPlans()[intKey]
+			artifacts.Int[intKey] = parseIntArtifactInstruction(intKey, candidate.Instruction, artifacts.Int[intKey], &plan)
+		default:
+			artifacts.Text[ArtifactKey(moduleName)] = candidate.Instruction
+		}
+	}
 
 	return artifacts, nil
 }
@@ -193,6 +234,10 @@ func (o *GEPAAgentOptimizer) MaterializeAgent(artifacts AgentArtifacts) (Optimiz
 // EvaluateCandidate runs the adapter's evaluator over examples and converts the result
 // into GEPA fitness and trace records.
 func (o *GEPAAgentOptimizer) EvaluateCandidate(ctx context.Context, candidate *optimizers.GEPACandidate, examples []AgentExample) (*GEPACandidateEvaluation, error) {
+	return o.evaluateCandidateWithBase(ctx, candidate, AgentArtifacts{}, examples)
+}
+
+func (o *GEPAAgentOptimizer) evaluateCandidateWithBase(ctx context.Context, candidate *optimizers.GEPACandidate, base AgentArtifacts, examples []AgentExample) (*GEPACandidateEvaluation, error) {
 	if o == nil {
 		return nil, fmt.Errorf("optimize: nil GEPA agent optimizer")
 	}
@@ -203,11 +248,10 @@ func (o *GEPAAgentOptimizer) EvaluateCandidate(ctx context.Context, candidate *o
 		return nil, fmt.Errorf("optimize: nil GEPA candidate")
 	}
 
-	artifacts, err := o.CandidateArtifacts(candidate)
+	artifacts, err := o.candidateArtifactsWithBase(candidate, base)
 	if err != nil {
 		return nil, err
 	}
-	artifacts = o.applyConfiguredIntMutations(candidate, artifacts)
 
 	agent, err := o.MaterializeAgent(artifacts)
 	if err != nil {
@@ -256,7 +300,13 @@ func (cfg GEPAAdapterConfig) withDefaults() GEPAAdapterConfig {
 	if cfg.ReflectionFreq < 0 {
 		cfg.ReflectionFreq = defaults.ReflectionFreq
 	}
-	if cfg.ValidationSplit <= 0 {
+	if cfg.SearchBatchSize <= 0 {
+		cfg.SearchBatchSize = defaults.SearchBatchSize
+	}
+	if cfg.StagnationLimit <= 0 {
+		cfg.StagnationLimit = defaults.StagnationLimit
+	}
+	if cfg.ValidationSplit < 0 {
 		cfg.ValidationSplit = defaults.ValidationSplit
 	}
 	if cfg.EvalConcurrency <= 0 {
@@ -264,9 +314,6 @@ func (cfg GEPAAdapterConfig) withDefaults() GEPAAdapterConfig {
 	}
 	if cfg.PassThreshold <= 0 {
 		cfg.PassThreshold = defaults.PassThreshold
-	}
-	if cfg.PrimaryArtifact == "" {
-		cfg.PrimaryArtifact = defaults.PrimaryArtifact
 	}
 	return cfg
 }
@@ -322,6 +369,12 @@ func (cfg GEPAAdapterConfig) primaryArtifact(seed AgentArtifacts) (ArtifactKey, 
 	cfg = cfg.withDefaults()
 	if cfg.PrimaryArtifact != "" && strings.TrimSpace(seed.Text[cfg.PrimaryArtifact]) != "" {
 		return cfg.PrimaryArtifact, nil
+	}
+	if strings.TrimSpace(seed.Text[ArtifactToolPolicy]) != "" {
+		return ArtifactToolPolicy, nil
+	}
+	if strings.TrimSpace(seed.Text[ArtifactSkillPack]) != "" {
+		return ArtifactSkillPack, nil
 	}
 
 	keys := cfg.resolveArtifactKeys(seed)

@@ -15,6 +15,8 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms/openai"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewOpenAILLM(t *testing.T) {
@@ -1101,6 +1103,136 @@ func TestOpenAILLM_GenerateWithFunctions(t *testing.T) {
 	if capturedRequest.ToolChoice != "auto" {
 		t.Errorf("expected tool_choice auto, got %v", capturedRequest.ToolChoice)
 	}
+}
+
+func TestOpenAILLM_GenerateWithTools(t *testing.T) {
+	var capturedRequest openai.ChatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("expected /v1/chat/completions, got %s", r.URL.Path)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &capturedRequest); err != nil {
+			t.Fatalf("failed to parse request body: %v", err)
+		}
+
+		response := openai.ChatCompletionResponse{
+			ID:      "chatcmpl-tools",
+			Object:  "chat.completion",
+			Created: 1234567891,
+			Model:   "gpt-5-mini",
+			Choices: []openai.ChatChoice{
+				{
+					Index: 0,
+					Message: openai.ChatCompletionMessage{
+						Role: "assistant",
+						ToolCalls: []openai.ChatCompletionToolCall{
+							{
+								ID:   "call_finish",
+								Type: "function",
+								Function: openai.ChatCompletionFunctionCallDelta{
+									Name:      "Finish",
+									Arguments: `{"answer":"done"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+			Usage: openai.CompletionUsage{
+				PromptTokens:     14,
+				CompletionTokens: 6,
+				TotalTokens:      20,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT5Mini,
+		WithAPIKey("test-api-key"),
+		WithOpenAIBaseURL(server.URL),
+	)
+	require.NoError(t, err)
+
+	messages := []core.ChatMessage{
+		{
+			Role:    "user",
+			Content: []core.ContentBlock{core.NewTextBlock("Solve task")},
+		},
+		{
+			Role: "assistant",
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   "call_write",
+					Name: "write_file",
+					Arguments: map[string]any{
+						"path":    "answer.txt",
+						"content": "done",
+					},
+				},
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &core.ChatToolResult{
+				ToolCallID: "call_write",
+				Name:       "write_file",
+				Content:    []core.ContentBlock{core.NewTextBlock("ok")},
+			},
+		},
+	}
+	tools := []map[string]any{
+		{
+			"name":        "Finish",
+			"description": "Complete the task",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"answer": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}
+
+	result, err := llm.GenerateWithTools(context.Background(), messages, tools, core.WithMaxTokens(128))
+	require.NoError(t, err)
+
+	require.Len(t, capturedRequest.Messages, 3)
+	assert.Equal(t, "user", capturedRequest.Messages[0].Role)
+	assert.Equal(t, "Solve task", capturedRequest.Messages[0].Content)
+	assert.Equal(t, "assistant", capturedRequest.Messages[1].Role)
+	require.Len(t, capturedRequest.Messages[1].ToolCalls, 1)
+	assert.Equal(t, "call_write", capturedRequest.Messages[1].ToolCalls[0].ID)
+	assert.Equal(t, "write_file", capturedRequest.Messages[1].ToolCalls[0].Function.Name)
+	assert.Equal(t, "tool", capturedRequest.Messages[2].Role)
+	assert.Equal(t, "call_write", capturedRequest.Messages[2].ToolCallID)
+	assert.Equal(t, "ok", capturedRequest.Messages[2].Content)
+	require.Len(t, capturedRequest.Tools, 1)
+	assert.Equal(t, "auto", capturedRequest.ToolChoice)
+
+	functionCall, ok := result["function_call"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Finish", functionCall["name"])
+	assert.Equal(t, map[string]interface{}{"answer": "done"}, functionCall["arguments"])
+	toolCalls, ok := result["tool_calls"].([]core.ToolCall)
+	require.True(t, ok)
+	require.Len(t, toolCalls, 1)
+	assert.Equal(t, "call_finish", toolCalls[0].ID)
+	assert.Equal(t, 20, result["_usage"].(*core.TokenInfo).TotalTokens)
 }
 
 // Tests for new functional options pattern

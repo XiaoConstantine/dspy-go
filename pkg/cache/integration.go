@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -171,6 +172,17 @@ func (c *CachedLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	}
 
 	return result, nil
+}
+
+// GenerateWithTools preserves provider-native tool calling when the wrapped
+// LLM supports it. Native chat/tool sessions are stateful, so this path is
+// currently pass-through rather than cache-backed.
+func (c *CachedLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+	chatLLM, ok := c.LLM.(core.ToolCallingChatLLM)
+	if !ok {
+		return nil, fmt.Errorf("wrapped llm %s does not support native tool calling", c.ModelID())
+	}
+	return chatLLM.GenerateWithTools(ctx, messages, tools, options...)
 }
 
 // GenerateWithContent implements core.LLM with caching for multimodal content.

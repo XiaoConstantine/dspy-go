@@ -41,6 +41,12 @@ type Tool interface {
 	InputSchema() models.InputSchema
 }
 
+// CloneableTool is an optional interface for tools that can provide an
+// isolated copy for concurrent agent or optimizer execution.
+type CloneableTool interface {
+	CloneTool() Tool
+}
+
 // ToolResult wraps tool execution results with metadata.
 type ToolResult struct {
 	Data        interface{}            // The actual result data

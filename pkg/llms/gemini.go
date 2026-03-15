@@ -92,6 +92,7 @@ type geminiResponse struct {
 		Content struct {
 			Parts []geminiPart `json:"parts"`
 		} `json:"content"`
+		FinishReason string `json:"finishReason,omitempty"`
 	} `json:"candidates"`
 	UsageMetadata struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
@@ -106,6 +107,7 @@ type geminiFunctionCallResponse struct {
 		Content struct {
 			Parts []geminiPart `json:"parts"`
 		} `json:"content"`
+		FinishReason string `json:"finishReason,omitempty"`
 	} `json:"candidates"`
 	UsageMetadata struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
@@ -113,6 +115,7 @@ type geminiFunctionCallResponse struct {
 		TotalTokenCount      int `json:"totalTokenCount"`
 		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 	} `json:"usageMetadata"`
+	PromptFeedback map[string]any `json:"promptFeedback,omitempty"`
 }
 type geminiFunctionCall struct {
 	Name      string                 `json:"name"`
@@ -755,9 +758,18 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 		}
 	}
 
-	// If no content or function call was found, add a default message
+	// If no content or function call was found, add a default message and stamp
+	// provider diagnostics so callers can distinguish an actually empty Gemini
+	// tool-call response from a normal plain-text reply.
 	if len(result) == 0 {
 		result["content"] = "No content or function call received from model"
+		result["provider_diagnostic"] = geminiEmptyToolResponseDiagnostic(
+			"functions",
+			geminiResp.Candidates[0].FinishReason,
+			len(geminiResp.Candidates),
+			len(geminiResp.Candidates[0].Content.Parts),
+			geminiResp.PromptFeedback,
+		)
 	}
 
 	// Add token usage information
@@ -832,8 +844,35 @@ func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatM
 	for key, value := range responseMetadata {
 		result[key] = value
 	}
+	if _, hasContent := result["content"]; !hasContent && len(toolCalls) == 0 {
+		result["content"] = "No content or function call received from model"
+		result["provider_diagnostic"] = geminiEmptyToolResponseDiagnostic(
+			"tools",
+			geminiResp.Candidates[0].FinishReason,
+			len(geminiResp.Candidates),
+			len(geminiResp.Candidates[0].Content.Parts),
+			geminiResp.PromptFeedback,
+		)
+	}
 
 	return result, nil
+}
+
+func geminiEmptyToolResponseDiagnostic(mode, finishReason string, candidateCount, partCount int, promptFeedback map[string]any) map[string]any {
+	diagnostic := map[string]any{
+		"provider":        "google",
+		"provider_mode":   mode,
+		"reason":          "empty_content_and_function_call",
+		"candidate_count": candidateCount,
+		"part_count":      partCount,
+	}
+	if strings.TrimSpace(finishReason) != "" {
+		diagnostic["finish_reason"] = finishReason
+	}
+	if len(promptFeedback) > 0 {
+		diagnostic["prompt_feedback"] = promptFeedback
+	}
+	return diagnostic
 }
 
 // CreateEmbedding implements the embedding generation for a single input.

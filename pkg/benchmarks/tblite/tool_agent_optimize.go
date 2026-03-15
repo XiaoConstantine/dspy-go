@@ -3,6 +3,7 @@ package tblite
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
@@ -112,6 +113,7 @@ func terminalTaskRequestFromInput(input map[string]interface{}) (TerminalTaskReq
 		TestScriptPath:   stringValue(input["test_script_path"]),
 		DockerImage:      stringValue(input["docker_image"]),
 		MaxTurns:         intValue(input["max_turns"]),
+		AgentTimeout:     durationValue(input["agent_timeout"]),
 	}
 	if req.TaskID == "" {
 		return TerminalTaskRequest{}, fmt.Errorf("task_id is required")
@@ -148,6 +150,23 @@ func intValue(value interface{}) int {
 		return int(typed)
 	case float64:
 		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func durationValue(value interface{}) time.Duration {
+	switch typed := value.(type) {
+	case time.Duration:
+		return typed
+	case int:
+		return time.Duration(typed)
+	case int32:
+		return time.Duration(typed)
+	case int64:
+		return time.Duration(typed)
+	case float64:
+		return time.Duration(typed)
 	default:
 		return 0
 	}

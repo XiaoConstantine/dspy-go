@@ -45,6 +45,31 @@ func (a AgentArtifacts) Clone() AgentArtifacts {
 	return cloned
 }
 
+func mergeArtifacts(base, overlay AgentArtifacts) AgentArtifacts {
+	merged := base.Clone()
+	if merged.Text == nil {
+		merged.Text = make(map[ArtifactKey]string)
+	}
+	if merged.Int == nil {
+		merged.Int = make(map[string]int)
+	}
+	if merged.Bool == nil {
+		merged.Bool = make(map[string]bool)
+	}
+
+	for key, value := range overlay.Text {
+		merged.Text[key] = value
+	}
+	for key, value := range overlay.Int {
+		merged.Int[key] = value
+	}
+	for key, value := range overlay.Bool {
+		merged.Bool[key] = value
+	}
+
+	return merged
+}
+
 // OptimizableAgent is a parallel interface that exposes mutable artifacts
 // without widening the base agents.Agent contract.
 //

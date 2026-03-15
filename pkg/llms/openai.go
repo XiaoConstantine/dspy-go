@@ -364,55 +364,48 @@ func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
 	}
 
-	choice := response.Choices[0]
-	result := map[string]interface{}{}
+	return buildOpenAIToolResult(response.Choices[0], response.Usage, "functions")
+}
 
-	if content := strings.TrimSpace(choice.Message.Content); content != "" {
-		result["content"] = content
+// GenerateWithTools implements native multi-turn tool calling for OpenAI.
+func (o *OpenAILLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]interface{}, error) {
+	if len(tools) == 0 {
+		return nil, errors.New(errors.InvalidInput, "at least one tool schema is required")
 	}
 
-	if len(choice.Message.ToolCalls) > 0 {
-		call := choice.Message.ToolCalls[0]
-		args, err := parseOpenAIFunctionArguments(call.Function.Arguments)
-		if err != nil {
-			return nil, errors.WithFields(
-				errors.Wrap(err, errors.InvalidResponse, "failed to parse tool call arguments"),
-				errors.Fields{
-					"tool_name": call.Function.Name,
-				},
-			)
-		}
-		result["function_call"] = map[string]interface{}{
-			"name":      call.Function.Name,
-			"arguments": args,
-		}
-	} else if choice.Message.FunctionCall != nil && choice.Message.FunctionCall.Name != "" {
-		args, err := parseOpenAIFunctionArguments(choice.Message.FunctionCall.Arguments)
-		if err != nil {
-			return nil, errors.WithFields(
-				errors.Wrap(err, errors.InvalidResponse, "failed to parse legacy function call arguments"),
-				errors.Fields{
-					"tool_name": choice.Message.FunctionCall.Name,
-				},
-			)
-		}
-		result["function_call"] = map[string]interface{}{
-			"name":      choice.Message.FunctionCall.Name,
-			"arguments": args,
-		}
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
 	}
 
-	if len(result) == 0 {
-		result["content"] = "No content or function call received from model"
+	openAIMessages, err := convertCoreChatMessagesToOpenAI(messages)
+	if err != nil {
+		return nil, err
 	}
 
-	result["_usage"] = &core.TokenInfo{
-		PromptTokens:     response.Usage.PromptTokens,
-		CompletionTokens: response.Usage.CompletionTokens,
-		TotalTokens:      response.Usage.TotalTokens,
+	openAITools, err := convertOpenAIAnyToolSchemas(tools)
+	if err != nil {
+		return nil, err
 	}
 
-	return result, nil
+	request := &openai.ChatCompletionRequest{
+		Model:      o.ModelID(),
+		Messages:   openAIMessages,
+		Tools:      openAITools,
+		ToolChoice: "auto",
+	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
+
+	response, err := o.makeRequest(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(response.Choices) == 0 {
+		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
+	}
+
+	return buildOpenAIToolResult(response.Choices[0], response.Usage, "tools")
 }
 
 func convertOpenAIFunctionSchemas(functions []map[string]interface{}) ([]openai.ChatCompletionTool, error) {
@@ -455,6 +448,14 @@ func convertOpenAIFunctionSchemas(functions []map[string]interface{}) ([]openai.
 	return tools, nil
 }
 
+func convertOpenAIAnyToolSchemas(functions []map[string]any) ([]openai.ChatCompletionTool, error) {
+	converted := make([]map[string]interface{}, 0, len(functions))
+	for _, function := range functions {
+		converted = append(converted, anyMapToInterfaceMap(function))
+	}
+	return convertOpenAIFunctionSchemas(converted)
+}
+
 func parseOpenAIFunctionArguments(raw string) (map[string]interface{}, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -480,6 +481,150 @@ func cloneMap(in map[string]interface{}) map[string]interface{} {
 		out[k] = v
 	}
 	return out
+}
+
+func anyMapToInterfaceMap(in map[string]any) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.ChatCompletionMessage, error) {
+	out := make([]openai.ChatCompletionMessage, 0, len(messages))
+	lastToolCallID := ""
+
+	for messageIndex, message := range messages {
+		openAIMessage := openai.ChatCompletionMessage{
+			Role:    strings.TrimSpace(message.Role),
+			Content: flattenCoreChatMessageContent(message.Content),
+		}
+
+		switch openAIMessage.Role {
+		case "assistant":
+			if len(message.ToolCalls) > 0 {
+				openAIMessage.ToolCalls = make([]openai.ChatCompletionToolCall, 0, len(message.ToolCalls))
+				for toolIndex, toolCall := range message.ToolCalls {
+					argumentsJSON, err := json.Marshal(toolCall.Arguments)
+					if err != nil {
+						return nil, errors.WithFields(
+							errors.Wrap(err, errors.InvalidInput, "failed to encode assistant tool call arguments"),
+							errors.Fields{"tool_name": toolCall.Name},
+						)
+					}
+
+					toolCallID := strings.TrimSpace(toolCall.ID)
+					if toolCallID == "" {
+						toolCallID = fmt.Sprintf("call_%d_%d", messageIndex, toolIndex)
+					}
+					lastToolCallID = toolCallID
+
+					openAIMessage.ToolCalls = append(openAIMessage.ToolCalls, openai.ChatCompletionToolCall{
+						ID:   toolCallID,
+						Type: "function",
+						Function: openai.ChatCompletionFunctionCallDelta{
+							Name:      toolCall.Name,
+							Arguments: string(argumentsJSON),
+						},
+					})
+				}
+			} else {
+				lastToolCallID = ""
+			}
+		case "tool":
+			if message.ToolResult != nil {
+				openAIMessage.Content = flattenCoreChatMessageContent(message.ToolResult.Content)
+				openAIMessage.ToolCallID = strings.TrimSpace(message.ToolResult.ToolCallID)
+				if openAIMessage.ToolCallID == "" {
+					openAIMessage.ToolCallID = lastToolCallID
+				}
+			}
+		default:
+			lastToolCallID = ""
+		}
+
+		out = append(out, openAIMessage)
+	}
+
+	return out, nil
+}
+
+func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		text := strings.TrimSpace(block.String())
+		if text == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsage, mode string) (map[string]interface{}, error) {
+	result := map[string]interface{}{}
+
+	if content := strings.TrimSpace(choice.Message.Content); content != "" {
+		result["content"] = content
+	}
+
+	if len(choice.Message.ToolCalls) > 0 {
+		toolCalls := make([]core.ToolCall, 0, len(choice.Message.ToolCalls))
+		for _, call := range choice.Message.ToolCalls {
+			args, err := parseOpenAIFunctionArguments(call.Function.Arguments)
+			if err != nil {
+				return nil, errors.WithFields(
+					errors.Wrap(err, errors.InvalidResponse, "failed to parse tool call arguments"),
+					errors.Fields{"tool_name": call.Function.Name},
+				)
+			}
+			toolCalls = append(toolCalls, core.ToolCall{
+				ID:        call.ID,
+				Name:      call.Function.Name,
+				Arguments: args,
+			})
+		}
+		result["tool_calls"] = toolCalls
+		result["function_call"] = map[string]interface{}{
+			"name":      toolCalls[0].Name,
+			"arguments": toolCalls[0].Arguments,
+		}
+	} else if choice.Message.FunctionCall != nil && choice.Message.FunctionCall.Name != "" {
+		args, err := parseOpenAIFunctionArguments(choice.Message.FunctionCall.Arguments)
+		if err != nil {
+			return nil, errors.WithFields(
+				errors.Wrap(err, errors.InvalidResponse, "failed to parse legacy function call arguments"),
+				errors.Fields{"tool_name": choice.Message.FunctionCall.Name},
+			)
+		}
+		result["function_call"] = map[string]interface{}{
+			"name":      choice.Message.FunctionCall.Name,
+			"arguments": args,
+		}
+	}
+
+	if len(result) == 0 {
+		result["content"] = "No content or function call received from model"
+		result["provider_diagnostic"] = map[string]any{
+			"provider":      "openai",
+			"provider_mode": mode,
+			"reason":        "empty_content_and_function_call",
+			"finish_reason": choice.FinishReason,
+		}
+	}
+
+	result["_usage"] = &core.TokenInfo{
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+	}
+
+	return result, nil
 }
 
 // CreateEmbedding implements the core.LLM interface.

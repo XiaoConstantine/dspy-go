@@ -71,6 +71,22 @@ func TestGEPAAgentOptimizer_MaterializeAgentFallsBackToFactory(t *testing.T) {
 	assert.Equal(t, artifacts.Clone(), agent.GetArtifacts())
 }
 
+func TestGEPAAgentOptimizer_SeedCandidatePrefersToolPolicyByDefault(t *testing.T) {
+	optimizer := NewGEPAAgentOptimizer(nil, nil, GEPAAdapterConfig{})
+
+	candidate, err := optimizer.SeedCandidate(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack:  "Generic system framing.",
+			ArtifactToolPolicy: "Use narrow, evidence-seeking tool calls.",
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, candidate)
+
+	assert.Equal(t, string(ArtifactToolPolicy), candidate.ModuleName)
+	assert.Equal(t, "Use narrow, evidence-seeking tool calls.", candidate.Instruction)
+}
+
 func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
 	baseAgent.outputs["first"] = map[string]interface{}{
@@ -140,7 +156,7 @@ func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T
 	assert.Contains(t, evaluation.Traces[1].ContextData, "diagnostics")
 }
 
-func TestGEPAAgentOptimizer_EvaluateCandidate_AppliesStableIntMutationPlans(t *testing.T) {
+func TestGEPAAgentOptimizer_EvaluateCandidate_UsesWholeProgramIntArtifacts(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
 	baseAgent.outputs["turn-budget"] = map[string]interface{}{
 		"answer": "ok",
@@ -154,22 +170,16 @@ func TestGEPAAgentOptimizer_EvaluateCandidate_AppliesStableIntMutationPlans(t *t
 		},
 	})
 
-	candidate := &optimizers.GEPACandidate{
-		ID:          "candidate-stable-int",
-		ModuleName:  string(ArtifactToolPolicy),
-		Instruction: "Prefer focused terminal actions.",
-		Metadata: map[string]interface{}{
-			gepaMetadataArtifactsKey: serializeArtifacts(AgentArtifacts{
-				Text: map[ArtifactKey]string{
-					ArtifactToolPolicy: "Prefer focused terminal actions.",
-				},
-				Int: map[string]int{
-					"max_turns": 20,
-				},
-				Bool: map[string]bool{},
-			}),
+	candidate, err := optimizer.SeedCandidate(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactToolPolicy: "Prefer focused terminal actions.",
 		},
-	}
+		Int: map[string]int{
+			"max_turns": 20,
+		},
+	})
+	require.NoError(t, err)
+	candidate.ComponentTexts[intArtifactModuleName("max_turns")] = "Set max_turns to 12."
 
 	examples := []AgentExample{{
 		ID: "turn-budget",
@@ -183,20 +193,11 @@ func TestGEPAAgentOptimizer_EvaluateCandidate_AppliesStableIntMutationPlans(t *t
 
 	firstEval, err := optimizer.EvaluateCandidate(context.Background(), candidate, examples)
 	require.NoError(t, err)
-	firstTurns := firstEval.Artifacts.Int["max_turns"]
-	assert.GreaterOrEqual(t, firstTurns, 8)
-	assert.LessOrEqual(t, firstTurns, 24)
+	assert.Equal(t, 12, firstEval.Artifacts.Int["max_turns"])
 
-	secondEval, err := optimizer.EvaluateCandidate(context.Background(), candidate, examples)
+	decoded, err := optimizer.CandidateArtifacts(candidate)
 	require.NoError(t, err)
-	assert.Equal(t, firstTurns, secondEval.Artifacts.Int["max_turns"])
-
-	records, ok := candidate.Metadata[gepaMetadataIntMutationsKey].(map[string]interface{})
-	require.True(t, ok)
-	maxTurnRecord, ok := records["max_turns"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "candidate-stable-int", maxTurnRecord["candidate_id"])
-	assert.Equal(t, firstTurns, int(maxTurnRecord["value"].(int)))
+	assert.Equal(t, 12, decoded.Int["max_turns"])
 }
 
 func TestBuildMultiObjectiveFitness_CountsEvaluationFailuresOnce(t *testing.T) {

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -17,8 +19,10 @@ const (
 )
 
 type dockerTaskRuntime struct {
-	containerID string
-	taskRoot    string
+	containerID      string
+	taskRoot         string
+	environmentRoot  string
+	containerEnvRoot string
 }
 
 func startDockerTaskRuntime(ctx context.Context, task *MaterializedTask, image string) (*dockerTaskRuntime, error) {
@@ -33,13 +37,22 @@ func startDockerTaskRuntime(ctx context.Context, task *MaterializedTask, image s
 	if err != nil {
 		return nil, fmt.Errorf("resolve task root: %w", err)
 	}
+	environmentRoot, err := filepath.Abs(task.EnvironmentDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve environment root: %w", err)
+	}
+	containerEnvRoot, err := detectContainerEnvironmentRoot(task)
+	if err != nil {
+		return nil, err
+	}
 
 	args := []string{
 		"run",
 		"-d",
 		"--rm",
 		"-v", taskRoot + ":" + containerTaskRoot,
-		"-w", containerEnvDir,
+		"-v", environmentRoot + ":" + containerEnvRoot,
+		"-w", containerEnvRoot,
 		image,
 		defaultShellPath,
 		"-lc",
@@ -61,8 +74,10 @@ func startDockerTaskRuntime(ctx context.Context, task *MaterializedTask, image s
 	}
 
 	return &dockerTaskRuntime{
-		containerID: containerID,
-		taskRoot:    taskRoot,
+		containerID:      containerID,
+		taskRoot:         taskRoot,
+		environmentRoot:  environmentRoot,
+		containerEnvRoot: containerEnvRoot,
 	}, nil
 }
 
@@ -115,12 +130,26 @@ func (r *dockerTaskRuntime) ReadFile(ctx context.Context, path string) (string, 
 func (r *dockerTaskRuntime) containerPathForHost(hostPath string) (string, error) {
 	hostPath = strings.TrimSpace(hostPath)
 	if hostPath == "" {
-		return containerEnvDir, nil
+		return r.containerEnvironmentRoot(), nil
 	}
 
 	absPath, err := filepath.Abs(hostPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve host path: %w", err)
+	}
+
+	environmentRoot := filepath.Clean(r.environmentRoot)
+	if environmentRoot != "" {
+		if absPath == environmentRoot {
+			return r.containerEnvironmentRoot(), nil
+		}
+		if strings.HasPrefix(absPath, environmentRoot+string(filepath.Separator)) {
+			rel, err := filepath.Rel(environmentRoot, absPath)
+			if err != nil {
+				return "", fmt.Errorf("compute environment relative path: %w", err)
+			}
+			return path.Join(r.containerEnvironmentRoot(), filepath.ToSlash(rel)), nil
+		}
 	}
 
 	taskRoot := filepath.Clean(r.taskRoot)
@@ -136,4 +165,58 @@ func (r *dockerTaskRuntime) containerPathForHost(hostPath string) (string, error
 		return "", fmt.Errorf("compute relative path: %w", err)
 	}
 	return filepath.ToSlash(filepath.Join(containerTaskRoot, rel)), nil
+}
+
+func (r *dockerTaskRuntime) containerEnvironmentRoot() string {
+	if r == nil || strings.TrimSpace(r.containerEnvRoot) == "" {
+		return containerEnvDir
+	}
+	return r.containerEnvRoot
+}
+
+func detectContainerEnvironmentRoot(task *MaterializedTask) (string, error) {
+	if task == nil || strings.TrimSpace(task.EnvironmentDir) == "" {
+		return containerEnvDir, nil
+	}
+
+	dockerfilePath := filepath.Join(task.EnvironmentDir, "Dockerfile")
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return containerEnvDir, nil
+		}
+		return "", fmt.Errorf("read task Dockerfile: %w", err)
+	}
+
+	workdir := parseDockerfileWorkdir(string(data))
+	if strings.TrimSpace(workdir) == "" {
+		return containerEnvDir, nil
+	}
+	return workdir, nil
+}
+
+func parseDockerfileWorkdir(contents string) string {
+	current := "/"
+	for _, rawLine := range strings.Split(contents, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		upper := strings.ToUpper(line)
+		if !strings.HasPrefix(upper, "WORKDIR ") {
+			continue
+		}
+
+		value := strings.TrimSpace(line[len("WORKDIR "):])
+		value = strings.Trim(value, `"'`)
+		if value == "" {
+			continue
+		}
+		if strings.HasPrefix(value, "/") {
+			current = path.Clean(value)
+			continue
+		}
+		current = path.Clean(path.Join(current, value))
+	}
+	return current
 }

@@ -113,6 +113,191 @@ func TestToolCallingAgent_RunTask_FailsAfterMaxTurns(t *testing.T) {
 	assert.Contains(t, result.Error, "max turns reached")
 }
 
+func TestToolCallingAgent_BuildTaskPrompt_IncludesFinishGuidance(t *testing.T) {
+	agent, err := NewToolCallingAgent(&toolCallingStubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+	}, ToolCallingAgentConfig{MaxTurns: 20})
+	require.NoError(t, err)
+
+	prompt := agent.buildTaskPrompt(TerminalTaskRequest{
+		TaskID:           "task-3",
+		Instruction:      "Build the API and verify it.",
+		TaskDir:          "/tmp/task",
+		WorkingDirectory: "/tmp/task/environment",
+		EnvironmentDir:   "/tmp/task/environment",
+		TestsDir:         "/tmp/task/tests",
+		TestScriptPath:   "/tmp/task/test.sh",
+		MaxTurns:         20,
+	})
+
+	assert.Contains(t, prompt, "call Finish when done")
+	assert.Contains(t, prompt, "health check, evaluation script, or verifier-style command succeeds")
+}
+
+func TestToolCallingAgent_RunTask_UsesNativeToolCallingWhenAvailable(t *testing.T) {
+	llm := &nativeToolCallingStubLLM{
+		toolCallingStubLLM: toolCallingStubLLM{
+			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			results: []map[string]any{
+				{
+					"function_call": map[string]any{
+						"name": "write_file",
+						"arguments": map[string]any{
+							"path":    "answer.txt",
+							"content": "done",
+						},
+					},
+					"_usage": &core.TokenInfo{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+				},
+				{
+					"function_call": map[string]any{
+						"name": "Finish",
+						"arguments": map[string]any{
+							"answer": "updated answer.txt",
+						},
+					},
+					"_usage": &core.TokenInfo{PromptTokens: 4, CompletionTokens: 2, TotalTokens: 6},
+				},
+			},
+		},
+	}
+
+	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 4})
+	require.NoError(t, err)
+
+	taskDir := t.TempDir()
+	envDir := filepath.Join(taskDir, "environment")
+	require.NoError(t, os.MkdirAll(envDir, 0o755))
+	testsDir := filepath.Join(taskDir, "tests")
+	require.NoError(t, os.MkdirAll(testsDir, 0o755))
+
+	result, err := agent.RunTask(context.Background(), TerminalTaskRequest{
+		TaskID:           "task-native",
+		Instruction:      "Write answer.txt with the word done.",
+		TaskDir:          taskDir,
+		WorkingDirectory: envDir,
+		EnvironmentDir:   envDir,
+		TestsDir:         testsDir,
+		TestScriptPath:   filepath.Join(taskDir, "test.sh"),
+		MaxTurns:         4,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Completed)
+	assert.Len(t, llm.messages, 2)
+	assert.Empty(t, llm.prompts)
+}
+
+func TestToolCallingAgent_RunTask_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
+	llm := &toolCallingStubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"content": "No content or function call received from model",
+				"provider_diagnostic": map[string]any{
+					"provider":      "google",
+					"provider_mode": "functions",
+					"reason":        "empty_content_and_function_call",
+					"finish_reason": "STOP",
+				},
+			},
+			{
+				"content": "No content or function call received from model",
+				"provider_diagnostic": map[string]any{
+					"provider":      "google",
+					"provider_mode": "functions",
+					"reason":        "empty_content_and_function_call",
+					"finish_reason": "STOP",
+				},
+			},
+			{
+				"content": "No content or function call received from model",
+				"provider_diagnostic": map[string]any{
+					"provider":      "google",
+					"provider_mode": "functions",
+					"reason":        "empty_content_and_function_call",
+					"finish_reason": "STOP",
+				},
+			},
+		},
+	}
+
+	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 20})
+	require.NoError(t, err)
+
+	taskDir := t.TempDir()
+	envDir := filepath.Join(taskDir, "environment")
+	require.NoError(t, os.MkdirAll(envDir, 0o755))
+
+	result, err := agent.RunTask(context.Background(), TerminalTaskRequest{
+		TaskID:           "task-no-call",
+		Instruction:      "Use a tool before finishing.",
+		TaskDir:          taskDir,
+		WorkingDirectory: envDir,
+		EnvironmentDir:   envDir,
+		TestsDir:         filepath.Join(taskDir, "tests"),
+		MaxTurns:         20,
+	})
+	require.NoError(t, err)
+	require.False(t, result.Completed)
+	assert.Contains(t, result.Error, "repeated model responses without tool calls")
+	assert.NotEmpty(t, result.TracePath)
+
+	traceBytes, err := os.ReadFile(result.TracePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(traceBytes), "\"reason\": \"empty_content_and_function_call\"")
+	assert.Contains(t, string(traceBytes), "\"finish_reason\": \"STOP\"")
+}
+
+func TestToolCallingAgent_RunTask_PromptUsesContainerAliases(t *testing.T) {
+	llm := &toolCallingStubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name": "Finish",
+					"arguments": map[string]any{
+						"answer": "done",
+					},
+				},
+			},
+		},
+	}
+
+	agent, err := NewToolCallingAgent(llm, ToolCallingAgentConfig{MaxTurns: 1})
+	require.NoError(t, err)
+
+	taskDir := t.TempDir()
+	envDir := filepath.Join(taskDir, "environment")
+	testsDir := filepath.Join(taskDir, "tests")
+	require.NoError(t, os.MkdirAll(envDir, 0o755))
+	require.NoError(t, os.MkdirAll(testsDir, 0o755))
+
+	result, err := agent.RunTask(context.Background(), TerminalTaskRequest{
+		TaskID:           "task-prompt",
+		Instruction:      "Inspect the workspace.",
+		TaskDir:          taskDir,
+		WorkingDirectory: envDir,
+		EnvironmentDir:   envDir,
+		TestsDir:         testsDir,
+		TestScriptPath:   filepath.Join(taskDir, "test.sh"),
+		ContainerEnv: []string{
+			EnvTaskRoot + "=" + containerTaskRoot,
+			EnvTaskEnvDir + "=/app",
+			EnvTaskTestsDir + "=" + containerTestsDir,
+		},
+		MaxTurns: 1,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Completed)
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "- working directory: /app")
+	assert.Contains(t, llm.prompts[0], "- tests directory: /task/tests")
+	assert.Contains(t, llm.prompts[0], "- test script: /task/test.sh")
+	assert.NotContains(t, llm.prompts[0], taskDir)
+	assert.NotContains(t, llm.prompts[0], envDir)
+	assert.NotContains(t, llm.prompts[0], testsDir)
+}
+
 type toolCallingStubLLM struct {
 	results      []map[string]any
 	index        int
@@ -168,4 +353,25 @@ func (m *toolCallingStubLLM) ProviderName() string { return "stub" }
 func (m *toolCallingStubLLM) ModelID() string      { return "stub-model" }
 func (m *toolCallingStubLLM) Capabilities() []core.Capability {
 	return m.capabilities
+}
+
+type nativeToolCallingStubLLM struct {
+	toolCallingStubLLM
+	messages [][]core.ChatMessage
+}
+
+func (m *nativeToolCallingStubLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+	messagesCopy := append([]core.ChatMessage(nil), messages...)
+	m.messages = append(m.messages, messagesCopy)
+	opts := core.NewGenerateOptions()
+	for _, option := range options {
+		option(opts)
+	}
+	m.lastOptions = opts
+	if m.index >= len(m.results) {
+		return nil, fmt.Errorf("no more stubbed results")
+	}
+	result := m.results[m.index]
+	m.index++
+	return result, nil
 }

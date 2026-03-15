@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,14 +53,14 @@ type TokenUsage struct {
 
 // TerminalTaskResult captures the agent side of a benchmark run.
 type TerminalTaskResult struct {
-	Completed  bool              `json:"completed"`
-	FinalAnswer string           `json:"final_answer,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	Duration   time.Duration     `json:"duration"`
-	ToolCalls  int               `json:"tool_calls,omitempty"`
-	TokenUsage TokenUsage        `json:"token_usage,omitempty"`
-	TracePath  string            `json:"trace_path,omitempty"`
-	Metadata   map[string]any    `json:"metadata,omitempty"`
+	Completed   bool           `json:"completed"`
+	FinalAnswer string         `json:"final_answer,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	Duration    time.Duration  `json:"duration"`
+	ToolCalls   int            `json:"tool_calls,omitempty"`
+	TokenUsage  TokenUsage     `json:"token_usage,omitempty"`
+	TracePath   string         `json:"trace_path,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 // TestResult captures benchmark verification output from test.sh.
@@ -81,10 +82,10 @@ type EvaluationResult struct {
 
 // RunnerConfig configures TBLite benchmark execution.
 type RunnerConfig struct {
-	MaxTurns            int
-	ShellPath           string
-	ExtraEnv            []string
-	UseTaskContainers   bool
+	MaxTurns             int
+	ShellPath            string
+	ExtraEnv             []string
+	UseTaskContainers    bool
 	RespectAgentMaxTurns bool
 }
 
@@ -146,7 +147,7 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 		req.ContainerID = runtime.containerID
 		req.ContainerEnv = []string{
 			EnvTaskRoot + "=" + containerTaskRoot,
-			EnvTaskEnvDir + "=" + containerEnvDir,
+			EnvTaskEnvDir + "=" + runtime.containerEnvironmentRoot(),
 			EnvTaskTestsDir + "=" + containerTestsDir,
 		}
 	}
@@ -183,7 +184,13 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 	var runErr error
 	if runtime != nil {
 		var output []byte
-		output, runErr = runtime.Exec(ctx, task.EnvironmentDir, r.config.ShellPath, fmt.Sprintf("%s %s", r.config.ShellPath, containerTaskRoot+"/test.sh"), append([]string{}, r.config.ExtraEnv...))
+		verifierEnv := append([]string{}, r.config.ExtraEnv...)
+		verifierEnv = append(verifierEnv,
+			EnvTaskRoot+"="+containerTaskRoot,
+			EnvTaskEnvDir+"="+runtime.containerEnvironmentRoot(),
+			EnvTaskTestsDir+"="+containerTestsDir,
+		)
+		output, runErr = runtime.Exec(ctx, task.EnvironmentDir, r.config.ShellPath, fmt.Sprintf("%s %s", r.config.ShellPath, containerTaskRoot+"/test.sh"), verifierEnv)
 		if runErr != nil {
 			stderr.Write(output)
 		} else {
@@ -223,7 +230,7 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 			}
 			result.Stderr += fmt.Sprintf("missing verifier reward: %v", err)
 		} else {
-			result.Passed = reward == "1"
+			result.Passed = verifierRewardPassed(reward)
 			if !result.Passed && result.ExitCode == 0 {
 				result.ExitCode = 1
 			}
@@ -241,4 +248,19 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 	}
 
 	return nil, fmt.Errorf("run verifier: %w", runErr)
+}
+
+func verifierRewardPassed(reward string) bool {
+	reward = strings.TrimSpace(reward)
+	if reward == "" {
+		return false
+	}
+	if reward == "1" {
+		return true
+	}
+	value, err := strconv.ParseFloat(reward, 64)
+	if err != nil {
+		return false
+	}
+	return value >= 1.0
 }

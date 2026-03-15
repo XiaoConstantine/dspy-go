@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	sharednative "github.com/XiaoConstantine/dspy-go/pkg/agents/native"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
 )
 
 const traceFileName = ".dspy_tblite_trace.json"
@@ -28,7 +28,7 @@ type ToolCallingAgentConfig struct {
 	FinishToolText string
 }
 
-// ToolCallingAgent executes terminal benchmark tasks with native provider tool calling.
+// ToolCallingAgent adapts the shared dspy-go native tool-calling harness to TBLite tasks.
 type ToolCallingAgent struct {
 	llm       core.LLM
 	config    ToolCallingAgentConfig
@@ -63,7 +63,7 @@ type ToolCallTraceStep struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-// NewToolCallingAgent creates a benchmark agent that uses provider-native tool calling.
+// NewToolCallingAgent creates a benchmark agent that uses the shared native tool-calling harness.
 func NewToolCallingAgent(llm core.LLM, cfg ToolCallingAgentConfig) (*ToolCallingAgent, error) {
 	if llm == nil {
 		return nil, fmt.Errorf("llm is required")
@@ -76,9 +76,6 @@ func NewToolCallingAgent(llm core.LLM, cfg ToolCallingAgentConfig) (*ToolCalling
 	}
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 2048
-	}
-	if cfg.Temperature == 0 {
-		cfg.Temperature = 0
 	}
 	if cfg.FinishToolText == "" {
 		cfg.FinishToolText = "Call this tool when the task is complete and summarize what changed in the answer."
@@ -106,218 +103,82 @@ func (a *ToolCallingAgent) RunTask(ctx context.Context, req TerminalTaskRequest)
 	}
 
 	toolCfg := a.config.Toolset
+	toolCfg.TaskRoot = req.TaskDir
+	toolCfg.TestsDir = req.TestsDir
+	toolCfg.ContainerEnvRoot = containerEnvValue(req.ContainerEnv, EnvTaskEnvDir, "")
 	if req.ContainerID != "" && toolCfg.CommandRunner == nil {
 		toolCfg.CommandRunner = dockerCommandRunner{
 			runtime: &dockerTaskRuntime{
-				containerID: req.ContainerID,
-				taskRoot:    req.TaskDir,
+				containerID:      req.ContainerID,
+				taskRoot:         req.TaskDir,
+				environmentRoot:  req.EnvironmentDir,
+				containerEnvRoot: containerEnvValue(req.ContainerEnv, EnvTaskEnvDir, containerEnvDir),
 			},
 			extraEnv:  req.ContainerEnv,
 			shellPath: toolCfg.ShellPath,
 		}
 	}
 
-	toolRegistry := toolspkg.NewInMemoryToolRegistry()
 	toolset, err := NewTerminalToolset(req.EnvironmentDir, toolCfg)
 	if err != nil {
 		return nil, err
 	}
+
+	sharedAgent, err := sharednative.NewAgent(a.llm, sharednative.Config{
+		MaxTurns:       a.config.MaxTurns,
+		MaxTokens:      a.config.MaxTokens,
+		Temperature:    a.config.Temperature,
+		SystemPrompt:   a.config.SystemPrompt,
+		ToolPolicy:     a.config.ToolPolicy,
+		FinishToolText: a.config.FinishToolText,
+	})
+	if err != nil {
+		return nil, err
+	}
 	for _, tool := range toolset {
-		if err := toolRegistry.Register(tool); err != nil {
+		if err := sharedAgent.RegisterTool(tool); err != nil {
 			return nil, fmt.Errorf("register tool %q: %w", tool.Name(), err)
 		}
 	}
 
-	functions, err := toolspkg.BuildFunctionSchemas(toolRegistry)
+	resultMap, err := sharedAgent.Execute(runCtx, map[string]interface{}{
+		"task":      a.buildTaskPrompt(req),
+		"task_id":   req.TaskID,
+		"max_turns": a.maxTurns(req),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("build tool schemas: %w", err)
-	}
-	functions = append(functions, toolspkg.BuildFinishFunctionSchema(a.config.FinishToolText))
-
-	startedAt := time.Now()
-	trace := ToolCallTrace{
-		TaskID:      req.TaskID,
-		Model:       a.llm.ModelID(),
-		Provider:    a.llm.ProviderName(),
-		Instruction: req.Instruction,
-		StartedAt:   startedAt,
-		Steps:       make([]ToolCallTraceStep, 0, a.maxTurns(req)),
-	}
-	totalUsage := TokenUsage{}
-	transcript := make([]toolTurn, 0, a.maxTurns(req))
-
-	for turn := 0; turn < a.maxTurns(req); turn++ {
-		prompt := a.buildPrompt(req, transcript)
-		options := []core.GenerateOption{core.WithMaxTokens(a.config.MaxTokens)}
-		if a.config.Temperature >= 0 {
-			options = append(options, core.WithTemperature(a.config.Temperature))
-		}
-		result, err := a.llm.GenerateWithFunctions(runCtx, prompt, functions, options...)
-		if err != nil {
-			trace.Duration = time.Since(startedAt)
-			trace.Error = err.Error()
-			a.storeExecutionTrace(req, trace, totalUsage)
-			traceFile, writeErr := writeTrace(req.TaskDir, trace)
-			if writeErr != nil {
-				return nil, fmt.Errorf("write failed trace: %w", writeErr)
-			}
-			return &TerminalTaskResult{
-				Completed:  false,
-				Error:      err.Error(),
-				Duration:   trace.Duration,
-				TokenUsage: totalUsage,
-				TracePath:  traceFile,
-				Metadata: map[string]any{
-					"turns": len(trace.Steps),
-				},
-			}, nil
-		}
-
-		step := ToolCallTraceStep{Index: turn + 1}
-		addUsage(&totalUsage, result["_usage"])
-		if usage, ok := result["_usage"].(*core.TokenInfo); ok {
-			step.Usage = tokenUsageFromCore(usage)
-		}
-
-		if content, ok := result["content"].(string); ok && strings.TrimSpace(content) != "" {
-			step.AssistantText = strings.TrimSpace(content)
-		}
-
-		call, hasCall := result["function_call"].(map[string]any)
-		if !hasCall {
-			trace.Steps = append(trace.Steps, step)
-			transcript = append(transcript, toolTurn{
-				AssistantText: step.AssistantText,
-				Observation:   "Model returned text without a tool call. It must use a tool or Finish.",
-				IsError:       true,
-			})
-			continue
-		}
-
-		toolName, _ := call["name"].(string)
-		arguments, _ := call["arguments"].(map[string]any)
-		if arguments == nil {
-			arguments = map[string]any{}
-		}
-		step.ToolName = toolName
-		step.Arguments = core.ShallowCopyMap(arguments)
-
-		if strings.EqualFold(toolName, "finish") {
-			finalAnswer := extractFinishAnswer(arguments, step.AssistantText)
-			trace.Completed = true
-			trace.FinalAnswer = finalAnswer
-			trace.Steps = append(trace.Steps, step)
-			trace.Duration = time.Since(startedAt)
-			a.storeExecutionTrace(req, trace, totalUsage)
-			traceFile, err := writeTrace(req.TaskDir, trace)
-			if err != nil {
-				return nil, err
-			}
-			return &TerminalTaskResult{
-				Completed:   true,
-				FinalAnswer: finalAnswer,
-				Duration:    trace.Duration,
-				ToolCalls:   countExecutedTools(trace.Steps),
-				TokenUsage:  totalUsage,
-				TracePath:   traceFile,
-				Metadata: map[string]any{
-					"provider": a.llm.ProviderName(),
-					"model":    a.llm.ModelID(),
-					"turns":    len(trace.Steps),
-				},
-			}, nil
-		}
-
-		tool, err := toolRegistry.Get(toolName)
-		if err != nil {
-			step.IsError = true
-			step.Observation = fmt.Sprintf("unknown tool %q: %v", toolName, err)
-			trace.Steps = append(trace.Steps, step)
-			transcript = append(transcript, toolTurn{
-				ToolName:      toolName,
-				Arguments:     step.Arguments,
-				Observation:   step.Observation,
-				IsError:       true,
-				AssistantText: step.AssistantText,
-			})
-			continue
-		}
-
-		if err := tool.Validate(arguments); err != nil {
-			step.IsError = true
-			step.Observation = fmt.Sprintf("invalid tool arguments: %v", err)
-			trace.Steps = append(trace.Steps, step)
-			transcript = append(transcript, toolTurn{
-				ToolName:      toolName,
-				Arguments:     step.Arguments,
-				Observation:   step.Observation,
-				IsError:       true,
-				AssistantText: step.AssistantText,
-			})
-			continue
-		}
-
-		toolResult, err := tool.Execute(runCtx, arguments)
-		if err != nil {
-			step.IsError = true
-			step.Observation = fmt.Sprintf("tool execution failed: %v", err)
-		} else {
-			step.Observation = stringifyToolResult(toolResult)
-			if isError, _ := toolResult.Metadata["isError"].(bool); isError {
-				step.IsError = true
-			}
-		}
-
-		trace.Steps = append(trace.Steps, step)
-		transcript = append(transcript, toolTurn{
-			ToolName:      toolName,
-			Arguments:     step.Arguments,
-			Observation:   step.Observation,
-			IsError:       step.IsError,
-			AssistantText: step.AssistantText,
-		})
+		return nil, err
 	}
 
-	trace.Duration = time.Since(startedAt)
-	trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", a.maxTurns(req))
-	a.storeExecutionTrace(req, trace, totalUsage)
+	nativeTrace := sharedAgent.LastNativeTrace()
+	if nativeTrace == nil {
+		return nil, fmt.Errorf("shared tool-calling agent did not record a trace")
+	}
+	trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
 	traceFile, err := writeTrace(req.TaskDir, trace)
 	if err != nil {
 		return nil, err
 	}
-	return &TerminalTaskResult{
-		Completed:  false,
-		Error:      trace.Error,
-		Duration:   trace.Duration,
-		ToolCalls:  countExecutedTools(trace.Steps),
-		TokenUsage: totalUsage,
-		TracePath:  traceFile,
+
+	a.traceMu.Lock()
+	a.lastTrace = sharedAgent.LastExecutionTrace()
+	a.traceMu.Unlock()
+
+	result := &TerminalTaskResult{
+		Completed:   boolValue(resultMap["completed"]),
+		FinalAnswer: stringValue(resultMap["final_answer"]),
+		Error:       stringValue(resultMap["error"]),
+		Duration:    nativeTrace.Duration,
+		ToolCalls:   countExecutedTools(trace.Steps),
+		TokenUsage:  tokenUsageFromShared(nativeTrace.TokenUsage),
+		TracePath:   traceFile,
 		Metadata: map[string]any{
 			"provider": a.llm.ProviderName(),
 			"model":    a.llm.ModelID(),
 			"turns":    len(trace.Steps),
 		},
-	}, nil
-}
-
-const defaultToolCallingSystemPrompt = `You are a terminal task benchmark agent.
-
-Work only inside the provided benchmark workspace.
-Use the available tools to inspect files, edit files, and run commands.
-Prefer concrete progress over narration.`
-
-const defaultToolCallingToolPolicy = `Use narrow, evidence-seeking tool calls.
-Start by locating the relevant files before making edits.
-Prefer short targeted reads and focused shell commands over broad dumps.
-After meaningful edits, run the smallest relevant verification before continuing.
-Do not loop indefinitely: if you have enough evidence and the task is complete, call Finish.`
-
-type toolTurn struct {
-	AssistantText string
-	ToolName      string
-	Arguments     map[string]any
-	Observation   string
-	IsError       bool
+	}
+	return result, nil
 }
 
 type dockerCommandRunner struct {
@@ -332,54 +193,47 @@ func (r dockerCommandRunner) Run(ctx context.Context, workingDir string, command
 	return r.runtime.Exec(ctx, workingDir, r.shellPath, command, env)
 }
 
-func (a *ToolCallingAgent) buildPrompt(req TerminalTaskRequest, turns []toolTurn) string {
+func (a *ToolCallingAgent) buildTaskPrompt(req TerminalTaskRequest) string {
 	var b strings.Builder
-	b.WriteString(a.config.SystemPrompt)
-	b.WriteString("\n\n")
 	b.WriteString("TASK INSTRUCTION:\n")
 	b.WriteString(req.Instruction)
 	b.WriteString("\n\n")
-	if strings.TrimSpace(a.config.ToolPolicy) != "" {
-		b.WriteString("TOOL POLICY:\n")
-		b.WriteString(a.config.ToolPolicy)
-		b.WriteString("\n\n")
-	}
 	b.WriteString("WORKSPACE:\n")
 	b.WriteString("- task id: " + req.TaskID + "\n")
-	b.WriteString("- working directory: " + req.WorkingDirectory + "\n")
-	b.WriteString("- tests directory: " + req.TestsDir + "\n")
-	b.WriteString("- test script: " + req.TestScriptPath + "\n\n")
-	b.WriteString("You must use tools to work in the workspace and call Finish when done.\n")
-
-	if len(turns) == 0 {
-		b.WriteString("\nNo prior steps yet.\n")
-		return b.String()
-	}
-
-	b.WriteString("\nPRIOR STEPS:\n")
-	for i, turn := range turns {
-		fmt.Fprintf(&b, "Step %d:\n", i+1)
-		if turn.AssistantText != "" {
-			fmt.Fprintf(&b, "Assistant: %s\n", turn.AssistantText)
-		}
-		if turn.ToolName != "" {
-			fmt.Fprintf(&b, "Tool: %s\n", turn.ToolName)
-			if len(turn.Arguments) > 0 {
-				argBytes, _ := json.Marshal(turn.Arguments)
-				fmt.Fprintf(&b, "Arguments: %s\n", string(argBytes))
-			}
-		}
-		if turn.Observation != "" {
-			if turn.IsError {
-				fmt.Fprintf(&b, "Observation (error): %s\n", turn.Observation)
-			} else {
-				fmt.Fprintf(&b, "Observation: %s\n", turn.Observation)
-			}
-		}
-		b.WriteString("\n")
-	}
-
+	b.WriteString("- working directory: " + promptWorkingDirectory(req) + "\n")
+	b.WriteString("- tests directory: " + promptTestsDirectory(req) + "\n")
+	b.WriteString("- test script: " + promptTestScript(req) + "\n")
+	b.WriteString(fmt.Sprintf("- max turns: %d\n\n", a.maxTurns(req)))
+	b.WriteString("Use the available tools to inspect, edit, run commands, verify progress, and call Finish when done.\n")
+	b.WriteString("If a health check, evaluation script, or verifier-style command succeeds and the required outputs exist, call Finish immediately instead of spending turns on extra inspection.\n")
 	return b.String()
+}
+
+func promptWorkingDirectory(req TerminalTaskRequest) string {
+	if root := containerEnvValue(req.ContainerEnv, EnvTaskEnvDir, ""); strings.TrimSpace(root) != "" {
+		return root
+	}
+	if strings.TrimSpace(req.TaskDir) != "" {
+		return containerEnvDir
+	}
+	return req.WorkingDirectory
+}
+
+func promptTestsDirectory(req TerminalTaskRequest) string {
+	if root := containerEnvValue(req.ContainerEnv, EnvTaskTestsDir, ""); strings.TrimSpace(root) != "" {
+		return root
+	}
+	if strings.TrimSpace(req.TaskDir) != "" {
+		return containerTestsDir
+	}
+	return req.TestsDir
+}
+
+func promptTestScript(req TerminalTaskRequest) string {
+	if strings.TrimSpace(req.TaskDir) != "" {
+		return containerTaskRoot + "/test.sh"
+	}
+	return req.TestScriptPath
 }
 
 func (a *ToolCallingAgent) maxTurns(req TerminalTaskRequest) int {
@@ -401,51 +255,44 @@ func writeTrace(taskDir string, trace ToolCallTrace) (string, error) {
 	return tracePath, nil
 }
 
-func extractFinishAnswer(arguments map[string]any, fallback string) string {
-	if answer, ok := arguments["answer"].(string); ok && strings.TrimSpace(answer) != "" {
-		return strings.TrimSpace(answer)
+func nativeTraceToToolCallTrace(trace *sharednative.Trace, instruction string) ToolCallTrace {
+	if trace == nil {
+		return ToolCallTrace{Instruction: instruction}
 	}
-	return strings.TrimSpace(fallback)
+
+	steps := make([]ToolCallTraceStep, 0, len(trace.Steps))
+	for _, step := range trace.Steps {
+		steps = append(steps, ToolCallTraceStep{
+			Index:         step.Index,
+			AssistantText: step.AssistantText,
+			ToolName:      step.ToolName,
+			Arguments:     core.ShallowCopyMap(step.Arguments),
+			Observation:   step.Observation,
+			IsError:       step.IsError,
+			Usage:         tokenUsageFromShared(step.Usage),
+			Metadata:      core.ShallowCopyMap(step.Metadata),
+		})
+	}
+
+	return ToolCallTrace{
+		TaskID:      trace.TaskID,
+		Model:       trace.Model,
+		Provider:    trace.Provider,
+		Instruction: instruction,
+		StartedAt:   trace.StartedAt,
+		Duration:    trace.Duration,
+		Completed:   trace.Completed,
+		FinalAnswer: trace.FinalAnswer,
+		Error:       trace.Error,
+		Steps:       steps,
+	}
 }
 
-func stringifyToolResult(result core.ToolResult) string {
-	text := strings.TrimSpace(fmt.Sprint(result.Data))
-	if text == "" {
-		text = "(no output)"
-	}
-	if isError, _ := result.Metadata["isError"].(bool); isError {
-		return "tool reported error: " + text
-	}
-	return text
-}
-
-func supportsFunctionCalling(llm core.LLM) bool {
-	for _, capability := range llm.Capabilities() {
-		if capability == core.CapabilityToolCalling {
-			return true
-		}
-	}
-	return false
-}
-
-func addUsage(total *TokenUsage, raw any) {
-	usage, ok := raw.(*core.TokenInfo)
-	if !ok || usage == nil {
-		return
-	}
-	total.PromptTokens += int64(usage.PromptTokens)
-	total.CompletionTokens += int64(usage.CompletionTokens)
-	total.TotalTokens += int64(usage.TotalTokens)
-}
-
-func tokenUsageFromCore(usage *core.TokenInfo) TokenUsage {
-	if usage == nil {
-		return TokenUsage{}
-	}
+func tokenUsageFromShared(usage sharednative.TokenUsage) TokenUsage {
 	return TokenUsage{
-		PromptTokens:     int64(usage.PromptTokens),
-		CompletionTokens: int64(usage.CompletionTokens),
-		TotalTokens:      int64(usage.TotalTokens),
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
 	}
 }
 
@@ -459,79 +306,55 @@ func countExecutedTools(steps []ToolCallTraceStep) int {
 	return count
 }
 
-func (a *ToolCallingAgent) storeExecutionTrace(req TerminalTaskRequest, trace ToolCallTrace, usage TokenUsage) {
-	if a == nil {
-		return
-	}
-
-	toolUsage := make(map[string]int)
-	steps := make([]agents.TraceStep, 0, len(trace.Steps))
-	for _, step := range trace.Steps {
-		if strings.TrimSpace(step.ToolName) != "" && !strings.EqualFold(step.ToolName, "finish") {
-			toolUsage[step.ToolName]++
+func supportsFunctionCalling(llm core.LLM) bool {
+	for _, capability := range llm.Capabilities() {
+		if capability == core.CapabilityToolCalling {
+			return true
 		}
-		steps = append(steps, agents.TraceStep{
-			Index:       step.Index,
-			Thought:     step.AssistantText,
-			Tool:        step.ToolName,
-			Arguments:   core.ShallowCopyMap(step.Arguments),
-			Observation: step.Observation,
-			Success:     !step.IsError,
-			Error:       boolError(step.IsError, step.Observation),
-		})
 	}
-
-	status := agents.TraceStatusFailure
-	if trace.Completed {
-		status = agents.TraceStatusSuccess
-	}
-	if !trace.Completed && len(steps) > 0 {
-		status = agents.TraceStatusPartial
-	}
-
-	execTrace := &agents.ExecutionTrace{
-		AgentID:        fmt.Sprintf("tblite-%s-%s", a.llm.ProviderName(), a.llm.ModelID()),
-		AgentType:      "tblite-tool-calling",
-		Task:           req.TaskID,
-		Input:          map[string]interface{}{"instruction": req.Instruction, "working_directory": req.WorkingDirectory, "tests_dir": req.TestsDir},
-		Output:         map[string]interface{}{"completed": trace.Completed, "final_answer": trace.FinalAnswer},
-		Steps:          steps,
-		Status:         status,
-		Error:          trace.Error,
-		StartedAt:      trace.StartedAt,
-		CompletedAt:    trace.StartedAt.Add(trace.Duration),
-		ProcessingTime: trace.Duration,
-		TokenUsage: map[string]int64{
-			"prompt_tokens":     usage.PromptTokens,
-			"completion_tokens": usage.CompletionTokens,
-			"total_tokens":      usage.TotalTokens,
-		},
-		ToolUsageCount:   toolUsage,
-		ContextMetadata:  map[string]interface{}{"turns": len(trace.Steps)},
-		TerminationCause: traceTerminationCause(trace),
-	}
-
-	a.traceMu.Lock()
-	a.lastTrace = execTrace
-	a.traceMu.Unlock()
+	return false
 }
 
-func traceTerminationCause(trace ToolCallTrace) string {
-	if trace.Completed {
-		return "finish"
+func containerEnvValue(env []string, key string, fallback string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			value := strings.TrimSpace(strings.TrimPrefix(entry, prefix))
+			if value != "" {
+				return value
+			}
+		}
 	}
-	if strings.Contains(strings.ToLower(trace.Error), "max turns") {
-		return "max_turns"
-	}
-	if strings.TrimSpace(trace.Error) != "" {
-		return "error"
-	}
-	return "unknown"
+	return fallback
 }
 
-func boolError(isError bool, observation string) string {
-	if !isError {
-		return ""
+func stringifyToolResult(result core.ToolResult) string {
+	text := strings.TrimSpace(fmt.Sprint(result.Data))
+	if text == "" {
+		text = "(no output)"
 	}
-	return observation
+	if isError, _ := result.Metadata["isError"].(bool); isError {
+		return "tool reported error: " + text
+	}
+	return text
 }
+
+func boolValue(value interface{}) bool {
+	if typed, ok := value.(bool); ok {
+		return typed
+	}
+	return false
+}
+
+const defaultToolCallingSystemPrompt = `You are a terminal task benchmark agent.
+
+Work only inside the provided benchmark workspace.
+Use the available tools to inspect files, edit files, and run commands.
+Prefer concrete progress over narration.`
+
+const defaultToolCallingToolPolicy = `Use narrow, evidence-seeking tool calls.
+Start by locating the relevant files before making edits.
+Prefer short targeted reads and focused shell commands over broad dumps.
+After meaningful edits, run the smallest relevant verification before continuing.
+Do not loop indefinitely: if you have enough evidence and the task is complete, call Finish.
+When a health check, evaluation script, or verifier-style command succeeds and required outputs are present, stop and call Finish immediately.`

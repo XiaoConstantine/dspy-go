@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -83,4 +84,22 @@ func TestToolCallingAgent_ArtifactsCloneAndTrace(t *testing.T) {
 	assert.Equal(t, int64(5), trace.TokenUsage["total_tokens"])
 	require.NotEmpty(t, llm.prompts)
 	assert.Contains(t, llm.prompts[0], "TOOL POLICY:\nprefer short commands and focused verification")
+}
+
+func TestTerminalTaskRequestFromInput_PreservesAgentTimeout(t *testing.T) {
+	req, err := terminalTaskRequestFromInput(map[string]interface{}{
+		"task_id":           "timeout-task",
+		"instruction":       "do work",
+		"task_dir":          "/tmp/task",
+		"working_directory": "/tmp/task/environment",
+		"environment_dir":   "/tmp/task/environment",
+		"tests_dir":         "/tmp/task/tests",
+		"agent_timeout":     int64(15 * time.Second),
+		"max_turns":         7,
+		"test_script_path":  "/tmp/task/test.sh",
+		"docker_image":      "example:latest",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 15*time.Second, req.AgentTimeout)
+	assert.Equal(t, 7, req.MaxTurns)
 }

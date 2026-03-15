@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,10 +25,13 @@ const (
 
 // ToolsetConfig controls the benchmark-local terminal/file tools exposed to the agent.
 type ToolsetConfig struct {
-	OutputLimit    int
-	CommandTimeout time.Duration
-	CommandRunner  CommandRunner
-	ShellPath      string
+	OutputLimit      int
+	CommandTimeout   time.Duration
+	CommandRunner    CommandRunner
+	ShellPath        string
+	TaskRoot         string
+	TestsDir         string
+	ContainerEnvRoot string
 }
 
 // CommandRunner abstracts shell command execution for benchmark tools.
@@ -40,6 +44,10 @@ func NewTerminalToolset(rootDir string, cfg ToolsetConfig) ([]core.Tool, error) 
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve root dir: %w", err)
+	}
+	resolver, err := newToolPathResolver(absRoot, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	if cfg.OutputLimit <= 0 {
@@ -56,16 +64,16 @@ func NewTerminalToolset(rootDir string, cfg ToolsetConfig) ([]core.Tool, error) 
 	}
 
 	tools := []core.Tool{
-		newListFilesTool(absRoot, cfg.OutputLimit),
-		newReadFileTool(absRoot, cfg.OutputLimit),
-		newWriteFileTool(absRoot, cfg.OutputLimit),
-		newRunCommandTool(absRoot, cfg.OutputLimit, cfg.CommandTimeout, cfg.CommandRunner),
+		newListFilesTool(resolver, cfg.OutputLimit),
+		newReadFileTool(resolver, cfg.OutputLimit),
+		newWriteFileTool(resolver, cfg.OutputLimit),
+		newRunCommandTool(resolver, cfg.OutputLimit, cfg.CommandTimeout, cfg.CommandRunner),
 	}
 
 	return tools, nil
 }
 
-func newListFilesTool(rootDir string, outputLimit int) core.Tool {
+func newListFilesTool(resolver toolPathResolver, outputLimit int) core.Tool {
 	schema := models.InputSchema{
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
@@ -84,7 +92,7 @@ func newListFilesTool(rootDir string, outputLimit int) core.Tool {
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 			_ = ctx
 
-			targetPath, err := resolveToolPath(rootDir, stringArg(args, "path", "."))
+			targetPath, err := resolver.resolve(stringArg(args, "path", "."))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
@@ -92,14 +100,14 @@ func newListFilesTool(rootDir string, outputLimit int) core.Tool {
 			recursive := boolArg(args, "recursive")
 			entries, err := listEntries(targetPath, recursive)
 			if err != nil {
-				return textToolResult(err.Error(), true), nil
+				return textToolResult(resolver.sanitizeError(err.Error()), true), nil
 			}
 
 			return textToolResult(truncateString(strings.Join(entries, "\n"), outputLimit), false), nil
 		})
 }
 
-func newReadFileTool(rootDir string, outputLimit int) core.Tool {
+func newReadFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 	schema := models.InputSchema{
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
@@ -115,21 +123,21 @@ func newReadFileTool(rootDir string, outputLimit int) core.Tool {
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 			_ = ctx
 
-			targetPath, err := resolveToolPath(rootDir, requiredStringArg(args, "path"))
+			targetPath, err := resolver.resolve(requiredStringArg(args, "path"))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
 
 			data, err := os.ReadFile(targetPath)
 			if err != nil {
-				return textToolResult(fmt.Sprintf("read file: %v", err), true), nil
+				return textToolResult(fmt.Sprintf("read file: %s", resolver.sanitizeError(err.Error())), true), nil
 			}
 
 			return textToolResult(truncateString(string(data), outputLimit), false), nil
 		})
 }
 
-func newWriteFileTool(rootDir string, outputLimit int) core.Tool {
+func newWriteFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 	schema := models.InputSchema{
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
@@ -150,25 +158,25 @@ func newWriteFileTool(rootDir string, outputLimit int) core.Tool {
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 			_ = ctx
 
-			targetPath, err := resolveToolPath(rootDir, requiredStringArg(args, "path"))
+			targetPath, err := resolver.resolve(requiredStringArg(args, "path"))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
 
 			content := requiredStringArg(args, "content")
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return textToolResult(fmt.Sprintf("create parent directories: %v", err), true), nil
+				return textToolResult(fmt.Sprintf("create parent directories: %s", resolver.sanitizeError(err.Error())), true), nil
 			}
 			if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
-				return textToolResult(fmt.Sprintf("write file: %v", err), true), nil
+				return textToolResult(fmt.Sprintf("write file: %s", resolver.sanitizeError(err.Error())), true), nil
 			}
 
-			message := fmt.Sprintf("wrote %d bytes to %s", len(content), filepath.Base(targetPath))
+			message := fmt.Sprintf("wrote %d bytes to %s", len(content), resolver.displayPath(targetPath))
 			return textToolResult(truncateString(message, outputLimit), false), nil
 		})
 }
 
-func newRunCommandTool(rootDir string, outputLimit int, commandTimeout time.Duration, runner CommandRunner) core.Tool {
+func newRunCommandTool(resolver toolPathResolver, outputLimit int, commandTimeout time.Duration, runner CommandRunner) core.Tool {
 	schema := models.InputSchema{
 		Type: "object",
 		Properties: map[string]models.ParameterSchema{
@@ -195,7 +203,7 @@ func newRunCommandTool(rootDir string, outputLimit int, commandTimeout time.Dura
 				return textToolResult("run_command requires a non-empty command", true), nil
 			}
 
-			workingDir, err := resolveToolPath(rootDir, stringArg(args, "working_directory", "."))
+			workingDir, err := resolver.resolve(stringArg(args, "working_directory", "."))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
@@ -236,22 +244,265 @@ func (r hostCommandRunner) Run(ctx context.Context, workingDir string, command s
 }
 
 func resolveToolPath(rootDir, relativePath string) (string, error) {
-	cleaned := filepath.Clean(strings.TrimSpace(relativePath))
-	if cleaned == "." || cleaned == "" {
-		return rootDir, nil
+	return newResolverForRoot(rootDir).resolve(relativePath)
+}
+
+type toolPathResolver struct {
+	rootDir          string
+	taskRoot         string
+	testsDir         string
+	containerEnvRoot string
+}
+
+func newResolverForRoot(rootDir string) toolPathResolver {
+	return toolPathResolver{rootDir: filepath.Clean(rootDir)}
+}
+
+func newToolPathResolver(rootDir string, cfg ToolsetConfig) (toolPathResolver, error) {
+	resolver := toolPathResolver{rootDir: filepath.Clean(rootDir)}
+	if strings.TrimSpace(cfg.TaskRoot) != "" {
+		taskRoot, err := filepath.Abs(cfg.TaskRoot)
+		if err != nil {
+			return toolPathResolver{}, fmt.Errorf("resolve task root: %w", err)
+		}
+		resolver.taskRoot = filepath.Clean(taskRoot)
+	}
+	if strings.TrimSpace(cfg.TestsDir) != "" {
+		testsDir, err := filepath.Abs(cfg.TestsDir)
+		if err != nil {
+			return toolPathResolver{}, fmt.Errorf("resolve tests dir: %w", err)
+		}
+		resolver.testsDir = filepath.Clean(testsDir)
+	}
+	if strings.TrimSpace(cfg.ContainerEnvRoot) != "" {
+		resolver.containerEnvRoot = cleanContainerPath(cfg.ContainerEnvRoot)
+	}
+	return resolver, nil
+}
+
+func (r toolPathResolver) resolve(input string) (string, error) {
+	raw := strings.TrimSpace(input)
+	if raw == "" || raw == "." {
+		return r.rootDir, nil
 	}
 
-	target := filepath.Join(rootDir, cleaned)
+	if mapped, ok, err := r.resolveAlias(raw); err != nil {
+		return "", err
+	} else if ok {
+		return mapped, nil
+	}
+
+	cleaned := filepath.Clean(raw)
+	target := filepath.Join(r.rootDir, cleaned)
+	return r.ensureWithinAllowed(target, input)
+}
+
+func (r toolPathResolver) resolveAlias(input string) (string, bool, error) {
+	if r.taskRoot == "" {
+		return "", false, nil
+	}
+
+	if filepath.IsAbs(input) {
+		return r.resolveAbsoluteAlias(input)
+	}
+
+	cleaned := filepath.Clean(input)
+	switch cleaned {
+	case "test.sh", "./test.sh":
+		mapped, err := r.ensureWithinAllowed(filepath.Join(r.taskRoot, "test.sh"), input)
+		return mapped, err == nil, err
+	case "instruction.txt", "./instruction.txt":
+		mapped, err := r.ensureWithinAllowed(filepath.Join(r.taskRoot, "instruction.txt"), input)
+		return mapped, err == nil, err
+	case "tests":
+		if r.testsDir != "" {
+			mapped, err := r.ensureWithinAllowed(r.testsDir, input)
+			return mapped, err == nil, err
+		}
+	case "environment":
+		mapped, err := r.ensureWithinAllowed(r.rootDir, input)
+		return mapped, err == nil, err
+	}
+
+	if mapped, ok := r.resolveRelativeAlias(cleaned); ok {
+		allowed, err := r.ensureWithinAllowed(mapped, input)
+		return allowed, err == nil, err
+	}
+	return "", false, nil
+}
+
+func (r toolPathResolver) resolveAbsoluteAlias(input string) (string, bool, error) {
+	cleaned := filepath.Clean(input)
+	if mapped, ok := r.matchHostPath(cleaned); ok {
+		return mapped, true, nil
+	}
+
+	if strings.HasPrefix(cleaned, containerTaskRoot) {
+		rel := strings.TrimPrefix(cleaned, containerTaskRoot)
+		rel = strings.TrimPrefix(rel, string(filepath.Separator))
+		mapped, err := r.ensureWithinAllowed(filepath.Join(r.taskRoot, rel), input)
+		return mapped, err == nil, err
+	}
+	if r.testsDir != "" && (cleaned == "/tests" || strings.HasPrefix(cleaned, "/tests/")) {
+		rel := strings.TrimPrefix(cleaned, "/tests")
+		rel = strings.TrimPrefix(rel, string(filepath.Separator))
+		mapped, err := r.ensureWithinAllowed(filepath.Join(r.testsDir, rel), input)
+		return mapped, err == nil, err
+	}
+	if r.containerEnvRoot != "" && (cleaned == r.containerEnvRoot || strings.HasPrefix(cleaned, r.containerEnvRoot+"/")) {
+		rel := strings.TrimPrefix(cleaned, r.containerEnvRoot)
+		rel = strings.TrimPrefix(rel, string(filepath.Separator))
+		mapped, err := r.ensureWithinAllowed(filepath.Join(r.rootDir, rel), input)
+		return mapped, err == nil, err
+	}
+	return "", false, nil
+}
+
+func (r toolPathResolver) resolveRelativeAlias(cleaned string) (string, bool) {
+	if cleaned == "" || cleaned == "." {
+		return r.rootDir, true
+	}
+	if strings.HasPrefix(cleaned, "tests"+string(filepath.Separator)) && r.testsDir != "" {
+		return filepath.Join(r.testsDir, strings.TrimPrefix(cleaned, "tests"+string(filepath.Separator))), true
+	}
+	if strings.HasPrefix(cleaned, "environment"+string(filepath.Separator)) {
+		return filepath.Join(r.rootDir, strings.TrimPrefix(cleaned, "environment"+string(filepath.Separator))), true
+	}
+
+	containerAlias := strings.TrimPrefix(r.containerEnvRoot, "/")
+	if containerAlias != "" {
+		if cleaned == containerAlias {
+			return r.rootDir, true
+		}
+		if strings.HasPrefix(cleaned, containerAlias+string(filepath.Separator)) {
+			return filepath.Join(r.rootDir, strings.TrimPrefix(cleaned, containerAlias+string(filepath.Separator))), true
+		}
+		aliasBase := filepath.Base(containerAlias)
+		if aliasBase != containerAlias {
+			if cleaned == aliasBase {
+				return r.rootDir, true
+			}
+			if strings.HasPrefix(cleaned, aliasBase+string(filepath.Separator)) {
+				return filepath.Join(r.rootDir, strings.TrimPrefix(cleaned, aliasBase+string(filepath.Separator))), true
+			}
+		}
+	}
+	return "", false
+}
+
+func (r toolPathResolver) matchHostPath(input string) (string, bool) {
+	if r.taskRoot == "" {
+		return "", false
+	}
+	input = filepath.Clean(input)
+	switch {
+	case input == r.rootDir || strings.HasPrefix(input, r.rootDir+string(filepath.Separator)):
+		return input, true
+	case r.testsDir != "" && (input == r.testsDir || strings.HasPrefix(input, r.testsDir+string(filepath.Separator))):
+		return input, true
+	case input == r.taskRoot || strings.HasPrefix(input, r.taskRoot+string(filepath.Separator)):
+		return input, true
+	default:
+		return "", false
+	}
+}
+
+func (r toolPathResolver) ensureWithinAllowed(target, original string) (string, error) {
 	absTarget, err := filepath.Abs(target)
 	if err != nil {
-		return "", fmt.Errorf("resolve path %q: %w", relativePath, err)
+		return "", fmt.Errorf("resolve path %q: %w", original, err)
 	}
-
-	if absTarget != rootDir && !strings.HasPrefix(absTarget, rootDir+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path %q escapes benchmark workspace", relativePath)
+	allowedRoots := []string{r.rootDir}
+	if r.taskRoot != "" {
+		allowedRoots = append(allowedRoots, r.taskRoot)
 	}
+	if r.testsDir != "" {
+		allowedRoots = append(allowedRoots, r.testsDir)
+	}
+	for _, root := range allowedRoots {
+		root = filepath.Clean(root)
+		if absTarget == root || strings.HasPrefix(absTarget, root+string(os.PathSeparator)) {
+			return absTarget, nil
+		}
+	}
+	return "", fmt.Errorf("path %q escapes benchmark workspace", original)
+}
 
-	return absTarget, nil
+func (r toolPathResolver) sanitizeError(message string) string {
+	sanitized := message
+	replacements := [][2]string{
+		{filepath.ToSlash(filepath.Clean(r.rootDir)), r.displayPath(r.rootDir)},
+	}
+	if r.testsDir != "" {
+		replacements = append(replacements, [2]string{filepath.ToSlash(filepath.Clean(r.testsDir)), "/tests"})
+	}
+	if r.taskRoot != "" {
+		replacements = append(replacements, [2]string{filepath.ToSlash(filepath.Clean(r.taskRoot)), containerTaskRoot})
+	}
+	for _, replacement := range replacements {
+		if replacement[0] == "" || replacement[1] == "" {
+			continue
+		}
+		sanitized = strings.ReplaceAll(filepath.ToSlash(sanitized), replacement[0], replacement[1])
+	}
+	return sanitized
+}
+
+func (r toolPathResolver) displayPath(target string) string {
+	target = filepath.Clean(target)
+	if target == r.rootDir {
+		return r.environmentDisplayRoot()
+	}
+	if r.testsDir != "" {
+		if target == r.testsDir {
+			return "/tests"
+		}
+		if strings.HasPrefix(target, r.testsDir+string(filepath.Separator)) {
+			rel, _ := filepath.Rel(r.testsDir, target)
+			return path.Join("/tests", filepath.ToSlash(rel))
+		}
+	}
+	if r.taskRoot != "" {
+		if target == filepath.Join(r.taskRoot, "test.sh") {
+			return "/task/test.sh"
+		}
+		if target == filepath.Join(r.taskRoot, "instruction.txt") {
+			return "/task/instruction.txt"
+		}
+		if strings.HasPrefix(target, r.rootDir+string(filepath.Separator)) {
+			rel, _ := filepath.Rel(r.rootDir, target)
+			return path.Join(r.environmentDisplayRoot(), filepath.ToSlash(rel))
+		}
+		if target == r.taskRoot {
+			return containerTaskRoot
+		}
+		if strings.HasPrefix(target, r.taskRoot+string(filepath.Separator)) {
+			rel, _ := filepath.Rel(r.taskRoot, target)
+			return path.Join(containerTaskRoot, filepath.ToSlash(rel))
+		}
+	}
+	return filepath.ToSlash(target)
+}
+
+func (r toolPathResolver) environmentDisplayRoot() string {
+	if r.containerEnvRoot != "" {
+		return r.containerEnvRoot
+	}
+	if r.taskRoot != "" {
+		return containerEnvDir
+	}
+	return filepath.ToSlash(r.rootDir)
+}
+
+func cleanContainerPath(value string) string {
+	cleaned := filepath.ToSlash(strings.TrimSpace(value))
+	if cleaned == "" {
+		return ""
+	}
+	if !strings.HasPrefix(cleaned, "/") {
+		cleaned = "/" + cleaned
+	}
+	return path.Clean(cleaned)
 }
 
 func listEntries(root string, recursive bool) ([]string, error) {

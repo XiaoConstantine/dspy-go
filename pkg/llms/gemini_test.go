@@ -26,6 +26,7 @@ func testGeminiTextResponse(text string) geminiResponse {
 		Content struct {
 			Parts []geminiPart `json:"parts"`
 		} `json:"content"`
+		FinishReason string `json:"finishReason,omitempty"`
 	}{
 		{
 			Content: struct {
@@ -33,6 +34,7 @@ func testGeminiTextResponse(text string) geminiResponse {
 			}{
 				Parts: []geminiPart{{Text: text}},
 			},
+			FinishReason: "",
 		},
 	}
 	return resp
@@ -743,6 +745,63 @@ func TestGeminiLLM_GenerateWithFunctions(t *testing.T) {
 	assert.Equal(t, 25, usage.TotalTokens)
 }
 
+func TestGeminiLLM_GenerateWithFunctions_EmptyResponseDiagnostics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": []
+				},
+				"finishReason": "STOP"
+			}],
+			"promptFeedback": {
+				"blockReason": "NONE"
+			},
+			"usageMetadata": {
+				"promptTokenCount": 9,
+				"candidatesTokenCount": 0,
+				"totalTokenCount": 9
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	endpoint := &core.EndpointConfig{
+		BaseURL:    server.URL,
+		Path:       "/models/gemini-2.0-flash:generateContent",
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		TimeoutSec: 30,
+	}
+	llm := &GeminiLLM{
+		apiKey: "test-api-key",
+		BaseLLM: core.NewBaseLLM(
+			"google",
+			core.ModelGoogleGeminiFlash,
+			[]core.Capability{core.CapabilityCompletion, core.CapabilityJSON, core.CapabilityToolCalling},
+			endpoint,
+		),
+	}
+
+	result, err := llm.GenerateWithFunctions(context.Background(), "Test prompt", []map[string]interface{}{{
+		"name":        "finish",
+		"description": "Finish the task",
+		"parameters": map[string]interface{}{
+			"type": "object",
+		},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, "No content or function call received from model", result["content"])
+	diagnostic, ok := result["provider_diagnostic"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "google", diagnostic["provider"])
+	assert.Equal(t, "functions", diagnostic["provider_mode"])
+	assert.Equal(t, "empty_content_and_function_call", diagnostic["reason"])
+	assert.Equal(t, "STOP", diagnostic["finish_reason"])
+	assert.Equal(t, 1, diagnostic["candidate_count"])
+	assert.Equal(t, 0, diagnostic["part_count"])
+}
+
 func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody geminiRequest
@@ -839,6 +898,61 @@ func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 	require.Len(t, thoughtBlocks, 1)
 	assert.Equal(t, "sig-thought", thoughtBlocks[0].Metadata["gemini_thought_signature"])
 	assert.Equal(t, 3, result["thoughts_token_count"])
+}
+
+func TestGeminiLLM_GenerateWithTools_EmptyResponseDiagnostics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": []
+				},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 7,
+				"candidatesTokenCount": 0,
+				"totalTokenCount": 7
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	endpoint := &core.EndpointConfig{
+		BaseURL:    server.URL,
+		Path:       "/models/gemini-3-flash-preview:generateContent",
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		TimeoutSec: 30,
+	}
+	llm := &GeminiLLM{
+		apiKey: "test-api-key",
+		BaseLLM: core.NewBaseLLM(
+			"google",
+			core.ModelGoogleGemini3FlashPreview,
+			[]core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			endpoint,
+		),
+	}
+
+	result, err := llm.GenerateWithTools(context.Background(), []core.ChatMessage{
+		{
+			Role:    "user",
+			Content: []core.ContentBlock{core.NewTextBlock("Test prompt")},
+		},
+	}, []map[string]any{{
+		"name":        "finish",
+		"description": "Finish the task",
+		"parameters": map[string]any{
+			"type": "object",
+		},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, "No content or function call received from model", result["content"])
+	diagnostic, ok := result["provider_diagnostic"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "tools", diagnostic["provider_mode"])
+	assert.Equal(t, "STOP", diagnostic["finish_reason"])
 }
 
 func TestGeminiLLM_StreamGenerate_ChunkHandling(t *testing.T) {
