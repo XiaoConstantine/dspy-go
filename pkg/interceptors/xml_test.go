@@ -538,25 +538,4 @@ func TestXMLParser_Robustness(t *testing.T) {
 			t.Errorf("Expected tasks to contain nested XML, got: %s", tasks)
 		}
 	})
-
-	t.Run("unescaped_entities", func(t *testing.T) {
-		// LLMs often forget to escape & in XML
-		xmlResponse := `<response>
-			<tasks>Task A & Task B</tasks>
-			<content>Research & Development</content>
-		</response>`
-
-		fields, err := parser.parseXML(xmlResponse, signature)
-		if err != nil {
-			t.Fatalf("Parsing should handle unescaped & gracefully: %v", err)
-		}
-
-		if fields["tasks"] != "Task A & Task B" {
-			t.Errorf("Expected 'Task A & Task B', got %v", fields["tasks"])
-		}
-
-		if fields["content"] != "Research & Development" {
-			t.Errorf("Expected 'Research & Development', got %v", fields["content"])
-		}
-	})
 }

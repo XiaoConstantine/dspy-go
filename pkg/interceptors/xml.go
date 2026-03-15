@@ -193,6 +193,13 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 	// Get or create cached signature info
 	sigInfo := p.getSignatureInfo(signature)
 
+	// Pre-validate XML if enabled
+	if p.config.ValidateXML {
+		if err := p.validateXMLSyntax(responseText); err != nil {
+			return nil, fmt.Errorf("XML validation failed: %w", err)
+		}
+	}
+
 	// Extract XML content (handle cases where XML is embedded in text)
 	xmlContent := p.extractXMLContent(responseText)
 	if xmlContent == "" {
@@ -258,11 +265,9 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 						inner = strings.TrimSpace(inner)
 					}
 
-					// Strip any field prefix
+					// Strip field name prefix if present (e.g., "answer: 366" -> "366")
+					// This is needed because LLM includes both XML structure and text prefixes for stability
 					inner = p.stripFieldPrefix(inner, fieldName)
-
-					// Unescape XML entities
-					inner = p.unescapeXMLEntities(inner)
 
 					// Convert to expected type
 					if field, exists := sigInfo.FieldMap[fieldName]; exists {
@@ -271,8 +276,6 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 							return nil, fmt.Errorf("field %s conversion failed: %w", fieldName, err)
 						}
 						fields[fieldName] = typedValue
-					} else {
-						fields[fieldName] = inner
 					}
 				}
 			}
@@ -463,19 +466,6 @@ func (p *XMLParser) escapeXMLEntities(xmlContent string) string {
 	}
 
 	return xmlContent
-}
-
-// unescapeXMLEntities reverses the escaping of XML entities.
-func (p *XMLParser) unescapeXMLEntities(xmlContent string) string {
-	// Simple replacement for basic XML entities
-	replacer := strings.NewReplacer(
-		"&amp;", "&",
-		"&lt;", "<",
-		"&gt;", ">",
-		"&quot;", "\"",
-		"&apos;", "'",
-	)
-	return replacer.Replace(xmlContent)
 }
 
 // e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking...".
