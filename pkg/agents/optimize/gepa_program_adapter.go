@@ -418,13 +418,6 @@ func sortedIntArtifactKeys(plans map[string]IntMutationConfig) []string {
 	return keys
 }
 
-func parseIntArtifactModuleName(moduleName string) (string, bool) {
-	if !strings.HasPrefix(strings.TrimSpace(moduleName), "__int__:") {
-		return "", false
-	}
-	return strings.TrimPrefix(strings.TrimSpace(moduleName), "__int__:"), true
-}
-
 func indexAgentExamples(examples []AgentExample) map[string]AgentExample {
 	indexed := make(map[string]AgentExample, len(examples))
 	for idx, example := range examples {
@@ -445,28 +438,6 @@ func cloneAgentExample(example AgentExample) AgentExample {
 		Outputs:  core.ShallowCopyMap(example.Outputs),
 		Metadata: core.ShallowCopyMap(example.Metadata),
 	}
-}
-
-func singleExampleRun(exampleID string, result *EvalResult, passThreshold float64) *HarnessRunResult {
-	run := &HarnessRunResult{
-		Results:           []HarnessExampleResult{{ExampleID: exampleID, Result: result}},
-		CompletedExamples: 1,
-	}
-	if result != nil {
-		run.AverageScore = result.Score
-		if result.Score >= passThreshold && extractEvalError(result.SideInfo) == nil {
-			run.PassedExamples = 1
-		} else {
-			run.FailedExamples = 1
-		}
-		if result.SideInfo != nil && result.SideInfo.Diagnostics != nil && result.SideInfo.Diagnostics["evaluation_error"] != nil {
-			run.EvaluationErrors = 1
-		}
-	} else {
-		run.FailedExamples = 1
-		run.EvaluationErrors = 1
-	}
-	return run
 }
 
 func optimizersCandidateCaseObservation(result *EvalResult, passThreshold float64) optimizers.CandidateCaseObservation {

@@ -3,7 +3,6 @@ package optimize
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"sort"
 	"strconv"
@@ -21,7 +20,6 @@ const (
 	gepaMetadataArtifactsKey       = "artifacts"
 	gepaMetadataArtifactKeysKey    = "artifact_keys"
 	gepaMetadataIntArtifactKeysKey = "int_artifact_keys"
-	gepaMetadataIntMutationsKey    = "int_mutations"
 	gepaMetadataPrimaryArtifactKey = "primary_artifact"
 	gepaMetadataTraceSummaryKey    = "rich_trace_summary"
 	gepaMetadataTraceEvidenceKey   = "rich_trace_evidence"
@@ -394,156 +392,6 @@ func serializeArtifacts(artifacts AgentArtifacts) map[string]interface{} {
 		"text": text,
 		"int":  core.ShallowCopyMap(artifacts.Int),
 		"bool": core.ShallowCopyMap(artifacts.Bool),
-	}
-}
-
-type intMutationRecord struct {
-	CandidateID string
-	Value       int
-}
-
-func (o *GEPAAgentOptimizer) applyConfiguredIntMutations(candidate *optimizers.GEPACandidate, artifacts AgentArtifacts) AgentArtifacts {
-	if o == nil || candidate == nil {
-		return artifacts
-	}
-
-	plans := o.config.normalizedIntMutationPlans()
-	if len(plans) == 0 {
-		return artifacts
-	}
-
-	mutated := artifacts.Clone()
-	records := cloneIntMutationRecords(candidate.Metadata)
-
-	for key, plan := range plans {
-		if record, ok := records[key]; ok && record.CandidateID == candidate.ID && record.Value > 0 {
-			mutated.Int[key] = record.Value
-			continue
-		}
-
-		base := mutated.Int[key]
-		mutatedValue := mutateIntArtifact(base, key, candidate.ID, plan)
-		mutated.Int[key] = mutatedValue
-		records[key] = intMutationRecord{
-			CandidateID: candidate.ID,
-			Value:       mutatedValue,
-		}
-	}
-
-	if candidate.Metadata == nil {
-		candidate.Metadata = make(map[string]interface{})
-	}
-	candidate.Metadata[gepaMetadataArtifactsKey] = serializeArtifacts(mutated)
-	candidate.Metadata[gepaMetadataIntMutationsKey] = serializeIntMutationRecords(records)
-
-	return mutated
-}
-
-func mutateIntArtifact(base int, key, candidateID string, plan IntMutationConfig) int {
-	if base <= 0 {
-		base = plan.Min
-	}
-	if base < plan.Min {
-		base = plan.Min
-	}
-	if base > plan.Max {
-		base = plan.Max
-	}
-
-	hash := stableArtifactHash(candidateID + "|" + key)
-	delta := int(hash%5) - 2
-	value := base + (delta * plan.Step)
-	if value < plan.Min {
-		value = plan.Min
-	}
-	if value > plan.Max {
-		value = plan.Max
-	}
-	return value
-}
-
-func stableArtifactHash(value string) uint32 {
-	hasher := fnv.New32a()
-	_, _ = hasher.Write([]byte(value))
-	return hasher.Sum32()
-}
-
-func cloneIntMutationRecords(metadata map[string]interface{}) map[string]intMutationRecord {
-	if len(metadata) == 0 {
-		return make(map[string]intMutationRecord)
-	}
-
-	rawRecords, ok := metadata[gepaMetadataIntMutationsKey]
-	if !ok {
-		return make(map[string]intMutationRecord)
-	}
-
-	switch typed := rawRecords.(type) {
-	case map[string]intMutationRecord:
-		cloned := make(map[string]intMutationRecord, len(typed))
-		for key, value := range typed {
-			cloned[key] = value
-		}
-		return cloned
-	case map[string]interface{}:
-		cloned := make(map[string]intMutationRecord, len(typed))
-		for key, value := range typed {
-			record, ok := decodeIntMutationRecord(value)
-			if ok {
-				cloned[key] = record
-			}
-		}
-		return cloned
-	default:
-		return make(map[string]intMutationRecord)
-	}
-}
-
-func decodeIntMutationRecord(raw interface{}) (intMutationRecord, bool) {
-	switch typed := raw.(type) {
-	case intMutationRecord:
-		return typed, typed.CandidateID != "" && typed.Value > 0
-	case map[string]interface{}:
-		record := intMutationRecord{
-			CandidateID: strings.TrimSpace(metadataStringValue(typed["candidate_id"])),
-			Value:       metadataIntValue(typed["value"]),
-		}
-		return record, record.CandidateID != "" && record.Value > 0
-	default:
-		return intMutationRecord{}, false
-	}
-}
-
-func serializeIntMutationRecords(records map[string]intMutationRecord) map[string]interface{} {
-	serialized := make(map[string]interface{}, len(records))
-	for key, record := range records {
-		serialized[key] = map[string]interface{}{
-			"candidate_id": record.CandidateID,
-			"value":        record.Value,
-		}
-	}
-	return serialized
-}
-
-func metadataStringValue(value interface{}) string {
-	if str, ok := value.(string); ok {
-		return str
-	}
-	return ""
-}
-
-func metadataIntValue(value interface{}) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int32:
-		return int(typed)
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return 0
 	}
 }
 

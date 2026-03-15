@@ -211,37 +211,3 @@ func (o *GEPAAgentOptimizer) resolveBestArtifacts(bestCandidate *optimizers.GEPA
 	}
 	return artifacts, nil
 }
-
-func failedCandidateEvaluation(candidate *optimizers.GEPACandidate, examples []AgentExample, err error) *GEPACandidateEvaluation {
-	run := &HarnessRunResult{
-		Results:           make([]HarnessExampleResult, 0, len(examples)),
-		AverageScore:      0,
-		PassedExamples:    0,
-		FailedExamples:    len(examples),
-		CompletedExamples: len(examples),
-		EvaluationErrors:  len(examples),
-	}
-
-	failureResult := evaluationFailureResult(err)
-	traces := make([]optimizers.ExecutionTrace, 0, len(examples))
-	for _, example := range examples {
-		run.Results = append(run.Results, HarnessExampleResult{
-			ExampleID: example.ID,
-			Result:    failureResult,
-		})
-		traces = append(traces, buildGEPATrace(candidate, example, failureResult, 1.0))
-	}
-
-	zeroFitness := &optimizers.MultiObjectiveFitness{}
-	if candidate != nil {
-		candidate.Fitness = 0
-	}
-
-	return &GEPACandidateEvaluation{
-		Candidate:    candidate,
-		Run:          run,
-		Fitness:      zeroFitness,
-		Traces:       traces,
-		AverageScore: 0,
-	}
-}
