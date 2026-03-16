@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"html"
 	"io"
 	"strconv"
 	"strings"
@@ -215,6 +216,7 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 	type tagState struct {
 		name       string
 		startIndex int64
+		hasNested  bool
 	}
 
 	var stack []tagState
@@ -234,6 +236,12 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 		switch t := tok.(type) {
 		case xml.StartElement:
 			tagName := t.Name.Local
+
+			// If we're already inside a tag, mark it as having nested content
+			if len(stack) > 0 {
+				stack[len(stack)-1].hasNested = true
+			}
+
 			stack = append(stack, tagState{
 				name:       tagName,
 				startIndex: tokenPos,
@@ -263,6 +271,22 @@ func (p *XMLParser) parseXML(responseText string, signature core.Signature) (map
 
 					if !p.config.PreserveWhitespace {
 						content = strings.TrimSpace(content)
+					}
+
+					// If this field contains no nested tags, unwrap it and unescape entities.
+					// Structured fields (with nested tags) preserve original escaping.
+					if !currentTag.hasNested {
+						startIdx := strings.IndexByte(content, '>')
+						endIdx := strings.LastIndexByte(content, '<')
+						if startIdx != -1 && endIdx != -1 && startIdx < endIdx {
+							content = content[startIdx+1 : endIdx]
+						}
+						// Strip any leading/trailing whitespace again after unwrapping,
+						// if PreserveWhitespace is false
+						if !p.config.PreserveWhitespace {
+							content = strings.TrimSpace(content)
+						}
+						content = p.unescapeXMLEntities(content)
 					}
 
 					// Strip field name prefix if present (e.g., "answer: 366" -> "366")
@@ -466,6 +490,11 @@ func (p *XMLParser) escapeXMLEntities(xmlContent string) string {
 	}
 
 	return xmlContent
+}
+
+// unescapeXMLEntities restores entities that were escaped for the XML decoder.
+func (p *XMLParser) unescapeXMLEntities(content string) string {
+	return html.UnescapeString(content)
 }
 
 // e.g., "answer: 366" -> "366", "rationale: thinking..." -> "thinking...".
