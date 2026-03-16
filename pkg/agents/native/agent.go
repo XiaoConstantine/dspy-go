@@ -10,6 +10,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
 )
 
@@ -172,11 +173,11 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 		return nil, fmt.Errorf("tool-calling agent is nil")
 	}
 
-	task := stringValue(input["task"])
+	task := agentutil.StringValue(input["task"])
 	if strings.TrimSpace(task) == "" {
 		return nil, fmt.Errorf("task is required")
 	}
-	taskID := stringValue(input["task_id"])
+	taskID := agentutil.StringValue(input["task_id"])
 	maxTurns := a.maxTurns(input)
 
 	functions, err := toolspkg.BuildFunctionSchemas(a.toolRegistry)
@@ -225,8 +226,24 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			step.Metadata = metadata
 		}
 
-		call, hasCall := extractFunctionCall(result)
-		if !hasCall {
+		calls, err := extractFunctionCalls(result)
+		if err != nil {
+			step.Observation = err.Error()
+			step.IsError = true
+			trace.Steps = append(trace.Steps, step)
+			trace.Duration = time.Since(startedAt)
+			trace.Error = err.Error()
+			trace.TokenUsage = totalUsage
+			a.storeTraces(input, trace)
+			return map[string]interface{}{
+				"completed":   false,
+				"error":       trace.Error,
+				"tool_calls":  countExecutedTools(trace.Steps),
+				"turns":       len(trace.Steps),
+				"token_usage": tokenUsageToMap(totalUsage),
+			}, nil
+		}
+		if len(calls) == 0 {
 			noCallStreak++
 			observation := "Model returned text without a tool call. It must use a tool or Finish."
 			if reason := toolResponseDiagnosticReason(step.Metadata); reason != "" {
@@ -260,79 +277,87 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 		}
 		noCallStreak = 0
 
-		toolName := stringValue(call["name"])
-		arguments, _ := call["arguments"].(map[string]any)
-		if arguments == nil {
-			arguments = map[string]any{}
-		}
-		step.ToolName = toolName
-		step.Arguments = core.ShallowCopyMap(arguments)
-
-		if strings.EqualFold(toolName, "finish") {
-			finalAnswer := extractFinishAnswer(arguments, step.AssistantText)
-			trace.Completed = true
-			trace.FinalAnswer = finalAnswer
-			trace.Steps = append(trace.Steps, step)
-			trace.Duration = time.Since(startedAt)
-			trace.TokenUsage = totalUsage
-			a.storeTraces(input, trace)
-			return map[string]interface{}{
-				"completed":    true,
-				"final_answer": finalAnswer,
-				"tool_calls":   countExecutedTools(trace.Steps),
-				"turns":        len(trace.Steps),
-				"token_usage":  tokenUsageToMap(totalUsage),
-			}, nil
-		}
-
-		tool, err := a.toolRegistry.Get(toolName)
-		if err != nil {
-			step.IsError = true
-			step.Observation = fmt.Sprintf("unknown tool %q: %v", toolName, err)
-			trace.Steps = append(trace.Steps, step)
-			transcript = append(transcript, toolTurn{
-				ToolName:      toolName,
-				Arguments:     step.Arguments,
-				Observation:   step.Observation,
-				IsError:       true,
-				AssistantText: step.AssistantText,
-			})
-			continue
-		}
-
-		if err := tool.Validate(arguments); err != nil {
-			step.IsError = true
-			step.Observation = fmt.Sprintf("invalid tool arguments: %v", err)
-			trace.Steps = append(trace.Steps, step)
-			transcript = append(transcript, toolTurn{
-				ToolName:      toolName,
-				Arguments:     step.Arguments,
-				Observation:   step.Observation,
-				IsError:       true,
-				AssistantText: step.AssistantText,
-			})
-			continue
-		}
-
-		toolResult, err := tool.Execute(ctx, arguments)
-		if err != nil {
-			step.IsError = true
-			step.Observation = fmt.Sprintf("tool execution failed: %v", err)
-		} else {
-			step.Observation = stringifyToolResult(toolResult)
-			if isError, _ := toolResult.Metadata["isError"].(bool); isError {
-				step.IsError = true
+		for callIndex, call := range calls {
+			callStep := step
+			if callIndex > 0 {
+				callStep.Index = len(trace.Steps) + 1
+				callStep.AssistantText = ""
 			}
-		}
 
-		trace.Steps = append(trace.Steps, step)
-		transcript = append(transcript, toolTurn{
-			ToolName:      toolName,
-			Arguments:     step.Arguments,
-			Observation:   step.Observation,
-			IsError:       step.IsError,
-			AssistantText: step.AssistantText,
-		})
+			toolName := agentutil.StringValue(call["name"])
+			arguments, _ := call["arguments"].(map[string]any)
+			if arguments == nil {
+				arguments = map[string]any{}
+			}
+			callStep.ToolName = toolName
+			callStep.Arguments = core.ShallowCopyMap(arguments)
+
+			if strings.EqualFold(toolName, "finish") {
+				finalAnswer := extractFinishAnswer(arguments, callStep.AssistantText)
+				trace.Completed = true
+				trace.FinalAnswer = finalAnswer
+				trace.Steps = append(trace.Steps, callStep)
+				trace.Duration = time.Since(startedAt)
+				trace.TokenUsage = totalUsage
+				a.storeTraces(input, trace)
+				return map[string]interface{}{
+					"completed":    true,
+					"final_answer": finalAnswer,
+					"tool_calls":   countExecutedTools(trace.Steps),
+					"turns":        len(trace.Steps),
+					"token_usage":  tokenUsageToMap(totalUsage),
+				}, nil
+			}
+
+			tool, err := a.toolRegistry.Get(toolName)
+			if err != nil {
+				callStep.IsError = true
+				callStep.Observation = fmt.Sprintf("unknown tool %q: %v", toolName, err)
+				trace.Steps = append(trace.Steps, callStep)
+				transcript = append(transcript, toolTurn{
+					ToolName:      toolName,
+					Arguments:     callStep.Arguments,
+					Observation:   callStep.Observation,
+					IsError:       true,
+					AssistantText: callStep.AssistantText,
+				})
+				continue
+			}
+
+			if err := tool.Validate(arguments); err != nil {
+				callStep.IsError = true
+				callStep.Observation = fmt.Sprintf("invalid tool arguments: %v", err)
+				trace.Steps = append(trace.Steps, callStep)
+				transcript = append(transcript, toolTurn{
+					ToolName:      toolName,
+					Arguments:     callStep.Arguments,
+					Observation:   callStep.Observation,
+					IsError:       true,
+					AssistantText: callStep.AssistantText,
+				})
+				continue
+			}
+
+			toolResult, err := tool.Execute(ctx, arguments)
+			if err != nil {
+				callStep.IsError = true
+				callStep.Observation = fmt.Sprintf("tool execution failed: %v", err)
+			} else {
+				callStep.Observation = agentutil.StringifyToolResult(toolResult)
+				if isError, _ := toolResult.Metadata["isError"].(bool); isError {
+					callStep.IsError = true
+				}
+			}
+
+			trace.Steps = append(trace.Steps, callStep)
+			transcript = append(transcript, toolTurn{
+				ToolName:      toolName,
+				Arguments:     callStep.Arguments,
+				Observation:   callStep.Observation,
+				IsError:       callStep.IsError,
+				AssistantText: callStep.AssistantText,
+			})
+		}
 	}
 
 	trace.Duration = time.Since(startedAt)
@@ -440,7 +465,7 @@ func (a *Agent) LastNativeTrace() *Trace {
 }
 
 func (a *Agent) maxTurns(input map[string]interface{}) int {
-	if override := intValue(input["max_turns"]); override > 0 {
+	if override := agentutil.IntValue(input["max_turns"]); override > 0 {
 		return override
 	}
 	return a.config.MaxTurns
@@ -648,20 +673,24 @@ func traceTerminationCause(trace *Trace) string {
 	}
 }
 
-func extractFunctionCall(result map[string]any) (map[string]any, bool) {
+func extractFunctionCalls(result map[string]any) ([]map[string]any, error) {
 	if result == nil {
-		return nil, false
+		return nil, nil
 	}
 	if call, ok := result["function_call"].(map[string]any); ok {
-		return call, true
+		return []map[string]any{call}, nil
 	}
 	if rawCalls, ok := result["tool_calls"].([]core.ToolCall); ok && len(rawCalls) > 0 {
-		return map[string]any{
-			"name":      rawCalls[0].Name,
-			"arguments": rawCalls[0].Arguments,
-		}, true
+		calls := make([]map[string]any, 0, len(rawCalls))
+		for _, rawCall := range rawCalls {
+			calls = append(calls, map[string]any{
+				"name":      rawCall.Name,
+				"arguments": rawCall.Arguments,
+			})
+		}
+		return calls, nil
 	}
-	return nil, false
+	return nil, nil
 }
 
 func extractFinishAnswer(arguments map[string]any, fallback string) string {
@@ -669,17 +698,6 @@ func extractFinishAnswer(arguments map[string]any, fallback string) string {
 		return strings.TrimSpace(answer)
 	}
 	return strings.TrimSpace(fallback)
-}
-
-func stringifyToolResult(result core.ToolResult) string {
-	text := strings.TrimSpace(fmt.Sprint(result.Data))
-	if text == "" {
-		text = "(no output)"
-	}
-	if isError, _ := result.Metadata["isError"].(bool); isError {
-		return "tool reported error: " + text
-	}
-	return text
 }
 
 func supportsToolCalling(llm core.LLM) bool {
@@ -817,28 +835,6 @@ func boolError(isError bool, observation string) string {
 		return ""
 	}
 	return observation
-}
-
-func stringValue(value interface{}) string {
-	if str, ok := value.(string); ok {
-		return str
-	}
-	return ""
-}
-
-func intValue(value interface{}) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int32:
-		return int(typed)
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return 0
-	}
 }
 
 func firstNonEmpty(values ...string) string {

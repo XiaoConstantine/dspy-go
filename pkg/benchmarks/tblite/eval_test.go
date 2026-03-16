@@ -50,6 +50,32 @@ func TestWriteReport(t *testing.T) {
 	assert.Contains(t, string(data), `"dataset_name": "test/tblite"`)
 }
 
+func TestEvaluateTasks_RecordsTaskErrorsAndContinues(t *testing.T) {
+	rootDir := t.TempDir()
+	runner := NewRunner(failingEvalAgent{failedTaskID: "task-b"}, RunnerConfig{MaxTurns: 3})
+
+	tasks := []datasets.TBLiteTask{
+		newEvalTask("task-a", "alpha"),
+		newEvalTask("task-b", "beta"),
+	}
+
+	report, err := EvaluateTasks(context.Background(), runner, tasks, EvalConfig{
+		DatasetName: "test/tblite",
+		Split:       "train",
+		Offset:      0,
+		Limit:       2,
+		RootDir:     rootDir,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, report.Summary.TotalTasks)
+	assert.Equal(t, 1, report.Summary.PassedTasks)
+	require.Len(t, report.Tasks, 2)
+	require.NotNil(t, report.Tasks[1].AgentResult)
+	assert.Contains(t, report.Tasks[1].AgentResult.Error, "runner error")
+	assert.Nil(t, report.Tasks[1].TestResult)
+}
+
 type fakeEvalAgent struct{}
 
 func (fakeEvalAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*TerminalTaskResult, error) {
@@ -67,6 +93,17 @@ func (fakeEvalAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Ter
 			TotalTokens:      7,
 		},
 	}, nil
+}
+
+type failingEvalAgent struct {
+	failedTaskID string
+}
+
+func (a failingEvalAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*TerminalTaskResult, error) {
+	if req.TaskID == a.failedTaskID {
+		return nil, assert.AnError
+	}
+	return fakeEvalAgent{}.RunTask(ctx, req)
 }
 
 func newEvalTask(name, category string) datasets.TBLiteTask {

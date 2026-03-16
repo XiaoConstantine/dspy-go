@@ -1,6 +1,7 @@
 package datasets
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -97,11 +98,21 @@ func LoadTBLiteTasksFromFile(path string) ([]TBLiteTask, error) {
 
 // FetchTBLiteTasksFromHuggingFace loads TBLite rows from the public datasets server.
 func FetchTBLiteTasksFromHuggingFace(limit int) ([]TBLiteTask, error) {
-	return FetchTBLiteTasksFromHuggingFaceRange(tbliteDefaultSplit, 0, limit)
+	return FetchTBLiteTasksFromHuggingFaceContext(context.Background(), limit)
+}
+
+// FetchTBLiteTasksFromHuggingFaceContext loads TBLite rows from the public datasets server.
+func FetchTBLiteTasksFromHuggingFaceContext(ctx context.Context, limit int) ([]TBLiteTask, error) {
+	return FetchTBLiteTasksFromHuggingFaceRangeContext(ctx, tbliteDefaultSplit, 0, limit)
 }
 
 // FetchTBLiteTasksFromHuggingFaceRange loads a deterministic slice of TBLite rows.
 func FetchTBLiteTasksFromHuggingFaceRange(split string, offset, limit int) ([]TBLiteTask, error) {
+	return FetchTBLiteTasksFromHuggingFaceRangeContext(context.Background(), split, offset, limit)
+}
+
+// FetchTBLiteTasksFromHuggingFaceRangeContext loads a deterministic slice of TBLite rows.
+func FetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, split string, offset, limit int) ([]TBLiteTask, error) {
 	if split == "" {
 		split = tbliteDefaultSplit
 	}
@@ -115,7 +126,11 @@ func FetchTBLiteTasksFromHuggingFaceRange(split string, offset, limit int) ([]TB
 	)
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build TBLite request: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch TBLite rows: %w", err)
 	}

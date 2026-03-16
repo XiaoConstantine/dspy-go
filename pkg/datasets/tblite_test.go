@@ -1,6 +1,7 @@
 package datasets
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -87,4 +88,13 @@ func TestTBLiteTaskDecodeArchives(t *testing.T) {
 	testsArchive, err := task.DecodeTestsArchive()
 	require.NoError(t, err)
 	assert.Equal(t, []byte("test-bytes"), testsArchive)
+}
+
+func TestFetchTBLiteTasksFromHuggingFaceRangeContext_RespectsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := FetchTBLiteTasksFromHuggingFaceRangeContext(ctx, "train", 0, 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fetch TBLite rows")
 }

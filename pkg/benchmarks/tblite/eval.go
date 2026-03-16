@@ -3,6 +3,7 @@ package tblite
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,36 +25,36 @@ type EvalConfig struct {
 
 // EvalSummary captures aggregate benchmark metrics for a run.
 type EvalSummary struct {
-	TotalTasks          int           `json:"total_tasks"`
-	PassedTasks         int           `json:"passed_tasks"`
-	PassRate            float64       `json:"pass_rate"`
-	AverageToolCalls    float64       `json:"average_tool_calls"`
-	AverageDuration     time.Duration `json:"average_duration"`
-	TotalPromptTokens   int64         `json:"total_prompt_tokens"`
-	TotalCompletionTokens int64       `json:"total_completion_tokens"`
-	TotalTokens         int64         `json:"total_tokens"`
+	TotalTasks            int           `json:"total_tasks"`
+	PassedTasks           int           `json:"passed_tasks"`
+	PassRate              float64       `json:"pass_rate"`
+	AverageToolCalls      float64       `json:"average_tool_calls"`
+	AverageDuration       time.Duration `json:"average_duration"`
+	TotalPromptTokens     int64         `json:"total_prompt_tokens"`
+	TotalCompletionTokens int64         `json:"total_completion_tokens"`
+	TotalTokens           int64         `json:"total_tokens"`
 }
 
 // TaskReport captures the per-task outcome without the materialized task pointer.
 type TaskReport struct {
-	TaskName     string              `json:"task_name"`
-	Category     string              `json:"category,omitempty"`
-	Difficulty   string              `json:"difficulty,omitempty"`
-	AgentResult  *TerminalTaskResult `json:"agent_result,omitempty"`
-	TestResult   *TestResult         `json:"test_result,omitempty"`
+	TaskName    string              `json:"task_name"`
+	Category    string              `json:"category,omitempty"`
+	Difficulty  string              `json:"difficulty,omitempty"`
+	AgentResult *TerminalTaskResult `json:"agent_result,omitempty"`
+	TestResult  *TestResult         `json:"test_result,omitempty"`
 }
 
 // EvalReport is the stable JSON report emitted by the TBLite batch runner.
 type EvalReport struct {
-	Label       string       `json:"label,omitempty"`
-	DatasetName string       `json:"dataset_name"`
-	Split       string       `json:"split"`
-	Offset      int          `json:"offset"`
-	Limit       int          `json:"limit"`
-	StartedAt   time.Time    `json:"started_at"`
+	Label       string        `json:"label,omitempty"`
+	DatasetName string        `json:"dataset_name"`
+	Split       string        `json:"split"`
+	Offset      int           `json:"offset"`
+	Limit       int           `json:"limit"`
+	StartedAt   time.Time     `json:"started_at"`
 	Duration    time.Duration `json:"duration"`
-	Summary     EvalSummary  `json:"summary"`
-	Tasks       []TaskReport `json:"tasks"`
+	Summary     EvalSummary   `json:"summary"`
+	Tasks       []TaskReport  `json:"tasks"`
 }
 
 // LabelOrDefault returns a stable display label for the report.
@@ -96,7 +97,16 @@ func EvaluateTasks(ctx context.Context, runner *Runner, tasks []datasets.TBLiteT
 	for _, task := range tasks {
 		result, err := runner.EvaluateTask(ctx, task, cfg.RootDir)
 		if err != nil {
-			return nil, fmt.Errorf("evaluate task %q: %w", task.TaskName, err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				return nil, fmt.Errorf("evaluate task %q: %w", task.TaskName, err)
+			}
+			result = &EvaluationResult{
+				Task: task.Normalize(),
+				AgentResult: &TerminalTaskResult{
+					Completed: false,
+					Error:     fmt.Sprintf("runner error: %v", err),
+				},
+			}
 		}
 
 		report.Tasks = append(report.Tasks, TaskReport{

@@ -3,11 +3,11 @@ package tblite
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 )
 
 var _ optimize.OptimizableAgent = (*NativeAgent)(nil)
@@ -104,16 +104,16 @@ func terminalTaskRequestFromInput(input map[string]interface{}) (TerminalTaskReq
 	}
 
 	req := TerminalTaskRequest{
-		TaskID:           stringValue(input["task_id"]),
-		Instruction:      stringValue(input["instruction"]),
-		TaskDir:          stringValue(input["task_dir"]),
-		WorkingDirectory: stringValue(input["working_directory"]),
-		EnvironmentDir:   stringValue(input["environment_dir"]),
-		TestsDir:         stringValue(input["tests_dir"]),
-		TestScriptPath:   stringValue(input["test_script_path"]),
-		DockerImage:      stringValue(input["docker_image"]),
-		MaxTurns:         intValue(input["max_turns"]),
-		AgentTimeout:     durationValue(input["agent_timeout"]),
+		TaskID:           agentutil.StringValue(input["task_id"]),
+		Instruction:      agentutil.StringValue(input["instruction"]),
+		TaskDir:          agentutil.StringValue(input["task_dir"]),
+		WorkingDirectory: agentutil.StringValue(input["working_directory"]),
+		EnvironmentDir:   agentutil.StringValue(input["environment_dir"]),
+		TestsDir:         agentutil.StringValue(input["tests_dir"]),
+		TestScriptPath:   agentutil.StringValue(input["test_script_path"]),
+		DockerImage:      agentutil.StringValue(input["docker_image"]),
+		MaxTurns:         agentutil.IntValue(input["max_turns"]),
+		AgentTimeout:     agentutil.DurationValue(input["agent_timeout"]),
 	}
 	if req.TaskID == "" {
 		return TerminalTaskRequest{}, fmt.Errorf("task_id is required")
@@ -126,48 +126,9 @@ func terminalTaskRequestFromInput(input map[string]interface{}) (TerminalTaskReq
 	} else if rawEnvAny, ok := input["container_env"].([]interface{}); ok {
 		req.ContainerEnv = make([]string, 0, len(rawEnvAny))
 		for _, item := range rawEnvAny {
-			req.ContainerEnv = append(req.ContainerEnv, stringValue(item))
+			req.ContainerEnv = append(req.ContainerEnv, agentutil.StringValue(item))
 		}
 	}
-	req.ContainerID = stringValue(input["container_id"])
+	req.ContainerID = agentutil.StringValue(input["container_id"])
 	return req, nil
-}
-
-func stringValue(value interface{}) string {
-	if str, ok := value.(string); ok {
-		return str
-	}
-	return ""
-}
-
-func intValue(value interface{}) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int32:
-		return int(typed)
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return 0
-	}
-}
-
-func durationValue(value interface{}) time.Duration {
-	switch typed := value.(type) {
-	case time.Duration:
-		return typed
-	case int:
-		return time.Duration(typed)
-	case int32:
-		return time.Duration(typed)
-	case int64:
-		return time.Duration(typed)
-	case float64:
-		return time.Duration(typed)
-	default:
-		return 0
-	}
 }

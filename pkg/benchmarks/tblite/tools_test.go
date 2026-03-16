@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,9 +42,9 @@ func TestListEntriesRecursive(t *testing.T) {
 }
 
 func TestTruncateString(t *testing.T) {
-	assert.Equal(t, "abcdef", truncateString("abcdef", 6))
-	assert.Equal(t, "ab...", truncateString("abcdef", 5))
-	assert.Equal(t, "ab", truncateString("abcdef", 2))
+	assert.Equal(t, "abcdef", agentutil.TruncateString("abcdef", 6))
+	assert.Equal(t, "ab...", agentutil.TruncateString("abcdef", 5))
+	assert.Equal(t, "ab", agentutil.TruncateString("abcdef", 2))
 }
 
 func TestNewTerminalToolset_SandboxAndCommand(t *testing.T) {
@@ -63,32 +64,32 @@ func TestNewTerminalToolset_SandboxAndCommand(t *testing.T) {
 		"content": "ship the benchmark",
 	})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(writeResult), "wrote")
+	assert.Contains(t, agentutil.StringifyToolResult(writeResult), "wrote")
 
 	readResult, err := byName["read_file"].Execute(ctx, map[string]any{
 		"path": "notes/todo.txt",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "ship the benchmark", stringifyToolResult(readResult))
+	assert.Equal(t, "ship the benchmark", agentutil.StringifyToolResult(readResult))
 
 	listResult, err := byName["list_files"].Execute(ctx, map[string]any{
 		"path":      ".",
 		"recursive": true,
 	})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(listResult), "notes/todo.txt")
+	assert.Contains(t, agentutil.StringifyToolResult(listResult), "notes/todo.txt")
 
 	commandResult, err := byName["run_command"].Execute(ctx, map[string]any{
 		"command": "cat notes/todo.txt",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "ship the benchmark", strings.TrimSpace(stringifyToolResult(commandResult)))
+	assert.Equal(t, "ship the benchmark", strings.TrimSpace(agentutil.StringifyToolResult(commandResult)))
 
 	sandboxResult, err := byName["read_file"].Execute(ctx, map[string]any{
 		"path": "../escape.txt",
 	})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(sandboxResult), "escapes benchmark workspace")
+	assert.Contains(t, agentutil.StringifyToolResult(sandboxResult), "escapes benchmark workspace")
 }
 
 func TestNewTerminalToolset_ResolvesTaskAndContainerAliases(t *testing.T) {
@@ -118,31 +119,31 @@ func TestNewTerminalToolset_ResolvesTaskAndContainerAliases(t *testing.T) {
 
 	readApp, err := byName["read_file"].Execute(ctx, map[string]any{"path": "/app/api/app.py"})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(readApp), "print('ok')")
+	assert.Contains(t, agentutil.StringifyToolResult(readApp), "print('ok')")
 
 	readAppRelative, err := byName["read_file"].Execute(ctx, map[string]any{"path": "app/api/app.py"})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(readAppRelative), "print('ok')")
+	assert.Contains(t, agentutil.StringifyToolResult(readAppRelative), "print('ok')")
 
 	readTests, err := byName["read_file"].Execute(ctx, map[string]any{"path": "tests/check.txt"})
 	require.NoError(t, err)
-	assert.Equal(t, "check", stringifyToolResult(readTests))
+	assert.Equal(t, "check", agentutil.StringifyToolResult(readTests))
 
 	readTaskScript, err := byName["read_file"].Execute(ctx, map[string]any{"path": "test.sh"})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(readTaskScript), "echo test")
+	assert.Contains(t, agentutil.StringifyToolResult(readTaskScript), "echo test")
 
 	readInstruction, err := byName["read_file"].Execute(ctx, map[string]any{"path": "instruction.txt"})
 	require.NoError(t, err)
-	assert.Equal(t, "do the task", stringifyToolResult(readInstruction))
+	assert.Equal(t, "do the task", agentutil.StringifyToolResult(readInstruction))
 
 	readEnvironmentAlias, err := byName["read_file"].Execute(ctx, map[string]any{"path": "environment/api/app.py"})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(readEnvironmentAlias), "print('ok')")
+	assert.Contains(t, agentutil.StringifyToolResult(readEnvironmentAlias), "print('ok')")
 
 	readHostPath, err := byName["read_file"].Execute(ctx, map[string]any{"path": filepath.Join(taskRoot, "test.sh")})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(readHostPath), "echo test")
+	assert.Contains(t, agentutil.StringifyToolResult(readHostPath), "echo test")
 }
 
 func TestNewTerminalToolset_SanitizesToolErrors(t *testing.T) {
@@ -168,7 +169,7 @@ func TestNewTerminalToolset_SanitizesToolErrors(t *testing.T) {
 		"path": "/app/missing.txt",
 	})
 	require.NoError(t, err)
-	output := stringifyToolResult(result)
+	output := agentutil.StringifyToolResult(result)
 	assert.Contains(t, output, "/app/missing.txt")
 	assert.NotContains(t, output, filepath.ToSlash(taskRoot))
 	assert.NotContains(t, output, filepath.ToSlash(envRoot))
@@ -200,7 +201,7 @@ func TestNewTerminalToolset_RunCommandUsesAliasWorkingDirectory(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Clean(testsDir), runner.workingDir)
-	assert.Equal(t, "ok", strings.TrimSpace(stringifyToolResult(result)))
+	assert.Equal(t, "ok", strings.TrimSpace(agentutil.StringifyToolResult(result)))
 }
 
 func TestNewTerminalToolset_RejectsSymlinkEscapes(t *testing.T) {
@@ -222,14 +223,14 @@ func TestNewTerminalToolset_RejectsSymlinkEscapes(t *testing.T) {
 		"path": "link.txt",
 	})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(readResult), "escapes benchmark workspace")
+	assert.Contains(t, agentutil.StringifyToolResult(readResult), "escapes benchmark workspace")
 
 	writeResult, err := byName["write_file"].Execute(context.Background(), map[string]any{
 		"path":    "link.txt",
 		"content": "mutated",
 	})
 	require.NoError(t, err)
-	assert.Contains(t, stringifyToolResult(writeResult), "escapes benchmark workspace")
+	assert.Contains(t, agentutil.StringifyToolResult(writeResult), "escapes benchmark workspace")
 
 	content, err := os.ReadFile(outsideFile)
 	require.NoError(t, err)

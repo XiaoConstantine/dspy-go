@@ -92,6 +92,60 @@ func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
 	assert.Equal(t, "empty_content_and_function_call", trace.Steps[0].Metadata["reason"])
 }
 
+func TestAgent_Execute_ProcessesMultipleToolCallsInOneResponse(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"tool_calls": []core.ToolCall{
+					{
+						Name:      "write_note",
+						Arguments: map[string]any{"content": "first"},
+					},
+					{
+						Name:      "write_note",
+						Arguments: map[string]any{"content": "second"},
+					},
+				},
+				"_usage": &core.TokenInfo{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{MaxTurns: 4})
+	require.NoError(t, err)
+
+	observed := make([]string, 0, 2)
+	require.NoError(t, agent.RegisterTool(simpleTool{
+		name: "write_note",
+		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+			observed = append(observed, params["content"].(string))
+			return core.ToolResult{Data: params["content"]}, nil
+		},
+	}))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Write two notes and finish.",
+		"task_id": "task-multi-call",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	assert.Equal(t, []string{"first", "second"}, observed)
+
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	require.Len(t, trace.Steps, 3)
+	assert.Equal(t, "write_note", trace.Steps[0].ToolName)
+	assert.Equal(t, "write_note", trace.Steps[1].ToolName)
+	assert.Equal(t, "Finish", trace.Steps[2].ToolName)
+}
+
 func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	llm := &nativeStubLLM{
 		stubLLM: stubLLM{

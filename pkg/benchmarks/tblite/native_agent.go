@@ -13,6 +13,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	sharednative "github.com/XiaoConstantine/dspy-go/pkg/agents/native"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 )
 
 const (
@@ -202,8 +203,8 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 
 	result := &TerminalTaskResult{
 		Completed:   boolValue(resultMap["completed"]),
-		FinalAnswer: stringValue(resultMap["final_answer"]),
-		Error:       stringValue(resultMap["error"]),
+		FinalAnswer: agentutil.StringValue(resultMap["final_answer"]),
+		Error:       agentutil.StringValue(resultMap["error"]),
 		Duration:    nativeTrace.Duration,
 		ToolCalls:   countExecutedTools(trace.Steps),
 		TokenUsage:  tokenUsageFromShared(nativeTrace.TokenUsage),
@@ -374,17 +375,6 @@ func containerEnvValue(env []string, key string, fallback string) string {
 		}
 	}
 	return fallback
-}
-
-func stringifyToolResult(result core.ToolResult) string {
-	text := strings.TrimSpace(fmt.Sprint(result.Data))
-	if text == "" {
-		text = "(no output)"
-	}
-	if isError, _ := result.Metadata["isError"].(bool); isError {
-		return "tool reported error: " + text
-	}
-	return text
 }
 
 func boolValue(value interface{}) bool {

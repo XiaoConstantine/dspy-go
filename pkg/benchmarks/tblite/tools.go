@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
@@ -103,7 +104,7 @@ func newListFilesTool(resolver toolPathResolver, outputLimit int) core.Tool {
 				return textToolResult(resolver.sanitizeError(err.Error()), true), nil
 			}
 
-			return textToolResult(truncateString(strings.Join(entries, "\n"), outputLimit), false), nil
+			return textToolResult(agentutil.TruncateString(strings.Join(entries, "\n"), outputLimit), false), nil
 		})
 }
 
@@ -133,7 +134,7 @@ func newReadFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 				return textToolResult(fmt.Sprintf("read file: %s", resolver.sanitizeError(err.Error())), true), nil
 			}
 
-			return textToolResult(truncateString(string(data), outputLimit), false), nil
+			return textToolResult(agentutil.TruncateString(string(data), outputLimit), false), nil
 		})
 }
 
@@ -172,7 +173,7 @@ func newWriteFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 			}
 
 			message := fmt.Sprintf("wrote %d bytes to %s", len(content), resolver.displayPath(targetPath))
-			return textToolResult(truncateString(message, outputLimit), false), nil
+			return textToolResult(agentutil.TruncateString(message, outputLimit), false), nil
 		})
 }
 
@@ -219,11 +220,11 @@ func newRunCommandTool(resolver toolPathResolver, outputLimit int, commandTimeou
 			}
 
 			if err == nil {
-				return textToolResult(truncateString(outputText, outputLimit), false), nil
+				return textToolResult(agentutil.TruncateString(outputText, outputLimit), false), nil
 			}
 
 			exitMessage := fmt.Sprintf("command failed: %v\n%s", err, outputText)
-			return textToolResult(truncateString(exitMessage, outputLimit), true), nil
+			return textToolResult(agentutil.TruncateString(exitMessage, outputLimit), true), nil
 		})
 }
 
@@ -617,16 +618,6 @@ func textToolResult(text string, isError bool) *models.CallToolResult {
 			},
 		},
 	}
-}
-
-func truncateString(value string, limit int) string {
-	if limit <= 0 || len(value) <= limit {
-		return value
-	}
-	if limit <= 3 {
-		return value[:limit]
-	}
-	return value[:limit-3] + "..."
 }
 
 func stringArg(args map[string]any, key, fallback string) string {

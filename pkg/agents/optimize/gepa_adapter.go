@@ -11,6 +11,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	modrlm "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
@@ -771,7 +772,7 @@ func summarizeAgentTrace(trace *agents.ExecutionTrace) string {
 	var builder strings.Builder
 	if trace.Task != "" {
 		builder.WriteString("task=")
-		builder.WriteString(truncateString(trace.Task, 120))
+		builder.WriteString(agentutil.TruncateString(trace.Task, 120))
 	}
 	if trace.Status != "" {
 		if builder.Len() > 0 {
@@ -809,10 +810,10 @@ func summarizeAgentTrace(trace *agents.ExecutionTrace) string {
 		builder.WriteString("]")
 		if step.Error != "" {
 			builder.WriteString(" error=")
-			builder.WriteString(truncateString(step.Error, 80))
+			builder.WriteString(agentutil.TruncateString(step.Error, 80))
 		} else if step.Observation != "" {
 			builder.WriteString(" obs=")
-			builder.WriteString(truncateString(step.Observation, 80))
+			builder.WriteString(agentutil.TruncateString(step.Observation, 80))
 		}
 	}
 
@@ -842,9 +843,9 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 				}
 				entry := fmt.Sprintf("step%d tool=%s success=%t", step.Index, step.Tool, step.Success)
 				if step.Error != "" {
-					entry += " error=" + truncateString(step.Error, 80)
+					entry += " error=" + agentutil.TruncateString(step.Error, 80)
 				} else if step.Observation != "" {
-					entry += " obs=" + truncateString(step.Observation, 80)
+					entry += " obs=" + agentutil.TruncateString(step.Observation, 80)
 				}
 				evidence = append(evidence, entry)
 				failedStepCount++
@@ -861,7 +862,7 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 			for _, key := range []string{"evaluation_error", "execution_error", "comparison_error"} {
 				if raw, ok := sideInfo.Diagnostics[key]; ok {
 					if message, ok := raw.(string); ok && message != "" {
-						evidence = append(evidence, key+"="+truncateString(message, 80))
+						evidence = append(evidence, key+"="+agentutil.TruncateString(message, 80))
 					}
 				}
 			}
@@ -1014,19 +1015,6 @@ func detectToolLoopEvidence(steps []agents.TraceStep) []string {
 	flush()
 
 	return evidence
-}
-
-func truncateString(value string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	if len(value) <= limit {
-		return value
-	}
-	if limit <= 3 {
-		return value[:limit]
-	}
-	return value[:limit-3] + "..."
 }
 
 func clamp01(value float64) float64 {
