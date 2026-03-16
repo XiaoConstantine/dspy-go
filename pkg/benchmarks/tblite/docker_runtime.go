@@ -49,7 +49,6 @@ func startDockerTaskRuntime(ctx context.Context, task *MaterializedTask, image s
 	args := []string{
 		"run",
 		"-d",
-		"--rm",
 		"-v", taskRoot + ":" + containerTaskRoot,
 		"-v", environmentRoot + ":" + containerEnvRoot,
 		"-w", containerEnvRoot,
@@ -89,6 +88,10 @@ func (r *dockerTaskRuntime) Close(ctx context.Context) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if strings.Contains(strings.ToLower(message), "no such container") {
+			return nil
+		}
 		return fmt.Errorf("remove docker container %s: %w: %s", r.containerID, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
@@ -120,7 +123,11 @@ func (r *dockerTaskRuntime) Exec(ctx context.Context, workingDir string, shellPa
 }
 
 func (r *dockerTaskRuntime) ReadFile(ctx context.Context, path string) (string, error) {
-	output, err := r.Exec(ctx, "", defaultShellPath, fmt.Sprintf("cat %q", path), nil)
+	if r == nil || r.containerID == "" {
+		return "", fmt.Errorf("docker task runtime is not initialized")
+	}
+	cmd := exec.CommandContext(ctx, "docker", "exec", r.containerID, "cat", "--", path)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", err
 	}
@@ -196,7 +203,7 @@ func detectContainerEnvironmentRoot(task *MaterializedTask) (string, error) {
 }
 
 func parseDockerfileWorkdir(contents string) string {
-	current := "/"
+	current := ""
 	for _, rawLine := range strings.Split(contents, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -214,6 +221,9 @@ func parseDockerfileWorkdir(contents string) string {
 		}
 		if strings.HasPrefix(value, "/") {
 			current = path.Clean(value)
+			continue
+		}
+		if current == "" {
 			continue
 		}
 		current = path.Clean(path.Join(current, value))

@@ -123,7 +123,7 @@ func newReadFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 			_ = ctx
 
-			targetPath, err := resolver.resolve(requiredStringArg(args, "path"))
+			targetPath, err := resolver.resolveSecurePath(requiredStringArg(args, "path"))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
@@ -158,7 +158,7 @@ func newWriteFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 			_ = ctx
 
-			targetPath, err := resolver.resolve(requiredStringArg(args, "path"))
+			targetPath, err := resolver.resolveSecurePath(requiredStringArg(args, "path"))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
@@ -238,8 +238,8 @@ func (r hostCommandRunner) Run(ctx context.Context, workingDir string, command s
 	}
 	cmd := exec.CommandContext(ctx, shellPath, "-lc", command)
 	cmd.Dir = workingDir
-	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Env = append(cmd.Env, os.Environ()...)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	return cmd.CombinedOutput()
 }
 
@@ -421,11 +421,63 @@ func (r toolPathResolver) ensureWithinAllowed(target, original string) (string, 
 	}
 	for _, root := range allowedRoots {
 		root = filepath.Clean(root)
-		if absTarget == root || strings.HasPrefix(absTarget, root+string(os.PathSeparator)) {
-			return absTarget, nil
+		canonicalRoots := []string{root}
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			resolved = filepath.Clean(resolved)
+			if resolved != root {
+				canonicalRoots = append(canonicalRoots, resolved)
+			}
+		}
+		for _, candidate := range canonicalRoots {
+			if absTarget == candidate || strings.HasPrefix(absTarget, candidate+string(os.PathSeparator)) {
+				return absTarget, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("path %q escapes benchmark workspace", original)
+}
+
+func (r toolPathResolver) resolveSecurePath(input string) (string, error) {
+	target, err := r.resolve(input)
+	if err != nil {
+		return "", err
+	}
+	resolvedTarget, err := resolvePathThroughExistingSymlinks(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve path %q: %w", input, err)
+	}
+	return r.ensureWithinAllowed(resolvedTarget, input)
+}
+
+func resolvePathThroughExistingSymlinks(target string) (string, error) {
+	current := filepath.Clean(target)
+	missing := make([]string, 0, 4)
+
+	for {
+		_, err := os.Lstat(current)
+		if err == nil {
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", err
+			}
+			current = resolved
+			break
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+
+	for i := len(missing) - 1; i >= 0; i-- {
+		current = filepath.Join(current, missing[i])
+	}
+	return filepath.Clean(current), nil
 }
 
 func (r toolPathResolver) sanitizeError(message string) string {

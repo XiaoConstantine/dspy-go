@@ -14,6 +14,11 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 )
 
+const (
+	maxArchiveFileSizeBytes  int64 = 100 << 20
+	maxArchiveTotalSizeBytes int64 = 512 << 20
+)
+
 // MaterializedTask describes a TBLite task expanded onto disk.
 type MaterializedTask struct {
 	Task            datasets.TBLiteTask
@@ -70,6 +75,10 @@ func MaterializeTask(task datasets.TBLiteTask, rootDir string) (*MaterializedTas
 }
 
 func extractArchive(payload string, targetDir string) error {
+	return extractArchiveWithLimits(payload, targetDir, maxArchiveFileSizeBytes, maxArchiveTotalSizeBytes)
+}
+
+func extractArchiveWithLimits(payload string, targetDir string, maxFileSizeBytes int64, maxTotalSizeBytes int64) error {
 	archiveBytes, err := decodeArchive(payload)
 	if err != nil {
 		return err
@@ -83,6 +92,7 @@ func extractArchive(payload string, targetDir string) error {
 		return err
 	}
 
+	var totalExtractedBytes int64
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
@@ -92,7 +102,16 @@ func extractArchive(payload string, targetDir string) error {
 			return fmt.Errorf("read tar entry: %w", err)
 		}
 
-		if err := writeTarEntry(targetDir, header, reader); err != nil {
+		if err := validateTarEntry(header, maxFileSizeBytes, maxTotalSizeBytes, &totalExtractedBytes); err != nil {
+			return err
+		}
+
+		entryReader := io.Reader(reader)
+		if header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA {
+			entryReader = io.LimitReader(reader, header.Size)
+		}
+
+		if err := writeTarEntry(targetDir, header, entryReader); err != nil {
 			return err
 		}
 	}
@@ -151,7 +170,33 @@ func writeTarEntry(root string, header *tar.Header, reader io.Reader) error {
 			return fmt.Errorf("write file %s: %w", destination, err)
 		}
 		return nil
+	case tar.TypeSymlink, tar.TypeLink:
+		return fmt.Errorf("refusing to extract link entry %q", header.Name)
 	default:
 		return nil
 	}
+}
+
+func validateTarEntry(header *tar.Header, maxFileSizeBytes int64, maxTotalSizeBytes int64, totalExtractedBytes *int64) error {
+	if header == nil {
+		return fmt.Errorf("tar header is required")
+	}
+	switch header.Typeflag {
+	case tar.TypeSymlink, tar.TypeLink:
+		return fmt.Errorf("refusing to extract link entry %q", header.Name)
+	case tar.TypeReg, tar.TypeRegA:
+		if header.Size < 0 {
+			return fmt.Errorf("refusing to extract negative-sized entry %q", header.Name)
+		}
+		if maxFileSizeBytes > 0 && header.Size > maxFileSizeBytes {
+			return fmt.Errorf("refusing to extract oversized entry %q (%d bytes > %d byte limit)", header.Name, header.Size, maxFileSizeBytes)
+		}
+		if totalExtractedBytes != nil {
+			*totalExtractedBytes += header.Size
+			if maxTotalSizeBytes > 0 && *totalExtractedBytes > maxTotalSizeBytes {
+				return fmt.Errorf("refusing to extract archive exceeding %d byte total limit", maxTotalSizeBytes)
+			}
+		}
+	}
+	return nil
 }

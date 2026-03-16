@@ -203,6 +203,49 @@ func TestNewTerminalToolset_RunCommandUsesAliasWorkingDirectory(t *testing.T) {
 	assert.Equal(t, "ok", strings.TrimSpace(stringifyToolResult(result)))
 }
 
+func TestNewTerminalToolset_RejectsSymlinkEscapes(t *testing.T) {
+	root := t.TempDir()
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("outside"), 0o644))
+	require.NoError(t, os.Symlink(outsideFile, filepath.Join(root, "link.txt")))
+
+	toolset, err := NewTerminalToolset(root, ToolsetConfig{})
+	require.NoError(t, err)
+
+	byName := map[string]core.Tool{}
+	for _, tool := range toolset {
+		byName[tool.Name()] = tool
+	}
+
+	readResult, err := byName["read_file"].Execute(context.Background(), map[string]any{
+		"path": "link.txt",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(readResult), "escapes benchmark workspace")
+
+	writeResult, err := byName["write_file"].Execute(context.Background(), map[string]any{
+		"path":    "link.txt",
+		"content": "mutated",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, stringifyToolResult(writeResult), "escapes benchmark workspace")
+
+	content, err := os.ReadFile(outsideFile)
+	require.NoError(t, err)
+	assert.Equal(t, "outside", string(content))
+}
+
+func TestHostCommandRunner_ExtraEnvOverridesHostEnv(t *testing.T) {
+	t.Setenv("DSPY_TBLITE_ENV_ORDER", "host")
+
+	output, err := (hostCommandRunner{}).Run(context.Background(), t.TempDir(), `printf %s "$DSPY_TBLITE_ENV_ORDER"`, []string{
+		"DSPY_TBLITE_ENV_ORDER=task",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "task", string(output))
+}
+
 func assertToolNames(t *testing.T, toolset []core.Tool, names ...string) {
 	t.Helper()
 

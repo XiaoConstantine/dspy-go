@@ -19,6 +19,15 @@ WORKDIR services/api
 	assert.Equal(t, "/app/services/api", parseDockerfileWorkdir(dockerfile))
 }
 
+func TestParseDockerfileWorkdir_EmptyWhenNoWorkdirPresent(t *testing.T) {
+	dockerfile := `
+FROM python:3.13
+RUN echo hello
+`
+
+	assert.Equal(t, "", parseDockerfileWorkdir(dockerfile))
+}
+
 func TestDetectContainerEnvironmentRoot_DefaultsWhenDockerfileMissing(t *testing.T) {
 	envDir := t.TempDir()
 	root, err := detectContainerEnvironmentRoot(&MaterializedTask{EnvironmentDir: envDir})

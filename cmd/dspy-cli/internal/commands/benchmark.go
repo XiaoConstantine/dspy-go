@@ -153,6 +153,8 @@ func runTBLiteGEPABenchmark(
 	validationSplit float64,
 	testSplit float64,
 ) error {
+	comparisonStartedAt := time.Now()
+
 	trainTasks, validationTasks, testTasks, err := partitionTBLiteTasks(tasks, validationSplit, testSplit)
 	if err != nil {
 		return err
@@ -278,7 +280,8 @@ func runTBLiteGEPABenchmark(
 		Split:               split,
 		Offset:              offset,
 		Limit:               limit,
-		StartedAt:           time.Now(),
+		StartedAt:           comparisonStartedAt,
+		Duration:            time.Since(comparisonStartedAt),
 		TrainingTaskCount:   len(trainTasks),
 		ValidationTaskCount: len(validationTasks),
 		TestTaskCount:       len(testTasks),
