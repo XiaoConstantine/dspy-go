@@ -52,6 +52,11 @@ func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, func
 	return args.Get(0).(map[string]interface{}), args.Error(1)
 }
 
+func (m *MockLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+	args := m.Called(ctx, messages, tools, options)
+	return args.Get(0).(map[string]any), args.Error(1)
+}
+
 func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.StreamResponse, error) {
 	args := m.Called(ctx, content, options)
 	return args.Get(0).(*core.StreamResponse), args.Error(1)
@@ -229,6 +234,34 @@ func TestCachedLLM_Generate(t *testing.T) {
 		assert.Equal(t, "fresh response", result.Content)
 		mockLLM.AssertExpectations(t)
 	})
+}
+
+func TestCachedLLM_GenerateWithTools(t *testing.T) {
+	ctx := context.Background()
+	messages := []core.ChatMessage{{Role: "user", Content: []core.ContentBlock{core.NewTextBlock("solve task")}}}
+	tools := []map[string]any{{"name": "Finish"}}
+	expected := map[string]any{
+		"function_call": map[string]any{"name": "Finish"},
+	}
+
+	mockLLM := &MockLLM{}
+	mockLLM.On("GenerateWithTools", ctx, messages, tools, mock.AnythingOfType("[]core.GenerateOption")).Return(expected, nil)
+
+	cachedLLM := &CachedLLM{
+		LLM:          mockLLM,
+		cache:        nil,
+		keyGenerator: NewKeyGenerator("test_"),
+		ttl:          time.Hour,
+		enabled:      true,
+	}
+
+	response, err := cachedLLM.GenerateWithTools(ctx, messages, tools)
+
+	assert.NoError(t, err)
+	assert.Equal(t, expected, response)
+	_, ok := interface{}(cachedLLM).(core.ToolCallingChatLLM)
+	assert.True(t, ok)
+	mockLLM.AssertExpectations(t)
 }
 
 func TestCachedLLM_GenerateWithJSON(t *testing.T) {

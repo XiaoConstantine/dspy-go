@@ -3,12 +3,22 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
+
+type CandidateCaseObservation struct {
+	Score             float64
+	Passed            bool
+	LatencyMS         float64
+	TotalTokens       int64
+	ToolCalls         int
+	RobustnessFailure bool
+}
 
 // BootstrapPopulationFromSeed initializes a GEPA population from a single external seed candidate.
 func (g *GEPA) BootstrapPopulationFromSeed(ctx context.Context, seed *GEPACandidate) error {
@@ -167,12 +177,150 @@ func (s *GEPAState) RecordCandidateFitness(candidate *GEPACandidate, fitness *Mu
 		metrics.Metadata = make(map[string]interface{})
 	}
 
-	metrics.AverageFitness = candidate.Fitness
-	if candidate.Fitness > metrics.BestFitness {
-		metrics.BestFitness = candidate.Fitness
+	metrics.AverageFitness = averageScore
+	if averageScore > metrics.BestFitness {
+		metrics.BestFitness = averageScore
 	}
 	metrics.Metadata["multi_objective_fitness"] = fitness
 	metrics.Metadata["average_score"] = averageScore
+}
+
+// BeginCandidateCaseRecording resets the per-example observation buffer for a
+// candidate so aggregate fitness can be derived from the current evaluation
+// batch only.
+func (s *GEPAState) BeginCandidateCaseRecording(candidateID string) {
+	if s == nil || strings.TrimSpace(candidateID) == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.candidateCaseObservations == nil {
+		s.candidateCaseObservations = make(map[string][]CandidateCaseObservation)
+	}
+	s.candidateCaseObservations[candidateID] = nil
+}
+
+// RecordCandidateCaseObservation stores one example-level observation for the
+// currently evaluated candidate without overwriting aggregate candidate fitness.
+func (s *GEPAState) RecordCandidateCaseObservation(candidateID string, observation CandidateCaseObservation) {
+	if s == nil || strings.TrimSpace(candidateID) == "" {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.candidateCaseObservations == nil {
+		s.candidateCaseObservations = make(map[string][]CandidateCaseObservation)
+	}
+	s.candidateCaseObservations[candidateID] = append(s.candidateCaseObservations[candidateID], observation)
+}
+
+// FinalizeCandidateCaseFitness derives aggregate multi-objective fitness from
+// the per-example observations recorded for a candidate and persists it once.
+func (s *GEPAState) FinalizeCandidateCaseFitness(candidate *GEPACandidate, averageScore float64) *MultiObjectiveFitness {
+	if s == nil || candidate == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	observations := append([]CandidateCaseObservation(nil), s.candidateCaseObservations[candidate.ID]...)
+	delete(s.candidateCaseObservations, candidate.ID)
+	s.mu.Unlock()
+
+	if len(observations) == 0 {
+		return nil
+	}
+
+	fitness := buildCandidateCaseFitness(observations, averageScore)
+	s.RecordCandidateFitness(candidate, fitness, averageScore)
+	return fitness
+}
+
+func buildCandidateCaseFitness(observations []CandidateCaseObservation, averageScore float64) *MultiObjectiveFitness {
+	fitness := &MultiObjectiveFitness{}
+	if len(observations) == 0 {
+		return fitness
+	}
+
+	total := float64(len(observations))
+	passed := 0
+	robustFailures := 0
+	totalEfficiency := 0.0
+	for _, observation := range observations {
+		if observation.Passed {
+			passed++
+		}
+		if observation.RobustnessFailure {
+			robustFailures++
+		}
+		totalEfficiency += candidateCaseEfficiency(observation)
+	}
+
+	fitness.SuccessRate = float64(passed) / total
+	fitness.OutputQuality = clampUnit(averageScore)
+	fitness.Efficiency = clampUnit(totalEfficiency / total)
+	fitness.Robustness = clampUnit(1.0 - float64(robustFailures)/total)
+	fitness.Generalization = clampUnit(candidateCaseConsistency(observations))
+	// These remain neutral placeholders until GEPA computes true
+	// cross-candidate diversity and innovation signals for agent artifacts.
+	fitness.Diversity = 0.5
+	fitness.Innovation = 0.5
+	fitness.WeightedScore = fitness.ComputeWeightedScore(DefaultMultiObjectiveWeights())
+	return fitness
+}
+
+func candidateCaseEfficiency(observation CandidateCaseObservation) float64 {
+	if observation.Score <= 0 {
+		return 0
+	}
+
+	components := make([]float64, 0, 3)
+	if observation.LatencyMS >= 0 {
+		components = append(components, 1.0/(1.0+observation.LatencyMS/1000.0))
+	}
+	if observation.TotalTokens > 0 {
+		components = append(components, 1.0/(1.0+float64(observation.TotalTokens)/1000.0))
+	}
+	if observation.ToolCalls >= 0 {
+		components = append(components, 1.0/(1.0+float64(observation.ToolCalls)))
+	}
+	if len(components) == 0 {
+		return 1.0
+	}
+
+	sum := 0.0
+	for _, component := range components {
+		sum += component
+	}
+	return sum / float64(len(components))
+}
+
+func candidateCaseConsistency(observations []CandidateCaseObservation) float64 {
+	if len(observations) == 0 {
+		return 0
+	}
+	if len(observations) == 1 {
+		return clampUnit(observations[0].Score)
+	}
+
+	mean := 0.0
+	for _, observation := range observations {
+		mean += observation.Score
+	}
+	mean /= float64(len(observations))
+
+	variance := 0.0
+	for _, observation := range observations {
+		diff := observation.Score - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(observations))
+	return clampUnit(1.0 - variance)
+}
+
+func clampUnit(value float64) float64 {
+	return math.Max(0, math.Min(1, value))
 }
 
 // CloneCandidate returns a deep copy of the candidate so callers can evaluate

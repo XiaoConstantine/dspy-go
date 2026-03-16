@@ -71,6 +71,22 @@ func TestGEPAAgentOptimizer_MaterializeAgentFallsBackToFactory(t *testing.T) {
 	assert.Equal(t, artifacts.Clone(), agent.GetArtifacts())
 }
 
+func TestGEPAAgentOptimizer_SeedCandidatePrefersToolPolicyByDefault(t *testing.T) {
+	optimizer := NewGEPAAgentOptimizer(nil, nil, GEPAAdapterConfig{})
+
+	candidate, err := optimizer.SeedCandidate(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack:  "Generic system framing.",
+			ArtifactToolPolicy: "Use narrow, evidence-seeking tool calls.",
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, candidate)
+
+	assert.Equal(t, string(ArtifactToolPolicy), candidate.ModuleName)
+	assert.Equal(t, "Use narrow, evidence-seeking tool calls.", candidate.Instruction)
+}
+
 func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
 	baseAgent.outputs["first"] = map[string]interface{}{
@@ -138,6 +154,50 @@ func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T
 	assert.Contains(t, evaluation.Traces[0].ContextData, gepaMetadataTraceEvidenceKey)
 	assert.Contains(t, evaluation.Traces[1].ContextData[gepaMetadataTraceEvidenceKey], "failed_test=output:answer")
 	assert.Contains(t, evaluation.Traces[1].ContextData, "diagnostics")
+}
+
+func TestGEPAAgentOptimizer_EvaluateCandidate_UsesWholeProgramIntArtifacts(t *testing.T) {
+	baseAgent := newMockOptimizableAgent()
+	baseAgent.outputs["turn-budget"] = map[string]interface{}{
+		"answer": "ok",
+	}
+
+	optimizer := NewGEPAAgentOptimizer(baseAgent, NewDeterministicEvaluator(nil), GEPAAdapterConfig{
+		PassThreshold:   1.0,
+		PrimaryArtifact: ArtifactToolPolicy,
+		IntMutationPlans: map[string]IntMutationConfig{
+			"max_turns": {Min: 8, Max: 24, Step: 4},
+		},
+	})
+
+	candidate, err := optimizer.SeedCandidate(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactToolPolicy: "Prefer focused terminal actions.",
+		},
+		Int: map[string]int{
+			"max_turns": 20,
+		},
+	})
+	require.NoError(t, err)
+	candidate.ComponentTexts[intArtifactModuleName("max_turns")] = "Set max_turns to 12."
+
+	examples := []AgentExample{{
+		ID: "turn-budget",
+		Inputs: map[string]interface{}{
+			"id": "turn-budget",
+		},
+		Outputs: map[string]interface{}{
+			"answer": "ok",
+		},
+	}}
+
+	firstEval, err := optimizer.EvaluateCandidate(context.Background(), candidate, examples)
+	require.NoError(t, err)
+	assert.Equal(t, 12, firstEval.Artifacts.Int["max_turns"])
+
+	decoded, err := optimizer.CandidateArtifacts(candidate)
+	require.NoError(t, err)
+	assert.Equal(t, 12, decoded.Int["max_turns"])
 }
 
 func TestBuildMultiObjectiveFitness_CountsEvaluationFailuresOnce(t *testing.T) {

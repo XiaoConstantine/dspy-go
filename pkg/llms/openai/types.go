@@ -24,6 +24,7 @@ type ChatCompletionRequest struct {
 type ChatCompletionMessage struct {
 	Role         string                           `json:"role"` // "system", "user", "assistant"
 	Content      string                           `json:"content"`
+	ToolCallID   string                           `json:"tool_call_id,omitempty"`
 	ToolCalls    []ChatCompletionToolCall         `json:"tool_calls,omitempty"`
 	FunctionCall *ChatCompletionFunctionCallDelta `json:"function_call,omitempty"` // Legacy field for compatibility
 }

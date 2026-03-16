@@ -2,7 +2,6 @@ package optimize
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGEPAAgentOptimizer_Optimize_RunsSharedEvolutionLoop(t *testing.T) {
+func TestGEPAAgentOptimizer_Optimize_UsesMainlineGEPACompile(t *testing.T) {
 	setupAgentGEPAMockLLM(t)
 
 	optimizer := NewGEPAAgentOptimizer(
@@ -57,6 +56,7 @@ func TestGEPAAgentOptimizer_Optimize_RunsSharedEvolutionLoop(t *testing.T) {
 	require.NotNil(t, result.BestCandidate)
 	require.NotNil(t, result.OptimizationState)
 	require.Len(t, result.OptimizationState.PopulationHistory, 2)
+	require.GreaterOrEqual(t, result.OptimizationState.CurrentGeneration, 1)
 	assert.Equal(t, 1, result.TrainingExampleCount)
 	assert.Equal(t, 0, result.ValidationExampleCount)
 	assert.NotEmpty(t, result.BestArtifacts.Text[ArtifactSkillPack])
@@ -65,25 +65,51 @@ func TestGEPAAgentOptimizer_Optimize_RunsSharedEvolutionLoop(t *testing.T) {
 	require.NotNil(t, secondGeneration)
 	require.NotEmpty(t, secondGeneration.Candidates)
 	for _, candidate := range secondGeneration.Candidates {
-		artifacts, decodeErr := optimizer.CandidateArtifacts(candidate)
+		artifacts, decodeErr := optimizer.candidateArtifactsWithBase(candidate, AgentArtifacts{
+			Text: map[ArtifactKey]string{
+				ArtifactSkillPack: "Use the repository debugging guide.",
+			},
+		})
 		require.NoError(t, decodeErr)
 		assert.NotEmpty(t, artifacts.Text[ArtifactSkillPack])
 	}
 }
 
-func TestGEPAAgentOptimizer_Optimize_UsesValidationExamplesForFinalSelection(t *testing.T) {
+func TestGEPAAgentOptimizer_BuildEngineConfig_UsesSearchBatchAndStagnationLimit(t *testing.T) {
+	optimizer := NewGEPAAgentOptimizer(
+		newMockOptimizableAgent(),
+		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
+			return &EvalResult{Score: 1.0}, nil
+		}),
+		GEPAAdapterConfig{
+			PopulationSize:  4,
+			MaxGenerations:  3,
+			ReflectionFreq:  1,
+			SearchBatchSize: 4,
+			StagnationLimit: 60,
+			EvalConcurrency: 2,
+			PassThreshold:   0.5,
+			PrimaryArtifact: ArtifactSkillPack,
+		},
+	)
+
+	engineConfig := optimizer.buildEngineConfig(13)
+	assert.Equal(t, 4, engineConfig.EvaluationBatchSize)
+	assert.Equal(t, 60, engineConfig.StagnationLimit)
+
+	engineConfig = optimizer.buildEngineConfig(3)
+	assert.Equal(t, 3, engineConfig.EvaluationBatchSize)
+}
+
+func TestGEPAAgentOptimizer_Optimize_EvaluatesBestCandidateOnValidationExamples(t *testing.T) {
 	setupAgentGEPAMockLLM(t)
 
 	optimizer := NewGEPAAgentOptimizer(
 		newMockOptimizableAgent(),
 		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
-			skill := strings.ToLower(agent.GetArtifacts().Text[ArtifactSkillPack])
-			score := 0.6
+			score := 0.8
 			if ex.ID == "validation" {
-				score = 0.2
-				if strings.Contains(skill, "carefully") {
-					score = 1.0
-				}
+				score = 0.4
 			}
 			return &EvalResult{
 				Score: score,
@@ -125,62 +151,151 @@ func TestGEPAAgentOptimizer_Optimize_UsesValidationExamplesForFinalSelection(t *
 	require.NotNil(t, result.BestCandidate)
 	require.NotNil(t, result.BestValidationEvaluation)
 
-	assert.Contains(t, strings.ToLower(result.BestCandidate.Instruction), "carefully")
-	assert.InDelta(t, 1.0, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
-	assert.Greater(t, result.BestValidationEvaluation.Fitness.WeightedScore, 0.5)
+	assert.Equal(t, result.BestCandidate.ID, result.BestValidationEvaluation.Candidate.ID)
+	assert.InDelta(t, 0.4, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
+	assert.InDelta(t, 0.4, result.BestValidationEvaluation.AverageScore, 0.000001)
 	assert.Equal(t, 1, result.ValidationExampleCount)
 }
 
-func TestGEPAAgentOptimizer_EvaluatePopulationCandidates_ToleratesCandidateFailures(t *testing.T) {
+func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestCandidate(t *testing.T) {
 	setupAgentGEPAMockLLM(t)
 
 	optimizer := NewGEPAAgentOptimizer(
-		cloneFailAgent{newMockOptimizableAgent()},
-		NewDeterministicEvaluator(nil),
+		newMockOptimizableAgent(),
+		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
+			score := 0.2
+			if strings.Contains(strings.ToLower(agent.GetArtifacts().Text[ArtifactSkillPack]), "carefully") {
+				score = 1.0
+			}
+			return &EvalResult{
+				Score: score,
+				SideInfo: &SideInfo{
+					Scores:      map[string]float64{"artifact_score": score},
+					Diagnostics: map[string]interface{}{},
+				},
+			}, nil
+		}),
 		GEPAAdapterConfig{
-			EvalConcurrency: 2,
+			EvalConcurrency: 1,
 			PassThreshold:   0.5,
 			PrimaryArtifact: ArtifactSkillPack,
 		},
-	).WithFactory(func(artifacts AgentArtifacts) (OptimizableAgent, error) {
-		if strings.Contains(strings.ToLower(artifacts.Text[ArtifactSkillPack]), "fail") {
-			return nil, errors.New("factory refused artifact")
-		}
-		agent := newMockOptimizableAgent()
-		if err := agent.SetArtifacts(artifacts); err != nil {
-			return nil, err
-		}
-		return agent, nil
-	})
+	)
 
-	goodCandidate, err := optimizer.SeedCandidate(AgentArtifacts{
+	seed := AgentArtifacts{
 		Text: map[ArtifactKey]string{
 			ArtifactSkillPack: "Use the repository debugging guide.",
 		},
-	})
+	}
+	archiveCandidate, err := optimizer.SeedCandidate(seed)
 	require.NoError(t, err)
+	archiveCandidate.ID = "archive"
 
-	failedCandidate, err := optimizer.SeedCandidate(AgentArtifacts{
-		Text: map[ArtifactKey]string{
-			ArtifactSkillPack: "Fail this candidate on purpose.",
+	historyCandidate := optimizers.CloneCandidate(archiveCandidate)
+	historyCandidate.ID = "history-best"
+	historyCandidate.Instruction = "Carefully analyze before acting."
+	historyCandidate.ComponentTexts = map[string]string{
+		string(ArtifactSkillPack): historyCandidate.Instruction,
+	}
+
+	state := optimizers.NewGEPAState()
+	state.BestCandidate = archiveCandidate
+	state.ParetoArchive = []*optimizers.GEPACandidate{archiveCandidate}
+	state.PopulationHistory = []*optimizers.Population{
+		{
+			Generation: 1,
+			Candidates: []*optimizers.GEPACandidate{
+				archiveCandidate,
+				historyCandidate,
+			},
+			BestCandidate: archiveCandidate,
+		},
+	}
+
+	bestCandidate, bestEvaluation, err := optimizer.evaluateBestCandidateOnValidation(context.Background(), state, seed, []AgentExample{{ID: "validation"}})
+	require.NoError(t, err)
+	require.NotNil(t, bestCandidate)
+	require.NotNil(t, bestEvaluation)
+	assert.Equal(t, archiveCandidate.ID, bestCandidate.ID)
+	assert.Equal(t, archiveCandidate.ID, bestEvaluation.Candidate.ID)
+	assert.NotContains(t, strings.ToLower(bestEvaluation.Artifacts.Text[ArtifactSkillPack]), "carefully")
+}
+
+func TestBestCandidateFromState_FallsBackToBestArchiveCandidate(t *testing.T) {
+	state := optimizers.NewGEPAState()
+	state.BestCandidate = nil
+	state.ParetoArchive = []*optimizers.GEPACandidate{
+		{ID: "candidate-b", Fitness: 0.7},
+		{ID: "candidate-a", Fitness: 0.7},
+		{ID: "candidate-c", Fitness: 0.9},
+	}
+	state.ArchiveFitnessMap = map[string]*optimizers.MultiObjectiveFitness{
+		"candidate-b": {WeightedScore: 0.7},
+		"candidate-a": {WeightedScore: 0.7},
+		"candidate-c": {WeightedScore: 0.9},
+	}
+
+	best := bestCandidateFromState(state)
+	require.NotNil(t, best)
+	assert.Equal(t, "candidate-c", best.ID)
+}
+
+func TestGEPAAgentOptimizer_Optimize_StoresAggregateCandidateFitnessForSyntheticProgram(t *testing.T) {
+	setupAgentGEPAMockLLM(t)
+
+	optimizer := NewGEPAAgentOptimizer(
+		newMockOptimizableAgent(),
+		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
+			score := 0.0
+			if ex.ID == "first" {
+				score = 1.0
+			}
+			return &EvalResult{
+				Score: score,
+				SideInfo: &SideInfo{
+					Scores:      map[string]float64{"artifact_score": score},
+					Diagnostics: map[string]interface{}{},
+				},
+			}, nil
+		}),
+		GEPAAdapterConfig{
+			PopulationSize:  1,
+			MaxGenerations:  1,
+			ReflectionFreq:  0,
+			ValidationSplit: 0,
+			EvalConcurrency: 1,
+			PassThreshold:   0.5,
+			PrimaryArtifact: ArtifactSkillPack,
+		},
+	)
+
+	result, err := optimizer.Optimize(context.Background(), GEPAOptimizeRequest{
+		SeedArtifacts: AgentArtifacts{
+			Text: map[ArtifactKey]string{
+				ArtifactSkillPack: "Use the repository debugging guide.",
+			},
+		},
+		TrainingExamples: []AgentExample{
+			{ID: "first"},
+			{ID: "second"},
 		},
 	})
-	require.NoError(t, err)
 
-	evaluations, err := optimizer.evaluatePopulationCandidates(context.Background(), []*optimizers.GEPACandidate{
-		goodCandidate,
-		failedCandidate,
-	}, []AgentExample{{ID: "example-1"}})
 	require.NoError(t, err)
-	require.Len(t, evaluations, 2)
+	require.NotNil(t, result)
+	require.NotNil(t, result.BestCandidate)
+	require.NotNil(t, result.OptimizationState)
 
-	require.NotNil(t, evaluations[0])
-	require.NotNil(t, evaluations[1])
-	assert.GreaterOrEqual(t, evaluations[0].Fitness.WeightedScore, 0.0)
-	assert.Zero(t, evaluations[1].Fitness.WeightedScore)
-	require.Len(t, evaluations[1].Traces, 1)
-	require.Error(t, evaluations[1].Traces[0].Error)
-	assert.Contains(t, evaluations[1].Traces[0].Error.Error(), "factory refused artifact")
+	metrics := result.OptimizationState.CandidateMetrics[result.BestCandidate.ID]
+	require.NotNil(t, metrics)
+	fitness, ok := metrics.Metadata["multi_objective_fitness"].(*optimizers.MultiObjectiveFitness)
+	require.True(t, ok)
+	require.NotNil(t, fitness)
+
+	assert.InDelta(t, 0.5, result.BestCandidate.Fitness, 0.000001)
+	assert.InDelta(t, 0.5, metrics.AverageFitness, 0.000001)
+	assert.InDelta(t, 0.5, fitness.OutputQuality, 0.000001)
+	assert.InDelta(t, 0.5, fitness.SuccessRate, 0.000001)
 }
 
 func TestGEPA_BootstrapPopulationFromSeed_RejectsReinitialization(t *testing.T) {

@@ -27,6 +27,8 @@ func init() {
 	rootCmd.AddCommand(commands.NewDescribeCommand())
 	rootCmd.AddCommand(commands.NewRecommendCommand())
 	rootCmd.AddCommand(commands.NewTryCommand())
+	rootCmd.AddCommand(commands.NewAgentCommand())
+	rootCmd.AddCommand(commands.NewBenchmarkCommand())
 	rootCmd.AddCommand(commands.NewInteractiveCommand())
 	rootCmd.AddCommand(commands.NewAnalyzeCommand())
 	rootCmd.AddCommand(commands.NewViewerCommand())
