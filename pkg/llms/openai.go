@@ -495,7 +495,7 @@ func anyMapToInterfaceMap(in map[string]any) map[string]interface{} {
 
 func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.ChatCompletionMessage, error) {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
-	lastToolCallID := ""
+	pendingToolCallIDs := make([]string, 0, 1)
 
 	for messageIndex, message := range messages {
 		openAIMessage := openai.ChatCompletionMessage{
@@ -507,6 +507,7 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 		case "assistant":
 			if len(message.ToolCalls) > 0 {
 				openAIMessage.ToolCalls = make([]openai.ChatCompletionToolCall, 0, len(message.ToolCalls))
+				pendingToolCallIDs = pendingToolCallIDs[:0]
 				for toolIndex, toolCall := range message.ToolCalls {
 					argumentsJSON, err := json.Marshal(toolCall.Arguments)
 					if err != nil {
@@ -520,7 +521,7 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 					if toolCallID == "" {
 						toolCallID = fmt.Sprintf("call_%d_%d", messageIndex, toolIndex)
 					}
-					lastToolCallID = toolCallID
+					pendingToolCallIDs = append(pendingToolCallIDs, toolCallID)
 
 					openAIMessage.ToolCalls = append(openAIMessage.ToolCalls, openai.ChatCompletionToolCall{
 						ID:   toolCallID,
@@ -532,24 +533,47 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 					})
 				}
 			} else {
-				lastToolCallID = ""
+				pendingToolCallIDs = pendingToolCallIDs[:0]
 			}
 		case "tool":
 			if message.ToolResult != nil {
 				openAIMessage.Content = flattenCoreChatMessageContent(message.ToolResult.Content)
 				openAIMessage.ToolCallID = strings.TrimSpace(message.ToolResult.ToolCallID)
 				if openAIMessage.ToolCallID == "" {
-					openAIMessage.ToolCallID = lastToolCallID
+					switch len(pendingToolCallIDs) {
+					case 0:
+					case 1:
+						openAIMessage.ToolCallID = pendingToolCallIDs[0]
+					default:
+						return nil, errors.Wrap(
+							fmt.Errorf("assistant turn has %d pending tool calls", len(pendingToolCallIDs)),
+							errors.InvalidInput,
+							"tool result is missing tool call id",
+						)
+					}
+				}
+				if openAIMessage.ToolCallID != "" {
+					pendingToolCallIDs = removePendingToolCallID(pendingToolCallIDs, openAIMessage.ToolCallID)
 				}
 			}
 		default:
-			lastToolCallID = ""
+			pendingToolCallIDs = pendingToolCallIDs[:0]
 		}
 
 		out = append(out, openAIMessage)
 	}
 
 	return out, nil
+}
+
+func removePendingToolCallID(ids []string, target string) []string {
+	for i, id := range ids {
+		if id != target {
+			continue
+		}
+		return append(ids[:i], ids[i+1:]...)
+	}
+	return ids
 }
 
 func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {

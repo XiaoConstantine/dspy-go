@@ -1235,6 +1235,56 @@ func TestOpenAILLM_GenerateWithTools(t *testing.T) {
 	assert.Equal(t, 20, result["_usage"].(*core.TokenInfo).TotalTokens)
 }
 
+func TestOpenAILLM_GenerateWithTools_RejectsAmbiguousImplicitToolResultBinding(t *testing.T) {
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT5Mini,
+		WithAPIKey("test-api-key"),
+	)
+	require.NoError(t, err)
+
+	_, err = llm.GenerateWithTools(context.Background(), []core.ChatMessage{
+		{
+			Role:    "user",
+			Content: []core.ContentBlock{core.NewTextBlock("Solve task")},
+		},
+		{
+			Role: "assistant",
+			ToolCalls: []core.ToolCall{
+				{
+					ID:        "call_a",
+					Name:      "write_file",
+					Arguments: map[string]any{"path": "a.txt", "content": "a"},
+				},
+				{
+					ID:        "call_b",
+					Name:      "write_file",
+					Arguments: map[string]any{"path": "b.txt", "content": "b"},
+				},
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &core.ChatToolResult{
+				Name:    "write_file",
+				Content: []core.ContentBlock{core.NewTextBlock("ok")},
+			},
+		},
+	}, []map[string]any{
+		{
+			"name":        "Finish",
+			"description": "Complete the task",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"answer": map[string]any{"type": "string"},
+				},
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool result is missing tool call id")
+}
+
 func TestOpenAILLM_GenerateWithTools_InvalidRequestIncludesDebugDump(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
