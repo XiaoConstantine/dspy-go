@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -30,6 +31,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	var split string
 	var offset int
 	var limit int
+	var tasksFile string
 	var rootDir string
 	var outputPath string
 	var keepArtifacts bool
@@ -49,14 +51,28 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 		Use:   "tblite",
 		Short: "Run a fixed-slice TBLite evaluation with the native benchmark agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tasks, err := datasets.FetchTBLiteTasksFromHuggingFaceRangeContext(cmd.Context(), split, offset, limit)
+			source, err := resolveTBLiteTaskSource(cmd.Context(), tbliteTaskSourceConfig{
+				Split:          split,
+				Offset:         offset,
+				Limit:          limit,
+				Label:          label,
+				TasksFile:      tasksFile,
+				SplitExplicit:  cmd.Flags().Changed("split"),
+				OffsetExplicit: cmd.Flags().Changed("offset"),
+				LimitExplicit:  cmd.Flags().Changed("limit"),
+			})
 			if err != nil {
 				return err
 			}
+			tasks := source.Tasks
 			if len(tasks) == 0 {
-				return fmt.Errorf("no tblite tasks returned for split=%s offset=%d limit=%d", split, offset, limit)
+				return fmt.Errorf("no tblite tasks returned for split=%s offset=%d limit=%d", source.Split, source.Offset, source.Limit)
 			}
 			tasks = shuffledTBLiteTasks(tasks, shuffleSeed)
+			label = source.Label
+			split = source.Split
+			offset = source.Offset
+			limit = source.Limit
 
 			if !useGEPA {
 				agent, err := factory(agentCfg)
@@ -114,6 +130,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	cmd.Flags().StringVar(&split, "split", "train", "Dataset split")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Task offset in the dataset")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Number of tasks to evaluate")
+	cmd.Flags().StringVar(&tasksFile, "tasks-file", "", "Optional JSON file describing a curated TBLite task slice")
 	cmd.Flags().StringVar(&rootDir, "root-dir", "", "Directory for materialized task workspaces")
 	cmd.Flags().StringVar(&outputPath, "output", "", "Optional path to write the JSON report")
 	cmd.Flags().BoolVar(&keepArtifacts, "keep-artifacts", false, "Keep materialized task directories after the run")
@@ -131,6 +148,103 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 
 	_ = cmd.MarkFlagRequired("root-dir")
 	return cmd
+}
+
+type tbliteTaskSourceConfig struct {
+	Split          string
+	Offset         int
+	Limit          int
+	Label          string
+	TasksFile      string
+	SplitExplicit  bool
+	OffsetExplicit bool
+	LimitExplicit  bool
+}
+
+type tbliteTaskSource struct {
+	Tasks  []datasets.TBLiteTask
+	Split  string
+	Offset int
+	Limit  int
+	Label  string
+}
+
+func resolveTBLiteTaskSource(ctx context.Context, cfg tbliteTaskSourceConfig) (*tbliteTaskSource, error) {
+	if cfg.TasksFile == "" {
+		tasks, err := datasets.FetchTBLiteTasksFromHuggingFaceRangeContext(ctx, cfg.Split, cfg.Offset, cfg.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return &tbliteTaskSource{
+			Tasks:  tasks,
+			Split:  cfg.Split,
+			Offset: cfg.Offset,
+			Limit:  cfg.Limit,
+			Label:  cfg.Label,
+		}, nil
+	}
+
+	if cfg.OffsetExplicit || cfg.LimitExplicit {
+		return nil, fmt.Errorf("--tasks-file cannot be combined with --offset or --limit")
+	}
+
+	selection, err := datasets.LoadTBLiteTaskSelectionFromFile(cfg.TasksFile)
+	if err != nil {
+		return nil, err
+	}
+
+	effectiveSplit := cfg.Split
+	if selection.Split != "" {
+		if cfg.SplitExplicit && cfg.Split != selection.Split {
+			return nil, fmt.Errorf("--split=%s conflicts with tasks file split=%s", cfg.Split, selection.Split)
+		}
+		effectiveSplit = selection.Split
+	}
+
+	tasks := append([]datasets.TBLiteTask(nil), selection.Tasks...)
+	if len(selection.TaskNames) > 0 {
+		resolved, err := datasets.FetchTBLiteTasksByNamesContext(ctx, effectiveSplit, selection.TaskNames)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, resolved...)
+	}
+
+	tasks = dedupeTBLiteTasksByName(tasks)
+	if len(tasks) == 0 {
+		return nil, fmt.Errorf("tasks file %s did not resolve any tasks", cfg.TasksFile)
+	}
+
+	effectiveLabel := cfg.Label
+	if effectiveLabel == "" && selection.Label != "" {
+		effectiveLabel = selection.Label
+	}
+
+	return &tbliteTaskSource{
+		Tasks:  tasks,
+		Split:  effectiveSplit,
+		Offset: 0,
+		Limit:  len(tasks),
+		Label:  effectiveLabel,
+	}, nil
+}
+
+func dedupeTBLiteTasksByName(tasks []datasets.TBLiteTask) []datasets.TBLiteTask {
+	if len(tasks) <= 1 {
+		return append([]datasets.TBLiteTask(nil), tasks...)
+	}
+
+	deduped := make([]datasets.TBLiteTask, 0, len(tasks))
+	seen := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		name := task.TaskName
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		deduped = append(deduped, task)
+	}
+	return deduped
 }
 
 func runTBLiteGEPABenchmark(

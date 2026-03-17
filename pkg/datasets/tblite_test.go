@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,6 +61,68 @@ func TestLoadTBLiteTasksFromFile_NormalizesTasks(t *testing.T) {
 	assert.Equal(t, []string{"python", "debugging"}, tasks[0].Tags)
 	assert.Equal(t, 600, tasks[0].AgentTimeoutSec)
 	assert.Equal(t, 120, tasks[0].TestTimeoutSec)
+}
+
+func TestLoadTBLiteTaskSelectionFromFile_TaskNamesManifest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "selection.json")
+	content := `{
+		"label":"focused-coding",
+		"split":"train",
+		"task_names":["task-a", "task-b", "task-a"]
+	}`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	selection, err := LoadTBLiteTaskSelectionFromFile(path)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	assert.Equal(t, "focused-coding", selection.Label)
+	assert.Equal(t, "train", selection.Split)
+	assert.Equal(t, []string{"task-a", "task-b"}, selection.TaskNames)
+	assert.Empty(t, selection.Tasks)
+}
+
+func TestLoadTBLiteTaskSelectionFromFile_AcceptsTaskArray(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "selection.json")
+	content := `[{
+		"task_name":"task-a",
+		"instruction":"do it",
+		"docker_image":"img:latest",
+		"category":"coding",
+		"difficulty":"easy",
+		"test_sh":"#!/bin/sh"
+	}]`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	selection, err := LoadTBLiteTaskSelectionFromFile(path)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Len(t, selection.Tasks, 1)
+	assert.Equal(t, "task-a", selection.Tasks[0].TaskName)
+	assert.Nil(t, selection.TaskNames)
+}
+
+func TestFetchTBLiteTasksByNamesContext_PreservesRequestedOrder(t *testing.T) {
+	originalEndpoint := tbliteRowsEndpoint
+	defer func() { tbliteRowsEndpoint = originalEndpoint }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"rows":[
+				{"row":{"task_name":"task-a","instruction":"a","docker_image":"img:latest","category":"coding","difficulty":"easy","test_sh":"#!/bin/sh"}},
+				{"row":{"task_name":"task-b","instruction":"b","docker_image":"img:latest","category":"coding","difficulty":"easy","test_sh":"#!/bin/sh"}},
+				{"row":{"task_name":"task-c","instruction":"c","docker_image":"img:latest","category":"coding","difficulty":"easy","test_sh":"#!/bin/sh"}}
+			]
+		}`))
+	}))
+	defer server.Close()
+	tbliteRowsEndpoint = server.URL
+
+	tasks, err := FetchTBLiteTasksByNamesContext(context.Background(), "train", []string{"task-c", "task-a"})
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+	assert.Equal(t, "task-c", tasks[0].TaskName)
+	assert.Equal(t, "task-a", tasks[1].TaskName)
 }
 
 func TestSliceTBLiteTasks_UsesDeterministicOffset(t *testing.T) {

@@ -18,6 +18,17 @@ const (
 	tbliteDefaultSplit = "train"
 )
 
+var tbliteRowsEndpoint = "https://datasets-server.huggingface.co/rows"
+
+// TBLiteTaskSelection describes a curated benchmark slice. It can reference
+// existing HuggingFace tasks by name and/or embed full local task payloads.
+type TBLiteTaskSelection struct {
+	Label     string       `json:"label,omitempty"`
+	Split     string       `json:"split,omitempty"`
+	TaskNames []string     `json:"task_names,omitempty"`
+	Tasks     []TBLiteTask `json:"tasks,omitempty"`
+}
+
 // TBLiteTask represents a single OpenThoughts-TBLite benchmark task.
 // It supports both HuggingFace row payloads and local JSON fixtures.
 type TBLiteTask struct {
@@ -96,6 +107,44 @@ func LoadTBLiteTasksFromFile(path string) ([]TBLiteTask, error) {
 	return tasks, nil
 }
 
+// LoadTBLiteTaskSelectionFromFile loads a curated TBLite benchmark manifest.
+// Supported JSON shapes:
+// - ["task-a", "task-b"]
+// - [{...full task...}, {...full task...}]
+// - {"label":"...", "split":"train", "task_names":[...], "tasks":[...]}
+func LoadTBLiteTaskSelectionFromFile(path string) (*TBLiteTaskSelection, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	var taskNames []string
+	if err := json.Unmarshal(data, &taskNames); err == nil {
+		return &TBLiteTaskSelection{TaskNames: normalizeTaskNames(taskNames)}, nil
+	}
+
+	var tasks []TBLiteTask
+	if err := json.Unmarshal(data, &tasks); err == nil {
+		for i := range tasks {
+			tasks[i] = tasks[i].Normalize()
+		}
+		return &TBLiteTaskSelection{Tasks: tasks}, nil
+	}
+
+	var selection TBLiteTaskSelection
+	if err := json.Unmarshal(data, &selection); err != nil {
+		return nil, fmt.Errorf("unmarshal task selection: %w", err)
+	}
+	selection.TaskNames = normalizeTaskNames(selection.TaskNames)
+	for i := range selection.Tasks {
+		selection.Tasks[i] = selection.Tasks[i].Normalize()
+	}
+	if len(selection.TaskNames) == 0 && len(selection.Tasks) == 0 {
+		return nil, fmt.Errorf("task selection must include task_names and/or tasks")
+	}
+	return &selection, nil
+}
+
 // FetchTBLiteTasksFromHuggingFace loads TBLite rows from the public datasets server.
 func FetchTBLiteTasksFromHuggingFace(limit int) ([]TBLiteTask, error) {
 	return FetchTBLiteTasksFromHuggingFaceContext(context.Background(), limit)
@@ -118,7 +167,8 @@ func FetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, split stri
 	}
 
 	url := fmt.Sprintf(
-		"https://datasets-server.huggingface.co/rows?dataset=%s&config=default&split=%s&offset=%d&length=%d",
+		"%s?dataset=%s&config=default&split=%s&offset=%d&length=%d",
+		tbliteRowsEndpoint,
 		tbliteDatasetName,
 		split,
 		offset,
@@ -161,6 +211,57 @@ func FetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, split stri
 	return tasks, nil
 }
 
+// FetchTBLiteTasksByNamesContext resolves named tasks from the datasets server
+// while preserving the requested order.
+func FetchTBLiteTasksByNamesContext(ctx context.Context, split string, taskNames []string) ([]TBLiteTask, error) {
+	orderedNames := normalizeTaskNames(taskNames)
+	if len(orderedNames) == 0 {
+		return nil, fmt.Errorf("at least one task name is required")
+	}
+
+	pending := make(map[string]struct{}, len(orderedNames))
+	for _, name := range orderedNames {
+		pending[name] = struct{}{}
+	}
+	found := make(map[string]TBLiteTask, len(orderedNames))
+
+	const pageSize = 100
+	for offset := 0; len(pending) > 0; offset += pageSize {
+		page, err := FetchTBLiteTasksFromHuggingFaceRangeContext(ctx, split, offset, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, task := range page {
+			if _, ok := pending[task.TaskName]; ok {
+				found[task.TaskName] = task.Normalize()
+				delete(pending, task.TaskName)
+			}
+		}
+		if len(page) < pageSize {
+			break
+		}
+	}
+
+	if len(pending) > 0 {
+		missing := make([]string, 0, len(pending))
+		for _, name := range orderedNames {
+			if _, ok := pending[name]; ok {
+				missing = append(missing, name)
+			}
+		}
+		return nil, fmt.Errorf("missing requested tblite tasks: %s", strings.Join(missing, ", "))
+	}
+
+	resolved := make([]TBLiteTask, 0, len(orderedNames))
+	for _, name := range orderedNames {
+		resolved = append(resolved, found[name])
+	}
+	return resolved, nil
+}
+
 // SliceTBLiteTasks returns a deterministic slice from a task set.
 func SliceTBLiteTasks(tasks []TBLiteTask, offset, limit int) []TBLiteTask {
 	if offset < 0 {
@@ -201,6 +302,27 @@ func decodeTBLiteArchive(payload string) ([]byte, error) {
 		return nil, fmt.Errorf("decode archive: %w", err)
 	}
 	return decoded, nil
+}
+
+func normalizeTaskNames(taskNames []string) []string {
+	if len(taskNames) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(taskNames))
+	seen := make(map[string]struct{}, len(taskNames))
+	for _, name := range taskNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		normalized = append(normalized, name)
+	}
+	return normalized
 }
 
 func parseTBLiteTags(value interface{}) ([]string, error) {

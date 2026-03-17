@@ -1,0 +1,26 @@
+{
+  "label": "focused-coding-repair",
+  "split": "train",
+  "task_names": [
+    "api-endpoint-permission-canonicalizer",
+    "application-debug",
+    "auth_token_race_condition",
+    "bash-log-processor-fix",
+    "bloom-filter-cache-penetration-prevention",
+    "broken-python",
+    "build-merkle-tree-cli-sha512",
+    "build-system-task-ordering",
+    "cpp-daemon-sighup-segfault",
+    "etl_checkpoint_resume_bug",
+    "fix-js-network-controller",
+    "fix_async_worker_queue",
+    "grpc-plant-position-server",
+    "hydra-debug-slurm-mode",
+    "maven-slf4j-conflict",
+    "monorepo-changelog-cli",
+    "okhttp-trailers-crash",
+    "python-api-rate-limit",
+    "raft-log-repair-concurrent-access",
+    "sympy-bug-fix"
+  ]
+}
