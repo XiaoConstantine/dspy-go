@@ -93,23 +93,29 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_UsesSearchBatchAndStagnationLimit(
 		},
 	)
 
-	engineConfig := optimizer.buildEngineConfig(13)
+	engineConfig := optimizer.buildEngineConfig(13, 3)
 	assert.Equal(t, 4, engineConfig.EvaluationBatchSize)
 	assert.Equal(t, 60, engineConfig.StagnationLimit)
+	assert.InDelta(t, 3.0/16.0, engineConfig.ValidationSplit, 0.000001)
 
-	engineConfig = optimizer.buildEngineConfig(3)
+	engineConfig = optimizer.buildEngineConfig(3, 0)
 	assert.Equal(t, 3, engineConfig.EvaluationBatchSize)
+	assert.Zero(t, engineConfig.ValidationSplit)
 }
 
-func TestGEPAAgentOptimizer_Optimize_EvaluatesBestCandidateOnValidationExamples(t *testing.T) {
+func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T) {
 	setupAgentGEPAMockLLM(t)
 
 	optimizer := NewGEPAAgentOptimizer(
 		newMockOptimizableAgent(),
 		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
-			score := 0.8
-			if ex.ID == "validation" {
-				score = 0.4
+			score := 0.2
+			if strings.Contains(strings.ToLower(agent.GetArtifacts().Text[ArtifactSkillPack]), "carefully") {
+				if ex.ID == "validation" {
+					score = 1.0
+				}
+			} else if ex.ID == "training" {
+				score = 1.0
 			}
 			return &EvalResult{
 				Score: score,
@@ -150,14 +156,19 @@ func TestGEPAAgentOptimizer_Optimize_EvaluatesBestCandidateOnValidationExamples(
 	require.NotNil(t, result)
 	require.NotNil(t, result.BestCandidate)
 	require.NotNil(t, result.BestValidationEvaluation)
+	require.NotNil(t, result.OptimizationState)
+	require.NotNil(t, result.OptimizationState.BestValidationCandidate)
 
+	assert.NotNil(t, result.OptimizationState.BestCandidate)
+	assert.Equal(t, result.OptimizationState.BestValidationCandidate.ID, result.BestCandidate.ID)
+	assert.NotEqual(t, result.OptimizationState.BestCandidate.ID, result.BestCandidate.ID)
 	assert.Equal(t, result.BestCandidate.ID, result.BestValidationEvaluation.Candidate.ID)
-	assert.InDelta(t, 0.4, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
-	assert.InDelta(t, 0.4, result.BestValidationEvaluation.AverageScore, 0.000001)
+	assert.InDelta(t, 1.0, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
+	assert.InDelta(t, 1.0, result.BestValidationEvaluation.AverageScore, 0.000001)
 	assert.Equal(t, 1, result.ValidationExampleCount)
 }
 
-func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestCandidate(t *testing.T) {
+func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestValidationCandidate(t *testing.T) {
 	setupAgentGEPAMockLLM(t)
 
 	optimizer := NewGEPAAgentOptimizer(
@@ -200,6 +211,7 @@ func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestCandi
 
 	state := optimizers.NewGEPAState()
 	state.BestCandidate = archiveCandidate
+	state.BestValidationCandidate = historyCandidate
 	state.ParetoArchive = []*optimizers.GEPACandidate{archiveCandidate}
 	state.PopulationHistory = []*optimizers.Population{
 		{
@@ -216,9 +228,19 @@ func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestCandi
 	require.NoError(t, err)
 	require.NotNil(t, bestCandidate)
 	require.NotNil(t, bestEvaluation)
-	assert.Equal(t, archiveCandidate.ID, bestCandidate.ID)
-	assert.Equal(t, archiveCandidate.ID, bestEvaluation.Candidate.ID)
-	assert.NotContains(t, strings.ToLower(bestEvaluation.Artifacts.Text[ArtifactSkillPack]), "carefully")
+	assert.Equal(t, historyCandidate.ID, bestCandidate.ID)
+	assert.Equal(t, historyCandidate.ID, bestEvaluation.Candidate.ID)
+	assert.Contains(t, strings.ToLower(bestEvaluation.Artifacts.Text[ArtifactSkillPack]), "carefully")
+}
+
+func TestBestCandidateFromState_PrefersBestValidationCandidate(t *testing.T) {
+	state := optimizers.NewGEPAState()
+	state.BestCandidate = &optimizers.GEPACandidate{ID: "training-best", Fitness: 0.9}
+	state.BestValidationCandidate = &optimizers.GEPACandidate{ID: "validation-best", Fitness: 0.4}
+
+	best := bestCandidateFromState(state)
+	require.NotNil(t, best)
+	assert.Equal(t, "validation-best", best.ID)
 }
 
 func TestBestCandidateFromState_FallsBackToBestArchiveCandidate(t *testing.T) {

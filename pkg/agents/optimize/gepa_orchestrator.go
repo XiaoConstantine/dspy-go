@@ -45,7 +45,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 		return nil, err
 	}
 
-	engine, err := optimizers.NewGEPA(o.buildEngineConfig(len(trainExamples)))
+	engine, err := optimizers.NewGEPA(o.buildEngineConfig(len(trainExamples), len(validationExamples)))
 	if err != nil {
 		return nil, fmt.Errorf("optimize: create GEPA engine: %w", err)
 	}
@@ -53,12 +53,14 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 		engine.SetProgressReporter(req.ProgressReporter)
 	}
 
-	program, err := o.buildOptimizationProgram(req.SeedArtifacts, trainExamples)
+	allExamples := append(append([]AgentExample(nil), trainExamples...), validationExamples...)
+
+	program, err := o.buildOptimizationProgram(req.SeedArtifacts, allExamples)
 	if err != nil {
 		return nil, err
 	}
 
-	dataset := o.buildOptimizationDataset(trainExamples)
+	dataset := o.buildOptimizationDataset(allExamples)
 	optimizedProgram, err := engine.Compile(ctx, program, dataset, o.buildOptimizationMetric())
 	if err != nil {
 		return nil, err
@@ -89,7 +91,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 	}, nil
 }
 
-func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount int) *optimizers.GEPAConfig {
+func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount, validationCount int) *optimizers.GEPAConfig {
 	engineConfig := optimizers.DefaultGEPAConfig()
 	engineConfig.PopulationSize = o.config.PopulationSize
 	engineConfig.MaxGenerations = o.config.MaxGenerations
@@ -100,6 +102,12 @@ func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount int) *optimizers.GE
 		engineConfig.EvaluationBatchSize = trainingCount
 		if o.config.SearchBatchSize > 0 && o.config.SearchBatchSize < engineConfig.EvaluationBatchSize {
 			engineConfig.EvaluationBatchSize = o.config.SearchBatchSize
+		}
+	}
+	if validationCount > 0 {
+		totalCount := trainingCount + validationCount
+		if totalCount > 1 {
+			engineConfig.ValidationSplit = float64(validationCount) / float64(totalCount)
 		}
 	}
 	return engineConfig
@@ -138,6 +146,12 @@ func (o *GEPAAgentOptimizer) evaluateBestCandidateOnValidation(ctx context.Conte
 		return nil, nil, fmt.Errorf("optimize: no GEPA best candidate available for validation evaluation")
 	}
 
+	if cachedEvaluation, err := o.cachedValidationEvaluation(state, bestCandidate, seed, validationExamples); err != nil {
+		return nil, nil, fmt.Errorf("optimize: decode cached GEPA validation evaluation: %w", err)
+	} else if cachedEvaluation != nil {
+		return bestCandidate, cachedEvaluation, nil
+	}
+
 	evaluation, err := o.evaluateCandidateWithBase(ctx, optimizers.CloneCandidate(bestCandidate), seed, validationExamples)
 	if err != nil {
 		return nil, nil, fmt.Errorf("optimize: evaluate GEPA best candidate on validation examples: %w", err)
@@ -146,9 +160,68 @@ func (o *GEPAAgentOptimizer) evaluateBestCandidateOnValidation(ctx context.Conte
 	return bestCandidate, evaluation, nil
 }
 
+func (o *GEPAAgentOptimizer) cachedValidationEvaluation(state *optimizers.GEPAState, candidate *optimizers.GEPACandidate, seed AgentArtifacts, validationExamples []AgentExample) (*GEPACandidateEvaluation, error) {
+	if o == nil || state == nil || candidate == nil {
+		return nil, nil
+	}
+
+	cachedEvaluation := state.GetCandidateValidationEvaluation(candidate.ID)
+	if cachedEvaluation == nil {
+		return nil, nil
+	}
+
+	artifacts, err := o.candidateArtifactsWithBase(candidate, seed)
+	if err != nil {
+		return nil, err
+	}
+
+	run := &HarnessRunResult{
+		Results: make([]HarnessExampleResult, 0, len(cachedEvaluation.Cases)),
+	}
+	traces := make([]optimizers.ExecutionTrace, 0, len(cachedEvaluation.Cases))
+	for idx, evalCase := range cachedEvaluation.Cases {
+		example := validationAgentExample(validationExamples, idx, evalCase.Example)
+		evalResult := cachedValidationEvalResult(evalCase.Score, evalCase.Err, evalCase.Feedback, evalCase.FeedbackTarget, evalCase.FeedbackMetadata)
+
+		run.Results = append(run.Results, HarnessExampleResult{
+			ExampleID: example.ID,
+			Result:    evalResult,
+		})
+		run.CompletedExamples++
+		run.AverageScore += evalResult.Score
+		if evalResult.Score >= o.config.PassThreshold {
+			run.PassedExamples++
+		} else {
+			run.FailedExamples++
+		}
+		if evalCase.Err != nil {
+			run.EvaluationErrors++
+		}
+		traces = append(traces, buildGEPATrace(candidate, example, evalResult, o.config.PassThreshold))
+	}
+	if run.CompletedExamples > 0 {
+		run.AverageScore /= float64(run.CompletedExamples)
+	}
+
+	fitness := buildMultiObjectiveFitness(run)
+	candidate.Fitness = fitness.WeightedScore
+	return &GEPACandidateEvaluation{
+		Candidate:    candidate,
+		Artifacts:    artifacts,
+		Run:          run,
+		Fitness:      fitness,
+		Traces:       traces,
+		AverageScore: cachedEvaluation.AverageScore,
+	}, nil
+}
+
 func bestCandidateFromState(state *optimizers.GEPAState) *optimizers.GEPACandidate {
 	if state == nil {
 		return nil
+	}
+
+	if state.BestValidationCandidate != nil {
+		return optimizers.CloneCandidate(state.BestValidationCandidate)
 	}
 
 	if state.BestCandidate != nil {
@@ -210,4 +283,42 @@ func (o *GEPAAgentOptimizer) resolveBestArtifacts(bestCandidate *optimizers.GEPA
 		}
 	}
 	return artifacts, nil
+}
+
+func validationAgentExample(validationExamples []AgentExample, idx int, example core.Example) AgentExample {
+	if idx >= 0 && idx < len(validationExamples) {
+		return cloneAgentExample(validationExamples[idx])
+	}
+
+	return AgentExample{
+		ID:      fmt.Sprintf("validation-case-%d", idx),
+		Inputs:  core.ShallowCopyMap(example.Inputs),
+		Outputs: core.ShallowCopyMap(example.Outputs),
+	}
+}
+
+func cachedValidationEvalResult(score float64, err error, feedback, feedbackTarget string, feedbackMetadata map[string]interface{}) *EvalResult {
+	diagnostics := make(map[string]interface{})
+	if err != nil {
+		diagnostics["evaluation_error"] = err.Error()
+	}
+	if feedback != "" {
+		diagnostics["gepa_feedback"] = feedback
+	}
+	if feedbackTarget != "" {
+		diagnostics["gepa_feedback_target"] = feedbackTarget
+	}
+	for key, value := range feedbackMetadata {
+		diagnostics[key] = value
+	}
+
+	return &EvalResult{
+		Score: score,
+		SideInfo: &SideInfo{
+			Diagnostics: diagnostics,
+			Scores: map[string]float64{
+				"cached_validation_score": score,
+			},
+		},
+	}
 }
