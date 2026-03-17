@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import tempfile
 from typing import Any
 
 import dspy
@@ -126,6 +127,46 @@ class FormatReflectionLM(dspy.clients.lm.LM):
         if "Your output failed to parse." in content:
             return [{"text": "```format tuned classifier instruction```"}]
         return [{"text": "```format fallback classifier instruction```"}]
+
+
+class ResumeTaskLM(dspy.clients.lm.LM):
+    """Task LM that only succeeds after the deterministic resume rewrite lands."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        if "classifier best" in content:
+            category = "correct"
+        elif "classifier better" in content:
+            category = "almost"
+        else:
+            category = "wrong"
+        return [{"text": json.dumps({"category": category})}]
+
+
+class ResumeReflectionLM(dspy.clients.lm.LM):
+    """Reflection LM that deterministically performs a two-step rewrite."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        improved_instruction = "classifier best" if "classifier better" in content else "classifier better"
+        return [{"text": json.dumps({"improved_instruction": improved_instruction})}]
+
+
+class StopAfterIntermediateBest:
+    """Stop once the partially improved candidate wins, but before the best rewrite lands."""
+
+    def __call__(self, gepa_state) -> bool:
+        scores = list(getattr(gepa_state, "program_full_scores_val_set", []) or [])
+        best_score = max(scores) if scores else 0.0
+        return 0.5 <= best_score < 1.0
 
 
 def component_instructions(program: dspy.Module) -> dict[str, str]:
@@ -439,6 +480,85 @@ def run_format_failure_feedback_fixture() -> dict[str, Any]:
     }
 
 
+def run_resume_parity_fixture() -> dict[str, Any]:
+    example = dspy.Example(input="resume fixture input", category="correct").with_inputs("input")
+    task_lm = ResumeTaskLM()
+    reflection_lm = ResumeReflectionLM()
+
+    def resume_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        if prediction.category == example.category:
+            score = 1.0
+        elif prediction.category == "almost":
+            score = 0.5
+        else:
+            score = 0.0
+        return dspy.Prediction(score=score, feedback="resume fixture feedback")
+
+    with tempfile.TemporaryDirectory(prefix="dspy-gepa-resume-stop-") as stopped_run_dir:
+        with dspy.context(lm=task_lm):
+            stopped_optimizer = dspy.GEPA(
+                metric=resume_metric,
+                reflection_lm=reflection_lm,
+                max_metric_calls=12,
+                component_selector="round_robin",
+                track_stats=True,
+                num_threads=1,
+                seed=7,
+                log_dir=stopped_run_dir,
+                gepa_kwargs={"stop_callbacks": [StopAfterIntermediateBest()]},
+            )
+            first_program = stopped_optimizer.compile(FeedbackModule(), trainset=[example], valset=[example])
+
+            resumed_optimizer = dspy.GEPA(
+                metric=resume_metric,
+                reflection_lm=reflection_lm,
+                max_metric_calls=12,
+                component_selector="round_robin",
+                track_stats=True,
+                num_threads=1,
+                seed=7,
+                log_dir=stopped_run_dir,
+            )
+            resumed_program = resumed_optimizer.compile(FeedbackModule(), trainset=[example], valset=[example])
+
+        checkpoint_written = Path(stopped_run_dir, "gepa_state.bin").exists()
+
+        first_details = getattr(first_program, "detailed_results", None)
+        resumed_details = getattr(resumed_program, "detailed_results", None)
+        if first_details is None or resumed_details is None:
+            raise RuntimeError("DSPy GEPA did not expose detailed_results for resume parity fixture")
+
+    with tempfile.TemporaryDirectory(prefix="dspy-gepa-resume-fresh-") as fresh_run_dir:
+        with dspy.context(lm=task_lm):
+            fresh_optimizer = dspy.GEPA(
+                metric=resume_metric,
+                reflection_lm=reflection_lm,
+                max_metric_calls=12,
+                component_selector="round_robin",
+                track_stats=True,
+                num_threads=1,
+                seed=7,
+                log_dir=fresh_run_dir,
+            )
+            fresh_program = fresh_optimizer.compile(FeedbackModule(), trainset=[example], valset=[example])
+
+        fresh_details = getattr(fresh_program, "detailed_results", None)
+        if fresh_details is None:
+            raise RuntimeError("DSPy GEPA did not expose detailed_results for fresh resume fixture")
+
+    return {
+        "checkpoint_written": checkpoint_written,
+        "stopped_metric_calls": getattr(first_details, "total_metric_calls", 0),
+        "resumed_metric_calls": getattr(resumed_details, "total_metric_calls", 0),
+        "fresh_metric_calls": getattr(fresh_details, "total_metric_calls", 0),
+        "resumed_candidate_count": len(getattr(resumed_details, "candidates", [])),
+        "fresh_candidate_count": len(getattr(fresh_details, "candidates", [])),
+        "resumed_final_program_instruction": resumed_program.classifier.signature.instructions,
+        "fresh_final_program_instruction": fresh_program.classifier.signature.instructions,
+    }
+
+
 def build_fixture_report() -> dict[str, Any]:
     return {
         "runner": "python_dspy",
@@ -454,6 +574,7 @@ def build_fixture_report() -> dict[str, Any]:
             "ancestor_merge": run_ancestor_merge_fixture(),
             "feedback_guided": run_feedback_guided_fixture(),
             "format_failure_feedback": run_format_failure_feedback_fixture(),
+            "resume_parity": run_resume_parity_fixture(),
         },
     }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -235,6 +236,57 @@ func (f *compatFormatFixtureLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion}
 }
 
+type compatResumeFixtureLLM struct{}
+
+func (f *compatResumeFixtureLLM) Generate(_ context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
+	switch {
+	case strings.Contains(prompt, "classifier better"):
+		return &core.LLMResponse{Content: "classifier best"}, nil
+	case strings.Contains(prompt, "classifier base"):
+		return &core.LLMResponse{Content: "classifier better"}, nil
+	case strings.Contains(prompt, "Generate 1 diverse variations of the instruction for a classifier module."):
+		return &core.LLMResponse{Content: "classifier better"}, nil
+	default:
+		return &core.LLMResponse{Content: "classifier better"}, nil
+	}
+}
+
+func (f *compatResumeFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) CreateEmbedding(context.Context, string, ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) CreateEmbeddings(context.Context, []string, ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) StreamGenerate(context.Context, string, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) GenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.LLMResponse, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) StreamGenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (f *compatResumeFixtureLLM) ProviderName() string { return "fixture" }
+
+func (f *compatResumeFixtureLLM) ModelID() string { return "fixture-gepa-resume" }
+
+func (f *compatResumeFixtureLLM) Capabilities() []core.Capability {
+	return []core.Capability{core.CapabilityCompletion}
+}
+
 type compatFixtureScenarioResult struct {
 	Selector                        string            `json:"selector"`
 	FirstCandidateUpdatedComponents []string          `json:"first_candidate_updated_components"`
@@ -268,12 +320,24 @@ type compatFeedbackResult struct {
 	CandidateCount          int    `json:"candidate_count"`
 }
 
+type compatResumeResult struct {
+	CheckpointWritten              bool   `json:"checkpoint_written"`
+	StoppedMetricCalls             int    `json:"stopped_metric_calls"`
+	ResumedMetricCalls             int    `json:"resumed_metric_calls"`
+	FreshMetricCalls               int    `json:"fresh_metric_calls"`
+	ResumedCandidateCount          int    `json:"resumed_candidate_count"`
+	FreshCandidateCount            int    `json:"fresh_candidate_count"`
+	ResumedFinalProgramInstruction string `json:"resumed_final_program_instruction"`
+	FreshFinalProgramInstruction   string `json:"fresh_final_program_instruction"`
+}
+
 type compatFixtureCollection struct {
 	ComponentSelection compatComponentSelectionReport `json:"component_selection"`
 	ValidationFrontier compatValidationFrontierResult `json:"validation_frontier"`
 	AncestorMerge      compatMergeResult              `json:"ancestor_merge"`
 	FeedbackGuided     compatFeedbackResult           `json:"feedback_guided"`
 	FormatFailure      compatFeedbackResult           `json:"format_failure_feedback"`
+	ResumeParity       compatResumeResult             `json:"resume_parity"`
 }
 
 type compatFixtureReport struct {
@@ -371,6 +435,19 @@ func compatBoolToFloat(value bool) float64 {
 		return 1.0
 	}
 	return 0.0
+}
+
+func compatResumeProgressMetric(_ map[string]interface{}, actual map[string]interface{}) float64 {
+	output, _ := actual["output"].(string)
+	lowered := strings.ToLower(output)
+	switch {
+	case strings.Contains(lowered, "classifier best"):
+		return 1.0
+	case strings.Contains(lowered, "classifier better"):
+		return 0.5
+	default:
+		return 0.0
+	}
 }
 
 func compatProgramInstructions(program core.Program) map[string]string {
@@ -802,6 +879,118 @@ func runCompatFormatFailureScenario(t *testing.T, ctx context.Context) compatFee
 	}
 }
 
+func runCompatResumeScenario(t *testing.T, ctx context.Context) compatResumeResult {
+	t.Helper()
+
+	originalDefault := core.GetDefaultLLM()
+	originalTeacher := core.GetTeacherLLM()
+	llm := &compatResumeFixtureLLM{}
+	core.SetDefaultLLM(llm)
+	core.GlobalConfig.TeacherLLM = llm
+	defer func() {
+		core.SetDefaultLLM(originalDefault)
+		core.GlobalConfig.TeacherLLM = originalTeacher
+	}()
+
+	buildConfig := func(runDir string) *GEPAConfig {
+		config := DefaultGEPAConfig()
+		config.RunDir = runDir
+		config.PopulationSize = 1
+		config.MaxGenerations = 3
+		config.MutationRate = 1.0
+		config.ReflectionFreq = 0
+		config.SelectionStrategy = "tournament"
+		config.TournamentSize = 1
+		config.ConcurrencyLevel = 1
+		config.EvaluationBatchSize = 1
+		config.RandomSeed = 7
+		return config
+	}
+
+	stopRunDir := t.TempDir()
+	stoppedConfig := buildConfig(stopRunDir)
+	stoppedConfig.StopCallbacks = []GEPAStopper{
+		func(_ context.Context, gepa *GEPA) *GEPAStopDecision {
+			if gepa == nil || gepa.state == nil {
+				return nil
+			}
+			if gepa.state.BestFitness < 0.5 || gepa.state.BestFitness >= 1.0 {
+				return nil
+			}
+			return &GEPAStopDecision{Reason: "compat_resume_stop"}
+		},
+	}
+
+	dataset := datasets.NewSimpleDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"input": "resume fixture input"},
+			Outputs: map[string]interface{}{"output": "classifier best"},
+		},
+	})
+
+	firstRun, err := NewGEPA(stoppedConfig)
+	if err != nil {
+		t.Fatalf("new stopped GEPA: %v", err)
+	}
+	_, err = firstRun.Compile(ctx, newCompatFeedbackFixtureProgram("classifier base"), dataset, compatResumeProgressMetric)
+	if err != nil {
+		t.Fatalf("compile stopped resume fixture: %v", err)
+	}
+
+	resumeConfig := buildConfig(stopRunDir)
+	resumedRun, err := NewGEPA(resumeConfig)
+	if err != nil {
+		t.Fatalf("new resumed GEPA: %v", err)
+	}
+	resumedProgram, err := resumedRun.Compile(ctx, newCompatFeedbackFixtureProgram("classifier base"), dataset, compatResumeProgressMetric)
+	if err != nil {
+		t.Fatalf("compile resumed resume fixture: %v", err)
+	}
+
+	freshConfig := buildConfig(t.TempDir())
+	freshRun, err := NewGEPA(freshConfig)
+	if err != nil {
+		t.Fatalf("new fresh GEPA: %v", err)
+	}
+	freshProgram, err := freshRun.Compile(ctx, newCompatFeedbackFixtureProgram("classifier base"), dataset, compatResumeProgressMetric)
+	if err != nil {
+		t.Fatalf("compile fresh resume fixture: %v", err)
+	}
+
+	return compatResumeResult{
+		CheckpointWritten:              compatFileExists(filepath.Join(stopRunDir, "gepa_state.json")),
+		StoppedMetricCalls:             firstRun.state.MetricCallCount(),
+		ResumedMetricCalls:             resumedRun.state.MetricCallCount(),
+		FreshMetricCalls:               freshRun.state.MetricCallCount(),
+		ResumedCandidateCount:          compatPopulationCandidateCount(resumedRun.state),
+		FreshCandidateCount:            compatPopulationCandidateCount(freshRun.state),
+		ResumedFinalProgramInstruction: resumedProgram.Modules["classifier"].GetSignature().Instruction,
+		FreshFinalProgramInstruction:   freshProgram.Modules["classifier"].GetSignature().Instruction,
+	}
+}
+
+func compatPopulationCandidateCount(state *GEPAState) int {
+	if state == nil {
+		return 0
+	}
+	total := 0
+	for _, population := range state.PopulationHistory {
+		if population == nil {
+			continue
+		}
+		total += len(population.Candidates)
+	}
+	return total
+}
+
+func compatFileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	t.Helper()
 
@@ -822,6 +1011,7 @@ func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	report.Fixtures.AncestorMerge = runCompatMergeScenario(t, ctx)
 	report.Fixtures.FeedbackGuided = runCompatFeedbackScenario(t, ctx)
 	report.Fixtures.FormatFailure = runCompatFormatFailureScenario(t, ctx)
+	report.Fixtures.ResumeParity = runCompatResumeScenario(t, ctx)
 	return report
 }
 

@@ -22,11 +22,26 @@ EXPECTED_MERGE_COMPONENTS = ["classifier", "generator"]
 EXPECTED_MERGE_PARENT_LABELS = ["classifier", "generator"]
 EXPECTED_FEEDBACK_INSTRUCTION = "feedback tuned classifier instruction"
 EXPECTED_FORMAT_FAILURE_INSTRUCTION = "format tuned classifier instruction"
+EXPECTED_RESUME_INSTRUCTION = "classifier best"
 
 
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def normalize_instruction(value: str) -> str:
+    normalized = value.replace("[[ ## improved_instruction ## ]]", "").strip()
+    if normalized.startswith("{") and normalized.endswith("}"):
+        try:
+            payload = json.loads(normalized)
+        except json.JSONDecodeError:
+            return normalized
+        if isinstance(payload, dict):
+            improved_instruction = payload.get("improved_instruction")
+            if isinstance(improved_instruction, str):
+                return improved_instruction.strip()
+    return normalized
 
 
 def compare_scenario(name: str, python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
@@ -131,6 +146,35 @@ def compare_format_failure_feedback(python_result: dict[str, Any], go_result: di
     }
 
 
+def compare_resume_parity(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
+    python_resumed = normalize_instruction(python_result.get("resumed_final_program_instruction", ""))
+    python_fresh = normalize_instruction(python_result.get("fresh_final_program_instruction", ""))
+    go_resumed = normalize_instruction(go_result.get("resumed_final_program_instruction", ""))
+    go_fresh = normalize_instruction(go_result.get("fresh_final_program_instruction", ""))
+
+    python_resume_consistent = (
+        bool(python_result.get("checkpoint_written"))
+        and python_result.get("stopped_metric_calls", 0) < python_result.get("resumed_metric_calls", 0)
+        and python_result.get("resumed_candidate_count", 0) == python_result.get("fresh_candidate_count", -1)
+        and python_resumed == python_fresh == EXPECTED_RESUME_INSTRUCTION
+    )
+    go_resume_consistent = (
+        bool(go_result.get("checkpoint_written"))
+        and go_result.get("stopped_metric_calls", 0) < go_result.get("resumed_metric_calls", 0)
+        and go_result.get("resumed_candidate_count", 0) == go_result.get("fresh_candidate_count", -1)
+        and go_resumed == go_fresh == EXPECTED_RESUME_INSTRUCTION
+    )
+
+    return {
+        "expected_resume_instruction": EXPECTED_RESUME_INSTRUCTION,
+        "python_result": python_result,
+        "go_result": go_result,
+        "python_resume_consistent": python_resume_consistent,
+        "go_resume_consistent": go_resume_consistent,
+        "cross_language_instruction_match": python_resumed == python_fresh == go_resumed == go_fresh == EXPECTED_RESUME_INSTRUCTION,
+    }
+
+
 def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> dict[str, Any]:
     fixtures = {"component_selection": {"scenarios": {}}}
     compatible = True
@@ -171,6 +215,18 @@ def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> 
     )
     fixtures["format_failure_feedback"] = format_failure_report
     compatible = compatible and format_failure_report["candidate_instruction_match"] and format_failure_report["final_program_instruction_match"]
+
+    resume_report = compare_resume_parity(
+        python_results["fixtures"]["resume_parity"],
+        go_results["fixtures"]["resume_parity"],
+    )
+    fixtures["resume_parity"] = resume_report
+    compatible = (
+        compatible
+        and resume_report["python_resume_consistent"]
+        and resume_report["go_resume_consistent"]
+        and resume_report["cross_language_instruction_match"]
+    )
 
     return {
         "python_runner": python_results.get("runner"),
