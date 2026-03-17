@@ -245,7 +245,7 @@ func (r hostCommandRunner) Run(ctx context.Context, workingDir string, command s
 }
 
 func resolveToolPath(rootDir, relativePath string) (string, error) {
-	return newResolverForRoot(rootDir).resolve(relativePath)
+	return newResolverForRoot(rootDir).resolveSecurePath(relativePath)
 }
 
 type toolPathResolver struct {

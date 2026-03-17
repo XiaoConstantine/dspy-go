@@ -128,6 +128,6 @@ func TestRunnerEvaluateTask_UsesVerifierTimeout(t *testing.T) {
 	require.NotNil(t, result)
 	require.NotNil(t, result.TestResult)
 	assert.False(t, result.TestResult.Passed)
-	assert.Equal(t, 124, result.TestResult.ExitCode)
+	assert.Equal(t, exitCodeTimeout, result.TestResult.ExitCode)
 	assert.Contains(t, result.TestResult.Stderr, "verifier timed out")
 }

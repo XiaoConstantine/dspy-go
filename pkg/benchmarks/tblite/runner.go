@@ -18,6 +18,9 @@ const (
 	EnvTaskRoot     = "DSPY_TBLITE_TASK_ROOT"
 	EnvTaskEnvDir   = "DSPY_TBLITE_ENV_DIR"
 	EnvTaskTestsDir = "DSPY_TBLITE_TESTS_DIR"
+
+	// exitCodeTimeout mirrors the exit code used by the timeout(1) utility.
+	exitCodeTimeout = 124
 )
 
 // Agent executes a single materialized terminal benchmark task.
@@ -163,7 +166,7 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 		}
 	}
 
-	testResult, err := r.executeVerifier(ctx, materialized, runtime, time.Duration(task.TestTimeoutSec)*time.Second)
+	testResult, err := r.executeVerifier(ctx, materialized, runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -176,14 +179,17 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 	}, nil
 }
 
-func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, runtime *dockerTaskRuntime, timeout time.Duration) (*TestResult, error) {
+func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, runtime *dockerTaskRuntime) (*TestResult, error) {
+	timeout := time.Duration(task.Task.TestTimeoutSec) * time.Second
 	startedAt := time.Now()
 	verifierCtx := ctx
-	cancel := func() {}
+	var cancel context.CancelFunc
 	if timeout > 0 {
 		verifierCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
-	defer cancel()
+	if cancel != nil {
+		defer cancel()
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -248,7 +254,7 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 	}
 	if timeout > 0 && verifierCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 		result.Passed = false
-		result.ExitCode = 124
+		result.ExitCode = exitCodeTimeout
 		if result.Stderr != "" {
 			result.Stderr += "\n"
 		}

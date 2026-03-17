@@ -170,24 +170,11 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 	a.traceMu.Unlock()
 	if err != nil {
 		nativeTrace := sharedAgent.LastNativeTrace()
-		traceFile := ""
 		result := &TerminalTaskResult{
 			Completed: false,
 			Error:     err.Error(),
-			Metadata: map[string]any{
-				"provider": a.llm.ProviderName(),
-				"model":    a.llm.ModelID(),
-			},
 		}
-		if nativeTrace != nil {
-			trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
-			traceFile, _ = writeTrace(req.TaskDir, trace)
-			result.Duration = nativeTrace.Duration
-			result.ToolCalls = countExecutedTools(trace.Steps)
-			result.TokenUsage = tokenUsageFromShared(nativeTrace.TokenUsage)
-			result.Metadata["turns"] = len(trace.Steps)
-		}
-		result.TracePath = traceFile
+		traceFile, _ := a.populateTraceResult(result, nativeTrace, req)
 		_ = writeDebugSnapshot(req.TaskDir, taskDebugSnapshot{
 			TaskID:         req.TaskID,
 			Model:          a.llm.ModelID(),
@@ -208,25 +195,13 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 	if nativeTrace == nil {
 		return nil, fmt.Errorf("shared native agent did not record a trace")
 	}
-	trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
-	traceFile, err := writeTrace(req.TaskDir, trace)
-	if err != nil {
-		return nil, err
-	}
-
 	result := &TerminalTaskResult{
 		Completed:   boolValue(resultMap["completed"]),
 		FinalAnswer: agentutil.StringValue(resultMap["final_answer"]),
 		Error:       agentutil.StringValue(resultMap["error"]),
-		Duration:    nativeTrace.Duration,
-		ToolCalls:   countExecutedTools(trace.Steps),
-		TokenUsage:  tokenUsageFromShared(nativeTrace.TokenUsage),
-		TracePath:   traceFile,
-		Metadata: map[string]any{
-			"provider": a.llm.ProviderName(),
-			"model":    a.llm.ModelID(),
-			"turns":    len(trace.Steps),
-		},
+	}
+	if _, err := a.populateTraceResult(result, nativeTrace, req); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -241,6 +216,28 @@ func (r dockerCommandRunner) Run(ctx context.Context, workingDir string, command
 	env := append([]string{}, r.extraEnv...)
 	env = append(env, extraEnv...)
 	return r.runtime.Exec(ctx, workingDir, r.shellPath, command, env)
+}
+
+// populateTraceResult fills trace-derived fields (Duration, ToolCalls,
+// TokenUsage, TracePath, Metadata) on an existing result. It returns the
+// trace file path for callers that need it independently.
+func (a *NativeAgent) populateTraceResult(result *TerminalTaskResult, nativeTrace *sharednative.Trace, req TerminalTaskRequest) (string, error) {
+	if result.Metadata == nil {
+		result.Metadata = map[string]any{}
+	}
+	result.Metadata["provider"] = a.llm.ProviderName()
+	result.Metadata["model"] = a.llm.ModelID()
+	if nativeTrace == nil {
+		return "", nil
+	}
+	trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
+	traceFile, writeErr := writeTrace(req.TaskDir, trace)
+	result.Duration = nativeTrace.Duration
+	result.ToolCalls = countExecutedTools(trace.Steps)
+	result.TokenUsage = tokenUsageFromShared(nativeTrace.TokenUsage)
+	result.TracePath = traceFile
+	result.Metadata["turns"] = len(trace.Steps)
+	return traceFile, writeErr
 }
 
 func (a *NativeAgent) buildTaskPrompt(req TerminalTaskRequest) string {
