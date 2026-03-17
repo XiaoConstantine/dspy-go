@@ -93,7 +93,7 @@ func newListFilesTool(resolver toolPathResolver, outputLimit int) core.Tool {
 		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
 			_ = ctx
 
-			targetPath, err := resolver.resolve(stringArg(args, "path", "."))
+			targetPath, err := resolver.resolveSecurePath(stringArg(args, "path", "."))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}
@@ -204,7 +204,7 @@ func newRunCommandTool(resolver toolPathResolver, outputLimit int, commandTimeou
 				return textToolResult("run_command requires a non-empty command", true), nil
 			}
 
-			workingDir, err := resolver.resolve(stringArg(args, "working_directory", "."))
+			workingDir, err := resolver.resolveSecurePath(stringArg(args, "working_directory", "."))
 			if err != nil {
 				return textToolResult(err.Error(), true), nil
 			}

@@ -200,7 +200,9 @@ func TestNewTerminalToolset_RunCommandUsesAliasWorkingDirectory(t *testing.T) {
 		"working_directory": "tests",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Clean(testsDir), runner.workingDir)
+	expectedWorkingDir, evalErr := filepath.EvalSymlinks(testsDir)
+	require.NoError(t, evalErr)
+	assert.Equal(t, filepath.Clean(expectedWorkingDir), runner.workingDir)
 	assert.Equal(t, "ok", strings.TrimSpace(agentutil.StringifyToolResult(result)))
 }
 
@@ -235,6 +237,36 @@ func TestNewTerminalToolset_RejectsSymlinkEscapes(t *testing.T) {
 	content, err := os.ReadFile(outsideFile)
 	require.NoError(t, err)
 	assert.Equal(t, "outside", string(content))
+}
+
+func TestNewTerminalToolset_ListFilesAndRunCommandRejectSymlinkDirEscapes(t *testing.T) {
+	root := t.TempDir()
+	outsideDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "outside.txt"), []byte("outside"), 0o644))
+	require.NoError(t, os.Symlink(outsideDir, filepath.Join(root, "linked-dir")))
+
+	runner := &recordingCommandRunner{}
+	toolset, err := NewTerminalToolset(root, ToolsetConfig{CommandRunner: runner})
+	require.NoError(t, err)
+
+	byName := map[string]core.Tool{}
+	for _, tool := range toolset {
+		byName[tool.Name()] = tool
+	}
+
+	listResult, err := byName["list_files"].Execute(context.Background(), map[string]any{
+		"path": "linked-dir",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, agentutil.StringifyToolResult(listResult), "escapes benchmark workspace")
+
+	commandResult, err := byName["run_command"].Execute(context.Background(), map[string]any{
+		"command":           "pwd",
+		"working_directory": "linked-dir",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, agentutil.StringifyToolResult(commandResult), "escapes benchmark workspace")
+	assert.Empty(t, runner.workingDir)
 }
 
 func TestHostCommandRunner_ExtraEnvOverridesHostEnv(t *testing.T) {

@@ -263,7 +263,7 @@ func TestNativeAgent_RunTask_WritesTraceAndDebugSnapshotOnEarlyAgentError(t *tes
 	require.NoError(t, os.MkdirAll(envDir, 0o755))
 	require.NoError(t, os.MkdirAll(testsDir, 0o755))
 
-	_, err = agent.RunTask(context.Background(), TerminalTaskRequest{
+	result, err := agent.RunTask(context.Background(), TerminalTaskRequest{
 		TaskID:           "task-error",
 		Instruction:      "Inspect and fix the workspace.",
 		TaskDir:          taskDir,
@@ -273,8 +273,10 @@ func TestNativeAgent_RunTask_WritesTraceAndDebugSnapshotOnEarlyAgentError(t *tes
 		TestScriptPath:   filepath.Join(taskDir, "test.sh"),
 		MaxTurns:         3,
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "synthetic provider failure")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.Completed)
+	assert.Contains(t, result.Error, "synthetic provider failure")
 
 	traceBytes, readErr := os.ReadFile(filepath.Join(taskDir, traceFileName))
 	require.NoError(t, readErr)

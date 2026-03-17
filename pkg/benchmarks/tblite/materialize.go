@@ -32,8 +32,8 @@ type MaterializedTask struct {
 // MaterializeTask decodes the task archives into a runnable directory structure.
 func MaterializeTask(task datasets.TBLiteTask, rootDir string) (*MaterializedTask, error) {
 	task = task.Normalize()
-	if task.TaskName == "" {
-		return nil, fmt.Errorf("task name is required")
+	if err := datasets.ValidateTBLiteTaskName(task.TaskName); err != nil {
+		return nil, err
 	}
 	if rootDir == "" {
 		return nil, fmt.Errorf("root dir is required")

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +84,7 @@ func (t *TBLiteTask) UnmarshalJSON(data []byte) error {
 
 // Normalize fills defaults used by the benchmark harness.
 func (t TBLiteTask) Normalize() TBLiteTask {
+	t.TaskName = strings.TrimSpace(t.TaskName)
 	if t.Tags == nil {
 		t.Tags = []string{}
 	}
@@ -103,6 +105,9 @@ func LoadTBLiteTasksFromFile(path string) ([]TBLiteTask, error) {
 
 	for i := range tasks {
 		tasks[i] = tasks[i].Normalize()
+	}
+	if err := validateLocalTBLiteTasks(tasks); err != nil {
+		return nil, err
 	}
 	return tasks, nil
 }
@@ -128,6 +133,9 @@ func LoadTBLiteTaskSelectionFromFile(path string) (*TBLiteTaskSelection, error) 
 		for i := range tasks {
 			tasks[i] = tasks[i].Normalize()
 		}
+		if err := validateLocalTBLiteTasks(tasks); err != nil {
+			return nil, err
+		}
 		return &TBLiteTaskSelection{Tasks: tasks}, nil
 	}
 
@@ -138,6 +146,9 @@ func LoadTBLiteTaskSelectionFromFile(path string) (*TBLiteTaskSelection, error) 
 	selection.TaskNames = normalizeTaskNames(selection.TaskNames)
 	for i := range selection.Tasks {
 		selection.Tasks[i] = selection.Tasks[i].Normalize()
+	}
+	if err := validateLocalTBLiteTasks(selection.Tasks); err != nil {
+		return nil, err
 	}
 	if len(selection.TaskNames) == 0 && len(selection.Tasks) == 0 {
 		return nil, fmt.Errorf("task selection must include task_names and/or tasks")
@@ -323,6 +334,34 @@ func normalizeTaskNames(taskNames []string) []string {
 		normalized = append(normalized, name)
 	}
 	return normalized
+}
+
+// ValidateTBLiteTaskName ensures task names are safe to materialize as a
+// single directory beneath a benchmark root.
+func ValidateTBLiteTaskName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("task name is required")
+	}
+	if filepath.IsAbs(name) {
+		return fmt.Errorf("task name %q must not be absolute", name)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("task name %q is invalid", name)
+	}
+	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, '\\') {
+		return fmt.Errorf("task name %q must not contain path separators", name)
+	}
+	return nil
+}
+
+func validateLocalTBLiteTasks(tasks []TBLiteTask) error {
+	for i := range tasks {
+		if err := ValidateTBLiteTaskName(tasks[i].TaskName); err != nil {
+			return fmt.Errorf("invalid local tblite task at index %d: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func parseTBLiteTags(value interface{}) ([]string, error) {

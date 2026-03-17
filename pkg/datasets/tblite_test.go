@@ -101,6 +101,23 @@ func TestLoadTBLiteTaskSelectionFromFile_AcceptsTaskArray(t *testing.T) {
 	assert.Nil(t, selection.TaskNames)
 }
 
+func TestLoadTBLiteTaskSelectionFromFile_RejectsEmptyEmbeddedTaskName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "selection.json")
+	require.NoError(t, os.WriteFile(path, []byte(`[{}]`), 0o644))
+
+	selection, err := LoadTBLiteTaskSelectionFromFile(path)
+	require.Error(t, err)
+	assert.Nil(t, selection)
+	assert.Contains(t, err.Error(), "task name is required")
+}
+
+func TestValidateTBLiteTaskName_RejectsTraversal(t *testing.T) {
+	require.Error(t, ValidateTBLiteTaskName("../../escape"))
+	require.Error(t, ValidateTBLiteTaskName("/absolute"))
+	require.Error(t, ValidateTBLiteTaskName(`nested\\task`))
+	require.NoError(t, ValidateTBLiteTaskName("task-a"))
+}
+
 func TestFetchTBLiteTasksByNamesContext_PreservesRequestedOrder(t *testing.T) {
 	originalEndpoint := tbliteRowsEndpoint
 	defer func() { tbliteRowsEndpoint = originalEndpoint }()

@@ -108,3 +108,26 @@ func TestVerifierRewardPassed(t *testing.T) {
 	assert.False(t, verifierRewardPassed("0"))
 	assert.False(t, verifierRewardPassed("not-a-number"))
 }
+
+func TestRunnerEvaluateTask_UsesVerifierTimeout(t *testing.T) {
+	task := datasets.TBLiteTask{
+		TaskName:       "slow-verifier",
+		Instruction:    "No-op task",
+		TestTimeoutSec: 1,
+		TestScript:     "#!/bin/sh\nset -eu\nsleep 2\n",
+	}
+
+	runner := NewRunner(fakeAgent{
+		run: func(ctx context.Context, req TerminalTaskRequest) (*TerminalTaskResult, error) {
+			return &TerminalTaskResult{Completed: true}, nil
+		},
+	}, RunnerConfig{})
+
+	result, err := runner.EvaluateTask(context.Background(), task, t.TempDir())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.TestResult)
+	assert.False(t, result.TestResult.Passed)
+	assert.Equal(t, 124, result.TestResult.ExitCode)
+	assert.Contains(t, result.TestResult.Stderr, "verifier timed out")
+}

@@ -163,7 +163,7 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 		}
 	}
 
-	testResult, err := r.executeVerifier(ctx, materialized, runtime)
+	testResult, err := r.executeVerifier(ctx, materialized, runtime, time.Duration(task.TestTimeoutSec)*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +176,14 @@ func (r *Runner) EvaluateTask(ctx context.Context, task datasets.TBLiteTask, roo
 	}, nil
 }
 
-func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, runtime *dockerTaskRuntime) (*TestResult, error) {
+func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, runtime *dockerTaskRuntime, timeout time.Duration) (*TestResult, error) {
 	startedAt := time.Now()
+	verifierCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		verifierCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -190,14 +196,14 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 			EnvTaskEnvDir+"="+runtime.containerEnvironmentRoot(),
 			EnvTaskTestsDir+"="+containerTestsDir,
 		)
-		output, runErr = runtime.Exec(ctx, task.EnvironmentDir, r.config.ShellPath, fmt.Sprintf("%s %s", r.config.ShellPath, containerTaskRoot+"/test.sh"), verifierEnv)
+		output, runErr = runtime.Exec(verifierCtx, task.EnvironmentDir, r.config.ShellPath, fmt.Sprintf("%s %s", r.config.ShellPath, containerTaskRoot+"/test.sh"), verifierEnv)
 		if runErr != nil {
 			stderr.Write(output)
 		} else {
 			stdout.Write(output)
 		}
 	} else {
-		cmd := exec.CommandContext(ctx, r.config.ShellPath, task.TestScriptPath)
+		cmd := exec.CommandContext(verifierCtx, r.config.ShellPath, task.TestScriptPath)
 		cmd.Dir = task.EnvironmentDir
 		cmd.Env = append(os.Environ(), r.config.ExtraEnv...)
 		cmd.Env = append(cmd.Env,
@@ -218,7 +224,7 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 		Duration: duration,
 	}
 
-	if runtime != nil {
+	if runtime != nil && verifierCtx.Err() == nil {
 		reward, err := runtime.ReadFile(ctx, "/logs/verifier/reward.txt")
 		if err != nil {
 			result.Passed = false
@@ -238,6 +244,15 @@ func (r *Runner) executeVerifier(ctx context.Context, task *MaterializedTask, ru
 	}
 
 	if runErr == nil {
+		return result, nil
+	}
+	if timeout > 0 && verifierCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+		result.Passed = false
+		result.ExitCode = 124
+		if result.Stderr != "" {
+			result.Stderr += "\n"
+		}
+		result.Stderr += fmt.Sprintf("verifier timed out after %s", timeout)
 		return result, nil
 	}
 

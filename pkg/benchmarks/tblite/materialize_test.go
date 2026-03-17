@@ -47,6 +47,16 @@ func TestMaterializeTask_RejectsPathTraversal(t *testing.T) {
 	assert.Contains(t, err.Error(), "path traversal")
 }
 
+func TestMaterializeTask_RejectsTaskNameTraversal(t *testing.T) {
+	task := datasets.TBLiteTask{
+		TaskName: "../../escape",
+	}
+
+	_, err := MaterializeTask(task, t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must not contain path separators")
+}
+
 func TestMaterializeTask_RejectsLinkEntries(t *testing.T) {
 	task := datasets.TBLiteTask{
 		TaskName: "bad-link",

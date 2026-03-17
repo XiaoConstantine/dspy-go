@@ -171,10 +171,23 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 	if err != nil {
 		nativeTrace := sharedAgent.LastNativeTrace()
 		traceFile := ""
+		result := &TerminalTaskResult{
+			Completed: false,
+			Error:     err.Error(),
+			Metadata: map[string]any{
+				"provider": a.llm.ProviderName(),
+				"model":    a.llm.ModelID(),
+			},
+		}
 		if nativeTrace != nil {
 			trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
 			traceFile, _ = writeTrace(req.TaskDir, trace)
+			result.Duration = nativeTrace.Duration
+			result.ToolCalls = countExecutedTools(trace.Steps)
+			result.TokenUsage = tokenUsageFromShared(nativeTrace.TokenUsage)
+			result.Metadata["turns"] = len(trace.Steps)
 		}
+		result.TracePath = traceFile
 		_ = writeDebugSnapshot(req.TaskDir, taskDebugSnapshot{
 			TaskID:         req.TaskID,
 			Model:          a.llm.ModelID(),
@@ -188,7 +201,7 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 			MaxTurns:       a.maxTurns(req),
 			TracePath:      traceFile,
 		})
-		return nil, err
+		return result, nil
 	}
 
 	nativeTrace := sharedAgent.LastNativeTrace()
