@@ -116,7 +116,7 @@ func LoadTBLiteTasksFromFile(path string) ([]TBLiteTask, error) {
 // Supported JSON shapes:
 // - ["task-a", "task-b"]
 // - [{...full task...}, {...full task...}]
-// - {"label":"...", "split":"train", "task_names":[...], "tasks":[...]}
+// - {"label":"...", "split":"train", "task_names":[...], "tasks":[...]}.
 func LoadTBLiteTaskSelectionFromFile(path string) (*TBLiteTaskSelection, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -125,7 +125,11 @@ func LoadTBLiteTaskSelectionFromFile(path string) (*TBLiteTaskSelection, error) 
 
 	var taskNames []string
 	if err := json.Unmarshal(data, &taskNames); err == nil {
-		return &TBLiteTaskSelection{TaskNames: normalizeTaskNames(taskNames)}, nil
+		taskNames = normalizeTaskNames(taskNames)
+		if err := validateTBLiteTaskNames(taskNames); err != nil {
+			return nil, err
+		}
+		return &TBLiteTaskSelection{TaskNames: taskNames}, nil
 	}
 
 	var tasks []TBLiteTask
@@ -144,6 +148,9 @@ func LoadTBLiteTaskSelectionFromFile(path string) (*TBLiteTaskSelection, error) 
 		return nil, fmt.Errorf("unmarshal task selection: %w", err)
 	}
 	selection.TaskNames = normalizeTaskNames(selection.TaskNames)
+	if err := validateTBLiteTaskNames(selection.TaskNames); err != nil {
+		return nil, err
+	}
 	for i := range selection.Tasks {
 		selection.Tasks[i] = selection.Tasks[i].Normalize()
 	}
@@ -359,6 +366,15 @@ func validateLocalTBLiteTasks(tasks []TBLiteTask) error {
 	for i := range tasks {
 		if err := ValidateTBLiteTaskName(tasks[i].TaskName); err != nil {
 			return fmt.Errorf("invalid local tblite task at index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validateTBLiteTaskNames(taskNames []string) error {
+	for i, name := range taskNames {
+		if err := ValidateTBLiteTaskName(name); err != nil {
+			return fmt.Errorf("invalid tblite task name at index %d: %w", i, err)
 		}
 	}
 	return nil

@@ -81,6 +81,19 @@ func TestLoadTBLiteTaskSelectionFromFile_TaskNamesManifest(t *testing.T) {
 	assert.Empty(t, selection.Tasks)
 }
 
+func TestLoadTBLiteTaskSelectionFromFile_RejectsInvalidTaskNamesManifest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "selection.json")
+	content := `{
+		"task_names":["../../escape"]
+	}`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	selection, err := LoadTBLiteTaskSelectionFromFile(path)
+	require.Error(t, err)
+	assert.Nil(t, selection)
+	assert.Contains(t, err.Error(), "invalid tblite task name")
+}
+
 func TestLoadTBLiteTaskSelectionFromFile_AcceptsTaskArray(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "selection.json")
 	content := `[{
