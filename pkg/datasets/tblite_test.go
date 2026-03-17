@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,9 +133,6 @@ func TestValidateTBLiteTaskName_RejectsTraversal(t *testing.T) {
 }
 
 func TestFetchTBLiteTasksByNamesContext_PreservesRequestedOrder(t *testing.T) {
-	originalEndpoint := tbliteRowsEndpoint
-	defer func() { tbliteRowsEndpoint = originalEndpoint }()
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -146,13 +144,33 @@ func TestFetchTBLiteTasksByNamesContext_PreservesRequestedOrder(t *testing.T) {
 		}`))
 	}))
 	defer server.Close()
-	tbliteRowsEndpoint = server.URL
 
-	tasks, err := FetchTBLiteTasksByNamesContext(context.Background(), "train", []string{"task-c", "task-a"})
+	tasks, err := fetchTBLiteTasksByNamesContext(context.Background(), server.URL, "train", []string{"task-c", "task-a"}, 100, 10)
 	require.NoError(t, err)
 	require.Len(t, tasks, 2)
 	assert.Equal(t, "task-c", tasks[0].TaskName)
 	assert.Equal(t, "task-a", tasks[1].TaskName)
+}
+
+func TestFetchTBLiteTasksByNamesContext_BoundsDatasetScan(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		query := r.URL.Query()
+		offset := query.Get("offset")
+		length := query.Get("length")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"rows":[{"row":{"task_name":"page-%s","instruction":"x","docker_image":"img:latest","category":"coding","difficulty":"easy","test_sh":"#!/bin/sh"}}]}`, offset)
+		assert.Equal(t, "1", length)
+	}))
+	defer server.Close()
+
+	tasks, err := fetchTBLiteTasksByNamesContext(context.Background(), server.URL, "train", []string{"missing-task"}, 1, 3)
+	require.Error(t, err)
+	assert.Nil(t, tasks)
+	assert.Contains(t, err.Error(), "missing requested tblite tasks after scanning up to 3 rows")
+	assert.Contains(t, err.Error(), "missing-task")
+	assert.Equal(t, 3, requests)
 }
 
 func TestSliceTBLiteTasks_UsesDeterministicOffset(t *testing.T) {

@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	tbliteDatasetName  = "NousResearch/openthoughts-tblite"
-	tbliteDefaultSplit = "train"
+	tbliteDatasetName       = "NousResearch/openthoughts-tblite"
+	tbliteDefaultSplit      = "train"
+	tbliteRowsEndpoint      = "https://datasets-server.huggingface.co/rows"
+	tbliteFetchPageSize     = 100
+	tbliteFetchMaxScanPages = 100
 )
-
-var tbliteRowsEndpoint = "https://datasets-server.huggingface.co/rows"
 
 // TBLiteTaskSelection describes a curated benchmark slice. It can reference
 // existing HuggingFace tasks by name and/or embed full local task payloads.
@@ -180,13 +181,17 @@ func FetchTBLiteTasksFromHuggingFaceRange(split string, offset, limit int) ([]TB
 
 // FetchTBLiteTasksFromHuggingFaceRangeContext loads a deterministic slice of TBLite rows.
 func FetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, split string, offset, limit int) ([]TBLiteTask, error) {
+	return fetchTBLiteTasksFromHuggingFaceRangeContext(ctx, tbliteRowsEndpoint, split, offset, limit)
+}
+
+func fetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, endpoint, split string, offset, limit int) ([]TBLiteTask, error) {
 	if split == "" {
 		split = tbliteDefaultSplit
 	}
 
 	url := fmt.Sprintf(
 		"%s?dataset=%s&config=default&split=%s&offset=%d&length=%d",
-		tbliteRowsEndpoint,
+		endpoint,
 		tbliteDatasetName,
 		split,
 		offset,
@@ -232,9 +237,22 @@ func FetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, split stri
 // FetchTBLiteTasksByNamesContext resolves named tasks from the datasets server
 // while preserving the requested order.
 func FetchTBLiteTasksByNamesContext(ctx context.Context, split string, taskNames []string) ([]TBLiteTask, error) {
+	return fetchTBLiteTasksByNamesContext(ctx, tbliteRowsEndpoint, split, taskNames, tbliteFetchPageSize, tbliteFetchMaxScanPages)
+}
+
+func fetchTBLiteTasksByNamesContext(ctx context.Context, endpoint, split string, taskNames []string, pageSize, maxPages int) ([]TBLiteTask, error) {
 	orderedNames := normalizeTaskNames(taskNames)
 	if len(orderedNames) == 0 {
 		return nil, fmt.Errorf("at least one task name is required")
+	}
+	if err := validateTBLiteTaskNames(orderedNames); err != nil {
+		return nil, err
+	}
+	if pageSize <= 0 {
+		pageSize = tbliteFetchPageSize
+	}
+	if maxPages <= 0 {
+		maxPages = tbliteFetchMaxScanPages
 	}
 
 	pending := make(map[string]struct{}, len(orderedNames))
@@ -243,9 +261,11 @@ func FetchTBLiteTasksByNamesContext(ctx context.Context, split string, taskNames
 	}
 	found := make(map[string]TBLiteTask, len(orderedNames))
 
-	const pageSize = 100
-	for offset := 0; len(pending) > 0; offset += pageSize {
-		page, err := FetchTBLiteTasksFromHuggingFaceRangeContext(ctx, split, offset, pageSize)
+	for pageIndex, offset := 0, 0; len(pending) > 0; pageIndex, offset = pageIndex+1, offset+pageSize {
+		if pageIndex >= maxPages {
+			break
+		}
+		page, err := fetchTBLiteTasksFromHuggingFaceRangeContext(ctx, endpoint, split, offset, pageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -270,7 +290,11 @@ func FetchTBLiteTasksByNamesContext(ctx context.Context, split string, taskNames
 				missing = append(missing, name)
 			}
 		}
-		return nil, fmt.Errorf("missing requested tblite tasks: %s", strings.Join(missing, ", "))
+		return nil, fmt.Errorf(
+			"missing requested tblite tasks after scanning up to %d rows: %s",
+			pageSize*maxPages,
+			strings.Join(missing, ", "),
+		)
 	}
 
 	resolved := make([]TBLiteTask, 0, len(orderedNames))

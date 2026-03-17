@@ -295,6 +295,80 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 	assert.Equal(t, 12, decodedIntCandidate.Int["max_turns"])
 }
 
+func TestGEPAAgentOptimizer_CachedValidationEvaluation_DoesNotMutateInputCandidate(t *testing.T) {
+	setupAgentGEPAMockLLM(t)
+
+	optimizer := NewGEPAAgentOptimizer(
+		newMockOptimizableAgent(),
+		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
+			score := 0.2
+			if strings.Contains(strings.ToLower(agent.GetArtifacts().Text[ArtifactSkillPack]), "carefully") {
+				if ex.ID == "validation" {
+					score = 1.0
+				}
+			} else if ex.ID == "training" {
+				score = 1.0
+			}
+			return &EvalResult{
+				Score: score,
+				SideInfo: &SideInfo{
+					Scores: map[string]float64{
+						"artifact_score": score,
+					},
+					Diagnostics: map[string]interface{}{},
+				},
+			}, nil
+		}),
+		GEPAAdapterConfig{
+			PopulationSize:  3,
+			MaxGenerations:  1,
+			ReflectionFreq:  0,
+			ValidationSplit: 0,
+			EvalConcurrency: 1,
+			PassThreshold:   0.5,
+			PrimaryArtifact: ArtifactSkillPack,
+		},
+	)
+
+	seed := AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack: "Use the repository debugging guide.",
+		},
+	}
+
+	result, err := optimizer.Optimize(context.Background(), GEPAOptimizeRequest{
+		SeedArtifacts: seed,
+		TrainingExamples: []AgentExample{
+			{ID: "training"},
+		},
+		ValidationExamples: []AgentExample{
+			{ID: "validation"},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.OptimizationState)
+	require.NotNil(t, result.OptimizationState.BestValidationCandidate)
+
+	inputCandidate := optimizers.CloneCandidate(result.OptimizationState.BestValidationCandidate)
+	inputCandidate.Fitness = -123.0
+
+	evaluation, err := optimizer.cachedValidationEvaluation(
+		result.OptimizationState,
+		inputCandidate,
+		seed,
+		[]AgentExample{{ID: "validation"}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, evaluation)
+	require.NotNil(t, evaluation.Candidate)
+
+	assert.Equal(t, -123.0, inputCandidate.Fitness)
+	assert.NotSame(t, inputCandidate, evaluation.Candidate)
+	assert.Equal(t, inputCandidate.ID, evaluation.Candidate.ID)
+	assert.InDelta(t, evaluation.Fitness.WeightedScore, evaluation.Candidate.Fitness, 0.000001)
+}
+
 func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestValidationCandidate(t *testing.T) {
 	setupAgentGEPAMockLLM(t)
 

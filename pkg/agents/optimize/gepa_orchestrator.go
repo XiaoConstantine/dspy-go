@@ -203,9 +203,10 @@ func (o *GEPAAgentOptimizer) cachedValidationEvaluation(state *optimizers.GEPASt
 	}
 
 	fitness := buildMultiObjectiveFitness(run)
-	candidate.Fitness = fitness.WeightedScore
+	evaluatedCandidate := optimizers.CloneCandidate(candidate)
+	evaluatedCandidate.Fitness = fitness.WeightedScore
 	return &GEPACandidateEvaluation{
-		Candidate:    candidate,
+		Candidate:    evaluatedCandidate,
 		Artifacts:    artifacts,
 		Run:          run,
 		Fitness:      fitness,
