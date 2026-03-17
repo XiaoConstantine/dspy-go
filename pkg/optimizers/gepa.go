@@ -570,6 +570,27 @@ func (s *GEPAState) GetCandidateValidationEvaluation(candidateID string) *gepaCa
 	return cloneGEPACandidateEvaluation(s.candidateValidationEvals[candidateID])
 }
 
+// BestCandidateForApplication returns the final candidate that should be
+// surfaced to callers, preferring the best validation candidate when one
+// exists and otherwise falling back to the best training candidate.
+func (s *GEPAState) BestCandidateForApplication() (*GEPACandidate, float64, bool) {
+	if s == nil {
+		return nil, 0, false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	switch {
+	case s.BestValidationCandidate != nil:
+		return CloneCandidate(s.BestValidationCandidate), s.BestValidationFitness, true
+	case s.BestCandidate != nil:
+		return CloneCandidate(s.BestCandidate), s.BestFitness, false
+	default:
+		return nil, 0, false
+	}
+}
+
 func (s *GEPAState) ResetEvaluationCaseCache() {
 	if s == nil {
 		return
@@ -6206,21 +6227,11 @@ func (g *GEPA) applyBestCandidate(program core.Program) core.Program {
 }
 
 func (g *GEPA) bestCandidateForApplication() (*GEPACandidate, float64, bool) {
-	if g == nil || g.state == nil {
+	if g == nil {
 		return nil, 0, false
 	}
 
-	g.state.mu.RLock()
-	defer g.state.mu.RUnlock()
-
-	switch {
-	case g.state.BestValidationCandidate != nil:
-		return CloneCandidate(g.state.BestValidationCandidate), g.state.BestValidationFitness, true
-	case g.state.BestCandidate != nil:
-		return CloneCandidate(g.state.BestCandidate), g.state.BestFitness, false
-	default:
-		return nil, 0, false
-	}
+	return g.state.BestCandidateForApplication()
 }
 
 // LLM-based Self-Critique Implementation

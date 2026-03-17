@@ -434,33 +434,42 @@ func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestValid
 	assert.Contains(t, strings.ToLower(bestEvaluation.Artifacts.Text[ArtifactSkillPack]), "carefully")
 }
 
-func TestBestCandidateFromState_PrefersBestValidationCandidate(t *testing.T) {
+func TestGEPAStateBestCandidateForApplication_PrefersBestValidationCandidate(t *testing.T) {
 	state := optimizers.NewGEPAState()
 	state.BestCandidate = &optimizers.GEPACandidate{ID: "training-best", Fitness: 0.9}
+	state.BestFitness = 0.9
 	state.BestValidationCandidate = &optimizers.GEPACandidate{ID: "validation-best", Fitness: 0.4}
+	state.BestValidationFitness = 0.4
 
-	best := bestCandidateFromState(state)
+	best, fitness, usingValidation := state.BestCandidateForApplication()
 	require.NotNil(t, best)
 	assert.Equal(t, "validation-best", best.ID)
+	assert.Equal(t, 0.4, fitness)
+	assert.True(t, usingValidation)
 }
 
-func TestBestCandidateFromState_FallsBackToBestArchiveCandidate(t *testing.T) {
+func TestGEPAStateBestCandidateForApplication_FallsBackToBestTrainingCandidate(t *testing.T) {
 	state := optimizers.NewGEPAState()
-	state.BestCandidate = nil
+	state.BestCandidate = &optimizers.GEPACandidate{ID: "training-best", Fitness: 0.9}
+	state.BestFitness = 0.9
+
+	best, fitness, usingValidation := state.BestCandidateForApplication()
+	require.NotNil(t, best)
+	assert.Equal(t, "training-best", best.ID)
+	assert.Equal(t, 0.9, fitness)
+	assert.False(t, usingValidation)
+}
+
+func TestGEPAStateBestCandidateForApplication_ReturnsNilWithoutBestCandidate(t *testing.T) {
+	state := optimizers.NewGEPAState()
 	state.ParetoArchive = []*optimizers.GEPACandidate{
-		{ID: "candidate-b", Fitness: 0.7},
-		{ID: "candidate-a", Fitness: 0.7},
-		{ID: "candidate-c", Fitness: 0.9},
-	}
-	state.ArchiveFitnessMap = map[string]*optimizers.MultiObjectiveFitness{
-		"candidate-b": {WeightedScore: 0.7},
-		"candidate-a": {WeightedScore: 0.7},
-		"candidate-c": {WeightedScore: 0.9},
+		{ID: "archive-only", Fitness: 0.9},
 	}
 
-	best := bestCandidateFromState(state)
-	require.NotNil(t, best)
-	assert.Equal(t, "candidate-c", best.ID)
+	best, fitness, usingValidation := state.BestCandidateForApplication()
+	assert.Nil(t, best)
+	assert.Zero(t, fitness)
+	assert.False(t, usingValidation)
 }
 
 func TestGEPAAgentOptimizer_Optimize_StoresAggregateCandidateFitnessForSyntheticProgram(t *testing.T) {

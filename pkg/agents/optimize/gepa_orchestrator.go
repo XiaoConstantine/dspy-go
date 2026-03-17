@@ -72,7 +72,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 	}
 
 	state := engine.GetOptimizationState()
-	bestCandidate := state.BestCandidate
+	bestCandidate, _, _ := state.BestCandidateForApplication()
 	var bestValidation *GEPACandidateEvaluation
 	if len(validationExamples) > 0 {
 		bestCandidate, bestValidation, err = o.evaluateBestCandidateOnValidation(ctx, state, req.SeedArtifacts, validationExamples)
@@ -140,7 +140,7 @@ func (o *GEPAAgentOptimizer) partitionExamples(req GEPAOptimizeRequest) ([]Agent
 }
 
 func (o *GEPAAgentOptimizer) evaluateBestCandidateOnValidation(ctx context.Context, state *optimizers.GEPAState, seed AgentArtifacts, validationExamples []AgentExample) (*optimizers.GEPACandidate, *GEPACandidateEvaluation, error) {
-	bestCandidate := bestCandidateFromState(state)
+	bestCandidate, _, _ := state.BestCandidateForApplication()
 	if bestCandidate == nil {
 		return nil, nil, fmt.Errorf("optimize: no GEPA best candidate available for validation evaluation")
 	}
@@ -213,43 +213,6 @@ func (o *GEPAAgentOptimizer) cachedValidationEvaluation(state *optimizers.GEPASt
 		Traces:       traces,
 		AverageScore: cachedEvaluation.AverageScore,
 	}, nil
-}
-
-func bestCandidateFromState(state *optimizers.GEPAState) *optimizers.GEPACandidate {
-	if state == nil {
-		return nil
-	}
-
-	if state.BestValidationCandidate != nil {
-		return optimizers.CloneCandidate(state.BestValidationCandidate)
-	}
-
-	if state.BestCandidate != nil {
-		return optimizers.CloneCandidate(state.BestCandidate)
-	}
-
-	var bestArchiveCandidate *optimizers.GEPACandidate
-	bestArchiveFitness := math.Inf(-1)
-	for _, candidate := range state.ParetoArchive {
-		if candidate == nil {
-			continue
-		}
-
-		fitness := candidate.Fitness
-		if archiveFitness, exists := state.ArchiveFitnessMap[candidate.ID]; exists && archiveFitness != nil {
-			fitness = archiveFitness.WeightedScore
-		}
-
-		if bestArchiveCandidate == nil || fitness > bestArchiveFitness || (fitness == bestArchiveFitness && candidate.ID < bestArchiveCandidate.ID) {
-			bestArchiveCandidate = candidate
-			bestArchiveFitness = fitness
-		}
-	}
-	if bestArchiveCandidate != nil {
-		return optimizers.CloneCandidate(bestArchiveCandidate)
-	}
-
-	return nil
 }
 
 func (o *GEPAAgentOptimizer) resolveBestArtifacts(bestCandidate *optimizers.GEPACandidate, optimizedProgram core.Program, seed AgentArtifacts) (AgentArtifacts, error) {
