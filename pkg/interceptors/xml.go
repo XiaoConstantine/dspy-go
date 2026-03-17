@@ -509,14 +509,6 @@ func (p *XMLParser) stripFieldPrefix(content, fieldName string) string {
 	return content
 }
 
-// charsetReader handles charset encoding for XML decoder.
-func (p *XMLParser) charsetReader(charset string, input io.Reader) (io.Reader, error) {
-	if charset != "utf-8" && charset != "UTF-8" && charset != "" {
-		return nil, fmt.Errorf("unsupported charset: %s", charset)
-	}
-	return input, nil
-}
-
 // Helper functions for XML instruction generation
 
 // generateXMLInstructions creates formatting instructions for the LLM.
