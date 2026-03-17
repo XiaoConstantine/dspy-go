@@ -103,6 +103,7 @@ type GEPAConfig struct {
 	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Default: 3
 	ValidationFrequency        int                   `json:"validation_frequency"`  // Default: 1
 	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (disabled)
+	ValidationExamples         []core.Example        `json:"-"`
 	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
 	MaxMergeInvocations        int                   `json:"max_merge_invocations"` // Default: 5
 	MaxMetricCalls             int                   `json:"max_metric_calls"`      // Default: 0 (disabled)
@@ -3224,7 +3225,17 @@ func (g *GEPA) evaluateAndArchiveCurrentPopulation(ctx context.Context, program 
 }
 
 func (g *GEPA) prepareOptimizationDatasets(dataset core.Dataset) (core.Dataset, []core.Example, error) {
-	if dataset == nil || g.config.ValidationSplit <= 0 {
+	if dataset == nil {
+		return dataset, nil, nil
+	}
+	if len(g.config.ValidationExamples) > 0 {
+		trainExamples := core.DatasetToSlice(dataset)
+		if len(trainExamples) == 0 {
+			return nil, nil, fmt.Errorf("optimizers: explicit validation examples require at least one training example")
+		}
+		return newGEPAExampleDataset(cloneEvaluationExamples(trainExamples)), cloneEvaluationExamples(g.config.ValidationExamples), nil
+	}
+	if g.config.ValidationSplit <= 0 {
 		return dataset, nil, nil
 	}
 

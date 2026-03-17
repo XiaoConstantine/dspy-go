@@ -93,12 +93,13 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_UsesSearchBatchAndStagnationLimit(
 		},
 	)
 
-	engineConfig := optimizer.buildEngineConfig(13, 3)
+	engineConfig := optimizer.buildEngineConfig(13)
 	assert.Equal(t, 4, engineConfig.EvaluationBatchSize)
 	assert.Equal(t, 60, engineConfig.StagnationLimit)
-	assert.InDelta(t, 3.0/16.0, engineConfig.ValidationSplit, 0.000001)
+	assert.Zero(t, engineConfig.ValidationSplit)
+	assert.Nil(t, engineConfig.ValidationExamples)
 
-	engineConfig = optimizer.buildEngineConfig(3, 0)
+	engineConfig = optimizer.buildEngineConfig(3)
 	assert.Equal(t, 3, engineConfig.EvaluationBatchSize)
 	assert.Zero(t, engineConfig.ValidationSplit)
 }

@@ -1051,6 +1051,34 @@ func TestPrepareOptimizationDatasetsDisabledValidationSplit(t *testing.T) {
 	assert.Nil(t, validationExamples)
 }
 
+func TestPrepareOptimizationDatasetsUsesExplicitValidationExamples(t *testing.T) {
+	gepa := &GEPA{
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+	}
+	gepa.config.ValidationSplit = 0.5
+	gepa.config.ValidationExamples = []core.Example{
+		{Outputs: map[string]interface{}{"output": "val-a"}},
+		{Outputs: map[string]interface{}{"output": "val-b"}},
+	}
+
+	dataset := newCountingDataset([]core.Example{
+		{Outputs: map[string]interface{}{"output": "train-a"}},
+		{Outputs: map[string]interface{}{"output": "train-b"}},
+	})
+
+	trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(dataset)
+	require.NoError(t, err)
+
+	trainExamples := core.DatasetToSlice(trainDataset)
+	require.Len(t, trainExamples, 2)
+	require.Len(t, validationExamples, 2)
+	assert.Equal(t, "train-a", trainExamples[0].Outputs["output"])
+	assert.Equal(t, "train-b", trainExamples[1].Outputs["output"])
+	assert.Equal(t, "val-a", validationExamples[0].Outputs["output"])
+	assert.Equal(t, "val-b", validationExamples[1].Outputs["output"])
+}
+
 func TestPrepareOptimizationDatasetsBoundarySizes(t *testing.T) {
 	tests := []struct {
 		name             string

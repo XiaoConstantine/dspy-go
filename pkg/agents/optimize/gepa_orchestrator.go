@@ -45,7 +45,12 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 		return nil, err
 	}
 
-	engine, err := optimizers.NewGEPA(o.buildEngineConfig(len(trainExamples), len(validationExamples)))
+	engineConfig := o.buildEngineConfig(len(trainExamples))
+	if len(validationExamples) > 0 {
+		engineConfig.ValidationExamples = core.DatasetToSlice(o.buildOptimizationDataset(validationExamples))
+	}
+
+	engine, err := optimizers.NewGEPA(engineConfig)
 	if err != nil {
 		return nil, fmt.Errorf("optimize: create GEPA engine: %w", err)
 	}
@@ -60,7 +65,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 		return nil, err
 	}
 
-	dataset := o.buildOptimizationDataset(allExamples)
+	dataset := o.buildOptimizationDataset(trainExamples)
 	optimizedProgram, err := engine.Compile(ctx, program, dataset, o.buildOptimizationMetric())
 	if err != nil {
 		return nil, err
@@ -91,7 +96,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 	}, nil
 }
 
-func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount, validationCount int) *optimizers.GEPAConfig {
+func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount int) *optimizers.GEPAConfig {
 	engineConfig := optimizers.DefaultGEPAConfig()
 	engineConfig.PopulationSize = o.config.PopulationSize
 	engineConfig.MaxGenerations = o.config.MaxGenerations
@@ -102,12 +107,6 @@ func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount, validationCount in
 		engineConfig.EvaluationBatchSize = trainingCount
 		if o.config.SearchBatchSize > 0 && o.config.SearchBatchSize < engineConfig.EvaluationBatchSize {
 			engineConfig.EvaluationBatchSize = o.config.SearchBatchSize
-		}
-	}
-	if validationCount > 0 {
-		totalCount := trainingCount + validationCount
-		if totalCount > 1 {
-			engineConfig.ValidationSplit = float64(validationCount) / float64(totalCount)
 		}
 	}
 	return engineConfig
