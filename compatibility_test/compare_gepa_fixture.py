@@ -24,6 +24,7 @@ EXPECTED_FEEDBACK_INSTRUCTION = "feedback tuned classifier instruction"
 EXPECTED_FORMAT_FAILURE_INSTRUCTION = "format tuned classifier instruction"
 EXPECTED_MINIBATCH_ACCEPTED_INSTRUCTION = "alpha tuned"
 EXPECTED_MINIBATCH_REJECTED_INSTRUCTION = "alpha base"
+EXPECTED_EARLY_STOP_INSTRUCTION = "classifier better"
 EXPECTED_RESUME_INSTRUCTION = "classifier best"
 
 
@@ -211,6 +212,47 @@ def compare_resume_parity(python_result: dict[str, Any], go_result: dict[str, An
     }
 
 
+def compare_early_stop_case(python_case: dict[str, Any], go_case: dict[str, Any]) -> dict[str, Any]:
+    python_stopped = normalize_instruction(python_case.get("stopped_final_program_instruction", ""))
+    python_fresh = normalize_instruction(python_case.get("fresh_final_program_instruction", ""))
+    go_stopped = normalize_instruction(go_case.get("stopped_final_program_instruction", ""))
+    go_fresh = normalize_instruction(go_case.get("fresh_final_program_instruction", ""))
+
+    stopped_case_match = python_stopped == go_stopped == EXPECTED_EARLY_STOP_INSTRUCTION
+    fresh_case_match = python_fresh == go_fresh == EXPECTED_RESUME_INSTRUCTION
+    early_stop_match = (
+        python_case.get("stopped_metric_calls", 0) < python_case.get("fresh_metric_calls", 0)
+        and go_case.get("stopped_metric_calls", 0) < go_case.get("fresh_metric_calls", 0)
+    )
+
+    return {
+        "expected_stopped_instruction": EXPECTED_EARLY_STOP_INSTRUCTION,
+        "expected_fresh_instruction": EXPECTED_RESUME_INSTRUCTION,
+        "python_case": python_case,
+        "go_case": go_case,
+        "stopped_case_match": stopped_case_match,
+        "fresh_case_match": fresh_case_match,
+        "early_stop_match": early_stop_match,
+    }
+
+
+def compare_stopper_budget_parity(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
+    custom_stopper = compare_early_stop_case(
+        python_result.get("custom_stopper", {}),
+        go_result.get("custom_stopper", {}),
+    )
+    metric_budget = compare_early_stop_case(
+        python_result.get("metric_budget", {}),
+        go_result.get("metric_budget", {}),
+    )
+    return {
+        "custom_stopper": custom_stopper,
+        "metric_budget": metric_budget,
+        "custom_stopper_match": custom_stopper["stopped_case_match"] and custom_stopper["fresh_case_match"] and custom_stopper["early_stop_match"],
+        "metric_budget_match": metric_budget["stopped_case_match"] and metric_budget["fresh_case_match"] and metric_budget["early_stop_match"],
+    }
+
+
 def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> dict[str, Any]:
     fixtures = {"component_selection": {"scenarios": {}}}
     compatible = True
@@ -258,6 +300,13 @@ def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> 
     )
     fixtures["minibatch_acceptance"] = minibatch_report
     compatible = compatible and minibatch_report["accepted_case_match"] and minibatch_report["rejected_case_match"]
+
+    stopper_budget_report = compare_stopper_budget_parity(
+        python_results["fixtures"]["stopper_budget_parity"],
+        go_results["fixtures"]["stopper_budget_parity"],
+    )
+    fixtures["stopper_budget_parity"] = stopper_budget_report
+    compatible = compatible and stopper_budget_report["custom_stopper_match"] and stopper_budget_report["metric_budget_match"]
 
     resume_report = compare_resume_parity(
         python_results["fixtures"]["resume_parity"],

@@ -45,6 +45,7 @@ This harness:
 - also covers feedback-guided rewrite parity for example-level metric feedback
 - also covers format-failure-as-feedback parity for parse-error-driven rewrites
 - also covers minibatch accept/reject parity for deterministic proposal gating
+- also covers early-stop parity for custom stoppers and metric-budget cutoffs
 - also covers checkpoint-resume parity for resumed-vs-fresh deterministic winners
 
 ### Test Status: ✅ COMPATIBLE

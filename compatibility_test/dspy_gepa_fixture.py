@@ -199,6 +199,71 @@ class StopAfterIntermediateBest:
         return 0.5 <= best_score < 1.0
 
 
+def run_early_stop_case(stopped_max_metric_calls: int, use_custom_stopper: bool) -> dict[str, Any]:
+    example = dspy.Example(input="early stop fixture input", category="correct").with_inputs("input")
+    task_lm = ResumeTaskLM()
+    reflection_lm = ResumeReflectionLM()
+
+    def resume_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        if prediction.category == example.category:
+            score = 1.0
+        elif prediction.category == "almost":
+            score = 0.5
+        else:
+            score = 0.0
+        return dspy.Prediction(score=score, feedback="early stop fixture feedback")
+
+    stopped_kwargs: dict[str, Any] = {}
+    if use_custom_stopper:
+        stopped_kwargs["gepa_kwargs"] = {"stop_callbacks": [StopAfterIntermediateBest()]}
+
+    with dspy.context(lm=task_lm):
+        stopped_optimizer = dspy.GEPA(
+            metric=resume_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=stopped_max_metric_calls,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+            seed=7,
+            **stopped_kwargs,
+        )
+        stopped_program = stopped_optimizer.compile(FeedbackModule(), trainset=[example], valset=[example])
+
+        fresh_optimizer = dspy.GEPA(
+            metric=resume_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=12,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+            seed=7,
+        )
+        fresh_program = fresh_optimizer.compile(FeedbackModule(), trainset=[example], valset=[example])
+
+    stopped_details = getattr(stopped_program, "detailed_results", None)
+    fresh_details = getattr(fresh_program, "detailed_results", None)
+    if stopped_details is None or fresh_details is None:
+        raise RuntimeError("DSPy GEPA did not expose detailed_results for early-stop fixture")
+
+    return {
+        "stopped_metric_calls": getattr(stopped_details, "total_metric_calls", 0),
+        "fresh_metric_calls": getattr(fresh_details, "total_metric_calls", 0),
+        "stopped_candidate_count": len(getattr(stopped_details, "candidates", [])),
+        "fresh_candidate_count": len(getattr(fresh_details, "candidates", [])),
+        "stopped_final_program_instruction": stopped_program.classifier.signature.instructions,
+        "fresh_final_program_instruction": fresh_program.classifier.signature.instructions,
+    }
+
+
+def run_stopper_budget_parity_fixture() -> dict[str, Any]:
+    return {
+        "custom_stopper": run_early_stop_case(12, True),
+        "metric_budget": run_early_stop_case(8, False),
+    }
+
+
 def component_instructions(program: dspy.Module) -> dict[str, str]:
     return {
         "classifier": program.classifier.signature.instructions,
@@ -659,6 +724,7 @@ def build_fixture_report() -> dict[str, Any]:
             "feedback_guided": run_feedback_guided_fixture(),
             "format_failure_feedback": run_format_failure_feedback_fixture(),
             "minibatch_acceptance": run_minibatch_acceptance_fixture(),
+            "stopper_budget_parity": run_stopper_budget_parity_fixture(),
             "resume_parity": run_resume_parity_fixture(),
         },
     }

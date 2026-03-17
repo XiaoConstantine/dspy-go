@@ -381,6 +381,21 @@ type compatResumeResult struct {
 	FreshFinalProgramInstruction   string `json:"fresh_final_program_instruction"`
 }
 
+type compatEarlyStopResult struct {
+	StoppedMetricCalls             int    `json:"stopped_metric_calls"`
+	FreshMetricCalls               int    `json:"fresh_metric_calls"`
+	StoppedCandidateCount          int    `json:"stopped_candidate_count"`
+	FreshCandidateCount            int    `json:"fresh_candidate_count"`
+	StoppedFinalProgramInstruction string `json:"stopped_final_program_instruction"`
+	FreshFinalProgramInstruction   string `json:"fresh_final_program_instruction"`
+	StopReason                     string `json:"stop_reason,omitempty"`
+}
+
+type compatStopperBudgetResult struct {
+	CustomStopper compatEarlyStopResult `json:"custom_stopper"`
+	MetricBudget  compatEarlyStopResult `json:"metric_budget"`
+}
+
 type compatMinibatchScenarioResult struct {
 	CandidateCount              int    `json:"candidate_count"`
 	CandidateAdded              bool   `json:"candidate_added"`
@@ -400,6 +415,7 @@ type compatFixtureCollection struct {
 	FeedbackGuided      compatFeedbackResult            `json:"feedback_guided"`
 	FormatFailure       compatFeedbackResult            `json:"format_failure_feedback"`
 	MinibatchAcceptance compatMinibatchAcceptanceResult `json:"minibatch_acceptance"`
+	StopperBudgetParity compatStopperBudgetResult       `json:"stopper_budget_parity"`
 	ResumeParity        compatResumeResult              `json:"resume_parity"`
 }
 
@@ -1005,6 +1021,107 @@ func runCompatMinibatchAcceptanceScenario(t *testing.T, ctx context.Context) com
 	}
 }
 
+func runCompatEarlyStopScenario(t *testing.T, ctx context.Context, stoppedConfigurator func(*GEPAConfig), freshConfigurator func(*GEPAConfig)) compatEarlyStopResult {
+	t.Helper()
+
+	originalDefault := core.GetDefaultLLM()
+	originalTeacher := core.GetTeacherLLM()
+	llm := &compatResumeFixtureLLM{}
+	core.SetDefaultLLM(llm)
+	core.GlobalConfig.TeacherLLM = llm
+	defer func() {
+		core.SetDefaultLLM(originalDefault)
+		core.GlobalConfig.TeacherLLM = originalTeacher
+	}()
+
+	buildConfig := func() *GEPAConfig {
+		config := DefaultGEPAConfig()
+		config.PopulationSize = 1
+		config.MaxGenerations = 3
+		config.MutationRate = 1.0
+		config.ReflectionFreq = 0
+		config.SelectionStrategy = "tournament"
+		config.TournamentSize = 1
+		config.ConcurrencyLevel = 1
+		config.EvaluationBatchSize = 1
+		config.RandomSeed = 7
+		return config
+	}
+
+	dataset := datasets.NewSimpleDataset([]core.Example{
+		{
+			Inputs:  map[string]interface{}{"input": "early stop fixture input"},
+			Outputs: map[string]interface{}{"output": "classifier best"},
+		},
+	})
+
+	stoppedConfig := buildConfig()
+	if stoppedConfigurator != nil {
+		stoppedConfigurator(stoppedConfig)
+	}
+	stoppedRun, err := NewGEPA(stoppedConfig)
+	if err != nil {
+		t.Fatalf("new stopped GEPA: %v", err)
+	}
+	stoppedProgram, err := stoppedRun.Compile(ctx, newCompatFeedbackFixtureProgram("classifier base"), dataset, compatResumeProgressMetric)
+	if err != nil {
+		t.Fatalf("compile stopped early-stop fixture: %v", err)
+	}
+
+	freshConfig := buildConfig()
+	if freshConfigurator != nil {
+		freshConfigurator(freshConfig)
+	}
+	freshRun, err := NewGEPA(freshConfig)
+	if err != nil {
+		t.Fatalf("new fresh GEPA: %v", err)
+	}
+	freshProgram, err := freshRun.Compile(ctx, newCompatFeedbackFixtureProgram("classifier base"), dataset, compatResumeProgressMetric)
+	if err != nil {
+		t.Fatalf("compile fresh early-stop fixture: %v", err)
+	}
+
+	result := compatEarlyStopResult{
+		StoppedMetricCalls:             stoppedRun.state.MetricCallCount(),
+		FreshMetricCalls:               freshRun.state.MetricCallCount(),
+		StoppedCandidateCount:          compatPopulationCandidateCount(stoppedRun.state),
+		FreshCandidateCount:            compatPopulationCandidateCount(freshRun.state),
+		StoppedFinalProgramInstruction: stoppedProgram.Modules["classifier"].GetSignature().Instruction,
+		FreshFinalProgramInstruction:   freshProgram.Modules["classifier"].GetSignature().Instruction,
+	}
+	if stoppedRun.state != nil {
+		result.StopReason = stoppedRun.state.StopReason
+	}
+	return result
+}
+
+func runCompatStopperBudgetScenario(t *testing.T, ctx context.Context) compatStopperBudgetResult {
+	t.Helper()
+
+	customStopper := runCompatEarlyStopScenario(t, ctx, func(config *GEPAConfig) {
+		config.StopCallbacks = []GEPAStopper{
+			func(_ context.Context, gepa *GEPA) *GEPAStopDecision {
+				if gepa == nil || gepa.state == nil {
+					return nil
+				}
+				if gepa.state.BestFitness < 0.5 || gepa.state.BestFitness >= 1.0 {
+					return nil
+				}
+				return &GEPAStopDecision{Reason: "compat_early_stop"}
+			},
+		}
+	}, nil)
+
+	metricBudget := runCompatEarlyStopScenario(t, ctx, func(config *GEPAConfig) {
+		config.MaxMetricCalls = 2
+	}, nil)
+
+	return compatStopperBudgetResult{
+		CustomStopper: customStopper,
+		MetricBudget:  metricBudget,
+	}
+}
+
 func runCompatResumeScenario(t *testing.T, ctx context.Context) compatResumeResult {
 	t.Helper()
 
@@ -1143,6 +1260,7 @@ func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	report.Fixtures.FeedbackGuided = runCompatFeedbackScenario(t, ctx)
 	report.Fixtures.FormatFailure = runCompatFormatFailureScenario(t, ctx)
 	report.Fixtures.MinibatchAcceptance = runCompatMinibatchAcceptanceScenario(t, ctx)
+	report.Fixtures.StopperBudgetParity = runCompatStopperBudgetScenario(t, ctx)
 	report.Fixtures.ResumeParity = runCompatResumeScenario(t, ctx)
 	return report
 }
