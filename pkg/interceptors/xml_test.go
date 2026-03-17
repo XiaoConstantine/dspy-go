@@ -499,3 +499,91 @@ func BenchmarkXMLModuleInterceptor_FullPipeline(b *testing.B) {
 		}
 	}
 }
+
+func TestXMLParser_ParsingLogic(t *testing.T) {
+	config := DefaultXMLConfig()
+	parser := &XMLParser{
+		config: config,
+		cache:  make(map[string]*ParsedSignature),
+	}
+
+	signature := core.NewSignature(
+		[]core.InputField{},
+		[]core.OutputField{
+			{Field: core.NewField("name")},
+			{Field: core.NewField("tasks")},
+			{Field: core.NewField("content")},
+		},
+	)
+
+	tests := []struct {
+		name     string
+		response string
+		expected map[string]string
+	}{
+		{
+			name: "nested_elements",
+			response: `<response>
+			<tasks>
+				<task id="1">First task</task>
+				<task id="2">Second task</task>
+			</tasks>
+			<content>Some text</content>
+		</response>`,
+			expected: map[string]string{
+				"tasks": `<tasks>
+				<task id="1">First task</task>
+				<task id="2">Second task</task>
+			</tasks>`,
+				"content": "Some text",
+			},
+		},
+		{
+			name:     "structured_and_escaped",
+			response: `<response><name>Tom &amp; Jerry &amp; Mark</name><tasks><task>A &amp; B</task><task>C &amp; D</task></tasks></response>`,
+			expected: map[string]string{
+				"name":  "Tom & Jerry & Mark",
+				"tasks": "<tasks><task>A &amp; B</task><task>C &amp; D</task></tasks>",
+			},
+		},
+		{
+			name:     "mixed_entities",
+			response: `<response><tasks>Task A &amp; Task B & Task C</tasks></response>`,
+			expected: map[string]string{
+				"tasks": "Task A & Task B & Task C",
+			},
+		},
+		{
+			name:     "prefix_stripping",
+			response: `<response><name>name: John Doe</name></response>`,
+			expected: map[string]string{
+				"name": "John Doe",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields, err := parser.parseXML(tt.response, signature)
+			if err != nil {
+				t.Fatalf("Parsing failed: %v", err)
+			}
+
+			if len(fields) != len(tt.expected) {
+				t.Errorf("Expected %d fields, got %d", len(tt.expected), len(fields))
+			}
+
+			for key, expectedVal := range tt.expected {
+				gotVal, ok := fields[key].(string)
+				if !ok {
+					t.Errorf("field %s should be a string, got %T", key, fields[key])
+					continue
+				}
+
+				if gotVal != expectedVal {
+					t.Errorf("Expected %s to be %q, got %q", key, expectedVal, gotVal)
+				}
+			}
+		})
+	}
+}

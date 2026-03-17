@@ -913,3 +913,85 @@ func TestPredict_XMLMode_ToggleMode(t *testing.T) {
 	assert.False(t, predict.IsXMLModeEnabled())
 	assert.Nil(t, predict.GetXMLConfig())
 }
+
+// Additional tests: ensure Predict XML mode correctly extracts analyzer fields (analysis + tasks).
+func TestPredict_AnalyzerTasksParsing(t *testing.T) {
+	// Signature mirrors what the orchestrator analyzer expects
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.OutputField{
+			{Field: core.NewField("analysis")},
+			{Field: core.NewField("tasks")},
+		},
+	)
+
+	xmlConfig := interceptors.DefaultXMLConfig()
+
+	ctx := context.Background()
+	ctx = core.WithExecutionState(ctx)
+
+	t.Run("raw_xml_response", func(t *testing.T) {
+		// Create isolated Predict and mock for this subtest
+		mockLLM := new(testutil.MockLLM)
+		predict := NewPredict(signature).WithXMLOutput(xmlConfig)
+		predict.SetLLM(mockLLM)
+
+		// Use same analyzer response as in orchestrator_test.go (Basic Task Processing)
+		xmlResp := `<response>
+<analysis>Task has been analyzed and broken down into atomic units</analysis>
+<tasks>
+     <task id="task1" type="test" processor="test" priority="1">
+         <description>Test task 1</description>
+         <metadata>
+             <item key="key">value</item>
+         </metadata>
+     </task>
+</tasks>
+</response>`
+
+		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+			Return(&core.LLMResponse{Content: xmlResp}, nil)
+
+		outputs, err := predict.Process(ctx, map[string]interface{}{"task": "check"})
+		require.NoError(t, err)
+
+		// analysis field should be parsed exactly
+		analysis, ok := outputs["analysis"]
+		require.True(t, ok)
+		require.Equal(t, "Task has been analyzed and broken down into atomic units", analysis)
+
+		// tasks field should contain the inner task id
+		tasksVal, ok := outputs["tasks"]
+		require.True(t, ok)
+		require.Contains(t, tasksVal.(string), "task1")
+
+		mockLLM.AssertExpectations(t)
+	})
+
+	t.Run("markdown_code_fence", func(t *testing.T) {
+		// Create isolated Predict and mock for this subtest
+		mockLLM := new(testutil.MockLLM)
+		predict := NewPredict(signature).WithXMLOutput(xmlConfig)
+		predict.SetLLM(mockLLM)
+
+		// Use the parallel execution analyzer response from orchestrator_test.go wrapped in a markdown fence
+		xmlResp := "```xml\n<response>\n<analysis>Task has been analyzed and decomposed for parallel execution</analysis>\n<tasks>\n     <task id=\"task1\" type=\"test\" processor=\"test\" priority=\"1\">\n         <description>Parallel task 1</description>\n         <metadata>\n             <item key=\"key\">value</item>\n         </metadata>\n     </task>\n     <task id=\"task2\" type=\"test\" processor=\"test\" priority=\"1\">\n         <description>Parallel task 2</description>\n         <metadata>\n             <item key=\"key\">value</item>\n         </metadata>\n     </task>\n</tasks>\n</response>\n```"
+
+		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+			Return(&core.LLMResponse{Content: xmlResp}, nil)
+
+		outputs, err := predict.Process(ctx, map[string]interface{}{"task": "check"})
+		require.NoError(t, err)
+
+		analysis, ok := outputs["analysis"]
+		require.True(t, ok)
+		require.Equal(t, "Task has been analyzed and decomposed for parallel execution", analysis)
+
+		tasksVal, ok := outputs["tasks"]
+		require.True(t, ok)
+		require.Contains(t, tasksVal.(string), "task1")
+		require.Contains(t, tasksVal.(string), "task2")
+
+		mockLLM.AssertExpectations(t)
+	})
+}
