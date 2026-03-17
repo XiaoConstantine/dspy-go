@@ -287,6 +287,56 @@ func (f *compatResumeFixtureLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion}
 }
 
+type compatSingleInstructionLLM struct {
+	proposal string
+	modelID  string
+}
+
+func (f *compatSingleInstructionLLM) Generate(_ context.Context, _ string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
+	return &core.LLMResponse{Content: f.proposal}, nil
+}
+
+func (f *compatSingleInstructionLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) CreateEmbedding(context.Context, string, ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) CreateEmbeddings(context.Context, []string, ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) StreamGenerate(context.Context, string, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) GenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.LLMResponse, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) StreamGenerateWithContent(context.Context, []core.ContentBlock, ...core.GenerateOption) (*core.StreamResponse, error) {
+	return nil, nil
+}
+
+func (f *compatSingleInstructionLLM) ProviderName() string { return "fixture" }
+
+func (f *compatSingleInstructionLLM) ModelID() string {
+	if f.modelID != "" {
+		return f.modelID
+	}
+	return "fixture-gepa-single-instruction"
+}
+
+func (f *compatSingleInstructionLLM) Capabilities() []core.Capability {
+	return []core.Capability{core.CapabilityCompletion}
+}
+
 type compatFixtureScenarioResult struct {
 	Selector                        string            `json:"selector"`
 	FirstCandidateUpdatedComponents []string          `json:"first_candidate_updated_components"`
@@ -331,13 +381,26 @@ type compatResumeResult struct {
 	FreshFinalProgramInstruction   string `json:"fresh_final_program_instruction"`
 }
 
+type compatMinibatchScenarioResult struct {
+	CandidateCount              int    `json:"candidate_count"`
+	CandidateAdded              bool   `json:"candidate_added"`
+	FinalProgramInstruction     string `json:"final_program_instruction"`
+	WinningCandidateInstruction string `json:"winning_candidate_instruction"`
+}
+
+type compatMinibatchAcceptanceResult struct {
+	AcceptedCase compatMinibatchScenarioResult `json:"accepted_case"`
+	RejectedCase compatMinibatchScenarioResult `json:"rejected_case"`
+}
+
 type compatFixtureCollection struct {
-	ComponentSelection compatComponentSelectionReport `json:"component_selection"`
-	ValidationFrontier compatValidationFrontierResult `json:"validation_frontier"`
-	AncestorMerge      compatMergeResult              `json:"ancestor_merge"`
-	FeedbackGuided     compatFeedbackResult           `json:"feedback_guided"`
-	FormatFailure      compatFeedbackResult           `json:"format_failure_feedback"`
-	ResumeParity       compatResumeResult             `json:"resume_parity"`
+	ComponentSelection  compatComponentSelectionReport  `json:"component_selection"`
+	ValidationFrontier  compatValidationFrontierResult  `json:"validation_frontier"`
+	AncestorMerge       compatMergeResult               `json:"ancestor_merge"`
+	FeedbackGuided      compatFeedbackResult            `json:"feedback_guided"`
+	FormatFailure       compatFeedbackResult            `json:"format_failure_feedback"`
+	MinibatchAcceptance compatMinibatchAcceptanceResult `json:"minibatch_acceptance"`
+	ResumeParity        compatResumeResult              `json:"resume_parity"`
 }
 
 type compatFixtureReport struct {
@@ -879,6 +942,69 @@ func runCompatFormatFailureScenario(t *testing.T, ctx context.Context) compatFee
 	}
 }
 
+func runCompatMinibatchScenario(t *testing.T, ctx context.Context, proposal, datasetOutput, modelID string) compatMinibatchScenarioResult {
+	t.Helper()
+
+	originalDefault := core.GetDefaultLLM()
+	originalTeacher := core.GetTeacherLLM()
+	llm := &compatSingleInstructionLLM{proposal: proposal, modelID: modelID}
+	core.SetDefaultLLM(llm)
+	core.GlobalConfig.TeacherLLM = llm
+	defer func() {
+		core.SetDefaultLLM(originalDefault)
+		core.GlobalConfig.TeacherLLM = originalTeacher
+	}()
+
+	config := DefaultGEPAConfig()
+	config.PopulationSize = 1
+	config.MaxGenerations = 2
+	config.MutationRate = 1.0
+	config.ReflectionFreq = 0
+	config.SelectionStrategy = "tournament"
+	config.TournamentSize = 1
+	config.ConcurrencyLevel = 1
+	config.EvaluationBatchSize = 2
+	config.RandomSeed = 7
+
+	gepa, err := NewGEPA(config)
+	if err != nil {
+		t.Fatalf("new GEPA minibatch fixture: %v", err)
+	}
+
+	dataset := datasets.NewSimpleDataset([]core.Example{
+		{Inputs: map[string]interface{}{"input": "mini-1"}, Outputs: map[string]interface{}{"output": datasetOutput}},
+		{Inputs: map[string]interface{}{"input": "mini-2"}, Outputs: map[string]interface{}{"output": datasetOutput}},
+		{Inputs: map[string]interface{}{"input": "mini-3"}, Outputs: map[string]interface{}{"output": datasetOutput}},
+	})
+
+	optimizedProgram, err := gepa.Compile(ctx, newCompatFeedbackFixtureProgram("alpha base"), dataset, exactOutputMetric)
+	if err != nil {
+		t.Fatalf("compile minibatch fixture: %v", err)
+	}
+
+	candidateCount := compatPopulationCandidateCount(gepa.state)
+	winningInstruction := ""
+	if gepa.state != nil && gepa.state.BestCandidate != nil {
+		winningInstruction = candidateInstructionForModule(gepa.state.BestCandidate, "classifier")
+	}
+
+	return compatMinibatchScenarioResult{
+		CandidateCount:              candidateCount,
+		CandidateAdded:              candidateCount > 1,
+		FinalProgramInstruction:     optimizedProgram.Modules["classifier"].GetSignature().Instruction,
+		WinningCandidateInstruction: winningInstruction,
+	}
+}
+
+func runCompatMinibatchAcceptanceScenario(t *testing.T, ctx context.Context) compatMinibatchAcceptanceResult {
+	t.Helper()
+
+	return compatMinibatchAcceptanceResult{
+		AcceptedCase: runCompatMinibatchScenario(t, ctx, "alpha tuned", "alpha tuned", "fixture-gepa-minibatch-accept"),
+		RejectedCase: runCompatMinibatchScenario(t, ctx, "alpha worse", "alpha base", "fixture-gepa-minibatch-reject"),
+	}
+}
+
 func runCompatResumeScenario(t *testing.T, ctx context.Context) compatResumeResult {
 	t.Helper()
 
@@ -973,14 +1099,19 @@ func compatPopulationCandidateCount(state *GEPAState) int {
 	if state == nil {
 		return 0
 	}
-	total := 0
+	seen := make(map[string]struct{})
 	for _, population := range state.PopulationHistory {
 		if population == nil {
 			continue
 		}
-		total += len(population.Candidates)
+		for _, candidate := range population.Candidates {
+			if candidate == nil || strings.TrimSpace(candidate.ID) == "" {
+				continue
+			}
+			seen[candidate.ID] = struct{}{}
+		}
 	}
-	return total
+	return len(seen)
 }
 
 func compatFileExists(path string) bool {
@@ -1011,6 +1142,7 @@ func buildCompatFixtureReport(t *testing.T) compatFixtureReport {
 	report.Fixtures.AncestorMerge = runCompatMergeScenario(t, ctx)
 	report.Fixtures.FeedbackGuided = runCompatFeedbackScenario(t, ctx)
 	report.Fixtures.FormatFailure = runCompatFormatFailureScenario(t, ctx)
+	report.Fixtures.MinibatchAcceptance = runCompatMinibatchAcceptanceScenario(t, ctx)
 	report.Fixtures.ResumeParity = runCompatResumeScenario(t, ctx)
 	return report
 }

@@ -22,6 +22,8 @@ EXPECTED_MERGE_COMPONENTS = ["classifier", "generator"]
 EXPECTED_MERGE_PARENT_LABELS = ["classifier", "generator"]
 EXPECTED_FEEDBACK_INSTRUCTION = "feedback tuned classifier instruction"
 EXPECTED_FORMAT_FAILURE_INSTRUCTION = "format tuned classifier instruction"
+EXPECTED_MINIBATCH_ACCEPTED_INSTRUCTION = "alpha tuned"
+EXPECTED_MINIBATCH_REJECTED_INSTRUCTION = "alpha base"
 EXPECTED_RESUME_INSTRUCTION = "classifier best"
 
 
@@ -146,6 +148,40 @@ def compare_format_failure_feedback(python_result: dict[str, Any], go_result: di
     }
 
 
+def compare_minibatch_acceptance(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
+    python_accepted = python_result.get("accepted_case", {})
+    go_accepted = go_result.get("accepted_case", {})
+    python_rejected = python_result.get("rejected_case", {})
+    go_rejected = go_result.get("rejected_case", {})
+
+    python_accepted_instruction = normalize_instruction(python_accepted.get("final_program_instruction", ""))
+    go_accepted_instruction = normalize_instruction(go_accepted.get("final_program_instruction", ""))
+    python_rejected_instruction = normalize_instruction(python_rejected.get("final_program_instruction", ""))
+    go_rejected_instruction = normalize_instruction(go_rejected.get("final_program_instruction", ""))
+
+    accepted_case_match = (
+        bool(python_accepted.get("candidate_added"))
+        and bool(go_accepted.get("candidate_added"))
+        and python_accepted_instruction == go_accepted_instruction == EXPECTED_MINIBATCH_ACCEPTED_INSTRUCTION
+    )
+    rejected_case_match = (
+        not bool(python_rejected.get("candidate_added"))
+        and not bool(go_rejected.get("candidate_added"))
+        and python_rejected_instruction == go_rejected_instruction == EXPECTED_MINIBATCH_REJECTED_INSTRUCTION
+    )
+
+    return {
+        "expected_accepted_instruction": EXPECTED_MINIBATCH_ACCEPTED_INSTRUCTION,
+        "expected_rejected_instruction": EXPECTED_MINIBATCH_REJECTED_INSTRUCTION,
+        "python_accepted_case": python_accepted,
+        "go_accepted_case": go_accepted,
+        "python_rejected_case": python_rejected,
+        "go_rejected_case": go_rejected,
+        "accepted_case_match": accepted_case_match,
+        "rejected_case_match": rejected_case_match,
+    }
+
+
 def compare_resume_parity(python_result: dict[str, Any], go_result: dict[str, Any]) -> dict[str, Any]:
     python_resumed = normalize_instruction(python_result.get("resumed_final_program_instruction", ""))
     python_fresh = normalize_instruction(python_result.get("fresh_final_program_instruction", ""))
@@ -215,6 +251,13 @@ def build_report(python_results: dict[str, Any], go_results: dict[str, Any]) -> 
     )
     fixtures["format_failure_feedback"] = format_failure_report
     compatible = compatible and format_failure_report["candidate_instruction_match"] and format_failure_report["final_program_instruction_match"]
+
+    minibatch_report = compare_minibatch_acceptance(
+        python_results["fixtures"]["minibatch_acceptance"],
+        go_results["fixtures"]["minibatch_acceptance"],
+    )
+    fixtures["minibatch_acceptance"] = minibatch_report
+    compatible = compatible and minibatch_report["accepted_case_match"] and minibatch_report["rejected_case_match"]
 
     resume_report = compare_resume_parity(
         python_results["fixtures"]["resume_parity"],

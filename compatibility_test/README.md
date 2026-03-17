@@ -44,6 +44,7 @@ This harness:
 - also covers ancestor-merge parity for deterministic two-parent merge proposals
 - also covers feedback-guided rewrite parity for example-level metric feedback
 - also covers format-failure-as-feedback parity for parse-error-driven rewrites
+- also covers minibatch accept/reject parity for deterministic proposal gating
 - also covers checkpoint-resume parity for resumed-vs-fresh deterministic winners
 
 ### Test Status: ✅ COMPATIBLE

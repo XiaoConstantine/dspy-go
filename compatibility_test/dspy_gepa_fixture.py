@@ -46,6 +46,18 @@ class FeedbackModule(dspy.Module):
         return dspy.Prediction(category=self.classifier(input=input).category)
 
 
+class MinibatchModule(dspy.Module):
+    """Single-component module for deterministic minibatch acceptance fixtures."""
+
+    def __init__(self):
+        super().__init__()
+        self.classifier = Predict("input -> output")
+        self.classifier.signature = self.classifier.signature.with_instructions("alpha base")
+
+    def forward(self, input: str):
+        return dspy.Prediction(output=self.classifier(input=input).output)
+
+
 def lm_content(prompt=None, messages=None) -> str:
     return (prompt or "") + "\n".join(str(message.get("content", "")) for message in messages or [])
 
@@ -145,6 +157,24 @@ class ResumeTaskLM(dspy.clients.lm.LM):
         else:
             category = "wrong"
         return [{"text": json.dumps({"category": category})}]
+
+
+class MinibatchTaskLM(dspy.clients.lm.LM):
+    """Task LM that mirrors the current instruction into a deterministic output."""
+
+    def __init__(self):
+        super().__init__("dummy", "chat", 0.0, 1000, True)
+
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        del kwargs
+        content = lm_content(prompt=prompt, messages=messages)
+        if "alpha tuned" in content:
+            output = "alpha tuned"
+        elif "alpha worse" in content:
+            output = "alpha worse"
+        else:
+            output = "alpha base"
+        return [{"text": json.dumps({"output": output})}]
 
 
 class ResumeReflectionLM(dspy.clients.lm.LM):
@@ -480,6 +510,60 @@ def run_format_failure_feedback_fixture() -> dict[str, Any]:
     }
 
 
+def run_minibatch_case(proposed_instruction: str, expected_output: str) -> dict[str, Any]:
+    student = MinibatchModule()
+
+    def minibatch_metric(example, prediction, trace=None, pred_name=None, pred_trace=None):
+        del trace, pred_name, pred_trace
+        score = 1.0 if prediction.output == example.output else 0.0
+        return dspy.Prediction(score=score, feedback="minibatch fixture feedback")
+
+    task_lm = MinibatchTaskLM()
+    reflection_lm = DummyLM([{"improved_instruction": proposed_instruction}] * 20)
+    trainset = [
+        dspy.Example(input="mini-1", output=expected_output).with_inputs("input"),
+        dspy.Example(input="mini-2", output=expected_output).with_inputs("input"),
+        dspy.Example(input="mini-3", output=expected_output).with_inputs("input"),
+    ]
+    valset = [dspy.Example(input="mini-val", output=expected_output).with_inputs("input")]
+
+    with dspy.context(lm=task_lm):
+        optimizer = dspy.GEPA(
+            metric=minibatch_metric,
+            reflection_lm=reflection_lm,
+            max_metric_calls=8,
+            reflection_minibatch_size=2,
+            component_selector="round_robin",
+            track_stats=True,
+            num_threads=1,
+            seed=7,
+        )
+        optimized_program = optimizer.compile(student, trainset=trainset, valset=valset)
+
+    details = getattr(optimized_program, "detailed_results", None)
+    candidates = list(getattr(details, "candidates", []))
+    candidate_count = len(candidates)
+    winning_instruction = optimized_program.classifier.signature.instructions
+    if candidate_count > 0 and getattr(details, "best_idx", None) is not None:
+        best_idx = details.best_idx
+        if 0 <= best_idx < candidate_count:
+            winning_instruction = candidates[best_idx].classifier.signature.instructions
+
+    return {
+        "candidate_count": candidate_count,
+        "candidate_added": candidate_count > 1,
+        "final_program_instruction": optimized_program.classifier.signature.instructions,
+        "winning_candidate_instruction": winning_instruction,
+    }
+
+
+def run_minibatch_acceptance_fixture() -> dict[str, Any]:
+    return {
+        "accepted_case": run_minibatch_case("alpha tuned", "alpha tuned"),
+        "rejected_case": run_minibatch_case("alpha worse", "alpha base"),
+    }
+
+
 def run_resume_parity_fixture() -> dict[str, Any]:
     example = dspy.Example(input="resume fixture input", category="correct").with_inputs("input")
     task_lm = ResumeTaskLM()
@@ -574,6 +658,7 @@ def build_fixture_report() -> dict[str, Any]:
             "ancestor_merge": run_ancestor_merge_fixture(),
             "feedback_guided": run_feedback_guided_fixture(),
             "format_failure_feedback": run_format_failure_feedback_fixture(),
+            "minibatch_acceptance": run_minibatch_acceptance_fixture(),
             "resume_parity": run_resume_parity_fixture(),
         },
     }
