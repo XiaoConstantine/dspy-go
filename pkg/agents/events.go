@@ -10,6 +10,8 @@ const (
 	EventRunStarted       = "run_started"
 	EventRunFinished      = "run_finished"
 	EventRunFailed        = "run_failed"
+	EventSessionLoaded    = "session_loaded"
+	EventSessionPersisted = "session_persisted"
 	EventLLMTurnStarted   = "llm_turn_started"
 	EventLLMTurnFinished  = "llm_turn_finished"
 	EventToolCallProposed = "tool_call_proposed"
