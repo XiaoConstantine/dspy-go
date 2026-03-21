@@ -610,6 +610,8 @@ func TestAgent_Clone_CopiesCloneableTools(t *testing.T) {
 	require.Len(t, originalTools, 1)
 	require.Len(t, clonedTools, 1)
 	assert.NotSame(t, originalTools[0], clonedTools[0])
+	assert.NotSame(t, agent.memory, cloned.memory)
+	assert.Empty(t, cloned.config.SessionID)
 }
 
 func TestAgent_Clone_FailsForNonCloneableTools(t *testing.T) {

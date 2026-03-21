@@ -5,6 +5,7 @@ import (
 	goerrors "errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -12,6 +13,8 @@ import (
 )
 
 const defaultSessionStorePrefix = "agent_sessions"
+
+var sessionStoreLocks sync.Map
 
 // SessionRecord captures one persisted agent run inside a logical session.
 type SessionRecord struct {
@@ -49,8 +52,8 @@ func (r SessionRecord) Clone() SessionRecord {
 	}
 }
 
-type sessionIndex struct {
-	IDs []string `json:"ids"`
+type sessionLog struct {
+	Records []SessionRecord `json:"records"`
 }
 
 // SessionStore persists session records on top of the generic Memory interface.
@@ -78,7 +81,7 @@ func NewSessionStoreWithPrefix(memory Memory, prefix string) *SessionStore {
 	}
 }
 
-// Append writes a session record and updates the ordered session index.
+// Append writes or replaces a session record inside the ordered session log.
 func (s *SessionStore) Append(record SessionRecord) error {
 	if s == nil {
 		return fmt.Errorf("session store is nil")
@@ -97,27 +100,25 @@ func (s *SessionStore) Append(record SessionRecord) error {
 		return fmt.Errorf("session record task is required")
 	}
 
-	encodedRecord, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("marshal session record: %w", err)
-	}
-	if err := s.memory.Store(s.recordKey(record.SessionID, record.ID), string(encodedRecord)); err != nil {
-		return err
-	}
+	lock := sessionStoreLock(s.sessionKey(record.SessionID))
+	lock.Lock()
+	defer lock.Unlock()
 
-	index, err := s.loadIndex(record.SessionID)
+	log, err := s.loadSessionLog(record.SessionID)
 	if err != nil {
 		return err
 	}
-	if !containsString(index.IDs, record.ID) {
-		index.IDs = append(index.IDs, record.ID)
+	if idx := indexOfRecord(log.Records, record.ID); idx >= 0 {
+		log.Records[idx] = record
+	} else {
+		log.Records = append(log.Records, record)
 	}
 
-	encodedIndex, err := json.Marshal(index)
+	encodedLog, err := json.Marshal(log)
 	if err != nil {
-		return fmt.Errorf("marshal session index: %w", err)
+		return fmt.Errorf("marshal session log: %w", err)
 	}
-	return s.memory.Store(s.indexKey(record.SessionID), string(encodedIndex))
+	return s.memory.Store(s.sessionKey(record.SessionID), string(encodedLog))
 }
 
 // Recent loads up to limit recent session records in chronological order.
@@ -130,60 +131,40 @@ func (s *SessionStore) Recent(sessionID string, limit int) ([]SessionRecord, err
 		return nil, nil
 	}
 
-	index, err := s.loadIndex(sessionID)
+	log, err := s.loadSessionLog(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	if len(index.IDs) == 0 {
+	if len(log.Records) == 0 {
 		return nil, nil
 	}
 
-	start := len(index.IDs) - limit
+	start := len(log.Records) - limit
 	if start < 0 {
 		start = 0
 	}
 
-	records := make([]SessionRecord, 0, len(index.IDs)-start)
-	for _, id := range index.IDs[start:] {
-		record, err := s.loadRecord(sessionID, id)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
+	records := make([]SessionRecord, 0, len(log.Records)-start)
+	for _, record := range log.Records[start:] {
+		records = append(records, record.Clone())
 	}
 	return records, nil
 }
 
-func (s *SessionStore) loadIndex(sessionID string) (sessionIndex, error) {
-	encoded, ok, err := s.loadString(s.indexKey(sessionID))
+func (s *SessionStore) loadSessionLog(sessionID string) (sessionLog, error) {
+	encoded, ok, err := s.loadString(s.sessionKey(sessionID))
 	if err != nil {
-		return sessionIndex{}, err
+		return sessionLog{}, err
 	}
 	if !ok || strings.TrimSpace(encoded) == "" {
-		return sessionIndex{}, nil
+		return sessionLog{}, nil
 	}
 
-	var index sessionIndex
-	if err := json.Unmarshal([]byte(encoded), &index); err != nil {
-		return sessionIndex{}, fmt.Errorf("decode session index: %w", err)
+	var log sessionLog
+	if err := json.Unmarshal([]byte(encoded), &log); err != nil {
+		return sessionLog{}, fmt.Errorf("decode session log: %w", err)
 	}
-	return index, nil
-}
-
-func (s *SessionStore) loadRecord(sessionID string, id string) (SessionRecord, error) {
-	encoded, ok, err := s.loadString(s.recordKey(sessionID, id))
-	if err != nil {
-		return SessionRecord{}, err
-	}
-	if !ok || strings.TrimSpace(encoded) == "" {
-		return SessionRecord{}, fmt.Errorf("session record %q not found", id)
-	}
-
-	var record SessionRecord
-	if err := json.Unmarshal([]byte(encoded), &record); err != nil {
-		return SessionRecord{}, fmt.Errorf("decode session record: %w", err)
-	}
-	return record, nil
+	return log, nil
 }
 
 func (s *SessionStore) loadString(key string) (string, bool, error) {
@@ -206,19 +187,20 @@ func (s *SessionStore) loadString(key string) (string, bool, error) {
 	}
 }
 
-func (s *SessionStore) indexKey(sessionID string) string {
-	return fmt.Sprintf("%s:%s:index", s.prefix, sessionID)
+func (s *SessionStore) sessionKey(sessionID string) string {
+	return fmt.Sprintf("%s:%s", s.prefix, sessionID)
 }
 
-func (s *SessionStore) recordKey(sessionID string, id string) string {
-	return fmt.Sprintf("%s:%s:record:%s", s.prefix, sessionID, id)
+func sessionStoreLock(key string) *sync.Mutex {
+	lock, _ := sessionStoreLocks.LoadOrStore(key, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }
 
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
+func indexOfRecord(records []SessionRecord, id string) int {
+	for i := range records {
+		if records[i].ID == id {
+			return i
 		}
 	}
-	return false
+	return -1
 }

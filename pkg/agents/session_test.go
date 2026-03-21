@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,4 +74,42 @@ func TestSessionStoreAppendRejectsInvalidRecords(t *testing.T) {
 	err = store.Append(SessionRecord{ID: "run-1", SessionID: "session-1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "task")
+}
+
+func TestSessionStoreAppendConcurrentPreservesAllRecords(t *testing.T) {
+	memory := NewInMemoryStore()
+	storeA := NewSessionStore(memory)
+	storeB := NewSessionStore(memory)
+	now := time.Date(2026, time.March, 21, 10, 0, 0, 0, time.UTC)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+
+			store := storeA
+			if i%2 == 1 {
+				store = storeB
+			}
+			errs <- store.Append(SessionRecord{
+				ID:          fmt.Sprintf("run-%02d", i),
+				SessionID:   "session-1",
+				Task:        fmt.Sprintf("task-%02d", i),
+				StartedAt:   now.Add(time.Duration(i) * time.Minute),
+				CompletedAt: now.Add(time.Duration(i+1) * time.Minute),
+				Completed:   true,
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	records, err := storeA.Recent("session-1", 30)
+	require.NoError(t, err)
+	require.Len(t, records, 20)
 }

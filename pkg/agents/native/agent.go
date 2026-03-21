@@ -600,7 +600,10 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 		return nil, fmt.Errorf("tool-calling agent is nil")
 	}
 
-	cloned, err := NewAgent(a.llm, a.config)
+	cfg := a.config
+	cfg.Memory = nil
+	cfg.SessionID = ""
+	cloned, err := NewAgent(a.llm, cfg)
 	if err != nil {
 		return nil, err
 	}
