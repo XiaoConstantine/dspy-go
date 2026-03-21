@@ -54,6 +54,16 @@ type ToolResult struct {
 	Annotations map[string]interface{} // Additional context for result interpretation
 }
 
+const (
+	ToolResultModelTextMeta     = "agent.model_text"
+	ToolResultDisplayTextMeta   = "agent.display_text"
+	ToolResultIsErrorMeta       = "agent.is_error"
+	ToolResultSyntheticMeta     = "agent.synthetic"
+	ToolResultRedactedMeta      = "agent.redacted"
+	ToolResultTruncatedMeta     = "agent.truncated"
+	ToolResultDetailsAnnotation = "agent.details"
+)
+
 // ToolRegistry manages available tools.
 type ToolRegistry interface {
 	Register(tool Tool) error

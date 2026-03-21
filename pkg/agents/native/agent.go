@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ type Config struct {
 	ToolPolicy                    string
 	FinishToolText                string
 	MaxConsecutiveNoCallResponses int
+	ToolInterceptors              []core.ToolInterceptor
+	OnEvent                       func(agents.AgentEvent)
 }
 
 // TokenUsage captures aggregate token usage for one tool-calling run.
@@ -78,27 +81,37 @@ func (t *Trace) Clone() *Trace {
 
 // TraceStep captures one model/tool turn.
 type TraceStep struct {
-	Index         int               `json:"index"`
-	AssistantText string            `json:"assistant_text,omitempty"`
-	ToolName      string            `json:"tool_name,omitempty"`
-	Arguments     map[string]any    `json:"arguments,omitempty"`
-	Observation   string            `json:"observation,omitempty"`
-	IsError       bool              `json:"is_error,omitempty"`
-	Usage         TokenUsage        `json:"usage,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	Index              int               `json:"index"`
+	AssistantText      string            `json:"assistant_text,omitempty"`
+	ToolName           string            `json:"tool_name,omitempty"`
+	Arguments          map[string]any    `json:"arguments,omitempty"`
+	Observation        string            `json:"observation,omitempty"`
+	ObservationDisplay string            `json:"observation_display,omitempty"`
+	ObservationDetails map[string]any    `json:"observation_details,omitempty"`
+	IsError            bool              `json:"is_error,omitempty"`
+	Synthetic          bool              `json:"synthetic,omitempty"`
+	Redacted           bool              `json:"redacted,omitempty"`
+	Truncated          bool              `json:"truncated,omitempty"`
+	Usage              TokenUsage        `json:"usage,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
 }
 
 // Clone returns a deep copy of the step.
 func (s TraceStep) Clone() TraceStep {
 	return TraceStep{
-		Index:         s.Index,
-		AssistantText: s.AssistantText,
-		ToolName:      s.ToolName,
-		Arguments:     core.ShallowCopyMap(s.Arguments),
-		Observation:   s.Observation,
-		IsError:       s.IsError,
-		Usage:         s.Usage,
-		Metadata:      core.ShallowCopyMap(s.Metadata),
+		Index:              s.Index,
+		AssistantText:      s.AssistantText,
+		ToolName:           s.ToolName,
+		Arguments:          core.ShallowCopyMap(s.Arguments),
+		Observation:        s.Observation,
+		ObservationDisplay: s.ObservationDisplay,
+		ObservationDetails: core.ShallowCopyMap(s.ObservationDetails),
+		IsError:            s.IsError,
+		Synthetic:          s.Synthetic,
+		Redacted:           s.Redacted,
+		Truncated:          s.Truncated,
+		Usage:              s.Usage,
+		Metadata:           core.ShallowCopyMap(s.Metadata),
 	}
 }
 
@@ -150,6 +163,7 @@ func NewAgent(llm core.LLM, cfg Config) (*Agent, error) {
 	if cfg.MaxConsecutiveNoCallResponses <= 0 {
 		cfg.MaxConsecutiveNoCallResponses = defaultMaxConsecutiveNoCallResponses
 	}
+	cfg.ToolInterceptors = append([]core.ToolInterceptor(nil), cfg.ToolInterceptors...)
 
 	return &Agent{
 		llm:          llm,
@@ -200,9 +214,23 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	transcript := make([]toolTurn, 0, maxTurns)
 	noCallStreak := 0
 
+	a.emitEvent(agents.EventRunStarted, map[string]any{
+		"task_id":   taskID,
+		"task":      task,
+		"max_turns": maxTurns,
+		"model":     a.llm.ModelID(),
+		"provider":  a.llm.ProviderName(),
+	})
+
 	for turn := 0; turn < maxTurns; turn++ {
 		options := []core.GenerateOption{core.WithMaxTokens(a.config.MaxTokens)}
 		options = append(options, core.WithTemperature(a.config.Temperature))
+
+		a.emitEvent(agents.EventLLMTurnStarted, map[string]any{
+			"task_id":   taskID,
+			"turn":      turn + 1,
+			"max_turns": maxTurns,
+		})
 
 		result, err := a.generateToolCallResponse(ctx, task, transcript, turn+1, maxTurns, functions, options...)
 		if err != nil {
@@ -210,6 +238,24 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			trace.Error = err.Error()
 			trace.TokenUsage = totalUsage
 			a.storeTraces(input, trace)
+			a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
+				"task_id":     taskID,
+				"turn":        turn + 1,
+				"tool_calls":  0,
+				"usage_total": int64(0),
+				"error":       err.Error(),
+			})
+			a.emitEvent(agents.EventRunFailed, map[string]any{
+				"task_id": taskID,
+				"error":   err.Error(),
+			})
+			a.emitEvent(agents.EventRunFinished, map[string]any{
+				"task_id":    taskID,
+				"completed":  false,
+				"turns":      len(trace.Steps),
+				"tool_calls": countExecutedTools(trace.Steps),
+				"error":      trace.Error,
+			})
 			return nil, err
 		}
 
@@ -228,13 +274,29 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 
 		calls, err := extractFunctionCalls(result)
 		if err != nil {
+			a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
+				"task_id":        taskID,
+				"turn":           turn + 1,
+				"assistant_text": step.AssistantText,
+				"tool_calls":     0,
+				"usage_total":    step.Usage.TotalTokens,
+				"parse_error":    err.Error(),
+			})
 			step.Observation = err.Error()
+			step.ObservationDisplay = err.Error()
 			step.IsError = true
 			trace.Steps = append(trace.Steps, step)
 			trace.Duration = time.Since(startedAt)
 			trace.Error = err.Error()
 			trace.TokenUsage = totalUsage
 			a.storeTraces(input, trace)
+			a.emitEvent(agents.EventRunFinished, map[string]any{
+				"task_id":    taskID,
+				"completed":  false,
+				"turns":      len(trace.Steps),
+				"tool_calls": countExecutedTools(trace.Steps),
+				"error":      trace.Error,
+			})
 			return map[string]interface{}{
 				"completed":   false,
 				"error":       trace.Error,
@@ -243,6 +305,13 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				"token_usage": tokenUsageToMap(totalUsage),
 			}, nil
 		}
+		a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
+			"task_id":        taskID,
+			"turn":           turn + 1,
+			"assistant_text": step.AssistantText,
+			"tool_calls":     len(calls),
+			"usage_total":    step.Usage.TotalTokens,
+		})
 		if len(calls) == 0 {
 			noCallStreak++
 			observation := "Model returned text without a tool call. It must use a tool or Finish."
@@ -253,6 +322,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				observation += " Finish reason: " + finishReason
 			}
 			step.Observation = observation
+			step.ObservationDisplay = observation
 			step.IsError = true
 			trace.Steps = append(trace.Steps, step)
 			transcript = append(transcript, toolTurn{
@@ -265,6 +335,13 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				trace.Error = fmt.Sprintf("repeated model responses without tool calls after %d turns", noCallStreak)
 				trace.TokenUsage = totalUsage
 				a.storeTraces(input, trace)
+				a.emitEvent(agents.EventRunFinished, map[string]any{
+					"task_id":    taskID,
+					"completed":  false,
+					"turns":      len(trace.Steps),
+					"tool_calls": countExecutedTools(trace.Steps),
+					"error":      trace.Error,
+				})
 				return map[string]interface{}{
 					"completed":   false,
 					"error":       trace.Error,
@@ -290,7 +367,16 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				arguments = map[string]any{}
 			}
 			callStep.ToolName = toolName
+			// Trace the originally proposed call arguments. Interceptors may rewrite
+			// the executed arguments, but proposed values remain useful for debugging
+			// model behavior and policy decisions.
 			callStep.Arguments = core.ShallowCopyMap(arguments)
+			a.emitEvent(agents.EventToolCallProposed, map[string]any{
+				"task_id":   taskID,
+				"turn":      turn + 1,
+				"tool_name": toolName,
+				"arguments": core.ShallowCopyMap(arguments),
+			})
 
 			if strings.EqualFold(toolName, "finish") {
 				finalAnswer := extractFinishAnswer(arguments, callStep.AssistantText)
@@ -300,6 +386,13 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				trace.Duration = time.Since(startedAt)
 				trace.TokenUsage = totalUsage
 				a.storeTraces(input, trace)
+				a.emitEvent(agents.EventRunFinished, map[string]any{
+					"task_id":      taskID,
+					"completed":    true,
+					"turns":        len(trace.Steps),
+					"tool_calls":   countExecutedTools(trace.Steps),
+					"final_answer": finalAnswer,
+				})
 				return map[string]interface{}{
 					"completed":    true,
 					"final_answer": finalAnswer,
@@ -313,6 +406,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			if err != nil {
 				callStep.IsError = true
 				callStep.Observation = fmt.Sprintf("unknown tool %q: %v", toolName, err)
+				callStep.ObservationDisplay = callStep.Observation
 				trace.Steps = append(trace.Steps, callStep)
 				transcript = append(transcript, toolTurn{
 					ToolName:      toolName,
@@ -327,6 +421,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			if err := tool.Validate(arguments); err != nil {
 				callStep.IsError = true
 				callStep.Observation = fmt.Sprintf("invalid tool arguments: %v", err)
+				callStep.ObservationDisplay = callStep.Observation
 				trace.Steps = append(trace.Steps, callStep)
 				transcript = append(transcript, toolTurn{
 					ToolName:      toolName,
@@ -338,16 +433,41 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				continue
 			}
 
-			toolResult, err := tool.Execute(ctx, arguments)
-			if err != nil {
+			a.emitEvent(agents.EventToolCallStarted, map[string]any{
+				"task_id":   taskID,
+				"turn":      turn + 1,
+				"tool_name": toolName,
+				"arguments": core.ShallowCopyMap(arguments),
+			})
+
+			observation, err := a.executeTool(ctx, tool, arguments)
+			if errors.Is(err, core.ErrToolBlocked) {
+				reason := blockedReason(err)
+				observation = agents.BlockedToolObservation(toolName, reason)
 				callStep.IsError = true
-				callStep.Observation = fmt.Sprintf("tool execution failed: %v", err)
-			} else {
-				callStep.Observation = agentutil.StringifyToolResult(toolResult)
-				if isError, _ := toolResult.Metadata["isError"].(bool); isError {
-					callStep.IsError = true
+				a.emitEvent(agents.EventToolCallBlocked, map[string]any{
+					"task_id":   taskID,
+					"turn":      turn + 1,
+					"tool_name": toolName,
+					"arguments": core.ShallowCopyMap(arguments),
+					"reason":    reason,
+				})
+			} else if err != nil {
+				callStep.IsError = true
+				observation = agents.ToolObservation{
+					ModelText:   fmt.Sprintf("tool execution failed: %v", err),
+					DisplayText: fmt.Sprintf("tool execution failed: %v", err),
+					IsError:     true,
 				}
 			}
+
+			callStep.Observation = observation.ModelText
+			callStep.ObservationDisplay = observation.DisplayText
+			callStep.ObservationDetails = observation.Details
+			callStep.IsError = callStep.IsError || observation.IsError
+			callStep.Synthetic = callStep.Synthetic || observation.Synthetic
+			callStep.Redacted = observation.Redacted
+			callStep.Truncated = observation.Truncated
 
 			trace.Steps = append(trace.Steps, callStep)
 			transcript = append(transcript, toolTurn{
@@ -357,6 +477,15 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				IsError:       callStep.IsError,
 				AssistantText: callStep.AssistantText,
 			})
+			a.emitEvent(agents.EventToolCallFinished, map[string]any{
+				"task_id":   taskID,
+				"turn":      turn + 1,
+				"tool_name": toolName,
+				"is_error":  callStep.IsError,
+				"synthetic": callStep.Synthetic,
+				"redacted":  callStep.Redacted,
+				"truncated": callStep.Truncated,
+			})
 		}
 	}
 
@@ -364,6 +493,13 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", maxTurns)
 	trace.TokenUsage = totalUsage
 	a.storeTraces(input, trace)
+	a.emitEvent(agents.EventRunFinished, map[string]any{
+		"task_id":    taskID,
+		"completed":  false,
+		"turns":      len(trace.Steps),
+		"tool_calls": countExecutedTools(trace.Steps),
+		"error":      trace.Error,
+	})
 	return map[string]interface{}{
 		"completed":   false,
 		"error":       trace.Error,
@@ -469,6 +605,25 @@ func (a *Agent) maxTurns(input map[string]interface{}) int {
 		return override
 	}
 	return a.config.MaxTurns
+}
+
+func (a *Agent) emitEvent(eventType string, data map[string]any) {
+	if a == nil {
+		return
+	}
+	agents.EmitEvent(a.config.OnEvent, eventType, data)
+}
+
+func (a *Agent) executeTool(ctx context.Context, tool core.Tool, arguments map[string]any) (agents.ToolObservation, error) {
+	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+		return tool.Execute(ctx, args)
+	}
+	info := core.NewToolInfoFromTool(tool)
+	result, err := core.ChainToolInterceptors(a.config.ToolInterceptors...)(ctx, arguments, info, handler)
+	if err != nil {
+		return agents.ToolObservation{}, err
+	}
+	return agents.NormalizeToolResult(result), nil
 }
 
 func (a *Agent) generateToolCallResponse(ctx context.Context, task string, turns []toolTurn, currentTurn int, maxTurns int, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
@@ -609,13 +764,18 @@ func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *
 			toolUsage[step.ToolName]++
 		}
 		steps = append(steps, agents.TraceStep{
-			Index:       step.Index,
-			Thought:     step.AssistantText,
-			Tool:        step.ToolName,
-			Arguments:   core.ShallowCopyMap(step.Arguments),
-			Observation: step.Observation,
-			Success:     !step.IsError,
-			Error:       boolError(step.IsError, step.Observation),
+			Index:              step.Index,
+			Thought:            step.AssistantText,
+			Tool:               step.ToolName,
+			Arguments:          core.ShallowCopyMap(step.Arguments),
+			Observation:        step.Observation,
+			ObservationDisplay: step.ObservationDisplay,
+			ObservationDetails: core.ShallowCopyMap(step.ObservationDetails),
+			Success:            !step.IsError,
+			Error:              boolError(step.IsError, step.Observation),
+			Synthetic:          step.Synthetic,
+			Redacted:           step.Redacted,
+			Truncated:          step.Truncated,
 		})
 	}
 
@@ -752,6 +912,14 @@ func cloneRegisteredTool(tool core.Tool) (core.Tool, error) {
 		return nil, fmt.Errorf("tool %q returned nil clone", tool.Name())
 	}
 	return cloned, nil
+}
+
+func blockedReason(err error) string {
+	var blocked *core.ToolBlockedError
+	if errors.As(err, &blocked) && blocked != nil && strings.TrimSpace(blocked.Reason) != "" {
+		return blocked.Reason
+	}
+	return "blocked by tool policy"
 }
 
 func addUsage(total *TokenUsage, raw any) {

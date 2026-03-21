@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
@@ -63,6 +64,67 @@ func TestAgent_Execute_CompletesWithToolAndFinish(t *testing.T) {
 	assert.Equal(t, "write_note", trace.Steps[0].ToolName)
 	assert.Equal(t, int64(9), trace.TokenUsage.PromptTokens)
 	assert.Equal(t, int64(5), trace.TokenUsage.CompletionTokens)
+}
+
+func TestAgent_Execute_UsesModelTextInTranscriptAndDisplayTextInTrace(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "write_note",
+					"arguments": map[string]any{"content": "done"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{MaxTurns: 4})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{
+		name: "write_note",
+		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+			return core.ToolResult{
+				Data: "raw output",
+				Metadata: map[string]any{
+					core.ToolResultModelTextMeta:   "summary for model",
+					core.ToolResultDisplayTextMeta: "full output for operator",
+				},
+				Annotations: map[string]any{
+					core.ToolResultDetailsAnnotation: map[string]any{"content": "done"},
+				},
+			}, nil
+		},
+	}))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task": "Write a note and finish.",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 2)
+	assert.Contains(t, llm.prompts[1], "summary for model")
+	assert.NotContains(t, llm.prompts[1], "full output for operator")
+
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	require.Len(t, trace.Steps, 2)
+	assert.Equal(t, "summary for model", trace.Steps[0].Observation)
+	assert.Equal(t, "full output for operator", trace.Steps[0].ObservationDisplay)
+	assert.Equal(t, map[string]any{"content": "done"}, trace.Steps[0].ObservationDetails)
+
+	execTrace := agent.LastExecutionTrace()
+	require.NotNil(t, execTrace)
+	require.Len(t, execTrace.Steps, 2)
+	assert.Equal(t, "summary for model", execTrace.Steps[0].Observation)
+	assert.Equal(t, "full output for operator", execTrace.Steps[0].ObservationDisplay)
+	assert.Equal(t, map[string]any{"content": "done"}, execTrace.Steps[0].ObservationDetails)
 }
 
 func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
@@ -168,6 +230,163 @@ func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, llm.messages, 1)
 	assert.Empty(t, llm.prompts)
+}
+
+func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "write_note",
+					"arguments": map[string]any{"content": "blocked"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 4,
+		ToolInterceptors: []core.ToolInterceptor{
+			func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+				return core.ToolResult{}, &core.ToolBlockedError{Reason: "approval denied"}
+			},
+		},
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Write a note and finish.",
+		"task_id": "task-blocked",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 2)
+	assert.Contains(t, llm.prompts[1], `Tool "write_note" blocked: approval denied`)
+
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	require.Len(t, trace.Steps, 2)
+	assert.True(t, trace.Steps[0].Synthetic)
+	assert.True(t, trace.Steps[0].IsError)
+	assert.Contains(t, trace.Steps[0].Observation, "approval denied")
+
+	eventTypes := make([]string, 0, len(events))
+	for _, event := range events {
+		eventTypes = append(eventTypes, event.Type)
+	}
+	assert.Contains(t, eventTypes, agents.EventRunStarted)
+	assert.Contains(t, eventTypes, agents.EventLLMTurnStarted)
+	assert.Contains(t, eventTypes, agents.EventLLMTurnFinished)
+	assert.Contains(t, eventTypes, agents.EventToolCallProposed)
+	assert.Contains(t, eventTypes, agents.EventToolCallStarted)
+	assert.Contains(t, eventTypes, agents.EventToolCallBlocked)
+	assert.Contains(t, eventTypes, agents.EventToolCallFinished)
+	assert.Contains(t, eventTypes, agents.EventRunFinished)
+}
+
+func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "write_note",
+					"arguments": map[string]any{"content": "value"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 4,
+		ToolInterceptors: []core.ToolInterceptor{
+			func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+				return core.ToolResult{}, fmt.Errorf("approval backend unavailable")
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task": "Write a note and finish.",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 2)
+	assert.Contains(t, llm.prompts[1], "tool execution failed: approval backend unavailable")
+
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	require.Len(t, trace.Steps, 2)
+	assert.False(t, trace.Steps[0].Synthetic)
+	assert.True(t, trace.Steps[0].IsError)
+	assert.Contains(t, trace.Steps[0].Observation, "approval backend unavailable")
+	assert.Contains(t, trace.Steps[0].ObservationDisplay, "approval backend unavailable")
+
+	execTrace := agent.LastExecutionTrace()
+	require.NotNil(t, execTrace)
+	require.Len(t, execTrace.Steps, 2)
+	assert.Contains(t, execTrace.Steps[0].Observation, "approval backend unavailable")
+	assert.Contains(t, execTrace.Steps[0].ObservationDisplay, "approval backend unavailable")
+}
+
+func TestAgent_Execute_EmitsLLMTurnFinishedOnGenerateError(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 1,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "this will fail",
+		"task_id": "task-generate-error",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no more stubbed results")
+
+	eventTypes := make([]string, 0, len(events))
+	var llmFinished *agents.AgentEvent
+	for i := range events {
+		eventTypes = append(eventTypes, events[i].Type)
+		if events[i].Type == agents.EventLLMTurnFinished {
+			llmFinished = &events[i]
+		}
+	}
+
+	assert.Contains(t, eventTypes, agents.EventLLMTurnStarted)
+	assert.Contains(t, eventTypes, agents.EventLLMTurnFinished)
+	assert.Contains(t, eventTypes, agents.EventRunFailed)
+	assert.Contains(t, eventTypes, agents.EventRunFinished)
+	require.NotNil(t, llmFinished)
+	assert.Equal(t, 0, llmFinished.Data["tool_calls"])
+	assert.Equal(t, int64(0), llmFinished.Data["usage_total"])
+	assert.Contains(t, llmFinished.Data["error"], "no more stubbed results")
 }
 
 func TestAgent_Execute_FallsBackToFunctionsForWrappedFunctionOnlyLLM(t *testing.T) {
