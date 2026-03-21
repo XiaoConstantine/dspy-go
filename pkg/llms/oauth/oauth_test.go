@@ -9,12 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"runtime"
+	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,6 +36,9 @@ func withOAuthSeams(t *testing.T) {
 	origOpenAIAuthURL := openAIAuthURL
 	origOpenAIExchanger := openAICodeExchanger
 	origBrowserOpener := browserOpener
+	origCurrentGOOS := currentGOOS
+	origExecCommand := execCommand
+	origCommandStarter := commandStarter
 	origLoginInput := loginInputReader
 
 	t.Cleanup(func() {
@@ -50,6 +50,9 @@ func withOAuthSeams(t *testing.T) {
 		openAIAuthURL = origOpenAIAuthURL
 		openAICodeExchanger = origOpenAIExchanger
 		browserOpener = origBrowserOpener
+		currentGOOS = origCurrentGOOS
+		execCommand = origExecCommand
+		commandStarter = origCommandStarter
 		loginInputReader = origLoginInput
 	})
 }
@@ -497,32 +500,66 @@ func TestLoginOpenAI(t *testing.T) {
 }
 
 func TestOpenBrowser(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("skip command-path interception on windows")
+	withOAuthSeams(t)
+
+	tests := []struct {
+		name        string
+		goos        string
+		wantCommand string
+		wantArgs    []string
+		wantStarted bool
+	}{
+		{
+			name:        "darwin uses open",
+			goos:        "darwin",
+			wantCommand: "open",
+			wantArgs:    []string{"https://example.com/login"},
+			wantStarted: true,
+		},
+		{
+			name:        "linux uses xdg-open",
+			goos:        "linux",
+			wantCommand: "xdg-open",
+			wantArgs:    []string{"https://example.com/login"},
+			wantStarted: true,
+		},
+		{
+			name:        "windows uses rundll32",
+			goos:        "windows",
+			wantCommand: "rundll32",
+			wantArgs:    []string{"url.dll,FileProtocolHandler", "https://example.com/login"},
+			wantStarted: true,
+		},
+		{
+			name:        "unsupported OS is a no-op",
+			goos:        "plan9",
+			wantStarted: false,
+		},
 	}
 
-	tempDir := t.TempDir()
-	capturePath := filepath.Join(tempDir, "args.txt")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			currentGOOS = tc.goos
 
-	commandName := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		commandName = "open"
+			var capturedName string
+			var capturedArgs []string
+			var started bool
+
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				capturedName = name
+				capturedArgs = append([]string{}, args...)
+				return &exec.Cmd{}
+			}
+			commandStarter = func(cmd *exec.Cmd) error {
+				started = true
+				return nil
+			}
+
+			openBrowser("https://example.com/login")
+
+			assert.Equal(t, tc.wantStarted, started)
+			assert.Equal(t, tc.wantCommand, capturedName)
+			assert.Equal(t, tc.wantArgs, capturedArgs)
+		})
 	}
-
-	scriptPath := filepath.Join(tempDir, commandName)
-	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"$1\" > %s\n", capturePath)
-	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
-
-	origPath := os.Getenv("PATH")
-	require.NoError(t, os.Setenv("PATH", tempDir+string(os.PathListSeparator)+origPath))
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", origPath)
-	})
-
-	openBrowser("https://example.com/login")
-
-	require.Eventually(t, func() bool {
-		data, err := os.ReadFile(capturePath)
-		return err == nil && string(data) == "https://example.com/login"
-	}, time.Second, 25*time.Millisecond)
 }
