@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -389,6 +390,180 @@ func TestAgent_Execute_EmitsLLMTurnFinishedOnGenerateError(t *testing.T) {
 	assert.Contains(t, llmFinished.Data["error"], "no more stubbed results")
 }
 
+func TestAgent_Execute_PersistsAndReloadsSessionRecall(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+
+	firstLLM := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "first answer"},
+				},
+			},
+		},
+	}
+	firstAgent, err := NewAgent(firstLLM, Config{
+		MaxTurns:  1,
+		Memory:    memory,
+		SessionID: "session-1",
+	})
+	require.NoError(t, err)
+
+	_, err = firstAgent.Execute(context.Background(), map[string]interface{}{
+		"task":    "First task",
+		"task_id": "task-1",
+	})
+	require.NoError(t, err)
+
+	secondLLM := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "second answer"},
+				},
+			},
+		},
+	}
+	secondAgent, err := NewAgent(secondLLM, Config{
+		MaxTurns:  1,
+		Memory:    memory,
+		SessionID: "session-1",
+	})
+	require.NoError(t, err)
+
+	_, err = secondAgent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Second task",
+		"task_id": "task-2",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, secondLLM.prompts, 1)
+	assert.Contains(t, secondLLM.prompts[0], "SESSION RECALL:")
+	assert.Contains(t, secondLLM.prompts[0], "First task")
+	assert.Contains(t, secondLLM.prompts[0], "first answer")
+
+	records, err := agents.NewSessionStore(memory).Recent("session-1", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, "First task", records[0].Task)
+	assert.Equal(t, "Second task", records[1].Task)
+}
+
+func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:  1,
+		Memory:    memory,
+		SessionID: "session-events",
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Eventful task",
+		"task_id": "event-task",
+	})
+	require.NoError(t, err)
+
+	var sessionLoaded *agents.AgentEvent
+	var sessionPersisted *agents.AgentEvent
+	for i := range events {
+		switch events[i].Type {
+		case agents.EventSessionLoaded:
+			sessionLoaded = &events[i]
+		case agents.EventSessionPersisted:
+			sessionPersisted = &events[i]
+		}
+	}
+
+	require.NotNil(t, sessionLoaded)
+	assert.Equal(t, "session-events", sessionLoaded.Data["session_id"])
+	assert.Equal(t, 0, sessionLoaded.Data["record_count"])
+	assert.Equal(t, 0, sessionLoaded.Data["recall_chars"])
+
+	require.NotNil(t, sessionPersisted)
+	assert.Equal(t, "session-events", sessionPersisted.Data["session_id"])
+	assert.Equal(t, true, sessionPersisted.Data["success"])
+	assert.Equal(t, true, sessionPersisted.Data["completed"])
+}
+
+func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			noCallResult(),
+			noCallResult(),
+			noCallResult(),
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:  20,
+		Memory:    memory,
+		SessionID: "session-failure",
+	})
+	require.NoError(t, err)
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Fail without tool calls",
+		"task_id": "task-failure",
+	})
+	require.NoError(t, err)
+	require.False(t, result["completed"].(bool))
+
+	records, err := agents.NewSessionStore(memory).Recent("session-failure", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.False(t, records[0].Completed)
+	assert.Equal(t, "Fail without tool calls", records[0].Task)
+	assert.Contains(t, records[0].Error, "repeated model responses without tool calls")
+}
+
+func TestBuildSessionRecall_StopsBeforePartialRecord(t *testing.T) {
+	records := []agents.SessionRecord{
+		{
+			Task:        "First task",
+			StartedAt:   time.Date(2026, time.March, 21, 10, 0, 0, 0, time.UTC),
+			Completed:   true,
+			FinalAnswer: "first answer",
+		},
+		{
+			Task:        "Second task that should not be partially included",
+			StartedAt:   time.Date(2026, time.March, 21, 10, 5, 0, 0, time.UTC),
+			Completed:   true,
+			FinalAnswer: "second answer",
+		},
+	}
+
+	fullFirst := renderSessionRecallRecord(1, records[0])
+	maxChars := len([]rune("Recent session runs:\n")) + len([]rune(fullFirst)) + len([]rune("Use this prior session context when it is relevant. Avoid repeating already completed work unless the new task requires it."))
+	recall := buildSessionRecall(records, maxChars)
+
+	assert.Contains(t, recall, "First task")
+	assert.NotContains(t, recall, "Second task")
+	assert.NotContains(t, recall, "...")
+}
+
 func TestAgent_Execute_FallsBackToFunctionsForWrappedFunctionOnlyLLM(t *testing.T) {
 	base := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
@@ -411,6 +586,7 @@ func TestAgent_Execute_FallsBackToFunctionsForWrappedFunctionOnlyLLM(t *testing.
 	assert.Len(t, base.prompts, 1)
 	assert.Contains(t, base.prompts[0], "TURN BUDGET: turn 1 of 1")
 	assert.Contains(t, base.prompts[0], "call Finish immediately")
+	assert.NotContains(t, base.prompts[0], "SESSION RECALL:")
 }
 
 func TestAgent_Clone_CopiesCloneableTools(t *testing.T) {
@@ -434,6 +610,8 @@ func TestAgent_Clone_CopiesCloneableTools(t *testing.T) {
 	require.Len(t, originalTools, 1)
 	require.Len(t, clonedTools, 1)
 	assert.NotSame(t, originalTools[0], clonedTools[0])
+	assert.NotSame(t, agent.memory, cloned.memory)
+	assert.Empty(t, cloned.config.SessionID)
 }
 
 func TestAgent_Clone_FailsForNonCloneableTools(t *testing.T) {

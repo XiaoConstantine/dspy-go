@@ -25,6 +25,10 @@ type Config struct {
 	SystemPrompt                  string
 	ToolPolicy                    string
 	FinishToolText                string
+	Memory                        agents.Memory
+	SessionID                     string
+	SessionRecallLimit            int
+	SessionRecallMaxChars         int
 	MaxConsecutiveNoCallResponses int
 	ToolInterceptors              []core.ToolInterceptor
 	OnEvent                       func(agents.AgentEvent)
@@ -129,6 +133,7 @@ type Agent struct {
 	config       Config
 	toolRegistry *toolspkg.InMemoryToolRegistry
 	memory       agents.Memory
+	sessions     *agents.SessionStore
 
 	traceMu         sync.RWMutex
 	lastTrace       *agents.ExecutionTrace
@@ -163,13 +168,23 @@ func NewAgent(llm core.LLM, cfg Config) (*Agent, error) {
 	if cfg.MaxConsecutiveNoCallResponses <= 0 {
 		cfg.MaxConsecutiveNoCallResponses = defaultMaxConsecutiveNoCallResponses
 	}
+	if cfg.SessionRecallLimit <= 0 {
+		cfg.SessionRecallLimit = defaultSessionRecallLimit
+	}
+	if cfg.SessionRecallMaxChars <= 0 {
+		cfg.SessionRecallMaxChars = defaultSessionRecallMaxChars
+	}
+	if cfg.Memory == nil {
+		cfg.Memory = agents.NewInMemoryStore()
+	}
 	cfg.ToolInterceptors = append([]core.ToolInterceptor(nil), cfg.ToolInterceptors...)
 
 	return &Agent{
 		llm:          llm,
 		config:       cfg,
 		toolRegistry: toolspkg.NewInMemoryToolRegistry(),
-		memory:       agents.NewInMemoryStore(),
+		memory:       cfg.Memory,
+		sessions:     agents.NewSessionStore(cfg.Memory),
 	}, nil
 }
 
@@ -193,6 +208,24 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	}
 	taskID := agentutil.StringValue(input["task_id"])
 	maxTurns := a.maxTurns(input)
+	sessionID := a.sessionID(input)
+	sessionRecords, sessionRecall, sessionErr := a.loadSessionContext(input)
+	if sessionID != "" {
+		sessionEventData := map[string]any{
+			"task_id":      taskID,
+			"session_id":   sessionID,
+			"record_count": len(sessionRecords),
+			"recall_chars": len(sessionRecall),
+		}
+		if sessionErr != nil {
+			sessionEventData["error"] = sessionErr.Error()
+		}
+		a.emitEvent(agents.EventSessionLoaded, sessionEventData)
+	}
+	if sessionErr != nil {
+		sessionRecall = ""
+		sessionRecords = nil
+	}
 
 	functions, err := toolspkg.BuildFunctionSchemas(a.toolRegistry)
 	if err != nil {
@@ -215,11 +248,14 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	noCallStreak := 0
 
 	a.emitEvent(agents.EventRunStarted, map[string]any{
-		"task_id":   taskID,
-		"task":      task,
-		"max_turns": maxTurns,
-		"model":     a.llm.ModelID(),
-		"provider":  a.llm.ProviderName(),
+		"task_id":              taskID,
+		"task":                 task,
+		"max_turns":            maxTurns,
+		"model":                a.llm.ModelID(),
+		"provider":             a.llm.ProviderName(),
+		"session_id":           sessionID,
+		"session_runs":         len(sessionRecords),
+		"session_recall_chars": len(sessionRecall),
 	})
 
 	for turn := 0; turn < maxTurns; turn++ {
@@ -232,7 +268,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			"max_turns": maxTurns,
 		})
 
-		result, err := a.generateToolCallResponse(ctx, task, transcript, turn+1, maxTurns, functions, options...)
+		result, err := a.generateToolCallResponse(ctx, task, sessionRecall, transcript, turn+1, maxTurns, functions, options...)
 		if err != nil {
 			trace.Duration = time.Since(startedAt)
 			trace.Error = err.Error()
@@ -564,7 +600,10 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 		return nil, fmt.Errorf("tool-calling agent is nil")
 	}
 
-	cloned, err := NewAgent(a.llm, a.config)
+	cfg := a.config
+	cfg.Memory = nil
+	cfg.SessionID = ""
+	cloned, err := NewAgent(a.llm, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -626,22 +665,22 @@ func (a *Agent) executeTool(ctx context.Context, tool core.Tool, arguments map[s
 	return agents.NormalizeToolResult(result), nil
 }
 
-func (a *Agent) generateToolCallResponse(ctx context.Context, task string, turns []toolTurn, currentTurn int, maxTurns int, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+func (a *Agent) generateToolCallResponse(ctx context.Context, task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	if supportsNativeToolCalling(a.llm) {
 		chatLLM, ok := a.llm.(core.ToolCallingChatLLM)
 		if !ok {
 			return nil, fmt.Errorf("llm %s advertised native tool calling without chat tool support", a.llm.ModelID())
 		}
-		return chatLLM.GenerateWithTools(ctx, a.buildToolMessages(task, turns, currentTurn, maxTurns), functions, options...)
+		return chatLLM.GenerateWithTools(ctx, a.buildToolMessages(task, sessionRecall, turns, currentTurn, maxTurns), functions, options...)
 	}
-	return a.llm.GenerateWithFunctions(ctx, a.buildPrompt(task, turns, currentTurn, maxTurns), functions, options...)
+	return a.llm.GenerateWithFunctions(ctx, a.buildPrompt(task, sessionRecall, turns, currentTurn, maxTurns), functions, options...)
 }
 
-func (a *Agent) buildToolMessages(task string, turns []toolTurn, currentTurn int, maxTurns int) []core.ChatMessage {
+func (a *Agent) buildToolMessages(task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int) []core.ChatMessage {
 	messages := []core.ChatMessage{
 		{
 			Role:    "user",
-			Content: []core.ContentBlock{core.NewTextBlock(a.buildPrompt(task, nil, currentTurn, maxTurns))},
+			Content: []core.ContentBlock{core.NewTextBlock(a.buildPrompt(task, sessionRecall, nil, currentTurn, maxTurns))},
 		},
 	}
 	for _, turn := range turns {
@@ -685,7 +724,7 @@ func (a *Agent) buildToolMessages(task string, turns []toolTurn, currentTurn int
 	return messages
 }
 
-func (a *Agent) buildPrompt(task string, turns []toolTurn, currentTurn int, maxTurns int) string {
+func (a *Agent) buildPrompt(task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int) string {
 	var b strings.Builder
 	b.WriteString(a.config.SystemPrompt)
 	b.WriteString("\n\n")
@@ -697,6 +736,11 @@ func (a *Agent) buildPrompt(task string, turns []toolTurn, currentTurn int, maxT
 	b.WriteString("TASK:\n")
 	b.WriteString(task)
 	b.WriteString("\n\n")
+	if strings.TrimSpace(sessionRecall) != "" {
+		b.WriteString("SESSION RECALL:\n")
+		b.WriteString(sessionRecall)
+		b.WriteString("\n\n")
+	}
 	if currentTurn > 0 && maxTurns > 0 {
 		fmt.Fprintf(&b, "TURN BUDGET: turn %d of %d (%d remaining)\n", currentTurn, maxTurns, maxTurns-currentTurn+1)
 		b.WriteString("If the task appears complete or your latest verification/check succeeded, call Finish immediately instead of doing extra inspection.\n\n")
@@ -750,6 +794,7 @@ func (a *Agent) storeTraces(input map[string]interface{}, trace *Trace) {
 	a.lastNativeTrace = trace.Clone()
 	a.lastTrace = execTrace
 	a.traceMu.Unlock()
+	a.persistSessionRecord(input, trace)
 }
 
 func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *Trace) *agents.ExecutionTrace {
@@ -789,6 +834,9 @@ func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *
 
 	contextMetadata := map[string]interface{}{
 		"turns": len(trace.Steps),
+	}
+	if sessionID := a.sessionID(input); sessionID != "" {
+		contextMetadata["session_id"] = sessionID
 	}
 
 	return &agents.ExecutionTrace{

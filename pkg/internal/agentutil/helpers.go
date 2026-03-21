@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -80,13 +81,14 @@ func DurationValue(value interface{}) time.Duration {
 
 // TruncateString shortens text while preserving a visible ellipsis.
 func TruncateString(value string, limit int) string {
-	if limit <= 0 || len(value) <= limit {
+	if limit <= 0 || utf8.RuneCountInString(value) <= limit {
 		return value
 	}
+	runes := []rune(value)
 	if limit <= 3 {
-		return value[:limit]
+		return string(runes[:limit])
 	}
-	return value[:limit-3] + "..."
+	return string(runes[:limit-3]) + "..."
 }
 
 // StringifyToolResult formats tool output for trace/transcript usage.
