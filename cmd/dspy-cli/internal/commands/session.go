@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
@@ -143,7 +144,16 @@ func openSessionStore(cfg *sessionCommandConfig) (*sessionevent.SQLiteStore, err
 	if cfg == nil || strings.TrimSpace(cfg.DBPath) == "" {
 		return nil, fmt.Errorf("session database path is required")
 	}
-	return sessionevent.NewSQLiteStore(strings.TrimSpace(cfg.DBPath))
+	path := strings.TrimSpace(cfg.DBPath)
+	if path != ":memory:" {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("session database %q not found", path)
+			}
+			return nil, fmt.Errorf("stat session database %q: %w", path, err)
+		}
+	}
+	return sessionevent.NewSQLiteStore(path)
 }
 
 func loadSessionState(ctx context.Context, store sessionevent.SessionEventStore, sessionID string) (*sessionState, error) {

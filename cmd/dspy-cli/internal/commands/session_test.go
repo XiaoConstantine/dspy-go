@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -93,6 +94,23 @@ func TestSessionForkCommand_ActivatesWhenRequested(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, branches, 2)
 	assert.Equal(t, branchIDByName(branches, "active-branch"), updated.ActiveBranchID)
+}
+
+func TestSessionShowCommand_MissingDatabaseFailsWithoutCreatingFile(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing-session-events.db")
+
+	cmd := NewSessionCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--db", missingPath, "show", "session-missing"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+	_, statErr := os.Stat(missingPath)
+	assert.Error(t, statErr)
+	assert.True(t, os.IsNotExist(statErr))
 }
 
 func newTestSessionEventStore(t *testing.T) (*sessionevent.SQLiteStore, string) {
