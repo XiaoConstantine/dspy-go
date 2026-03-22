@@ -277,7 +277,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			trace.Duration = time.Since(startedAt)
 			trace.Error = err.Error()
 			trace.TokenUsage = totalUsage
-			a.storeTraces(input, trace)
+			a.storeTraces(ctx, input, trace)
 			a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
 				"task_id":     taskID,
 				"turn":        turn + 1,
@@ -329,7 +329,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			trace.Duration = time.Since(startedAt)
 			trace.Error = err.Error()
 			trace.TokenUsage = totalUsage
-			a.storeTraces(input, trace)
+			a.storeTraces(ctx, input, trace)
 			a.emitEvent(agents.EventRunFinished, map[string]any{
 				"task_id":    taskID,
 				"completed":  false,
@@ -374,7 +374,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				trace.Duration = time.Since(startedAt)
 				trace.Error = fmt.Sprintf("repeated model responses without tool calls after %d turns", noCallStreak)
 				trace.TokenUsage = totalUsage
-				a.storeTraces(input, trace)
+				a.storeTraces(ctx, input, trace)
 				a.emitEvent(agents.EventRunFinished, map[string]any{
 					"task_id":    taskID,
 					"completed":  false,
@@ -425,7 +425,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				trace.Steps = append(trace.Steps, callStep)
 				trace.Duration = time.Since(startedAt)
 				trace.TokenUsage = totalUsage
-				a.storeTraces(input, trace)
+				a.storeTraces(ctx, input, trace)
 				a.emitEvent(agents.EventRunFinished, map[string]any{
 					"task_id":      taskID,
 					"completed":    true,
@@ -532,7 +532,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	trace.Duration = time.Since(startedAt)
 	trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", maxTurns)
 	trace.TokenUsage = totalUsage
-	a.storeTraces(input, trace)
+	a.storeTraces(ctx, input, trace)
 	a.emitEvent(agents.EventRunFinished, map[string]any{
 		"task_id":    taskID,
 		"completed":  false,
@@ -793,13 +793,13 @@ func turnBudgetReminder(currentTurn int, maxTurns int) string {
 	}
 }
 
-func (a *Agent) storeTraces(input map[string]interface{}, trace *Trace) {
+func (a *Agent) storeTraces(ctx context.Context, input map[string]interface{}, trace *Trace) {
 	execTrace := nativeTraceToExecutionTrace(a, input, trace)
 	a.traceMu.Lock()
 	a.lastNativeTrace = trace.Clone()
 	a.lastTrace = execTrace
 	a.traceMu.Unlock()
-	a.persistSessionRecord(input, trace)
+	a.persistSessionRecord(ctx, input, trace)
 }
 
 func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *Trace) *agents.ExecutionTrace {

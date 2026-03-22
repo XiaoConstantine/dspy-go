@@ -465,6 +465,7 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 					"name":      "Finish",
 					"arguments": map[string]any{"answer": "done"},
 				},
+				"_usage": &core.TokenInfo{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18},
 			},
 		},
 	}
@@ -522,6 +523,7 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 					"name":      "Finish",
 					"arguments": map[string]any{"answer": "done"},
 				},
+				"_usage": &core.TokenInfo{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18},
 			},
 		},
 	}
@@ -543,6 +545,11 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 		"task_id": "dual-write-task",
 	})
 	require.NoError(t, err)
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	assert.Equal(t, int64(11), trace.TokenUsage.PromptTokens)
+	assert.Equal(t, int64(7), trace.TokenUsage.CompletionTokens)
+	assert.Equal(t, int64(18), trace.TokenUsage.TotalTokens)
 
 	records, err := agents.NewSessionStore(memory).Recent("session-dual-write", 10)
 	require.NoError(t, err)
@@ -557,6 +564,10 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, head)
 
+	derivedEntries := sessionEventEntriesFromTrace(trace, session.ID, session.ActiveBranchID)
+	require.Len(t, derivedEntries, 3)
+	assert.Equal(t, int64(18), derivedEntries[2].TotalTokens)
+
 	lineage, err := eventStore.LoadLineage(context.Background(), session.ID, head.ID, sessionevent.LoadOptions{})
 	require.NoError(t, err)
 	require.Len(t, lineage, 3)
@@ -566,6 +577,9 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	assert.Equal(t, "Persist to both stores", lineage[0].Payload["text"])
 	assert.Equal(t, "done", lineage[1].Payload["text"])
 	assert.Equal(t, "run_finished", lineage[2].Payload["event"])
+	assert.Equal(t, int64(11), lineage[2].PromptTokens)
+	assert.Equal(t, int64(7), lineage[2].CompletionTokens)
+	assert.Equal(t, int64(18), lineage[2].TotalTokens)
 
 	var persisted *agents.AgentEvent
 	for i := range events {

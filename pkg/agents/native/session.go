@@ -57,12 +57,13 @@ func (a *Agent) loadSessionContext(input map[string]any) ([]agents.SessionRecord
 	return records, buildSessionRecall(records, a.config.SessionRecallMaxChars), nil
 }
 
-func (a *Agent) persistSessionRecord(input map[string]any, trace *Trace) {
+func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, trace *Trace) {
 	sessionID := a.sessionID(input)
 	if sessionID == "" || trace == nil {
 		return
 	}
 
+	eventStore := a.sessionEventStore()
 	record := sessionRecordFromTrace(a, input, trace, sessionID)
 	snapshotErr := a.sessionStore().Append(record)
 
@@ -71,8 +72,8 @@ func (a *Agent) persistSessionRecord(input map[string]any, trace *Trace) {
 		eventBranch  string
 		eventErr     error
 	)
-	if store := a.sessionEventStore(); store != nil {
-		eventEntries, eventBranch, eventErr = a.persistSessionEventTrace(context.Background(), store, trace, sessionID)
+	if eventStore != nil {
+		eventEntries, eventBranch, eventErr = a.persistSessionEventTrace(ctx, eventStore, trace, sessionID)
 	}
 
 	eventData := map[string]any{
@@ -85,7 +86,7 @@ func (a *Agent) persistSessionRecord(input map[string]any, trace *Trace) {
 	if snapshotErr != nil {
 		eventData["error"] = snapshotErr.Error()
 	}
-	if a.sessionEventStore() != nil {
+	if eventStore != nil {
 		eventData["event_store_enabled"] = true
 		eventData["event_store_success"] = eventErr == nil
 		eventData["event_entry_count"] = len(eventEntries)
@@ -151,7 +152,7 @@ func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEve
 	if trace != nil {
 		title = strings.TrimSpace(trace.Task)
 	}
-	createdSession, branch, createErr := store.CreateSession(ctx, sessionevent.CreateSessionParams{
+	_, branch, createErr := store.CreateSession(ctx, sessionevent.CreateSessionParams{
 		ID:    sessionID,
 		Title: title,
 	})
@@ -162,8 +163,8 @@ func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEve
 	if getErr == nil && strings.TrimSpace(session.ActiveBranchID) != "" {
 		return session.ActiveBranchID, nil
 	}
-	if getErr == nil && createdSession != nil {
-		_ = createdSession
+	if getErr != nil && !isResourceNotFound(getErr) {
+		return "", getErr
 	}
 	return "", createErr
 }
@@ -177,6 +178,8 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 	baseTime := time.Now().UTC()
 	offset := 0
 	nextTime := func() time.Time {
+		// The trace only captures run-level timing, not per-entry timestamps. Use a
+		// monotonic nanosecond offset to preserve deterministic entry ordering.
 		t := baseTime.Add(time.Duration(offset) * time.Nanosecond)
 		offset++
 		return t
@@ -211,10 +214,13 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 	for _, step := range trace.Steps {
 		if text := strings.TrimSpace(step.AssistantText); text != "" {
 			appendEntry(sessionevent.SessionEntry{
-				Kind:       sessionevent.EntryKindAssistantMessage,
-				Role:       "assistant",
-				CreatedAt:  nextTime(),
-				SearchText: text,
+				Kind:             sessionevent.EntryKindAssistantMessage,
+				Role:             "assistant",
+				CreatedAt:        nextTime(),
+				SearchText:       text,
+				PromptTokens:     step.Usage.PromptTokens,
+				CompletionTokens: step.Usage.CompletionTokens,
+				TotalTokens:      step.Usage.TotalTokens,
 				Payload: map[string]any{
 					"text":       text,
 					"step_index": step.Index,
@@ -285,9 +291,12 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 	}
 
 	appendEntry(sessionevent.SessionEntry{
-		Kind:       sessionevent.EntryKindSystemEvent,
-		CreatedAt:  nextTime(),
-		SearchText: firstNonEmpty(strings.TrimSpace(trace.FinalAnswer), strings.TrimSpace(trace.Error), strings.TrimSpace(trace.Task)),
+		Kind:             sessionevent.EntryKindSystemEvent,
+		CreatedAt:        nextTime(),
+		SearchText:       firstNonEmpty(strings.TrimSpace(trace.FinalAnswer), strings.TrimSpace(trace.Error), strings.TrimSpace(trace.Task)),
+		PromptTokens:     trace.TokenUsage.PromptTokens,
+		CompletionTokens: trace.TokenUsage.CompletionTokens,
+		TotalTokens:      trace.TokenUsage.TotalTokens,
 		Payload: map[string]any{
 			"event":             "run_finished",
 			"task_id":           strings.TrimSpace(trace.TaskID),
