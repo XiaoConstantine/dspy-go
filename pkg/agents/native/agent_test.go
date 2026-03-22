@@ -2,12 +2,16 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -463,6 +467,7 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 					"name":      "Finish",
 					"arguments": map[string]any{"answer": "done"},
 				},
+				"_usage": &core.TokenInfo{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18},
 			},
 		},
 	}
@@ -504,6 +509,191 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 	assert.Equal(t, "session-events", sessionPersisted.Data["session_id"])
 	assert.Equal(t, true, sessionPersisted.Data["success"])
 	assert.Equal(t, true, sessionPersisted.Data["completed"])
+}
+
+func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	eventStore, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
+	require.NoError(t, err)
+	defer eventStore.Close()
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+				"_usage": &core.TokenInfo{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		Memory:            memory,
+		SessionID:         "session-dual-write",
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Persist to both stores",
+		"task_id": "dual-write-task",
+	})
+	require.NoError(t, err)
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	assert.Equal(t, int64(11), trace.TokenUsage.PromptTokens)
+	assert.Equal(t, int64(7), trace.TokenUsage.CompletionTokens)
+	assert.Equal(t, int64(18), trace.TokenUsage.TotalTokens)
+
+	records, err := agents.NewSessionStore(memory).Recent("session-dual-write", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "Persist to both stores", records[0].Task)
+
+	session, err := eventStore.GetSession(context.Background(), "session-dual-write")
+	require.NoError(t, err)
+	require.NotEmpty(t, session.ActiveBranchID)
+
+	head, err := eventStore.GetBranchHead(context.Background(), session.ID, session.ActiveBranchID)
+	require.NoError(t, err)
+	require.NotNil(t, head)
+
+	derivedEntries := sessionEventEntriesFromTrace(trace, session.ID, session.ActiveBranchID)
+	require.Len(t, derivedEntries, 3)
+	assert.Equal(t, int64(18), derivedEntries[2].TotalTokens)
+
+	lineage, err := eventStore.LoadLineage(context.Background(), session.ID, head.ID, sessionevent.LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, lineage, 3)
+	assert.Equal(t, sessionevent.EntryKindUserMessage, lineage[0].Kind)
+	assert.Equal(t, sessionevent.EntryKindAssistantMessage, lineage[1].Kind)
+	assert.Equal(t, sessionevent.EntryKindSystemEvent, lineage[2].Kind)
+	assert.Equal(t, "Persist to both stores", lineage[0].Payload["text"])
+	assert.Equal(t, "done", lineage[1].Payload["text"])
+	assert.Equal(t, "run_finished", lineage[2].Payload["event"])
+	assert.Equal(t, int64(11), lineage[2].PromptTokens)
+	assert.Equal(t, int64(7), lineage[2].CompletionTokens)
+	assert.Equal(t, int64(18), lineage[2].TotalTokens)
+
+	var persisted *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionPersisted {
+			persisted = &events[i]
+		}
+	}
+	require.NotNil(t, persisted)
+	assert.Equal(t, true, persisted.Data["success"])
+	assert.Equal(t, true, persisted.Data["event_store_success"])
+	assert.Equal(t, 3, persisted.Data["event_entry_count"])
+	assert.Equal(t, session.ActiveBranchID, persisted.Data["event_branch_id"])
+}
+
+func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPersistence(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	eventStore, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
+	require.NoError(t, err)
+	require.NoError(t, eventStore.Close())
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		Memory:            memory,
+		SessionID:         "session-event-failure",
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Event store should fail only for dual write",
+		"task_id": "dual-write-failure",
+	})
+	require.NoError(t, err)
+
+	records, err := agents.NewSessionStore(memory).Recent("session-event-failure", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "Event store should fail only for dual write", records[0].Task)
+
+	var persisted *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionPersisted {
+			persisted = &events[i]
+		}
+	}
+	require.NotNil(t, persisted)
+	assert.Equal(t, true, persisted.Data["success"])
+	assert.Equal(t, true, persisted.Data["event_store_enabled"])
+	assert.Equal(t, false, persisted.Data["event_store_success"])
+	assert.Contains(t, persisted.Data["event_store_error"], "closed")
+}
+
+func TestSessionEventEntriesFromTrace_DeduplicatesFinalAnswerAssistantEntry(t *testing.T) {
+	trace := &Trace{
+		TaskID:      "task-final-answer",
+		Task:        "Summarize and finish",
+		Provider:    "stub",
+		Model:       "stub-model",
+		StartedAt:   time.Date(2026, time.March, 21, 12, 0, 0, 0, time.UTC),
+		Completed:   true,
+		FinalAnswer: "done",
+		TokenUsage:  TokenUsage{PromptTokens: 9, CompletionTokens: 4, TotalTokens: 13},
+		Steps: []TraceStep{
+			{
+				Index:         1,
+				AssistantText: "done",
+				ToolName:      "Finish",
+			},
+		},
+	}
+
+	entries := sessionEventEntriesFromTrace(trace, "session-1", "branch-1")
+	require.Len(t, entries, 3)
+	assert.Equal(t, sessionevent.EntryKindUserMessage, entries[0].Kind)
+	assert.Equal(t, sessionevent.EntryKindAssistantMessage, entries[1].Kind)
+	assert.Equal(t, "done", entries[1].Payload["text"])
+	assert.Equal(t, sessionevent.EntryKindSystemEvent, entries[2].Kind)
+	assert.Equal(t, "done", entries[2].Payload["final_answer"])
+}
+
+func TestEnsureSessionEventBranch_JoinsCreateAndRecoveryErrors(t *testing.T) {
+	createErr := errors.New("create failed")
+	recoveryErr := errors.New("recovery lookup failed")
+	store := &stubSessionEventStore{
+		getSessionErrs: []error{
+			dspyerrors.New(dspyerrors.ResourceNotFound, "missing"),
+			recoveryErr,
+		},
+		createSessionErr: createErr,
+	}
+
+	_, err := ensureSessionEventBranch(context.Background(), store, "session-1", &Trace{Task: "task"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, createErr)
+	assert.ErrorIs(t, err, recoveryErr)
+	assert.Contains(t, err.Error(), "create session event branch recovery failed")
 }
 
 func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
@@ -612,6 +802,7 @@ func TestAgent_Clone_CopiesCloneableTools(t *testing.T) {
 	assert.NotSame(t, originalTools[0], clonedTools[0])
 	assert.NotSame(t, agent.memory, cloned.memory)
 	assert.Empty(t, cloned.config.SessionID)
+	assert.Nil(t, cloned.sessionEvent)
 }
 
 func TestAgent_Clone_FailsForNonCloneableTools(t *testing.T) {
@@ -755,4 +946,64 @@ func (m *nativeStubLLM) GenerateWithTools(ctx context.Context, messages []core.C
 	result := m.results[m.index]
 	m.index++
 	return result, nil
+}
+
+type stubSessionEventStore struct {
+	getSessionErrs   []error
+	getSessionIndex  int
+	createSessionErr error
+}
+
+func (s *stubSessionEventStore) CreateSession(context.Context, sessionevent.CreateSessionParams) (*sessionevent.Session, *sessionevent.SessionBranch, error) {
+	if s.createSessionErr != nil {
+		return nil, nil, s.createSessionErr
+	}
+	return &sessionevent.Session{ID: "session-1", ActiveBranchID: "branch-1"}, &sessionevent.SessionBranch{ID: "branch-1", SessionID: "session-1"}, nil
+}
+
+func (s *stubSessionEventStore) AppendEntries(context.Context, []sessionevent.SessionEntry) ([]sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected AppendEntries call")
+}
+
+func (s *stubSessionEventStore) AppendSummary(context.Context, sessionevent.SessionSummary) error {
+	return fmt.Errorf("unexpected AppendSummary call")
+}
+
+func (s *stubSessionEventStore) SetActiveBranch(context.Context, string, string) error {
+	return fmt.Errorf("unexpected SetActiveBranch call")
+}
+
+func (s *stubSessionEventStore) ForkBranch(context.Context, string, string, string, map[string]any) (*sessionevent.SessionBranch, error) {
+	return nil, fmt.Errorf("unexpected ForkBranch call")
+}
+
+func (s *stubSessionEventStore) GetSession(context.Context, string) (*sessionevent.Session, error) {
+	if s.getSessionIndex < len(s.getSessionErrs) {
+		err := s.getSessionErrs[s.getSessionIndex]
+		s.getSessionIndex++
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &sessionevent.Session{ID: "session-1", ActiveBranchID: "branch-1"}, nil
+}
+
+func (s *stubSessionEventStore) ListBranches(context.Context, string) ([]sessionevent.SessionBranch, error) {
+	return nil, fmt.Errorf("unexpected ListBranches call")
+}
+
+func (s *stubSessionEventStore) GetEntry(context.Context, string, string) (*sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected GetEntry call")
+}
+
+func (s *stubSessionEventStore) GetBranchHead(context.Context, string, string) (*sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected GetBranchHead call")
+}
+
+func (s *stubSessionEventStore) LoadLineage(context.Context, string, string, sessionevent.LoadOptions) ([]sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected LoadLineage call")
+}
+
+func (s *stubSessionEventStore) LoadSummaries(context.Context, string, string, int) ([]sessionevent.SessionSummary, error) {
+	return nil, fmt.Errorf("unexpected LoadSummaries call")
 }

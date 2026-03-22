@@ -10,6 +10,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
@@ -29,6 +30,7 @@ type Config struct {
 	SessionID                     string
 	SessionRecallLimit            int
 	SessionRecallMaxChars         int
+	SessionEventStore             sessionevent.SessionEventStore
 	MaxConsecutiveNoCallResponses int
 	ToolInterceptors              []core.ToolInterceptor
 	OnEvent                       func(agents.AgentEvent)
@@ -134,6 +136,7 @@ type Agent struct {
 	toolRegistry *toolspkg.InMemoryToolRegistry
 	memory       agents.Memory
 	sessions     *agents.SessionStore
+	sessionEvent sessionevent.SessionEventStore
 
 	traceMu         sync.RWMutex
 	lastTrace       *agents.ExecutionTrace
@@ -185,6 +188,7 @@ func NewAgent(llm core.LLM, cfg Config) (*Agent, error) {
 		toolRegistry: toolspkg.NewInMemoryToolRegistry(),
 		memory:       cfg.Memory,
 		sessions:     agents.NewSessionStore(cfg.Memory),
+		sessionEvent: cfg.SessionEventStore,
 	}, nil
 }
 
@@ -273,7 +277,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			trace.Duration = time.Since(startedAt)
 			trace.Error = err.Error()
 			trace.TokenUsage = totalUsage
-			a.storeTraces(input, trace)
+			a.storeTraces(ctx, input, trace)
 			a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
 				"task_id":     taskID,
 				"turn":        turn + 1,
@@ -325,7 +329,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			trace.Duration = time.Since(startedAt)
 			trace.Error = err.Error()
 			trace.TokenUsage = totalUsage
-			a.storeTraces(input, trace)
+			a.storeTraces(ctx, input, trace)
 			a.emitEvent(agents.EventRunFinished, map[string]any{
 				"task_id":    taskID,
 				"completed":  false,
@@ -370,7 +374,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				trace.Duration = time.Since(startedAt)
 				trace.Error = fmt.Sprintf("repeated model responses without tool calls after %d turns", noCallStreak)
 				trace.TokenUsage = totalUsage
-				a.storeTraces(input, trace)
+				a.storeTraces(ctx, input, trace)
 				a.emitEvent(agents.EventRunFinished, map[string]any{
 					"task_id":    taskID,
 					"completed":  false,
@@ -421,7 +425,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				trace.Steps = append(trace.Steps, callStep)
 				trace.Duration = time.Since(startedAt)
 				trace.TokenUsage = totalUsage
-				a.storeTraces(input, trace)
+				a.storeTraces(ctx, input, trace)
 				a.emitEvent(agents.EventRunFinished, map[string]any{
 					"task_id":      taskID,
 					"completed":    true,
@@ -528,7 +532,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	trace.Duration = time.Since(startedAt)
 	trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", maxTurns)
 	trace.TokenUsage = totalUsage
-	a.storeTraces(input, trace)
+	a.storeTraces(ctx, input, trace)
 	a.emitEvent(agents.EventRunFinished, map[string]any{
 		"task_id":    taskID,
 		"completed":  false,
@@ -603,6 +607,7 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 	cfg := a.config
 	cfg.Memory = nil
 	cfg.SessionID = ""
+	cfg.SessionEventStore = nil
 	cloned, err := NewAgent(a.llm, cfg)
 	if err != nil {
 		return nil, err
@@ -788,13 +793,13 @@ func turnBudgetReminder(currentTurn int, maxTurns int) string {
 	}
 }
 
-func (a *Agent) storeTraces(input map[string]interface{}, trace *Trace) {
+func (a *Agent) storeTraces(ctx context.Context, input map[string]interface{}, trace *Trace) {
 	execTrace := nativeTraceToExecutionTrace(a, input, trace)
 	a.traceMu.Lock()
 	a.lastNativeTrace = trace.Clone()
 	a.lastTrace = execTrace
 	a.traceMu.Unlock()
-	a.persistSessionRecord(input, trace)
+	a.persistSessionRecord(ctx, input, trace)
 }
 
 func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *Trace) *agents.ExecutionTrace {
