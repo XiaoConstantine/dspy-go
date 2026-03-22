@@ -3,10 +3,12 @@ package native
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
@@ -506,6 +508,132 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 	assert.Equal(t, true, sessionPersisted.Data["completed"])
 }
 
+func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	eventStore, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
+	require.NoError(t, err)
+	defer eventStore.Close()
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		Memory:            memory,
+		SessionID:         "session-dual-write",
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Persist to both stores",
+		"task_id": "dual-write-task",
+	})
+	require.NoError(t, err)
+
+	records, err := agents.NewSessionStore(memory).Recent("session-dual-write", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "Persist to both stores", records[0].Task)
+
+	session, err := eventStore.GetSession(context.Background(), "session-dual-write")
+	require.NoError(t, err)
+	require.NotEmpty(t, session.ActiveBranchID)
+
+	head, err := eventStore.GetBranchHead(context.Background(), session.ID, session.ActiveBranchID)
+	require.NoError(t, err)
+	require.NotNil(t, head)
+
+	lineage, err := eventStore.LoadLineage(context.Background(), session.ID, head.ID, sessionevent.LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, lineage, 3)
+	assert.Equal(t, sessionevent.EntryKindUserMessage, lineage[0].Kind)
+	assert.Equal(t, sessionevent.EntryKindAssistantMessage, lineage[1].Kind)
+	assert.Equal(t, sessionevent.EntryKindSystemEvent, lineage[2].Kind)
+	assert.Equal(t, "Persist to both stores", lineage[0].Payload["text"])
+	assert.Equal(t, "done", lineage[1].Payload["text"])
+	assert.Equal(t, "run_finished", lineage[2].Payload["event"])
+
+	var persisted *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionPersisted {
+			persisted = &events[i]
+		}
+	}
+	require.NotNil(t, persisted)
+	assert.Equal(t, true, persisted.Data["success"])
+	assert.Equal(t, true, persisted.Data["event_store_success"])
+	assert.Equal(t, 3, persisted.Data["event_entry_count"])
+	assert.Equal(t, session.ActiveBranchID, persisted.Data["event_branch_id"])
+}
+
+func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPersistence(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	eventStore, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
+	require.NoError(t, err)
+	require.NoError(t, eventStore.Close())
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		Memory:            memory,
+		SessionID:         "session-event-failure",
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Event store should fail only for dual write",
+		"task_id": "dual-write-failure",
+	})
+	require.NoError(t, err)
+
+	records, err := agents.NewSessionStore(memory).Recent("session-event-failure", 10)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "Event store should fail only for dual write", records[0].Task)
+
+	var persisted *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionPersisted {
+			persisted = &events[i]
+		}
+	}
+	require.NotNil(t, persisted)
+	assert.Equal(t, true, persisted.Data["success"])
+	assert.Equal(t, true, persisted.Data["event_store_enabled"])
+	assert.Equal(t, false, persisted.Data["event_store_success"])
+	assert.Contains(t, persisted.Data["event_store_error"], "closed")
+}
+
 func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	llm := &stubLLM{
@@ -612,6 +740,7 @@ func TestAgent_Clone_CopiesCloneableTools(t *testing.T) {
 	assert.NotSame(t, originalTools[0], clonedTools[0])
 	assert.NotSame(t, agent.memory, cloned.memory)
 	assert.Empty(t, cloned.config.SessionID)
+	assert.Nil(t, cloned.sessionEvent)
 }
 
 func TestAgent_Clone_FailsForNonCloneableTools(t *testing.T) {

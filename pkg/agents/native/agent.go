@@ -10,6 +10,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
@@ -29,6 +30,7 @@ type Config struct {
 	SessionID                     string
 	SessionRecallLimit            int
 	SessionRecallMaxChars         int
+	SessionEventStore             sessionevent.SessionEventStore
 	MaxConsecutiveNoCallResponses int
 	ToolInterceptors              []core.ToolInterceptor
 	OnEvent                       func(agents.AgentEvent)
@@ -134,6 +136,7 @@ type Agent struct {
 	toolRegistry *toolspkg.InMemoryToolRegistry
 	memory       agents.Memory
 	sessions     *agents.SessionStore
+	sessionEvent sessionevent.SessionEventStore
 
 	traceMu         sync.RWMutex
 	lastTrace       *agents.ExecutionTrace
@@ -185,6 +188,7 @@ func NewAgent(llm core.LLM, cfg Config) (*Agent, error) {
 		toolRegistry: toolspkg.NewInMemoryToolRegistry(),
 		memory:       cfg.Memory,
 		sessions:     agents.NewSessionStore(cfg.Memory),
+		sessionEvent: cfg.SessionEventStore,
 	}, nil
 }
 
@@ -603,6 +607,7 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 	cfg := a.config
 	cfg.Memory = nil
 	cfg.SessionID = ""
+	cfg.SessionEventStore = nil
 	cloned, err := NewAgent(a.llm, cfg)
 	if err != nil {
 		return nil, err

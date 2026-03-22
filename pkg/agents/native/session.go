@@ -1,11 +1,16 @@
 package native
 
 import (
+	"context"
+	goerrors "errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 )
 
@@ -32,6 +37,13 @@ func (a *Agent) sessionStore() *agents.SessionStore {
 	return a.sessions
 }
 
+func (a *Agent) sessionEventStore() sessionevent.SessionEventStore {
+	if a == nil {
+		return nil
+	}
+	return a.sessionEvent
+}
+
 func (a *Agent) loadSessionContext(input map[string]any) ([]agents.SessionRecord, string, error) {
 	sessionID := a.sessionID(input)
 	if sessionID == "" {
@@ -52,24 +64,255 @@ func (a *Agent) persistSessionRecord(input map[string]any, trace *Trace) {
 	}
 
 	record := sessionRecordFromTrace(a, input, trace, sessionID)
-	if err := a.sessionStore().Append(record); err != nil {
-		a.emitEvent(agents.EventSessionPersisted, map[string]any{
-			"session_id": sessionID,
-			"record_id":  record.ID,
-			"task_id":    trace.TaskID,
-			"success":    false,
-			"error":      err.Error(),
-		})
-		return
+	snapshotErr := a.sessionStore().Append(record)
+
+	var (
+		eventEntries []sessionevent.SessionEntry
+		eventBranch  string
+		eventErr     error
+	)
+	if store := a.sessionEventStore(); store != nil {
+		eventEntries, eventBranch, eventErr = a.persistSessionEventTrace(context.Background(), store, trace, sessionID)
 	}
 
-	a.emitEvent(agents.EventSessionPersisted, map[string]any{
+	eventData := map[string]any{
 		"session_id": sessionID,
 		"record_id":  record.ID,
 		"task_id":    trace.TaskID,
-		"success":    true,
+		"success":    snapshotErr == nil,
 		"completed":  trace.Completed,
+	}
+	if snapshotErr != nil {
+		eventData["error"] = snapshotErr.Error()
+	}
+	if a.sessionEventStore() != nil {
+		eventData["event_store_enabled"] = true
+		eventData["event_store_success"] = eventErr == nil
+		eventData["event_entry_count"] = len(eventEntries)
+		if eventBranch != "" {
+			eventData["event_branch_id"] = eventBranch
+		}
+		if len(eventEntries) > 0 {
+			eventData["event_head_entry_id"] = eventEntries[len(eventEntries)-1].ID
+		}
+		if eventErr != nil {
+			eventData["event_store_error"] = eventErr.Error()
+		}
+	}
+	a.emitEvent(agents.EventSessionPersisted, eventData)
+}
+
+func (a *Agent) persistSessionEventTrace(ctx context.Context, store sessionevent.SessionEventStore, trace *Trace, sessionID string) ([]sessionevent.SessionEntry, string, error) {
+	if store == nil || trace == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, "", nil
+	}
+
+	branchID, err := ensureSessionEventBranch(ctx, store, sessionID, trace)
+	if err != nil {
+		return nil, "", err
+	}
+
+	entries := sessionEventEntriesFromTrace(trace, sessionID, branchID)
+	if len(entries) == 0 {
+		return nil, branchID, nil
+	}
+
+	inserted, err := store.AppendEntries(ctx, entries)
+	if err != nil {
+		return nil, branchID, err
+	}
+	return inserted, branchID, nil
+}
+
+func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEventStore, sessionID string, trace *Trace) (string, error) {
+	session, err := store.GetSession(ctx, sessionID)
+	if err == nil {
+		if branchID := strings.TrimSpace(session.ActiveBranchID); branchID != "" {
+			return branchID, nil
+		}
+		branches, listErr := store.ListBranches(ctx, sessionID)
+		if listErr != nil {
+			return "", listErr
+		}
+		if len(branches) > 0 {
+			branchID := branches[0].ID
+			if setErr := store.SetActiveBranch(ctx, sessionID, branchID); setErr != nil {
+				return "", setErr
+			}
+			return branchID, nil
+		}
+		return "", fmt.Errorf("session event store session %q has no active branch", sessionID)
+	}
+	if !isResourceNotFound(err) {
+		return "", err
+	}
+
+	title := ""
+	if trace != nil {
+		title = strings.TrimSpace(trace.Task)
+	}
+	createdSession, branch, createErr := store.CreateSession(ctx, sessionevent.CreateSessionParams{
+		ID:    sessionID,
+		Title: title,
 	})
+	if createErr == nil {
+		return branch.ID, nil
+	}
+	session, getErr := store.GetSession(ctx, sessionID)
+	if getErr == nil && strings.TrimSpace(session.ActiveBranchID) != "" {
+		return session.ActiveBranchID, nil
+	}
+	if getErr == nil && createdSession != nil {
+		_ = createdSession
+	}
+	return "", createErr
+}
+
+func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []sessionevent.SessionEntry {
+	if trace == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(branchID) == "" {
+		return nil
+	}
+
+	entries := make([]sessionevent.SessionEntry, 0, len(trace.Steps)*3+3)
+	baseTime := time.Now().UTC()
+	offset := 0
+	nextTime := func() time.Time {
+		t := baseTime.Add(time.Duration(offset) * time.Nanosecond)
+		offset++
+		return t
+	}
+
+	appendEntry := func(entry sessionevent.SessionEntry) {
+		entry.SessionID = sessionID
+		entry.BranchID = branchID
+		if entry.CreatedAt.IsZero() {
+			entry.CreatedAt = nextTime()
+		}
+		entries = append(entries, entry)
+	}
+
+	appendEntry(sessionevent.SessionEntry{
+		Kind:       sessionevent.EntryKindUserMessage,
+		Role:       "user",
+		CreatedAt:  nextTime(),
+		SearchText: strings.TrimSpace(trace.Task),
+		Payload: map[string]any{
+			"text":    strings.TrimSpace(trace.Task),
+			"task_id": strings.TrimSpace(trace.TaskID),
+		},
+		Metadata: map[string]any{
+			"source":   "native",
+			"task_id":  strings.TrimSpace(trace.TaskID),
+			"provider": strings.TrimSpace(trace.Provider),
+			"model":    strings.TrimSpace(trace.Model),
+		},
+	})
+
+	for _, step := range trace.Steps {
+		if text := strings.TrimSpace(step.AssistantText); text != "" {
+			appendEntry(sessionevent.SessionEntry{
+				Kind:       sessionevent.EntryKindAssistantMessage,
+				Role:       "assistant",
+				CreatedAt:  nextTime(),
+				SearchText: text,
+				Payload: map[string]any{
+					"text":       text,
+					"step_index": step.Index,
+				},
+				Metadata: map[string]any{
+					"source":     "native",
+					"step_index": step.Index,
+				},
+			})
+		}
+
+		if strings.TrimSpace(step.ToolName) == "" || strings.EqualFold(step.ToolName, "finish") {
+			continue
+		}
+
+		appendEntry(sessionevent.SessionEntry{
+			Kind:       sessionevent.EntryKindToolCall,
+			Role:       "assistant",
+			ToolName:   step.ToolName,
+			CreatedAt:  nextTime(),
+			SearchText: strings.TrimSpace(step.ToolName),
+			Payload: map[string]any{
+				"arguments":  core.ShallowCopyMap(step.Arguments),
+				"step_index": step.Index,
+			},
+			Metadata: map[string]any{
+				"source":     "native",
+				"step_index": step.Index,
+			},
+		})
+
+		appendEntry(sessionevent.SessionEntry{
+			Kind:       sessionevent.EntryKindToolResult,
+			ToolName:   step.ToolName,
+			CreatedAt:  nextTime(),
+			IsError:    step.IsError,
+			Synthetic:  step.Synthetic,
+			Redacted:   step.Redacted,
+			Truncated:  step.Truncated,
+			SearchText: firstNonEmpty(strings.TrimSpace(step.ObservationDisplay), strings.TrimSpace(step.Observation)),
+			Payload: map[string]any{
+				"observation":         strings.TrimSpace(step.Observation),
+				"observation_display": strings.TrimSpace(step.ObservationDisplay),
+				"details":             core.ShallowCopyMap(step.ObservationDetails),
+				"step_index":          step.Index,
+			},
+			Metadata: map[string]any{
+				"source":     "native",
+				"step_index": step.Index,
+			},
+		})
+	}
+
+	if finalAnswer := strings.TrimSpace(trace.FinalAnswer); finalAnswer != "" {
+		appendEntry(sessionevent.SessionEntry{
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			CreatedAt:  nextTime(),
+			SearchText: finalAnswer,
+			Payload: map[string]any{
+				"text":  finalAnswer,
+				"final": true,
+			},
+			Metadata: map[string]any{
+				"source": "native",
+			},
+		})
+	}
+
+	appendEntry(sessionevent.SessionEntry{
+		Kind:       sessionevent.EntryKindSystemEvent,
+		CreatedAt:  nextTime(),
+		SearchText: firstNonEmpty(strings.TrimSpace(trace.FinalAnswer), strings.TrimSpace(trace.Error), strings.TrimSpace(trace.Task)),
+		Payload: map[string]any{
+			"event":             "run_finished",
+			"task_id":           strings.TrimSpace(trace.TaskID),
+			"completed":         trace.Completed,
+			"final_answer":      strings.TrimSpace(trace.FinalAnswer),
+			"error":             strings.TrimSpace(trace.Error),
+			"provider":          strings.TrimSpace(trace.Provider),
+			"model":             strings.TrimSpace(trace.Model),
+			"started_at":        trace.StartedAt.UTC().Format(time.RFC3339Nano),
+			"duration_ms":       trace.Duration.Milliseconds(),
+			"prompt_tokens":     trace.TokenUsage.PromptTokens,
+			"completion_tokens": trace.TokenUsage.CompletionTokens,
+			"total_tokens":      trace.TokenUsage.TotalTokens,
+		},
+		Metadata: map[string]any{
+			"source": "native",
+		},
+	})
+
+	return entries
+}
+
+func isResourceNotFound(err error) bool {
+	var dspyErr *dspyerrors.Error
+	return goerrors.As(err, &dspyErr) && dspyErr.Code() == dspyerrors.ResourceNotFound
 }
 
 func buildSessionRecall(records []agents.SessionRecord, maxChars int) string {
