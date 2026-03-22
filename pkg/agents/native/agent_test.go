@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -676,6 +678,24 @@ func TestSessionEventEntriesFromTrace_DeduplicatesFinalAnswerAssistantEntry(t *t
 	assert.Equal(t, "done", entries[2].Payload["final_answer"])
 }
 
+func TestEnsureSessionEventBranch_JoinsCreateAndRecoveryErrors(t *testing.T) {
+	createErr := errors.New("create failed")
+	recoveryErr := errors.New("recovery lookup failed")
+	store := &stubSessionEventStore{
+		getSessionErrs: []error{
+			dspyerrors.New(dspyerrors.ResourceNotFound, "missing"),
+			recoveryErr,
+		},
+		createSessionErr: createErr,
+	}
+
+	_, err := ensureSessionEventBranch(context.Background(), store, "session-1", &Trace{Task: "task"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, createErr)
+	assert.ErrorIs(t, err, recoveryErr)
+	assert.Contains(t, err.Error(), "create session event branch recovery failed")
+}
+
 func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	llm := &stubLLM{
@@ -926,4 +946,64 @@ func (m *nativeStubLLM) GenerateWithTools(ctx context.Context, messages []core.C
 	result := m.results[m.index]
 	m.index++
 	return result, nil
+}
+
+type stubSessionEventStore struct {
+	getSessionErrs   []error
+	getSessionIndex  int
+	createSessionErr error
+}
+
+func (s *stubSessionEventStore) CreateSession(context.Context, sessionevent.CreateSessionParams) (*sessionevent.Session, *sessionevent.SessionBranch, error) {
+	if s.createSessionErr != nil {
+		return nil, nil, s.createSessionErr
+	}
+	return &sessionevent.Session{ID: "session-1", ActiveBranchID: "branch-1"}, &sessionevent.SessionBranch{ID: "branch-1", SessionID: "session-1"}, nil
+}
+
+func (s *stubSessionEventStore) AppendEntries(context.Context, []sessionevent.SessionEntry) ([]sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected AppendEntries call")
+}
+
+func (s *stubSessionEventStore) AppendSummary(context.Context, sessionevent.SessionSummary) error {
+	return fmt.Errorf("unexpected AppendSummary call")
+}
+
+func (s *stubSessionEventStore) SetActiveBranch(context.Context, string, string) error {
+	return fmt.Errorf("unexpected SetActiveBranch call")
+}
+
+func (s *stubSessionEventStore) ForkBranch(context.Context, string, string, string, map[string]any) (*sessionevent.SessionBranch, error) {
+	return nil, fmt.Errorf("unexpected ForkBranch call")
+}
+
+func (s *stubSessionEventStore) GetSession(context.Context, string) (*sessionevent.Session, error) {
+	if s.getSessionIndex < len(s.getSessionErrs) {
+		err := s.getSessionErrs[s.getSessionIndex]
+		s.getSessionIndex++
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &sessionevent.Session{ID: "session-1", ActiveBranchID: "branch-1"}, nil
+}
+
+func (s *stubSessionEventStore) ListBranches(context.Context, string) ([]sessionevent.SessionBranch, error) {
+	return nil, fmt.Errorf("unexpected ListBranches call")
+}
+
+func (s *stubSessionEventStore) GetEntry(context.Context, string, string) (*sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected GetEntry call")
+}
+
+func (s *stubSessionEventStore) GetBranchHead(context.Context, string, string) (*sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected GetBranchHead call")
+}
+
+func (s *stubSessionEventStore) LoadLineage(context.Context, string, string, sessionevent.LoadOptions) ([]sessionevent.SessionEntry, error) {
+	return nil, fmt.Errorf("unexpected LoadLineage call")
+}
+
+func (s *stubSessionEventStore) LoadSummaries(context.Context, string, string, int) ([]sessionevent.SessionSummary, error) {
+	return nil, fmt.Errorf("unexpected LoadSummaries call")
 }

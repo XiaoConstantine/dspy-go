@@ -164,7 +164,7 @@ func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEve
 		return session.ActiveBranchID, nil
 	}
 	if getErr != nil && !isResourceNotFound(getErr) {
-		return "", getErr
+		return "", fmt.Errorf("create session event branch recovery failed: %w", goerrors.Join(createErr, getErr))
 	}
 	return "", createErr
 }
@@ -276,10 +276,7 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 		})
 	}
 
-	if finalAnswer := strings.TrimSpace(trace.FinalAnswer); finalAnswer != "" {
-		if finalAnswer == lastAssistantText {
-			goto appendSystemEvent
-		}
+	if finalAnswer := strings.TrimSpace(trace.FinalAnswer); finalAnswer != "" && finalAnswer != lastAssistantText {
 		appendEntry(sessionevent.SessionEntry{
 			Kind:       sessionevent.EntryKindAssistantMessage,
 			Role:       "assistant",
@@ -295,7 +292,6 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 		})
 	}
 
-appendSystemEvent:
 	appendEntry(sessionevent.SessionEntry{
 		Kind:             sessionevent.EntryKindSystemEvent,
 		CreatedAt:        nextTime(),
