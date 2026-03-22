@@ -648,6 +648,34 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	assert.Contains(t, persisted.Data["event_store_error"], "closed")
 }
 
+func TestSessionEventEntriesFromTrace_DeduplicatesFinalAnswerAssistantEntry(t *testing.T) {
+	trace := &Trace{
+		TaskID:      "task-final-answer",
+		Task:        "Summarize and finish",
+		Provider:    "stub",
+		Model:       "stub-model",
+		StartedAt:   time.Date(2026, time.March, 21, 12, 0, 0, 0, time.UTC),
+		Completed:   true,
+		FinalAnswer: "done",
+		TokenUsage:  TokenUsage{PromptTokens: 9, CompletionTokens: 4, TotalTokens: 13},
+		Steps: []TraceStep{
+			{
+				Index:         1,
+				AssistantText: "done",
+				ToolName:      "Finish",
+			},
+		},
+	}
+
+	entries := sessionEventEntriesFromTrace(trace, "session-1", "branch-1")
+	require.Len(t, entries, 3)
+	assert.Equal(t, sessionevent.EntryKindUserMessage, entries[0].Kind)
+	assert.Equal(t, sessionevent.EntryKindAssistantMessage, entries[1].Kind)
+	assert.Equal(t, "done", entries[1].Payload["text"])
+	assert.Equal(t, sessionevent.EntryKindSystemEvent, entries[2].Kind)
+	assert.Equal(t, "done", entries[2].Payload["final_answer"])
+}
+
 func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	llm := &stubLLM{

@@ -211,8 +211,10 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 		},
 	})
 
+	lastAssistantText := ""
 	for _, step := range trace.Steps {
 		if text := strings.TrimSpace(step.AssistantText); text != "" {
+			lastAssistantText = text
 			appendEntry(sessionevent.SessionEntry{
 				Kind:             sessionevent.EntryKindAssistantMessage,
 				Role:             "assistant",
@@ -275,6 +277,9 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 	}
 
 	if finalAnswer := strings.TrimSpace(trace.FinalAnswer); finalAnswer != "" {
+		if finalAnswer == lastAssistantText {
+			goto appendSystemEvent
+		}
 		appendEntry(sessionevent.SessionEntry{
 			Kind:       sessionevent.EntryKindAssistantMessage,
 			Role:       "assistant",
@@ -290,6 +295,7 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 		})
 	}
 
+appendSystemEvent:
 	appendEntry(sessionevent.SessionEntry{
 		Kind:             sessionevent.EntryKindSystemEvent,
 		CreatedAt:        nextTime(),
