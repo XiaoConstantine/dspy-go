@@ -531,7 +531,7 @@ func newWorkspaceTools(resolver workspaceResolver) []core.Tool {
 				}
 
 				replaceAll := boolValue(params["replace_all"])
-				updated := content
+				var updated string
 				replacements := 1
 				if replaceAll {
 					replacements = strings.Count(content, oldText)
