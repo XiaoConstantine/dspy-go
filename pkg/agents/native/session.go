@@ -122,21 +122,17 @@ func (a *Agent) loadSessionEventContext(ctx context.Context, input map[string]an
 		return result, nil
 	}
 
-	loadOpts := sessionevent.LoadOptions{
-		MaxEntries:    maxSessionEventEntries(a.config.SessionRecallLimit),
-		PreferSummary: true,
+	lineageOpts := sessionevent.LoadOptions{
+		MaxEntries: maxSessionEventEntries(a.config.SessionRecallLimit),
 	}
-	entries, err := store.LoadLineage(ctx, sessionID, branchState.HeadEntryID, loadOpts)
+	entries, err := store.LoadLineage(ctx, sessionID, branchState.HeadEntryID, lineageOpts)
 	if err != nil {
 		return sessionContext{}, err
 	}
 
-	var summaries []sessionevent.SessionSummary
-	if loadOpts.PreferSummary {
-		summaries, err = store.LoadSummaries(ctx, sessionID, branchState.BranchID, maxSessionEventSummaries(a.config.SessionRecallLimit))
-		if err != nil {
-			return sessionContext{}, err
-		}
+	summaries, err := store.LoadSummaries(ctx, sessionID, branchState.BranchID, maxSessionEventSummaries(a.config.SessionRecallLimit))
+	if err != nil {
+		return sessionContext{}, err
 	}
 
 	result.EntryCount = len(entries)
