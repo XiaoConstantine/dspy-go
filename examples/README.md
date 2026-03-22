@@ -13,6 +13,9 @@ This directory contains comprehensive examples demonstrating the various feature
 ### 🔧 Tool Management
 - **[smart_tool_registry/](smart_tool_registry/)** - Intelligent tool selection and management system
 
+### 🤖 Native Agent Runtime
+- **[native_agent_session/](native_agent_session/)** - Minimal native tool-calling agent with SQLite session recall and branch forking
+
 ### 🌐 Integrations
 - **[mcp/](mcp/)** - Model Context Protocol (MCP) integrations
 - **[others/](others/)** - Additional integrations and utilities
@@ -111,6 +114,12 @@ func main() {
 - 🔄 **Auto-Discovery**: MCP server integration for dynamic tool registration
 - 🛡️ **Fallback Mechanisms**: Intelligent fallback selection when tools fail
 - ⚙️ **Custom Configuration**: Configurable selection algorithms and weights
+
+### Native Agent Example
+
+| Example | Description | Key Features |
+|---------|-------------|--------------|
+| [main.go](native_agent_session/main.go) | Native tool-calling agent with persisted session recall | SQLite session events, branch resume, forked sessions, public session controls |
 
 ### Running the Examples
 
