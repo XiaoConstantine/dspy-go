@@ -113,6 +113,22 @@ func TestSessionShowCommand_MissingDatabaseFailsWithoutCreatingFile(t *testing.T
 	assert.True(t, os.IsNotExist(statErr))
 }
 
+func TestSessionEntrySummary_IgnoresNilValuesButKeepsLiteralString(t *testing.T) {
+	entry := &sessionevent.SessionEntry{
+		Payload: map[string]any{
+			"text":          nil,
+			"final_answer":  "   ",
+			"event":         "<nil>",
+			"observation":   nil,
+			"search_text":   "unused",
+			"other_payload": 42,
+		},
+		SearchText: "fallback",
+	}
+
+	assert.Equal(t, "<nil>", sessionEntrySummary(entry))
+}
+
 func newTestSessionEventStore(t *testing.T) (*sessionevent.SQLiteStore, string) {
 	t.Helper()
 

@@ -251,8 +251,15 @@ func sessionEntrySummary(entry *sessionevent.SessionEntry) string {
 		return ""
 	}
 	for _, key := range []string{"text", "final_answer", "event", "observation_display", "observation"} {
-		value := strings.TrimSpace(fmt.Sprint(entry.Payload[key]))
-		if value != "" && value != "<nil>" {
+		raw, ok := entry.Payload[key]
+		if !ok || raw == nil {
+			continue
+		}
+		value, ok := raw.(string)
+		if ok {
+			value = strings.TrimSpace(value)
+		}
+		if ok && value != "" {
 			return value
 		}
 	}
