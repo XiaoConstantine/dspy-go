@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/commands"
+	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
@@ -32,6 +32,7 @@ func init() {
 	rootCmd.AddCommand(commands.NewInteractiveCommand())
 	rootCmd.AddCommand(commands.NewAnalyzeCommand())
 	rootCmd.AddCommand(commands.NewViewerCommand())
+	rootCmd.AddCommand(commands.NewSessionCommand())
 
 	// Make interactive mode the default when no command is specified
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
