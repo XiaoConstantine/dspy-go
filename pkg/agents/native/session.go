@@ -158,11 +158,8 @@ func (a *Agent) resolveSessionEventBranch(ctx context.Context, input map[string]
 	}
 
 	if branchID := a.sessionBranchID(input); branchID != "" {
-		head, err := store.GetBranchHead(ctx, sessionID, branchID)
+		head, err := switchSessionEventBranch(ctx, store, sessionID, branchID)
 		if err != nil {
-			return sessionEventBranchState{}, err
-		}
-		if err := store.SetActiveBranch(ctx, sessionID, branchID); err != nil {
 			return sessionEventBranchState{}, err
 		}
 		return sessionEventBranchState{
