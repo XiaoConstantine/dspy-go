@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -21,10 +20,6 @@ const defaultBranchName = "main"
 
 type SQLiteStore struct {
 	db *sql.DB
-
-	initErr error
-
-	initialized sync.Once
 }
 
 var _ SessionEventStore = (*SQLiteStore)(nil)
@@ -53,9 +48,9 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	store := &SQLiteStore{
 		db: db,
 	}
-	if err := store.ensureInitialized(); err != nil {
+	if _, err := db.Exec(sessionSchema); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, wrapSQLError(err, "failed to initialize session event schema", nil)
 	}
 	return store, nil
 }
@@ -68,10 +63,6 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) CreateSession(ctx context.Context, params CreateSessionParams) (*Session, *SessionBranch, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, nil, err
-	}
-
 	sessionID := strings.TrimSpace(params.ID)
 	if sessionID == "" {
 		sessionID = uuid.NewString()
@@ -162,9 +153,6 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, params CreateSessionPar
 }
 
 func (s *SQLiteStore) GetSession(ctx context.Context, sessionID string) (*Session, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil, dspyerrors.New(dspyerrors.InvalidInput, "session id is required")
@@ -185,9 +173,6 @@ func (s *SQLiteStore) GetSession(ctx context.Context, sessionID string) (*Sessio
 }
 
 func (s *SQLiteStore) ListBranches(ctx context.Context, sessionID string) ([]SessionBranch, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil, dspyerrors.New(dspyerrors.InvalidInput, "session id is required")
@@ -220,9 +205,6 @@ func (s *SQLiteStore) ListBranches(ctx context.Context, sessionID string) ([]Ses
 }
 
 func (s *SQLiteStore) GetEntry(ctx context.Context, sessionID, entryID string) (*SessionEntry, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	entryID = strings.TrimSpace(entryID)
 	if sessionID == "" || entryID == "" {
@@ -242,9 +224,6 @@ func (s *SQLiteStore) GetEntry(ctx context.Context, sessionID, entryID string) (
 }
 
 func (s *SQLiteStore) GetBranchHead(ctx context.Context, sessionID, branchID string) (*SessionEntry, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	branchID = strings.TrimSpace(branchID)
 	if sessionID == "" || branchID == "" {
@@ -278,9 +257,6 @@ func (s *SQLiteStore) GetBranchHead(ctx context.Context, sessionID, branchID str
 }
 
 func (s *SQLiteStore) LoadLineage(ctx context.Context, sessionID, headEntryID string, opts LoadOptions) ([]SessionEntry, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	headEntryID = strings.TrimSpace(headEntryID)
 	if sessionID == "" || headEntryID == "" {
@@ -291,9 +267,6 @@ func (s *SQLiteStore) LoadLineage(ctx context.Context, sessionID, headEntryID st
 
 	stopAt := strings.TrimSpace(opts.StopAtEntryID)
 	maxEntries := opts.MaxEntries
-	if opts.TailEntries > 0 && (maxEntries <= 0 || opts.TailEntries < maxEntries) {
-		maxEntries = opts.TailEntries
-	}
 
 	rows, err := s.db.QueryContext(ctx, `
 WITH RECURSIVE lineage (
@@ -307,6 +280,7 @@ WITH RECURSIVE lineage (
 		metadata_json, prompt_tokens, completion_tokens, total_tokens, 1
 	FROM session_entries
 	WHERE session_id = ? AND id = ?
+	  AND (? = '' OR id != ?)
 
 	UNION ALL
 
@@ -331,6 +305,8 @@ ORDER BY depth DESC
 		headEntryID,
 		stopAt,
 		stopAt,
+		stopAt,
+		stopAt,
 		maxEntries,
 		maxEntries,
 	)
@@ -351,15 +327,21 @@ ORDER BY depth DESC
 		return nil, wrapSQLError(err, "failed to iterate lineage rows", dspyerrors.Fields{"session_id": sessionID, "head_entry_id": headEntryID})
 	}
 	if len(entries) == 0 {
+		if stopAt != "" && stopAt == headEntryID {
+			exists, err := s.entryExists(ctx, sessionID, headEntryID)
+			if err != nil {
+				return nil, err
+			}
+			if exists {
+				return []SessionEntry{}, nil
+			}
+		}
 		return nil, notFound("entry not found", dspyerrors.Fields{"session_id": sessionID, "entry_id": headEntryID})
 	}
 	return entries, nil
 }
 
 func (s *SQLiteStore) AppendEntries(ctx context.Context, entries []SessionEntry) ([]SessionEntry, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -403,6 +385,19 @@ func (s *SQLiteStore) AppendEntries(ctx context.Context, entries []SessionEntry)
 		}
 		if entry.Kind == "" {
 			return nil, dspyerrors.New(dspyerrors.InvalidInput, "entry kind is required")
+		}
+		if strings.TrimSpace(entry.ParentID) != "" {
+			exists, err := s.entryExistsTx(ctx, tx, entry.SessionID, entry.ParentID)
+			if err != nil {
+				return nil, err
+			}
+			if !exists {
+				return nil, notFound("parent entry not found", dspyerrors.Fields{
+					"session_id": entry.SessionID,
+					"branch_id":  entry.BranchID,
+					"parent_id":  entry.ParentID,
+				})
+			}
 		}
 		payloadJSON, err := encodeJSONMap(entry.Payload)
 		if err != nil {
@@ -480,9 +475,6 @@ func (s *SQLiteStore) AppendEntries(ctx context.Context, entries []SessionEntry)
 }
 
 func (s *SQLiteStore) AppendSummary(ctx context.Context, summary SessionSummary) error {
-	if err := s.ensureInitialized(); err != nil {
-		return err
-	}
 	summary = cloneSummary(summary)
 	if strings.TrimSpace(summary.SessionID) == "" || strings.TrimSpace(summary.BranchID) == "" {
 		return dspyerrors.New(dspyerrors.InvalidInput, "summary requires session_id and branch_id")
@@ -534,9 +526,6 @@ func (s *SQLiteStore) AppendSummary(ctx context.Context, summary SessionSummary)
 }
 
 func (s *SQLiteStore) LoadSummaries(ctx context.Context, sessionID, branchID string, limit int) ([]SessionSummary, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	branchID = strings.TrimSpace(branchID)
 	if sessionID == "" || branchID == "" {
@@ -576,9 +565,6 @@ func (s *SQLiteStore) LoadSummaries(ctx context.Context, sessionID, branchID str
 }
 
 func (s *SQLiteStore) SetActiveBranch(ctx context.Context, sessionID, branchID string) error {
-	if err := s.ensureInitialized(); err != nil {
-		return err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	branchID = strings.TrimSpace(branchID)
 	if sessionID == "" || branchID == "" {
@@ -626,9 +612,6 @@ func (s *SQLiteStore) SetActiveBranch(ctx context.Context, sessionID, branchID s
 }
 
 func (s *SQLiteStore) ForkBranch(ctx context.Context, sessionID, fromEntryID, name string, metadata map[string]any) (*SessionBranch, error) {
-	if err := s.ensureInitialized(); err != nil {
-		return nil, err
-	}
 	sessionID = strings.TrimSpace(sessionID)
 	fromEntryID = strings.TrimSpace(fromEntryID)
 	if sessionID == "" || fromEntryID == "" {
@@ -706,16 +689,6 @@ func (s *SQLiteStore) ForkBranch(ctx context.Context, sessionID, fromEntryID, na
 	return branch, nil
 }
 
-func (s *SQLiteStore) ensureInitialized() error {
-	s.initialized.Do(func() {
-		if _, err := s.db.Exec(sessionSchema); err != nil {
-			s.initErr = wrapSQLError(err, "failed to initialize session event schema", nil)
-			return
-		}
-	})
-	return s.initErr
-}
-
 func (s *SQLiteStore) lookupBranchHeadTx(ctx context.Context, tx *sql.Tx, sessionID, branchID string) (string, error) {
 	var headID sql.NullString
 	err := tx.QueryRowContext(ctx,
@@ -735,6 +708,38 @@ func (s *SQLiteStore) lookupBranchHeadTx(ctx context.Context, tx *sql.Tx, sessio
 		return "", nil
 	}
 	return strings.TrimSpace(headID.String), nil
+}
+
+func (s *SQLiteStore) entryExistsTx(ctx context.Context, tx *sql.Tx, sessionID, entryID string) (bool, error) {
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT 1
+		   FROM session_entries
+		  WHERE session_id = ? AND id = ?`,
+		sessionID,
+		entryID,
+	).Scan(&exists); err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, wrapSQLError(err, "failed to validate parent entry", dspyerrors.Fields{"session_id": sessionID, "entry_id": entryID})
+	}
+	return true, nil
+}
+
+func (s *SQLiteStore) entryExists(ctx context.Context, sessionID, entryID string) (bool, error) {
+	var exists int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT 1
+		   FROM session_entries
+		  WHERE session_id = ? AND id = ?`,
+		sessionID,
+		entryID,
+	).Scan(&exists); err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, wrapSQLError(err, "failed to validate entry", dspyerrors.Fields{"session_id": sessionID, "entry_id": entryID})
+	}
+	return true, nil
 }
 
 func scanSession(scanner interface{ Scan(dest ...any) error }) (*Session, error) {
@@ -935,7 +940,7 @@ func parseTime(value string) (time.Time, error) {
 }
 
 func formatTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
+	return value.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
 }
 
 func decodeJSONMap(value string) (map[string]any, error) {
@@ -993,9 +998,9 @@ func nullString(value sql.NullString) string {
 
 func sqliteDSN(path string) string {
 	if path == ":memory:" {
-		return "file::memory:?cache=shared&_foreign_keys=on&_busy_timeout=5000"
+		return "file::memory:?cache=shared&_foreign_keys=on&_busy_timeout=5000&_txlock=immediate"
 	}
-	return path + "?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
+	return path + "?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_txlock=immediate"
 }
 
 func rollbackTx(ctx context.Context, tx *sql.Tx) {

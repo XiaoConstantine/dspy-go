@@ -98,8 +98,6 @@ type LoadOptions struct {
 	StopAtEntryID string
 	// PreferSummary is reserved for future summary-aware lineage loading.
 	PreferSummary bool
-	// TailEntries is an alias for callers that want only the most recent N lineage entries.
-	TailEntries int
 }
 
 type CreateSessionParams struct {

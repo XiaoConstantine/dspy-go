@@ -141,6 +141,10 @@ func TestSQLiteStoreLoadLineageRespectsStopAtAndMaxEntries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stopped, 1)
 	assert.Equal(t, head.ID, stopped[0].ID)
+
+	empty, err := store.LoadLineage(ctx, session.ID, head.ID, LoadOptions{StopAtEntryID: head.ID})
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }
 
 func TestSQLiteStoreAppendSummaryAndForkBranch(t *testing.T) {
@@ -225,6 +229,42 @@ func TestSQLiteStoreReturnsInvalidInputForUnmarshalableMaps(t *testing.T) {
 	}})
 	require.Error(t, err)
 	assertErrorCode(t, err, dspyerrors.InvalidInput)
+}
+
+func TestSQLiteStoreRejectsUnknownParentEntry(t *testing.T) {
+	t.Parallel()
+
+	store := newTestSQLiteStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	session, branch, err := store.CreateSession(ctx, CreateSessionParams{Title: "bad parent"})
+	require.NoError(t, err)
+
+	_, err = store.AppendEntries(ctx, []SessionEntry{{
+		SessionID: session.ID,
+		BranchID:  branch.ID,
+		Kind:      EntryKindAssistantMessage,
+		ParentID:  "missing-parent",
+		Payload:   map[string]any{"text": "orphan"},
+	}})
+	require.Error(t, err)
+	assertErrorCode(t, err, dspyerrors.ResourceNotFound)
+}
+
+func TestFormatTimeIsFixedWidthAndSortable(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.March, 21, 12, 0, 0, 0, time.UTC)
+	later := base.Add(time.Millisecond)
+
+	baseFormatted := formatTime(base)
+	laterFormatted := formatTime(later)
+
+	assert.Equal(t, len(baseFormatted), len(laterFormatted))
+	assert.Less(t, baseFormatted, laterFormatted)
+	assert.Equal(t, "2026-03-21T12:00:00.000000000Z", baseFormatted)
+	assert.Equal(t, "2026-03-21T12:00:00.001000000Z", laterFormatted)
 }
 
 func newTestSQLiteStore(t *testing.T) *SQLiteStore {
