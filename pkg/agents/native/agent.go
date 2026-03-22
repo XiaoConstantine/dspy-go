@@ -28,6 +28,7 @@ type Config struct {
 	FinishToolText                string
 	Memory                        agents.Memory
 	SessionID                     string
+	SessionBranchID               string
 	SessionRecallLimit            int
 	SessionRecallMaxChars         int
 	SessionEventStore             sessionevent.SessionEventStore
@@ -213,22 +214,28 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	taskID := agentutil.StringValue(input["task_id"])
 	maxTurns := a.maxTurns(input)
 	sessionID := a.sessionID(input)
-	sessionRecords, sessionRecall, sessionErr := a.loadSessionContext(input)
+	sessionContext, sessionErr := a.loadSessionContext(ctx, input)
 	if sessionID != "" {
 		sessionEventData := map[string]any{
-			"task_id":      taskID,
-			"session_id":   sessionID,
-			"record_count": len(sessionRecords),
-			"recall_chars": len(sessionRecall),
+			"task_id":        taskID,
+			"session_id":     sessionID,
+			"source":         sessionContext.Source,
+			"record_count":   sessionContext.RecordCount,
+			"entry_count":    sessionContext.EntryCount,
+			"summary_count":  sessionContext.SummaryCount,
+			"recall_chars":   len(sessionContext.Recall),
+			"branch_id":      sessionContext.BranchID,
+			"head_entry_id":  sessionContext.HeadEntryID,
+			"forked_from_id": sessionContext.ForkedFromEntryID,
 		}
 		if sessionErr != nil {
 			sessionEventData["error"] = sessionErr.Error()
 		}
 		a.emitEvent(agents.EventSessionLoaded, sessionEventData)
 	}
+	sessionRecall := sessionContext.Recall
 	if sessionErr != nil {
 		sessionRecall = ""
-		sessionRecords = nil
 	}
 
 	functions, err := toolspkg.BuildFunctionSchemas(a.toolRegistry)
@@ -252,14 +259,19 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 	noCallStreak := 0
 
 	a.emitEvent(agents.EventRunStarted, map[string]any{
-		"task_id":              taskID,
-		"task":                 task,
-		"max_turns":            maxTurns,
-		"model":                a.llm.ModelID(),
-		"provider":             a.llm.ProviderName(),
-		"session_id":           sessionID,
-		"session_runs":         len(sessionRecords),
-		"session_recall_chars": len(sessionRecall),
+		"task_id":               taskID,
+		"task":                  task,
+		"max_turns":             maxTurns,
+		"model":                 a.llm.ModelID(),
+		"provider":              a.llm.ProviderName(),
+		"session_id":            sessionID,
+		"session_source":        sessionContext.Source,
+		"session_runs":          sessionContext.RecordCount,
+		"session_entries":       sessionContext.EntryCount,
+		"session_summaries":     sessionContext.SummaryCount,
+		"session_branch_id":     sessionContext.BranchID,
+		"session_head_entry_id": sessionContext.HeadEntryID,
+		"session_recall_chars":  len(sessionRecall),
 	})
 
 	for turn := 0; turn < maxTurns; turn++ {
@@ -607,6 +619,7 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 	cfg := a.config
 	cfg.Memory = nil
 	cfg.SessionID = ""
+	cfg.SessionBranchID = ""
 	cfg.SessionEventStore = nil
 	cloned, err := NewAgent(a.llm, cfg)
 	if err != nil {

@@ -596,6 +596,326 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	assert.Equal(t, session.ActiveBranchID, persisted.Data["event_branch_id"])
 }
 
+func TestAgent_Execute_LoadsSessionRecallFromSessionEventStore(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	eventStore := newNativeTestSessionEventStore(t)
+	ctx := context.Background()
+
+	session, branch, err := eventStore.CreateSession(ctx, sessionevent.CreateSessionParams{
+		ID:    "session-event-read",
+		Title: "Prior session",
+	})
+	require.NoError(t, err)
+
+	inserted, err := eventStore.AppendEntries(ctx, []sessionevent.SessionEntry{
+		{
+			SessionID:  session.ID,
+			BranchID:   branch.ID,
+			Kind:       sessionevent.EntryKindUserMessage,
+			Role:       "user",
+			SearchText: "Prior event-store task",
+			Payload:    map[string]any{"text": "Prior event-store task"},
+		},
+		{
+			SessionID:  session.ID,
+			BranchID:   branch.ID,
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			SearchText: "Prior event-store answer",
+			Payload:    map[string]any{"text": "Prior event-store answer"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, inserted, 2)
+
+	require.NoError(t, eventStore.AppendSummary(ctx, sessionevent.SessionSummary{
+		SessionID:    session.ID,
+		BranchID:     branch.ID,
+		StartEntryID: inserted[0].ID,
+		EndEntryID:   inserted[1].ID,
+		SummaryText:  "Condensed summary from event store",
+	}))
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		Memory:            memory,
+		SessionID:         session.ID,
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(ctx, map[string]interface{}{
+		"task":    "Continue prior work",
+		"task_id": "resume-task",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "SESSION RECALL:")
+	assert.Contains(t, llm.prompts[0], "Condensed summary from event store")
+	assert.Contains(t, llm.prompts[0], "Prior event-store task")
+	assert.Contains(t, llm.prompts[0], "Prior event-store answer")
+
+	var loaded *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionLoaded {
+			loaded = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, loaded)
+	assert.Equal(t, "event_store", loaded.Data["source"])
+	assert.Equal(t, 0, loaded.Data["record_count"])
+	assert.Equal(t, 2, loaded.Data["entry_count"])
+	assert.Equal(t, 1, loaded.Data["summary_count"])
+	assert.Equal(t, branch.ID, loaded.Data["branch_id"])
+	assert.Equal(t, inserted[1].ID, loaded.Data["head_entry_id"])
+}
+
+func TestAgent_Execute_UsesRequestedSessionBranchForRecallAndPersistence(t *testing.T) {
+	eventStore := newNativeTestSessionEventStore(t)
+	ctx := context.Background()
+
+	session, mainBranch, err := eventStore.CreateSession(ctx, sessionevent.CreateSessionParams{
+		ID:    "session-branch-switch",
+		Title: "Branch switch",
+	})
+	require.NoError(t, err)
+
+	mainEntries, err := eventStore.AppendEntries(ctx, []sessionevent.SessionEntry{
+		{
+			SessionID:  session.ID,
+			BranchID:   mainBranch.ID,
+			Kind:       sessionevent.EntryKindUserMessage,
+			Role:       "user",
+			SearchText: "shared root",
+			Payload:    map[string]any{"text": "shared root"},
+		},
+		{
+			SessionID:  session.ID,
+			BranchID:   mainBranch.ID,
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			SearchText: "shared assistant",
+			Payload:    map[string]any{"text": "shared assistant"},
+		},
+		{
+			SessionID:  session.ID,
+			BranchID:   mainBranch.ID,
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			SearchText: "main branch only",
+			Payload:    map[string]any{"text": "main branch only"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, mainEntries, 3)
+
+	altBranch, err := eventStore.ForkBranch(ctx, session.ID, mainEntries[1].ID, "alt-path", nil)
+	require.NoError(t, err)
+
+	_, err = eventStore.AppendEntries(ctx, []sessionevent.SessionEntry{
+		{
+			SessionID:  session.ID,
+			BranchID:   altBranch.ID,
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			SearchText: "alternate branch only",
+			Payload:    map[string]any{"text": "alternate branch only"},
+		},
+	})
+	require.NoError(t, err)
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		SessionID:         session.ID,
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(ctx, map[string]interface{}{
+		"task":              "Continue alternate branch",
+		"session_branch_id": altBranch.ID,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "Active branch: "+altBranch.ID)
+	assert.Contains(t, llm.prompts[0], "alternate branch only")
+	assert.NotContains(t, llm.prompts[0], "main branch only")
+
+	updatedSession, err := eventStore.GetSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, altBranch.ID, updatedSession.ActiveBranchID)
+
+	forkedHead, err := eventStore.GetBranchHead(ctx, session.ID, altBranch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, forkedHead)
+	lineage, err := eventStore.LoadLineage(ctx, session.ID, forkedHead.ID, sessionevent.LoadOptions{})
+	require.NoError(t, err)
+	assert.NotEmpty(t, lineage)
+	assert.NotContains(t, sessionEventPayloadTexts(lineage), "main branch only")
+
+	var loaded *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionLoaded {
+			loaded = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, loaded)
+	assert.Equal(t, "event_store", loaded.Data["source"])
+	assert.Equal(t, altBranch.ID, loaded.Data["branch_id"])
+}
+
+func TestAgent_Execute_ForksSessionBranchFromRequestedEntry(t *testing.T) {
+	eventStore := newNativeTestSessionEventStore(t)
+	ctx := context.Background()
+
+	session, mainBranch, err := eventStore.CreateSession(ctx, sessionevent.CreateSessionParams{
+		ID:    "session-fork-request",
+		Title: "Fork request",
+	})
+	require.NoError(t, err)
+
+	mainEntries, err := eventStore.AppendEntries(ctx, []sessionevent.SessionEntry{
+		{
+			SessionID:  session.ID,
+			BranchID:   mainBranch.ID,
+			Kind:       sessionevent.EntryKindUserMessage,
+			Role:       "user",
+			SearchText: "shared root",
+			Payload:    map[string]any{"text": "shared root"},
+		},
+		{
+			SessionID:  session.ID,
+			BranchID:   mainBranch.ID,
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			SearchText: "fork point",
+			Payload:    map[string]any{"text": "fork point"},
+		},
+		{
+			SessionID:  session.ID,
+			BranchID:   mainBranch.ID,
+			Kind:       sessionevent.EntryKindAssistantMessage,
+			Role:       "assistant",
+			SearchText: "main branch only",
+			Payload:    map[string]any{"text": "main branch only"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, mainEntries, 3)
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:          1,
+		SessionID:         session.ID,
+		SessionEventStore: eventStore,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = agent.Execute(ctx, map[string]interface{}{
+		"task":                       "Investigate forked branch",
+		"session_fork_from_entry_id": mainEntries[1].ID,
+		"session_branch_name":        "explore-fork",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "shared root")
+	assert.Contains(t, llm.prompts[0], "fork point")
+	assert.NotContains(t, llm.prompts[0], "main branch only")
+
+	updatedSession, err := eventStore.GetSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, mainBranch.ID, updatedSession.ActiveBranchID)
+
+	branches, err := eventStore.ListBranches(ctx, session.ID)
+	require.NoError(t, err)
+	require.Len(t, branches, 2)
+
+	var forked *sessionevent.SessionBranch
+	for i := range branches {
+		if branches[i].ID == updatedSession.ActiveBranchID {
+			forked = &branches[i]
+			break
+		}
+	}
+	require.NotNil(t, forked)
+	assert.Equal(t, "explore-fork", forked.Name)
+	assert.Equal(t, mainEntries[1].ID, forked.OriginEntryID)
+
+	forkedHead, err := eventStore.GetBranchHead(ctx, session.ID, forked.ID)
+	require.NoError(t, err)
+	require.NotNil(t, forkedHead)
+	lineage, err := eventStore.LoadLineage(ctx, session.ID, forkedHead.ID, sessionevent.LoadOptions{})
+	require.NoError(t, err)
+	assert.NotEmpty(t, lineage)
+	assert.NotContains(t, sessionEventPayloadTexts(lineage), "main branch only")
+	assert.Contains(t, sessionEventPayloadTexts(lineage), "shared root")
+
+	var loaded *agents.AgentEvent
+	for i := range events {
+		if events[i].Type == agents.EventSessionLoaded {
+			loaded = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, loaded)
+	assert.Equal(t, "event_store", loaded.Data["source"])
+	assert.Equal(t, mainEntries[1].ID, loaded.Data["forked_from_id"])
+	assert.Equal(t, forked.ID, loaded.Data["branch_id"])
+	assert.Equal(t, mainEntries[1].ID, loaded.Data["head_entry_id"])
+}
+
 func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPersistence(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	eventStore, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
@@ -694,6 +1014,24 @@ func TestEnsureSessionEventBranch_JoinsCreateAndRecoveryErrors(t *testing.T) {
 	assert.ErrorIs(t, err, createErr)
 	assert.ErrorIs(t, err, recoveryErr)
 	assert.Contains(t, err.Error(), "create session event branch recovery failed")
+}
+
+func TestResolveSessionEventBranch_DoesNotSwitchActiveBranchBeforeHeadLoads(t *testing.T) {
+	headErr := errors.New("head unavailable")
+	store := &stubSessionEventStore{
+		getBranchHeadErr: headErr,
+	}
+	agent := &Agent{
+		config: Config{
+			SessionBranchID: "branch-2",
+		},
+	}
+
+	_, err := agent.resolveSessionEventBranch(context.Background(), map[string]any{}, store, "session-1")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, headErr)
+	assert.Equal(t, 0, store.setActiveBranchCalls)
+	assert.Equal(t, "", store.setActiveBranchID)
 }
 
 func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
@@ -825,6 +1163,34 @@ func TestTurnBudgetReminder(t *testing.T) {
 	assert.Contains(t, turnBudgetReminder(5, 5), "Final turn")
 }
 
+func newNativeTestSessionEventStore(t *testing.T) *sessionevent.SQLiteStore {
+	t.Helper()
+
+	store, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, store.Close())
+	})
+	return store
+}
+
+func sessionEventPayloadTexts(entries []sessionevent.SessionEntry) []string {
+	texts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		for _, key := range []string{"text", "final_answer", "event", "observation_display", "observation"} {
+			text := fmt.Sprint(entry.Payload[key])
+			if text == "" || text == "<nil>" {
+				continue
+			}
+			texts = append(texts, text)
+		}
+		if entry.SearchText != "" {
+			texts = append(texts, entry.SearchText)
+		}
+	}
+	return texts
+}
+
 func noCallResult() map[string]any {
 	return map[string]any{
 		"content": "No content or function call received from model",
@@ -949,9 +1315,14 @@ func (m *nativeStubLLM) GenerateWithTools(ctx context.Context, messages []core.C
 }
 
 type stubSessionEventStore struct {
-	getSessionErrs   []error
-	getSessionIndex  int
-	createSessionErr error
+	getSessionErrs       []error
+	getSessionIndex      int
+	createSessionErr     error
+	getBranchHead        *sessionevent.SessionEntry
+	getBranchHeadErr     error
+	setActiveBranchErr   error
+	setActiveBranchID    string
+	setActiveBranchCalls int
 }
 
 func (s *stubSessionEventStore) CreateSession(context.Context, sessionevent.CreateSessionParams) (*sessionevent.Session, *sessionevent.SessionBranch, error) {
@@ -969,8 +1340,13 @@ func (s *stubSessionEventStore) AppendSummary(context.Context, sessionevent.Sess
 	return fmt.Errorf("unexpected AppendSummary call")
 }
 
-func (s *stubSessionEventStore) SetActiveBranch(context.Context, string, string) error {
-	return fmt.Errorf("unexpected SetActiveBranch call")
+func (s *stubSessionEventStore) SetActiveBranch(_ context.Context, _ string, branchID string) error {
+	s.setActiveBranchCalls++
+	s.setActiveBranchID = branchID
+	if s.setActiveBranchErr != nil {
+		return s.setActiveBranchErr
+	}
+	return nil
 }
 
 func (s *stubSessionEventStore) ForkBranch(context.Context, string, string, string, map[string]any) (*sessionevent.SessionBranch, error) {
@@ -997,7 +1373,14 @@ func (s *stubSessionEventStore) GetEntry(context.Context, string, string) (*sess
 }
 
 func (s *stubSessionEventStore) GetBranchHead(context.Context, string, string) (*sessionevent.SessionEntry, error) {
-	return nil, fmt.Errorf("unexpected GetBranchHead call")
+	if s.getBranchHeadErr != nil {
+		return nil, s.getBranchHeadErr
+	}
+	if s.getBranchHead != nil {
+		cloned := *s.getBranchHead
+		return &cloned, nil
+	}
+	return nil, nil
 }
 
 func (s *stubSessionEventStore) LoadLineage(context.Context, string, string, sessionevent.LoadOptions) ([]sessionevent.SessionEntry, error) {

@@ -203,6 +203,41 @@ func TestSQLiteStoreAppendSummaryAndForkBranch(t *testing.T) {
 	assert.Equal(t, forked.ID, updatedSession.ActiveBranchID)
 }
 
+func TestSQLiteStoreLoadLineageTraversesForkAncestorsWithoutSiblingTail(t *testing.T) {
+	t.Parallel()
+
+	store := newTestSQLiteStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	session, branch, err := store.CreateSession(ctx, CreateSessionParams{Title: "Fork ancestry"})
+	require.NoError(t, err)
+
+	mainEntries, err := store.AppendEntries(ctx, []SessionEntry{
+		{SessionID: session.ID, BranchID: branch.ID, Kind: EntryKindUserMessage, Role: "user", Payload: map[string]any{"text": "root"}},
+		{SessionID: session.ID, BranchID: branch.ID, Kind: EntryKindAssistantMessage, Role: "assistant", Payload: map[string]any{"text": "fork-point"}},
+		{SessionID: session.ID, BranchID: branch.ID, Kind: EntryKindAssistantMessage, Role: "assistant", Payload: map[string]any{"text": "main-only"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, mainEntries, 3)
+
+	forked, err := store.ForkBranch(ctx, session.ID, mainEntries[1].ID, "alt-path", nil)
+	require.NoError(t, err)
+
+	forkEntries, err := store.AppendEntries(ctx, []SessionEntry{
+		{SessionID: session.ID, BranchID: forked.ID, Kind: EntryKindAssistantMessage, Role: "assistant", Payload: map[string]any{"text": "fork-only"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, forkEntries, 1)
+
+	lineage, err := store.LoadLineage(ctx, session.ID, forkEntries[0].ID, LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, lineage, 3)
+	assert.Equal(t, "root", lineage[0].Payload["text"])
+	assert.Equal(t, "fork-point", lineage[1].Payload["text"])
+	assert.Equal(t, "fork-only", lineage[2].Payload["text"])
+}
+
 func TestSQLiteStoreReturnsInvalidInputForUnmarshalableMaps(t *testing.T) {
 	t.Parallel()
 

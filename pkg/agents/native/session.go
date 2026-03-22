@@ -15,19 +15,52 @@ import (
 )
 
 const (
-	defaultSessionRecallLimit    = 3
-	defaultSessionRecallMaxChars = 1200
-	maxSessionHighlights         = 3
-	maxSessionHighlightChars     = 160
-	maxSessionTaskChars          = 160
-	maxSessionAnswerChars        = 220
+	defaultSessionRecallLimit      = 3
+	defaultSessionRecallMaxChars   = 1200
+	defaultSessionEventEntryFactor = 4
+	maxSessionHighlights           = 3
+	maxSessionHighlightChars       = 160
+	maxSessionTaskChars            = 160
+	maxSessionAnswerChars          = 220
 )
+
+type sessionContext struct {
+	Recall            string
+	Source            string
+	RecordCount       int
+	EntryCount        int
+	SummaryCount      int
+	BranchID          string
+	HeadEntryID       string
+	ForkedFromEntryID string
+}
+
+type sessionEventBranchState struct {
+	BranchID          string
+	HeadEntryID       string
+	ForkedFromEntryID string
+}
 
 func (a *Agent) sessionID(input map[string]any) string {
 	if id := strings.TrimSpace(agentutil.StringValue(input["session_id"])); id != "" {
 		return id
 	}
 	return strings.TrimSpace(a.config.SessionID)
+}
+
+func (a *Agent) sessionBranchID(input map[string]any) string {
+	if id := strings.TrimSpace(agentutil.StringValue(input["session_branch_id"])); id != "" {
+		return id
+	}
+	return strings.TrimSpace(a.config.SessionBranchID)
+}
+
+func (a *Agent) sessionBranchName(input map[string]any) string {
+	return strings.TrimSpace(agentutil.StringValue(input["session_branch_name"]))
+}
+
+func (a *Agent) sessionForkFromEntryID(input map[string]any) string {
+	return strings.TrimSpace(agentutil.StringValue(input["session_fork_from_entry_id"]))
 }
 
 func (a *Agent) sessionStore() *agents.SessionStore {
@@ -44,17 +77,128 @@ func (a *Agent) sessionEventStore() sessionevent.SessionEventStore {
 	return a.sessionEvent
 }
 
-func (a *Agent) loadSessionContext(input map[string]any) ([]agents.SessionRecord, string, error) {
+func (a *Agent) loadSessionContext(ctx context.Context, input map[string]any) (sessionContext, error) {
 	sessionID := a.sessionID(input)
 	if sessionID == "" {
-		return nil, "", nil
+		return sessionContext{}, nil
+	}
+
+	if eventStore := a.sessionEventStore(); eventStore != nil {
+		loadedContext, err := a.loadSessionEventContext(ctx, input, eventStore, sessionID)
+		if err == nil {
+			return loadedContext, nil
+		}
+
+		explicitBranchRequest := a.sessionBranchID(input) != "" || a.sessionForkFromEntryID(input) != ""
+		if explicitBranchRequest || !isResourceNotFound(err) {
+			return sessionContext{}, err
+		}
 	}
 
 	records, err := a.sessionStore().Recent(sessionID, a.config.SessionRecallLimit)
 	if err != nil {
-		return nil, "", err
+		return sessionContext{}, err
 	}
-	return records, buildSessionRecall(records, a.config.SessionRecallMaxChars), nil
+	return sessionContext{
+		Recall:      buildSessionRecall(records, a.config.SessionRecallMaxChars),
+		Source:      "snapshot",
+		RecordCount: len(records),
+	}, nil
+}
+
+func (a *Agent) loadSessionEventContext(ctx context.Context, input map[string]any, store sessionevent.SessionEventStore, sessionID string) (sessionContext, error) {
+	branchState, err := a.resolveSessionEventBranch(ctx, input, store, sessionID)
+	if err != nil {
+		return sessionContext{}, err
+	}
+
+	result := sessionContext{
+		Source:            "event_store",
+		BranchID:          branchState.BranchID,
+		HeadEntryID:       branchState.HeadEntryID,
+		ForkedFromEntryID: branchState.ForkedFromEntryID,
+	}
+	if strings.TrimSpace(branchState.HeadEntryID) == "" {
+		return result, nil
+	}
+
+	lineageOpts := sessionevent.LoadOptions{
+		MaxEntries: maxSessionEventEntries(a.config.SessionRecallLimit),
+	}
+	entries, err := store.LoadLineage(ctx, sessionID, branchState.HeadEntryID, lineageOpts)
+	if err != nil {
+		return sessionContext{}, err
+	}
+
+	summaries, err := store.LoadSummaries(ctx, sessionID, branchState.BranchID, maxSessionEventSummaries(a.config.SessionRecallLimit))
+	if err != nil {
+		return sessionContext{}, err
+	}
+
+	result.EntryCount = len(entries)
+	result.SummaryCount = len(summaries)
+	result.Recall = buildSessionEventRecall(branchState.BranchID, summaries, entries, a.config.SessionRecallMaxChars)
+	return result, nil
+}
+
+func (a *Agent) resolveSessionEventBranch(ctx context.Context, input map[string]any, store sessionevent.SessionEventStore, sessionID string) (sessionEventBranchState, error) {
+	if forkFromID := a.sessionForkFromEntryID(input); forkFromID != "" {
+		forked, err := store.ForkBranch(ctx, sessionID, forkFromID, a.sessionBranchName(input), nil)
+		if err != nil {
+			return sessionEventBranchState{}, err
+		}
+		if err := store.SetActiveBranch(ctx, sessionID, forked.ID); err != nil {
+			return sessionEventBranchState{}, err
+		}
+		return sessionEventBranchState{
+			BranchID:          forked.ID,
+			HeadEntryID:       strings.TrimSpace(forked.HeadEntryID),
+			ForkedFromEntryID: forkFromID,
+		}, nil
+	}
+
+	if branchID := a.sessionBranchID(input); branchID != "" {
+		head, err := store.GetBranchHead(ctx, sessionID, branchID)
+		if err != nil {
+			return sessionEventBranchState{}, err
+		}
+		if err := store.SetActiveBranch(ctx, sessionID, branchID); err != nil {
+			return sessionEventBranchState{}, err
+		}
+		return sessionEventBranchState{
+			BranchID:    branchID,
+			HeadEntryID: sessionHeadEntryID(head),
+		}, nil
+	}
+
+	session, err := store.GetSession(ctx, sessionID)
+	if err != nil {
+		return sessionEventBranchState{}, err
+	}
+
+	branchID := strings.TrimSpace(session.ActiveBranchID)
+	if branchID == "" {
+		branches, err := store.ListBranches(ctx, sessionID)
+		if err != nil {
+			return sessionEventBranchState{}, err
+		}
+		if len(branches) == 0 {
+			return sessionEventBranchState{}, fmt.Errorf("session event store session %q has no branches", sessionID)
+		}
+		branchID = branches[0].ID
+		if err := store.SetActiveBranch(ctx, sessionID, branchID); err != nil {
+			return sessionEventBranchState{}, err
+		}
+	}
+
+	head, err := store.GetBranchHead(ctx, sessionID, branchID)
+	if err != nil {
+		return sessionEventBranchState{}, err
+	}
+	return sessionEventBranchState{
+		BranchID:    branchID,
+		HeadEntryID: sessionHeadEntryID(head),
+	}, nil
 }
 
 func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, trace *Trace) {
@@ -319,6 +463,131 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 	})
 
 	return entries
+}
+
+func sessionHeadEntryID(head *sessionevent.SessionEntry) string {
+	if head == nil {
+		return ""
+	}
+	return strings.TrimSpace(head.ID)
+}
+
+func maxSessionEventEntries(limit int) int {
+	if limit <= 0 {
+		limit = defaultSessionRecallLimit
+	}
+	return limit * defaultSessionEventEntryFactor
+}
+
+func maxSessionEventSummaries(limit int) int {
+	if limit <= 0 {
+		return defaultSessionRecallLimit
+	}
+	return limit
+}
+
+func buildSessionEventRecall(branchID string, summaries []sessionevent.SessionSummary, entries []sessionevent.SessionEntry, maxChars int) string {
+	if len(summaries) == 0 && len(entries) == 0 {
+		return ""
+	}
+	if maxChars <= 0 {
+		maxChars = defaultSessionRecallMaxChars
+	}
+
+	const footer = "Use this prior session context when it is relevant. Avoid repeating already completed work unless the new task requires it."
+
+	var builder strings.Builder
+	header := "Recent session branch context:\n"
+	builder.WriteString(header)
+	currentLen := len([]rune(header))
+	footerLen := len([]rune(footer))
+
+	if branchID = strings.TrimSpace(branchID); branchID != "" {
+		branchLine := fmt.Sprintf("Active branch: %s\n", branchID)
+		if currentLen+len([]rune(branchLine))+footerLen <= maxChars {
+			builder.WriteString(branchLine)
+			currentLen += len([]rune(branchLine))
+		}
+	}
+
+	if len(summaries) > 0 {
+		// Until sessionevent supports summary-aware lineage elision, summaries and raw
+		// entries may overlap in recall. Keep both for now so resume stays lossless.
+		summaryHeader := "Branch summaries:\n"
+		if currentLen+len([]rune(summaryHeader))+footerLen <= maxChars {
+			builder.WriteString(summaryHeader)
+			currentLen += len([]rune(summaryHeader))
+			for i := len(summaries) - 1; i >= 0; i-- {
+				summaryText := renderSessionEventSummary(summaries[i])
+				summaryLen := len([]rune(summaryText))
+				if currentLen+summaryLen+footerLen > maxChars {
+					break
+				}
+				builder.WriteString(summaryText)
+				currentLen += summaryLen
+			}
+		}
+	}
+
+	if len(entries) > 0 {
+		lineageHeader := "Branch lineage:\n"
+		if currentLen+len([]rune(lineageHeader))+footerLen <= maxChars {
+			builder.WriteString(lineageHeader)
+			currentLen += len([]rune(lineageHeader))
+			for i, entry := range entries {
+				entryText := renderSessionEventRecallEntry(i+1, entry)
+				entryLen := len([]rune(entryText))
+				if currentLen+entryLen+footerLen > maxChars {
+					break
+				}
+				builder.WriteString(entryText)
+				currentLen += entryLen
+			}
+		}
+	}
+
+	if currentLen+footerLen <= maxChars {
+		builder.WriteString(footer)
+		return builder.String()
+	}
+	return agentutil.TruncateString(builder.String(), maxChars)
+}
+
+func renderSessionEventSummary(summary sessionevent.SessionSummary) string {
+	return fmt.Sprintf("- %s\n", agentutil.TruncateString(strings.TrimSpace(summary.SummaryText), maxSessionAnswerChars))
+}
+
+func renderSessionEventRecallEntry(index int, entry sessionevent.SessionEntry) string {
+	switch entry.Kind {
+	case sessionevent.EntryKindUserMessage:
+		return fmt.Sprintf("%d. User: %s\n", index, agentutil.TruncateString(strings.TrimSpace(agentutil.StringValue(entry.Payload["text"])), maxSessionTaskChars))
+	case sessionevent.EntryKindAssistantMessage:
+		return fmt.Sprintf("%d. Assistant: %s\n", index, agentutil.TruncateString(strings.TrimSpace(agentutil.StringValue(entry.Payload["text"])), maxSessionAnswerChars))
+	case sessionevent.EntryKindToolCall:
+		return fmt.Sprintf("%d. Tool call %s\n", index, agentutil.TruncateString(strings.TrimSpace(entry.ToolName), maxSessionTaskChars))
+	case sessionevent.EntryKindToolResult:
+		prefix := fmt.Sprintf("%d. Tool result %s", index, agentutil.TruncateString(strings.TrimSpace(entry.ToolName), maxSessionTaskChars))
+		body := agentutil.StringValue(entry.Payload["observation_display"])
+		if strings.TrimSpace(body) == "" {
+			body = agentutil.StringValue(entry.Payload["observation"])
+		}
+		if entry.IsError {
+			return fmt.Sprintf("%s (error): %s\n", prefix, agentutil.TruncateString(strings.TrimSpace(body), maxSessionAnswerChars))
+		}
+		return fmt.Sprintf("%s: %s\n", prefix, agentutil.TruncateString(strings.TrimSpace(body), maxSessionAnswerChars))
+	case sessionevent.EntryKindSystemEvent:
+		if event := strings.TrimSpace(agentutil.StringValue(entry.Payload["event"])); event == "run_finished" {
+			if finalAnswer := strings.TrimSpace(agentutil.StringValue(entry.Payload["final_answer"])); finalAnswer != "" {
+				return fmt.Sprintf("%d. Final result: %s\n", index, agentutil.TruncateString(finalAnswer, maxSessionAnswerChars))
+			}
+			if errText := strings.TrimSpace(agentutil.StringValue(entry.Payload["error"])); errText != "" {
+				return fmt.Sprintf("%d. Run error: %s\n", index, agentutil.TruncateString(errText, maxSessionAnswerChars))
+			}
+		}
+		return fmt.Sprintf("%d. System event: %s\n", index, agentutil.TruncateString(strings.TrimSpace(agentutil.StringValue(entry.Payload["event"])), maxSessionAnswerChars))
+	default:
+		return fmt.Sprintf("%d. %s\n", index, agentutil.TruncateString(strings.TrimSpace(entry.SearchText), maxSessionAnswerChars))
+	}
 }
 
 func isResourceNotFound(err error) bool {
