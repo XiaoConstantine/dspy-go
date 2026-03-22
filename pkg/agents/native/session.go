@@ -158,11 +158,11 @@ func (a *Agent) resolveSessionEventBranch(ctx context.Context, input map[string]
 	}
 
 	if branchID := a.sessionBranchID(input); branchID != "" {
-		if err := store.SetActiveBranch(ctx, sessionID, branchID); err != nil {
-			return sessionEventBranchState{}, err
-		}
 		head, err := store.GetBranchHead(ctx, sessionID, branchID)
 		if err != nil {
+			return sessionEventBranchState{}, err
+		}
+		if err := store.SetActiveBranch(ctx, sessionID, branchID); err != nil {
 			return sessionEventBranchState{}, err
 		}
 		return sessionEventBranchState{
@@ -511,6 +511,8 @@ func buildSessionEventRecall(branchID string, summaries []sessionevent.SessionSu
 	}
 
 	if len(summaries) > 0 {
+		// Until sessionevent supports summary-aware lineage elision, summaries and raw
+		// entries may overlap in recall. Keep both for now so resume stays lossless.
 		summaryHeader := "Branch summaries:\n"
 		if currentLen+len([]rune(summaryHeader))+footerLen <= maxChars {
 			builder.WriteString(summaryHeader)

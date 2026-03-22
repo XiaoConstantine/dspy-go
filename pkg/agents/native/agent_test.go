@@ -1016,6 +1016,24 @@ func TestEnsureSessionEventBranch_JoinsCreateAndRecoveryErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "create session event branch recovery failed")
 }
 
+func TestResolveSessionEventBranch_DoesNotSwitchActiveBranchBeforeHeadLoads(t *testing.T) {
+	headErr := errors.New("head unavailable")
+	store := &stubSessionEventStore{
+		getBranchHeadErr: headErr,
+	}
+	agent := &Agent{
+		config: Config{
+			SessionBranchID: "branch-2",
+		},
+	}
+
+	_, err := agent.resolveSessionEventBranch(context.Background(), map[string]any{}, store, "session-1")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, headErr)
+	assert.Equal(t, 0, store.setActiveBranchCalls)
+	assert.Equal(t, "", store.setActiveBranchID)
+}
+
 func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
 	memory := agents.NewInMemoryStore()
 	llm := &stubLLM{
@@ -1297,9 +1315,14 @@ func (m *nativeStubLLM) GenerateWithTools(ctx context.Context, messages []core.C
 }
 
 type stubSessionEventStore struct {
-	getSessionErrs   []error
-	getSessionIndex  int
-	createSessionErr error
+	getSessionErrs       []error
+	getSessionIndex      int
+	createSessionErr     error
+	getBranchHead        *sessionevent.SessionEntry
+	getBranchHeadErr     error
+	setActiveBranchErr   error
+	setActiveBranchID    string
+	setActiveBranchCalls int
 }
 
 func (s *stubSessionEventStore) CreateSession(context.Context, sessionevent.CreateSessionParams) (*sessionevent.Session, *sessionevent.SessionBranch, error) {
@@ -1317,8 +1340,13 @@ func (s *stubSessionEventStore) AppendSummary(context.Context, sessionevent.Sess
 	return fmt.Errorf("unexpected AppendSummary call")
 }
 
-func (s *stubSessionEventStore) SetActiveBranch(context.Context, string, string) error {
-	return fmt.Errorf("unexpected SetActiveBranch call")
+func (s *stubSessionEventStore) SetActiveBranch(_ context.Context, _ string, branchID string) error {
+	s.setActiveBranchCalls++
+	s.setActiveBranchID = branchID
+	if s.setActiveBranchErr != nil {
+		return s.setActiveBranchErr
+	}
+	return nil
 }
 
 func (s *stubSessionEventStore) ForkBranch(context.Context, string, string, string, map[string]any) (*sessionevent.SessionBranch, error) {
@@ -1345,7 +1373,14 @@ func (s *stubSessionEventStore) GetEntry(context.Context, string, string) (*sess
 }
 
 func (s *stubSessionEventStore) GetBranchHead(context.Context, string, string) (*sessionevent.SessionEntry, error) {
-	return nil, fmt.Errorf("unexpected GetBranchHead call")
+	if s.getBranchHeadErr != nil {
+		return nil, s.getBranchHeadErr
+	}
+	if s.getBranchHead != nil {
+		cloned := *s.getBranchHead
+		return &cloned, nil
+	}
+	return nil, nil
 }
 
 func (s *stubSessionEventStore) LoadLineage(context.Context, string, string, sessionevent.LoadOptions) ([]sessionevent.SessionEntry, error) {
