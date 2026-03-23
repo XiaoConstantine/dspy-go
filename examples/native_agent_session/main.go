@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +16,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	filetools "github.com/XiaoConstantine/dspy-go/pkg/tools/files"
 )
 
 const (
@@ -26,17 +25,15 @@ const (
 	defaultDBPath       = "./tmp/native-agent-session/session.db"
 	defaultWorkspaceDir = "./tmp/native-agent-session/workspace"
 	defaultTaskTimeout  = 2 * time.Minute
-	modelOutputLimit    = 1600
-	displayOutputLimit  = 6000
 )
 
 const exampleSystemPrompt = `You are a pragmatic native tool-calling assistant working inside a local workspace.
 
 Use the available tools to inspect files, edit files, and create new files.
 Prefer session recall when it already answers the question from previous runs.
-Use list_files before making assumptions about the workspace layout.
-Use edit_file for targeted changes when a file already exists.
-Use write_file when creating a new file or replacing the full contents intentionally.
+Use ls before making assumptions about the workspace layout.
+Use edit for targeted changes when a file already exists.
+Use write when creating a new file or replacing the full contents intentionally.
 Call the finish tool once the task is complete.`
 
 var errUsage = errors.New("usage")
@@ -124,11 +121,13 @@ func run() error {
 		}
 	}()
 
-	resolver, err := newWorkspaceResolver(workspaceDir)
+	toolset, err := filetools.NewToolset(filetools.Config{
+		Root: workspaceDir,
+	})
 	if err != nil {
 		return fmt.Errorf("resolve workspace %q: %w", workspaceDir, err)
 	}
-	if err := ensureWorkspaceSeed(resolver.root); err != nil {
+	if err := ensureWorkspaceSeed(toolset.Root()); err != nil {
 		return fmt.Errorf("prepare workspace seed: %w", err)
 	}
 
@@ -148,7 +147,7 @@ func run() error {
 		return fmt.Errorf("create native agent: %w", err)
 	}
 
-	for _, tool := range newWorkspaceTools(resolver) {
+	for _, tool := range toolset.Tools() {
 		if err := agent.RegisterTool(tool); err != nil {
 			return fmt.Errorf("register tool %q: %w", tool.Name(), err)
 		}
@@ -159,7 +158,7 @@ func run() error {
 	fmt.Printf("  provider: %s\n", llm.ProviderName())
 	fmt.Printf("  session: %s\n", sessionID)
 	fmt.Printf("  session_db: %s\n", filepath.Clean(sessionDB))
-	fmt.Printf("  workspace: %s\n\n", resolver.root)
+	fmt.Printf("  workspace: %s\n\n", toolset.Root())
 
 	result, err := agent.Execute(ctx, map[string]any{
 		"task": task,
@@ -215,10 +214,10 @@ func buildExampleTask(task string) string {
 
 Rules:
 - Start with a tool call. Do not begin with a plain-text answer.
-- Use list_files before assuming the workspace layout.
-- Use read_file to inspect existing files before editing them.
-- Use write_file when creating a new file.
-- Use edit_file for targeted replacements in an existing file.
+- Use ls before assuming the workspace layout.
+- Use read to inspect existing files before editing them.
+- Use write when creating a new file.
+- Use edit for targeted replacements in an existing file.
 - If session recall already answers the question, call Finish with that answer instead of narrating first.
 
 Task:
@@ -318,95 +317,6 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
-type workspaceResolver struct {
-	root string
-}
-
-func newWorkspaceResolver(root string) (workspaceResolver, error) {
-	if strings.TrimSpace(root) == "" {
-		root = defaultWorkspaceDir
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return workspaceResolver{}, err
-	}
-	if err := os.MkdirAll(absRoot, 0o755); err != nil {
-		return workspaceResolver{}, err
-	}
-	return workspaceResolver{root: filepath.Clean(absRoot)}, nil
-}
-
-func (r workspaceResolver) resolveSecurePath(input string) (string, error) {
-	raw := strings.TrimSpace(input)
-	if raw == "" || raw == "." {
-		return r.root, nil
-	}
-
-	// This is demo-grade confinement for the example: it resolves existing
-	// symlinks and rejects paths outside the workspace root, but it does not
-	// eliminate TOCTOU races between path resolution and later file operations.
-	target := filepath.Join(r.root, filepath.Clean(raw))
-	resolved, err := resolvePathThroughExistingSymlinks(target)
-	if err != nil {
-		return "", fmt.Errorf("resolve path %q: %w", input, err)
-	}
-	return r.ensureWithinRoot(resolved, input)
-}
-
-func (r workspaceResolver) ensureWithinRoot(target, original string) (string, error) {
-	absTarget, err := filepath.Abs(target)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(r.root, absTarget)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q escapes workspace root", original)
-	}
-	return filepath.Clean(absTarget), nil
-}
-
-func (r workspaceResolver) displayPath(target string) string {
-	rel, err := filepath.Rel(r.root, target)
-	if err != nil || rel == "." {
-		return "."
-	}
-	return filepath.ToSlash(rel)
-}
-
-func resolvePathThroughExistingSymlinks(target string) (string, error) {
-	current := filepath.Clean(target)
-	missing := make([]string, 0, 4)
-
-	for {
-		_, err := os.Lstat(current)
-		if err == nil {
-			resolved, err := filepath.EvalSymlinks(current)
-			if err != nil {
-				return "", err
-			}
-			current = resolved
-			break
-		}
-		if !os.IsNotExist(err) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		missing = append(missing, filepath.Base(current))
-		current = parent
-	}
-
-	for i := len(missing) - 1; i >= 0; i-- {
-		current = filepath.Join(current, missing[i])
-	}
-	return filepath.Clean(current), nil
-}
-
 func ensureWorkspaceSeed(root string) error {
 	seedPath := filepath.Join(root, "project_brief.md")
 	if _, err := os.Stat(seedPath); err == nil {
@@ -431,339 +341,6 @@ Known risks:
 `) + "\n"
 
 	return os.WriteFile(seedPath, []byte(content), 0o644)
-}
-
-func newWorkspaceTools(resolver workspaceResolver) []core.Tool {
-	return []core.Tool{
-		newWorkspaceTool(
-			"list_files",
-			"List files and directories within the workspace.",
-			models.InputSchema{
-				Type: "object",
-				Properties: map[string]models.ParameterSchema{
-					"path": {
-						Type:        "string",
-						Description: "Relative path to list. Defaults to the workspace root.",
-					},
-					"recursive": {
-						Type:        "boolean",
-						Description: "Whether to recursively list descendants.",
-					},
-				},
-			},
-			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := resolver.resolveSecurePath(stringValue(params["path"]))
-				if err != nil {
-					return errorToolResult(err.Error()), nil
-				}
-				recursive := boolValue(params["recursive"])
-				entries, err := listWorkspaceEntries(targetPath, resolver.root, recursive)
-				if err != nil {
-					return errorToolResult(err.Error()), nil
-				}
-				text := strings.Join(entries, "\n")
-				if text == "" {
-					text = "(empty)"
-				}
-				return successToolResult(
-					truncateRunes(text, modelOutputLimit),
-					truncateRunes(text, displayOutputLimit),
-					map[string]any{"path": resolver.displayPath(targetPath), "entry_count": len(entries)},
-				), nil
-			},
-		),
-		newWorkspaceTool(
-			"read_file",
-			"Read a UTF-8 text file inside the workspace.",
-			models.InputSchema{
-				Type: "object",
-				Properties: map[string]models.ParameterSchema{
-					"path": {
-						Type:        "string",
-						Description: "Relative file path to read.",
-						Required:    true,
-					},
-				},
-			},
-			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := resolver.resolveSecurePath(stringValue(params["path"]))
-				if err != nil {
-					return errorToolResult(err.Error()), nil
-				}
-				data, err := os.ReadFile(targetPath)
-				if err != nil {
-					return errorToolResult(fmt.Sprintf("read file: %v", err)), nil
-				}
-				content := string(data)
-				return successToolResult(
-					truncateRunes(content, modelOutputLimit),
-					truncateRunes(content, displayOutputLimit),
-					map[string]any{"path": resolver.displayPath(targetPath), "bytes": len(data)},
-				), nil
-			},
-		),
-		newWorkspaceTool(
-			"write_file",
-			"Write a UTF-8 text file inside the workspace, creating parent directories when needed.",
-			models.InputSchema{
-				Type: "object",
-				Properties: map[string]models.ParameterSchema{
-					"path": {
-						Type:        "string",
-						Description: "Relative file path to write.",
-						Required:    true,
-					},
-					"content": {
-						Type:        "string",
-						Description: "New file contents.",
-						Required:    true,
-					},
-				},
-			},
-			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := resolver.resolveSecurePath(stringValue(params["path"]))
-				if err != nil {
-					return errorToolResult(err.Error()), nil
-				}
-				content := stringValue(params["content"])
-				if content == "" {
-					return errorToolResult("content is required"), nil
-				}
-				if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-					return errorToolResult(fmt.Sprintf("create parent directories: %v", err)), nil
-				}
-				if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
-					return errorToolResult(fmt.Sprintf("write file: %v", err)), nil
-				}
-				message := fmt.Sprintf("wrote %d bytes to %s", len(content), resolver.displayPath(targetPath))
-				return successToolResult(message, message, map[string]any{"path": resolver.displayPath(targetPath), "bytes": len(content)}), nil
-			},
-		),
-		newWorkspaceTool(
-			"edit_file",
-			"Edit an existing UTF-8 text file by replacing exact text.",
-			models.InputSchema{
-				Type: "object",
-				Properties: map[string]models.ParameterSchema{
-					"path": {
-						Type:        "string",
-						Description: "Relative file path to edit.",
-						Required:    true,
-					},
-					"old_text": {
-						Type:        "string",
-						Description: "Exact existing text to replace.",
-						Required:    true,
-					},
-					"new_text": {
-						Type:        "string",
-						Description: "Replacement text.",
-						Required:    true,
-					},
-					"replace_all": {
-						Type:        "boolean",
-						Description: "Replace every occurrence instead of only the first match.",
-					},
-				},
-			},
-			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := resolver.resolveSecurePath(stringValue(params["path"]))
-				if err != nil {
-					return errorToolResult(err.Error()), nil
-				}
-				oldText := stringValue(params["old_text"])
-				if oldText == "" {
-					return errorToolResult("old_text is required"), nil
-				}
-				newText := stringValue(params["new_text"])
-				data, err := os.ReadFile(targetPath)
-				if err != nil {
-					return errorToolResult(fmt.Sprintf("read file: %v", err)), nil
-				}
-				content := string(data)
-				if !strings.Contains(content, oldText) {
-					return errorToolResult("old_text was not found in the target file"), nil
-				}
-
-				replaceAll := boolValue(params["replace_all"])
-				var updated string
-				replacements := 1
-				if replaceAll {
-					replacements = strings.Count(content, oldText)
-					updated = strings.ReplaceAll(content, oldText, newText)
-				} else {
-					updated = strings.Replace(content, oldText, newText, 1)
-				}
-
-				if err := os.WriteFile(targetPath, []byte(updated), 0o644); err != nil {
-					return errorToolResult(fmt.Sprintf("write file: %v", err)), nil
-				}
-
-				message := fmt.Sprintf("edited %s with %d replacement(s)", resolver.displayPath(targetPath), replacements)
-				return successToolResult(message, message, map[string]any{
-					"path":          resolver.displayPath(targetPath),
-					"replacements":  replacements,
-					"replace_all":   replaceAll,
-					"old_text_size": len(oldText),
-					"new_text_size": len(newText),
-				}), nil
-			},
-		),
-	}
-}
-
-type workspaceTool struct {
-	name        string
-	description string
-	schema      models.InputSchema
-	run         func(context.Context, map[string]any) (core.ToolResult, error)
-}
-
-func newWorkspaceTool(name, description string, schema models.InputSchema, run func(context.Context, map[string]any) (core.ToolResult, error)) *workspaceTool {
-	return &workspaceTool{
-		name:        name,
-		description: description,
-		schema:      schema,
-		run:         run,
-	}
-}
-
-func (t *workspaceTool) Name() string {
-	return t.name
-}
-
-func (t *workspaceTool) Description() string {
-	return t.description
-}
-
-func (t *workspaceTool) Metadata() *core.ToolMetadata {
-	return &core.ToolMetadata{
-		Name:         t.name,
-		Description:  t.description,
-		InputSchema:  t.schema,
-		Capabilities: []string{"workspace", "files"},
-		Version:      "1.0.0",
-	}
-}
-
-func (t *workspaceTool) CanHandle(_ context.Context, intent string) bool {
-	intent = strings.ToLower(intent)
-	return strings.Contains(intent, "file") || strings.Contains(intent, "workspace") || strings.Contains(intent, "edit") || strings.Contains(intent, "read") || strings.Contains(intent, "write")
-}
-
-func (t *workspaceTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
-	return t.run(ctx, params)
-}
-
-func (t *workspaceTool) Validate(params map[string]any) error {
-	for name, property := range t.schema.Properties {
-		if property.Required && strings.TrimSpace(stringValue(params[name])) == "" {
-			return fmt.Errorf("%s is required", name)
-		}
-	}
-	return nil
-}
-
-func (t *workspaceTool) InputSchema() models.InputSchema {
-	return t.schema
-}
-
-func (t *workspaceTool) CloneTool() core.Tool {
-	if t == nil {
-		return nil
-	}
-	cloned := *t
-	return &cloned
-}
-
-func successToolResult(modelText, displayText string, details map[string]any) core.ToolResult {
-	if strings.TrimSpace(displayText) == "" {
-		displayText = modelText
-	}
-	return core.ToolResult{
-		Data: displayText,
-		Metadata: map[string]any{
-			core.ToolResultModelTextMeta:   modelText,
-			core.ToolResultDisplayTextMeta: displayText,
-			core.ToolResultIsErrorMeta:     false,
-		},
-		Annotations: map[string]any{
-			core.ToolResultDetailsAnnotation: details,
-		},
-	}
-}
-
-func errorToolResult(message string) core.ToolResult {
-	return core.ToolResult{
-		Data: message,
-		Metadata: map[string]any{
-			core.ToolResultModelTextMeta:   message,
-			core.ToolResultDisplayTextMeta: message,
-			core.ToolResultIsErrorMeta:     true,
-		},
-		Annotations: map[string]any{
-			core.ToolResultDetailsAnnotation: map[string]any{"error": message},
-		},
-	}
-}
-
-func listWorkspaceEntries(targetPath, workspaceRoot string, recursive bool) ([]string, error) {
-	if recursive {
-		entries := make([]string, 0, 16)
-		err := filepath.WalkDir(targetPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, relErr := filepath.Rel(workspaceRoot, path)
-			if relErr != nil {
-				return relErr
-			}
-			if rel == "." {
-				entries = append(entries, ".")
-				return nil
-			}
-			label := filepath.ToSlash(rel)
-			if d.IsDir() {
-				label += "/"
-			}
-			entries = append(entries, label)
-			return nil
-		})
-		return entries, err
-	}
-
-	dirEntries, err := os.ReadDir(targetPath)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]string, 0, len(dirEntries))
-	for _, entry := range dirEntries {
-		childPath := filepath.Join(targetPath, entry.Name())
-		rel, relErr := filepath.Rel(workspaceRoot, childPath)
-		if relErr != nil {
-			return nil, relErr
-		}
-		label := filepath.ToSlash(rel)
-		if entry.IsDir() {
-			label += "/"
-		}
-		entries = append(entries, label)
-	}
-	return entries, nil
-}
-
-func truncateRunes(text string, limit int) string {
-	if limit <= 0 {
-		return ""
-	}
-	runes := []rune(strings.TrimSpace(text))
-	if len(runes) <= limit {
-		return string(runes)
-	}
-	if limit <= 3 {
-		return string(runes[:limit])
-	}
-	return string(runes[:limit-3]) + "..."
 }
 
 func stringValue(value any) string {
