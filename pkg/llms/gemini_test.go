@@ -628,22 +628,25 @@ func TestConstructRequestURL(t *testing.T) {
 func TestGeminiLLM_GenerateWithFunctions(t *testing.T) {
 	// Setup test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Read request body to verify function declarations
-		body, err := io.ReadAll(r.Body)
+		var reqBody geminiRequest
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		require.NoError(t, err)
 
-		// Check if body contains function_declarations
-		bodyStr := string(body)
-		if strings.Contains(bodyStr, "function_declarations") {
+		if len(reqBody.Tools) > 0 {
+			require.NotNil(t, reqBody.ToolConfig)
+			require.NotNil(t, reqBody.ToolConfig.FunctionCallingConfig)
+			assert.Equal(t, "ANY", reqBody.ToolConfig.FunctionCallingConfig.Mode)
+			assert.Equal(t, []string{"get_weather"}, reqBody.ToolConfig.FunctionCallingConfig.AllowedFunctionNames)
+
 			// Respond with function call
 			w.WriteHeader(http.StatusOK)
 			if _, err := w.Write([]byte(`{
 				"candidates": [{
 					"content": {
 						"parts": [{
-							"function_call": {
+							"functionCall": {
 								"name": "get_weather",
-								"arguments": {
+								"args": {
 									"location": "New York",
 									"unit": "celsius"
 								}
@@ -809,6 +812,10 @@ func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reqBody.GenerationConfig.ThinkingConfig)
 		assert.True(t, reqBody.GenerationConfig.ThinkingConfig.IncludeThoughts)
+		require.NotNil(t, reqBody.ToolConfig)
+		require.NotNil(t, reqBody.ToolConfig.FunctionCallingConfig)
+		assert.Equal(t, "ANY", reqBody.ToolConfig.FunctionCallingConfig.Mode)
+		assert.Equal(t, []string{"search"}, reqBody.ToolConfig.FunctionCallingConfig.AllowedFunctionNames)
 		require.Len(t, reqBody.Contents, 2)
 		require.Len(t, reqBody.Contents[1].Parts, 1)
 		require.NotNil(t, reqBody.Contents[1].Parts[0].FunctionResponse)
@@ -825,9 +832,9 @@ func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 							"thoughtSignature": "sig-thought"
 						},
 						{
-							"function_call": {
+							"functionCall": {
 								"name": "search",
-								"arguments": {"query": "gemini"}
+								"args": {"query": "gemini"}
 							},
 							"thought": true,
 							"thoughtSignature": "sig-call"
@@ -1247,8 +1254,8 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 
 						if ok && len(tools) > 0 {
 							tool := tools[0].(map[string]interface{})
-							functionDecls, ok := tool["function_declarations"].([]interface{})
-							assert.True(t, ok, "Tool should include function_declarations")
+							functionDecls, ok := tool["functionDeclarations"].([]interface{})
+							assert.True(t, ok, "Tool should include functionDeclarations")
 							assert.True(t, len(functionDecls) > 0, "Should have at least one function declaration")
 						}
 					}
@@ -1331,9 +1338,9 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 				"candidates": [{
 					"content": {
 						"parts": [{
-							"function_call": {
+							"functionCall": {
 								"name": "get_weather",
-								"arguments": {
+								"args": {
 									"location": "New York",
 									"unit": "celsius"
 								}
@@ -1364,9 +1371,9 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 								"text": "I'll get the weather for you"
 							},
 							{
-								"function_call": {
+								"functionCall": {
 									"name": "get_weather",
-									"arguments": {
+									"args": {
 										"location": "London",
 										"unit": "fahrenheit"
 									}
@@ -1514,9 +1521,9 @@ func TestGeminiLLM_GenerateWithFunctions_OptionsHandling(t *testing.T) {
 			"candidates": [{
 				"content": {
 					"parts": [{
-						"function_call": {
+						"functionCall": {
 							"name": "test_function",
-							"arguments": {"test": "value"}
+							"args": {"test": "value"}
 						}
 					}]
 				}

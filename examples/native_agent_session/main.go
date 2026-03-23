@@ -63,6 +63,7 @@ func run() error {
 		branchID     string
 		forkName     string
 		activateFork bool
+		reset        bool
 		showState    bool
 		verbose      bool
 		maxTurns     int
@@ -79,6 +80,7 @@ func run() error {
 	flag.StringVar(&branchID, "branch", "", "Branch ID to resume explicitly before this run")
 	flag.StringVar(&forkName, "fork-name", "", "Fork the active branch after the run using this branch name")
 	flag.BoolVar(&activateFork, "activate-fork", true, "When forking after the run, make the new branch active")
+	flag.BoolVar(&reset, "reset", false, "Remove the session database and workspace before running for a cold-start demo")
 	flag.BoolVar(&showState, "show-state", true, "Print session and branch state after the run")
 	flag.BoolVar(&verbose, "verbose", false, "Print selected native-agent lifecycle events")
 	flag.IntVar(&maxTurns, "max-turns", 12, "Maximum tool-calling turns for the run")
@@ -93,6 +95,7 @@ func run() error {
 	if task == "" {
 		return errUsage
 	}
+	task = buildExampleTask(task)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -101,6 +104,14 @@ func run() error {
 	llm, err := llms.NewLLM(strings.TrimSpace(apiKey), core.ModelID(strings.TrimSpace(model)))
 	if err != nil {
 		return fmt.Errorf("create llm for model %q: %v\nHint: pass -api-key or configure credentials for the selected provider in the environment", model, err)
+	}
+
+	if reset {
+		if err := resetExampleState(sessionDB, workspaceDir); err != nil {
+			return fmt.Errorf("reset example state: %w", err)
+		}
+	} else if reusingExistingState(sessionDB, workspaceDir) {
+		fmt.Printf("Reusing existing session/workspace state. Use -reset for a cold-start run.\n\n")
 	}
 
 	store, err := sessionevent.NewSQLiteStore(sessionDB)
@@ -122,15 +133,16 @@ func run() error {
 	}
 
 	agent, err := native.NewAgent(llm, native.Config{
-		MaxTurns:              maxTurns,
-		Temperature:           temperature,
-		SystemPrompt:          exampleSystemPrompt,
-		SessionID:             sessionID,
-		SessionBranchID:       strings.TrimSpace(branchID),
-		SessionRecallLimit:    4,
-		SessionRecallMaxChars: 1800,
-		SessionEventStore:     store,
-		OnEvent:               makeEventPrinter(verbose),
+		MaxTurns:                      maxTurns,
+		MaxConsecutiveNoCallResponses: 6,
+		Temperature:                   temperature,
+		SystemPrompt:                  exampleSystemPrompt,
+		SessionID:                     sessionID,
+		SessionBranchID:               strings.TrimSpace(branchID),
+		SessionRecallLimit:            4,
+		SessionRecallMaxChars:         1800,
+		SessionEventStore:             store,
+		OnEvent:                       makeEventPrinter(verbose),
 	})
 	if err != nil {
 		return fmt.Errorf("create native agent: %w", err)
@@ -192,9 +204,25 @@ func run() error {
 
 func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage:\n")
-	fmt.Fprintf(w, "  go run ./examples/native_agent_session -task \"Read project_brief.md, create rollout_notes.md with a short rollout plan, then finish.\"\n")
+	fmt.Fprintf(w, "  go run ./examples/native_agent_session -reset -task \"Read project_brief.md, create rollout_notes.md with a short rollout plan, then finish.\"\n")
 	fmt.Fprintf(w, "  go run ./examples/native_agent_session -task \"Edit rollout_notes.md to add a rollback note, then finish.\"\n")
 	fmt.Fprintf(w, "  go run ./examples/native_agent_session -task \"What file did you create in the previous run? Answer from session recall, then finish.\"\n")
+}
+
+func buildExampleTask(task string) string {
+	task = strings.TrimSpace(task)
+	return fmt.Sprintf(`Complete the task using tools.
+
+Rules:
+- Start with a tool call. Do not begin with a plain-text answer.
+- Use list_files before assuming the workspace layout.
+- Use read_file to inspect existing files before editing them.
+- Use write_file when creating a new file.
+- Use edit_file for targeted replacements in an existing file.
+- If session recall already answers the question, call Finish with that answer instead of narrating first.
+
+Task:
+%s`, task)
 }
 
 func printSessionState(ctx context.Context, agent *native.Agent, sessionID string) error {
@@ -261,6 +289,33 @@ func makeEventPrinter(verbose bool) func(agents.AgentEvent) {
 			)
 		}
 	}
+}
+
+func reusingExistingState(sessionDB, workspaceDir string) bool {
+	if pathExists(sessionDB) {
+		return true
+	}
+	if pathExists(workspaceDir) {
+		return true
+	}
+	return false
+}
+
+func resetExampleState(sessionDB, workspaceDir string) error {
+	if err := os.RemoveAll(filepath.Clean(workspaceDir)); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(filepath.Clean(sessionDB) + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(filepath.Clean(path))
+	return err == nil
 }
 
 type workspaceResolver struct {

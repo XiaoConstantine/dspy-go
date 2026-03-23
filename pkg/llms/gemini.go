@@ -31,11 +31,21 @@ type geminiRequest struct {
 	Contents         []geminiContent        `json:"contents"`
 	GenerationConfig geminiGenerationConfig `json:"generationConfig,omitempty"`
 	Tools            []geminiTool           `json:"tools,omitempty"`
+	ToolConfig       *geminiToolConfig      `json:"toolConfig,omitempty"`
 }
 
 // Add these new types to support function calling.
 type geminiTool struct {
-	FunctionDeclarations []geminiFunctionDeclaration `json:"function_declarations"`
+	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations"`
+}
+
+type geminiToolConfig struct {
+	FunctionCallingConfig *geminiFunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+}
+
+type geminiFunctionCallingConfig struct {
+	Mode                 string   `json:"mode,omitempty"`
+	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
 type geminiFunctionDeclaration struct {
@@ -50,10 +60,10 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text             string                      `json:"text,omitempty"`
-	InlineData       *geminiInlineData           `json:"inline_data,omitempty"`
-	FileData         *geminiFileData             `json:"file_data,omitempty"`
-	FunctionCall     *geminiFunctionCall         `json:"function_call,omitempty"`
-	FunctionResponse *geminiFunctionResponsePart `json:"function_response,omitempty"`
+	InlineData       *geminiInlineData           `json:"inlineData,omitempty"`
+	FileData         *geminiFileData             `json:"fileData,omitempty"`
+	FunctionCall     *geminiFunctionCall         `json:"functionCall,omitempty"`
+	FunctionResponse *geminiFunctionResponsePart `json:"functionResponse,omitempty"`
 	Thought          bool                        `json:"thought,omitempty"`
 	ThoughtSignature string                      `json:"thoughtSignature,omitempty"`
 }
@@ -65,14 +75,14 @@ type geminiFunctionResponsePart struct {
 
 // geminiInlineData represents inline binary data (base64 encoded).
 type geminiInlineData struct {
-	MimeType string `json:"mime_type"`
+	MimeType string `json:"mimeType"`
 	Data     string `json:"data"` // base64 encoded
 }
 
 // geminiFileData represents a file uploaded to Gemini (for large files).
 type geminiFileData struct {
-	MimeType string `json:"mime_type"`
-	FileURI  string `json:"file_uri"`
+	MimeType string `json:"mimeType"`
+	FileURI  string `json:"fileUri"`
 }
 
 type geminiGenerationConfig struct {
@@ -119,7 +129,7 @@ type geminiFunctionCallResponse struct {
 }
 type geminiFunctionCall struct {
 	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
+	Arguments map[string]interface{} `json:"args"`
 }
 
 // Request and response structures for Gemini embeddings.
@@ -698,6 +708,7 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 				FunctionDeclarations: functionDeclarations,
 			},
 		},
+		ToolConfig:       requiredGeminiToolConfig(functionDeclarations),
 		GenerationConfig: g.buildGenerationConfig(opts),
 	}
 	requestJSON, _ := json.MarshalIndent(reqBody, "", "  ")
@@ -797,6 +808,7 @@ func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatM
 	}
 	if len(functionDeclarations) > 0 {
 		reqBody.Tools = []geminiTool{{FunctionDeclarations: functionDeclarations}}
+		reqBody.ToolConfig = requiredGeminiToolConfig(functionDeclarations)
 	}
 
 	requestJSON, _ := json.MarshalIndent(reqBody, "", "  ")
@@ -856,6 +868,29 @@ func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatM
 	}
 
 	return result, nil
+}
+
+func requiredGeminiToolConfig(functions []geminiFunctionDeclaration) *geminiToolConfig {
+	if len(functions) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(functions))
+	for _, function := range functions {
+		if strings.TrimSpace(function.Name) != "" {
+			names = append(names, function.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	return &geminiToolConfig{
+		FunctionCallingConfig: &geminiFunctionCallingConfig{
+			Mode:                 "ANY",
+			AllowedFunctionNames: names,
+		},
+	}
 }
 
 func geminiEmptyToolResponseDiagnostic(mode, finishReason string, candidateCount, partCount int, promptFeedback map[string]any) map[string]any {

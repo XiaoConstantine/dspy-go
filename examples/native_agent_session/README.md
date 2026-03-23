@@ -23,6 +23,7 @@ Set the provider API key in the matching environment variable, or pass `-api-key
 ```bash
 export GEMINI_API_KEY=...
 go run ./examples/native_agent_session \
+  -reset \
   -task "Read project_brief.md, create rollout_notes.md with a short rollout plan, then finish."
 ```
 
@@ -70,10 +71,11 @@ go run ./examples/native_agent_session \
 
 ## Useful Flags
 
-- `-model` chooses the tool-calling model ID. Default: `gemini-2.0-flash`
+- `-model` chooses the tool-calling model ID. Default: `gemini-2.5-flash`
 - `-session` chooses the logical session ID. Default: `native-agent-demo`
 - `-session-db` chooses the SQLite path. Default: `./tmp/native-agent-session/session.db`
 - `-workspace` chooses the workspace root. Default: `./tmp/native-agent-session/workspace`
+- `-reset` clears the session DB and workspace first, which is useful when you want to verify a true cold-start tool run
 - `-verbose` prints selected lifecycle events
 
 ## Why This Example Exists
