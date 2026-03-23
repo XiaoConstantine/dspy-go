@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/tools/internal/localfs"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
@@ -24,6 +25,7 @@ type Config struct {
 }
 
 type Toolset struct {
+	resolver           *localfs.Resolver
 	root               string
 	modelOutputLimit   int
 	displayOutputLimit int
@@ -31,19 +33,9 @@ type Toolset struct {
 
 func NewToolset(cfg Config) (*Toolset, error) {
 	root := strings.TrimSpace(cfg.Root)
-	if root == "" {
-		return nil, fmt.Errorf("workspace root is required")
-	}
-	absRoot, err := filepath.Abs(root)
+	resolver, err := localfs.NewResolver(root)
 	if err != nil {
 		return nil, err
-	}
-	if err := os.MkdirAll(absRoot, 0o755); err != nil {
-		return nil, err
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
-	if err == nil {
-		absRoot = resolvedRoot
 	}
 	if cfg.ModelOutputLimit <= 0 {
 		cfg.ModelOutputLimit = DefaultModelOutputLimit
@@ -53,7 +45,8 @@ func NewToolset(cfg Config) (*Toolset, error) {
 	}
 
 	return &Toolset{
-		root:               filepath.Clean(absRoot),
+		resolver:           resolver,
+		root:               resolver.Root(),
 		modelOutputLimit:   cfg.ModelOutputLimit,
 		displayOutputLimit: cfg.DisplayOutputLimit,
 	}, nil
@@ -88,7 +81,7 @@ func (t *Toolset) Tools() []core.Tool {
 				},
 			},
 			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := t.resolveSecurePath(stringValue(params["path"]))
+				targetPath, err := t.resolver.ResolveSecurePath(stringValue(params["path"]))
 				if err != nil {
 					return errorToolResult(err.Error()), nil
 				}
@@ -104,7 +97,7 @@ func (t *Toolset) Tools() []core.Tool {
 					truncateRunes(text, t.modelOutputLimit),
 					truncateRunes(text, t.displayOutputLimit),
 					map[string]any{
-						"path":        t.displayPath(targetPath),
+						"path":        t.resolver.DisplayPath(targetPath),
 						"entry_count": len(entries),
 					},
 				), nil
@@ -124,7 +117,7 @@ func (t *Toolset) Tools() []core.Tool {
 				},
 			},
 			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := t.resolveSecurePath(stringValue(params["path"]))
+				targetPath, err := t.resolver.ResolveSecurePath(stringValue(params["path"]))
 				if err != nil {
 					return errorToolResult(err.Error()), nil
 				}
@@ -137,7 +130,7 @@ func (t *Toolset) Tools() []core.Tool {
 					truncateRunes(content, t.modelOutputLimit),
 					truncateRunes(content, t.displayOutputLimit),
 					map[string]any{
-						"path":  t.displayPath(targetPath),
+						"path":  t.resolver.DisplayPath(targetPath),
 						"bytes": len(data),
 					},
 				), nil
@@ -162,7 +155,7 @@ func (t *Toolset) Tools() []core.Tool {
 				},
 			},
 			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := t.resolveSecurePath(stringValue(params["path"]))
+				targetPath, err := t.resolver.ResolveSecurePath(stringValue(params["path"]))
 				if err != nil {
 					return errorToolResult(err.Error()), nil
 				}
@@ -176,9 +169,9 @@ func (t *Toolset) Tools() []core.Tool {
 				if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
 					return errorToolResult(fmt.Sprintf("write file: %v", err)), nil
 				}
-				message := fmt.Sprintf("wrote %d bytes to %s", len(content), t.displayPath(targetPath))
+				message := fmt.Sprintf("wrote %d bytes to %s", len(content), t.resolver.DisplayPath(targetPath))
 				return successToolResult(message, message, map[string]any{
-					"path":  t.displayPath(targetPath),
+					"path":  t.resolver.DisplayPath(targetPath),
 					"bytes": len(content),
 				}), nil
 			},
@@ -211,7 +204,7 @@ func (t *Toolset) Tools() []core.Tool {
 				},
 			},
 			func(_ context.Context, params map[string]any) (core.ToolResult, error) {
-				targetPath, err := t.resolveSecurePath(stringValue(params["path"]))
+				targetPath, err := t.resolver.ResolveSecurePath(stringValue(params["path"]))
 				if err != nil {
 					return errorToolResult(err.Error()), nil
 				}
@@ -241,9 +234,9 @@ func (t *Toolset) Tools() []core.Tool {
 					return errorToolResult(fmt.Sprintf("write file: %v", err)), nil
 				}
 
-				message := fmt.Sprintf("edited %s with %d replacement(s)", t.displayPath(targetPath), replacements)
+				message := fmt.Sprintf("edited %s with %d replacement(s)", t.resolver.DisplayPath(targetPath), replacements)
 				return successToolResult(message, message, map[string]any{
-					"path":          t.displayPath(targetPath),
+					"path":          t.resolver.DisplayPath(targetPath),
 					"replacements":  replacements,
 					"replace_all":   replaceAll,
 					"old_text_size": len(oldText),
@@ -252,77 +245,6 @@ func (t *Toolset) Tools() []core.Tool {
 			},
 		),
 	}
-}
-
-func (t *Toolset) resolveSecurePath(input string) (string, error) {
-	raw := strings.TrimSpace(input)
-	if raw == "" || raw == "." {
-		return t.root, nil
-	}
-
-	// This is demo-grade confinement: it resolves existing symlinks and
-	// rejects paths outside the workspace root, but it does not eliminate
-	// TOCTOU races between resolution and later file operations.
-	target := filepath.Join(t.root, filepath.Clean(raw))
-	resolved, err := resolvePathThroughExistingSymlinks(target)
-	if err != nil {
-		return "", fmt.Errorf("resolve path %q: %w", input, err)
-	}
-	return t.ensureWithinRoot(resolved, input)
-}
-
-func (t *Toolset) ensureWithinRoot(target, original string) (string, error) {
-	absTarget, err := filepath.Abs(target)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(t.root, absTarget)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q escapes workspace root", original)
-	}
-	return filepath.Clean(absTarget), nil
-}
-
-func (t *Toolset) displayPath(target string) string {
-	rel, err := filepath.Rel(t.root, target)
-	if err != nil || rel == "." {
-		return "."
-	}
-	return filepath.ToSlash(rel)
-}
-
-func resolvePathThroughExistingSymlinks(target string) (string, error) {
-	current := filepath.Clean(target)
-	missing := make([]string, 0, 4)
-
-	for {
-		_, err := os.Lstat(current)
-		if err == nil {
-			resolved, err := filepath.EvalSymlinks(current)
-			if err != nil {
-				return "", err
-			}
-			current = resolved
-			break
-		}
-		if !os.IsNotExist(err) {
-			return "", err
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		missing = append(missing, filepath.Base(current))
-		current = parent
-	}
-
-	for i := len(missing) - 1; i >= 0; i-- {
-		current = filepath.Join(current, missing[i])
-	}
-	return filepath.Clean(current), nil
 }
 
 type tool struct {

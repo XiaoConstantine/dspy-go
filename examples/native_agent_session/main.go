@@ -16,7 +16,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-	filetools "github.com/XiaoConstantine/dspy-go/pkg/tools/files"
+	defaulttools "github.com/XiaoConstantine/dspy-go/pkg/tools/defaults"
 )
 
 const (
@@ -34,6 +34,7 @@ Prefer session recall when it already answers the question from previous runs.
 Use ls before making assumptions about the workspace layout.
 Use edit for targeted changes when a file already exists.
 Use write when creating a new file or replacing the full contents intentionally.
+Use bash for short workspace-local shell commands when that is simpler than manual file inspection.
 Call the finish tool once the task is complete.`
 
 var errUsage = errors.New("usage")
@@ -121,8 +122,9 @@ func run() error {
 		}
 	}()
 
-	toolset, err := filetools.NewToolset(filetools.Config{
-		Root: workspaceDir,
+	toolset, err := defaulttools.NewToolset(defaulttools.Config{
+		Root:           workspaceDir,
+		CommandTimeout: 30 * time.Second,
 	})
 	if err != nil {
 		return fmt.Errorf("resolve workspace %q: %w", workspaceDir, err)
@@ -218,6 +220,7 @@ Rules:
 - Use read to inspect existing files before editing them.
 - Use write when creating a new file.
 - Use edit for targeted replacements in an existing file.
+- Use bash for short workspace-local commands when needed.
 - If session recall already answers the question, call Finish with that answer instead of narrating first.
 
 Task:

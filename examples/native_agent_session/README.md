@@ -7,12 +7,13 @@ This example gives the repo a simple, canonical execution path for the native to
 - session recall across runs
 - branch fork and branch resume
 
-It intentionally stays small. The example registers a minimal Pi-style file tool pack:
+It intentionally stays small. The example registers a minimal Pi-style default tool pack:
 
 - `ls`
 - `read`
 - `write`
 - `edit`
+- `bash`
 
 The native agent also gets the built-in `finish` tool automatically. On first run, the example seeds the workspace with `project_brief.md` so you can use it immediately.
 
