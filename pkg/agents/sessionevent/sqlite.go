@@ -172,6 +172,31 @@ func (s *SQLiteStore) GetSession(ctx context.Context, sessionID string) (*Sessio
 	return session, nil
 }
 
+func (s *SQLiteStore) ListSessions(ctx context.Context) ([]Session, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, title, status, created_at, updated_at, active_branch_id, metadata_json
+		   FROM sessions
+		  ORDER BY updated_at DESC, created_at DESC, id ASC`,
+	)
+	if err != nil {
+		return nil, wrapSQLError(err, "failed to list sessions", nil)
+	}
+	defer rows.Close()
+
+	var sessions []Session
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, *session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapSQLError(err, "failed to iterate sessions", nil)
+	}
+	return sessions, nil
+}
+
 func (s *SQLiteStore) ListBranches(ctx context.Context, sessionID string) ([]SessionBranch, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

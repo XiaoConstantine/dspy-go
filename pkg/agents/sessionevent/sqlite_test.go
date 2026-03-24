@@ -46,6 +46,34 @@ func TestSQLiteStoreCreateSessionCreatesDefaultBranch(t *testing.T) {
 	assert.Empty(t, branches[0].HeadEntryID)
 }
 
+func TestSQLiteStoreListSessionsReturnsNewestFirst(t *testing.T) {
+	t.Parallel()
+
+	store := newTestSQLiteStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	first, _, err := store.CreateSession(ctx, CreateSessionParams{
+		ID:    "session-a",
+		Title: "First",
+	})
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+
+	second, _, err := store.CreateSession(ctx, CreateSessionParams{
+		ID:    "session-b",
+		Title: "Second",
+	})
+	require.NoError(t, err)
+
+	sessions, err := store.ListSessions(ctx)
+	require.NoError(t, err)
+	require.Len(t, sessions, 2)
+	assert.Equal(t, second.ID, sessions[0].ID)
+	assert.Equal(t, first.ID, sessions[1].ID)
+}
+
 func TestSQLiteStoreAppendEntriesAndLoadLineage(t *testing.T) {
 	t.Parallel()
 

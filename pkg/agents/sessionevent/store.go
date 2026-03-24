@@ -12,6 +12,7 @@ type SessionWriter interface {
 
 type SessionReader interface {
 	GetSession(ctx context.Context, sessionID string) (*Session, error)
+	ListSessions(ctx context.Context) ([]Session, error)
 	ListBranches(ctx context.Context, sessionID string) ([]SessionBranch, error)
 	GetEntry(ctx context.Context, sessionID, entryID string) (*SessionEntry, error)
 	GetBranchHead(ctx context.Context, sessionID, branchID string) (*SessionEntry, error)
