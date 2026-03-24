@@ -42,6 +42,8 @@ type Config struct {
 	Timeout            time.Duration
 	ModelOutputLimit   int
 	DisplayOutputLimit int
+	ExtraEnv           map[string]string
+	PassthroughEnvKeys []string
 }
 
 type Tool struct {
@@ -51,6 +53,8 @@ type Tool struct {
 	timeout            time.Duration
 	modelOutputLimit   int
 	displayOutputLimit int
+	extraEnv           map[string]string
+	passthroughEnvKeys []string
 }
 
 func NewTool(cfg Config) (core.Tool, error) {
@@ -77,6 +81,8 @@ func NewTool(cfg Config) (core.Tool, error) {
 		timeout:            cfg.Timeout,
 		modelOutputLimit:   cfg.ModelOutputLimit,
 		displayOutputLimit: cfg.DisplayOutputLimit,
+		extraEnv:           copyStringMap(cfg.ExtraEnv),
+		passthroughEnvKeys: append([]string(nil), cfg.PassthroughEnvKeys...),
 	}, nil
 }
 
@@ -123,7 +129,7 @@ func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolRes
 
 	cmd := exec.CommandContext(runCtx, t.shellPath, "-c", command)
 	cmd.Dir = workingDir
-	cmd.Env = filteredEnvironment()
+	cmd.Env = buildEnvironment(t.extraEnv, t.passthroughEnvKeys)
 	output, execErr := cmd.CombinedOutput()
 	outputText := strings.TrimSpace(string(output))
 	if outputText == "" {
@@ -192,6 +198,8 @@ func (t *Tool) CloneTool() core.Tool {
 		return nil
 	}
 	cloned := *t
+	cloned.extraEnv = copyStringMap(t.extraEnv)
+	cloned.passthroughEnvKeys = append([]string(nil), t.passthroughEnvKeys...)
 	return &cloned
 }
 
@@ -294,14 +302,25 @@ func exitCode(err error) int {
 	return -1
 }
 
-func filteredEnvironment() []string {
-	env := make([]string, 0, len(allowedEnvironmentKeys))
+func buildEnvironment(extraEnv map[string]string, passthroughKeys []string) []string {
+	allowed := make(map[string]struct{}, len(allowedEnvironmentKeys)+len(passthroughKeys))
+	for key := range allowedEnvironmentKeys {
+		allowed[key] = struct{}{}
+	}
+	for _, key := range passthroughKeys {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			allowed[key] = struct{}{}
+		}
+	}
+
+	env := make([]string, 0, len(allowed)+len(extraEnv))
 	for _, entry := range os.Environ() {
 		key, _, ok := strings.Cut(entry, "=")
 		if !ok {
 			continue
 		}
-		if _, allowed := allowedEnvironmentKeys[key]; allowed {
+		if _, ok := allowed[key]; ok {
 			env = append(env, entry)
 			continue
 		}
@@ -309,5 +328,23 @@ func filteredEnvironment() []string {
 			env = append(env, entry)
 		}
 	}
+	for key, value := range extraEnv {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		env = append(env, key+"="+value)
+	}
 	return env
+}
+
+func copyStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }

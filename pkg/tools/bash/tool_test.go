@@ -62,6 +62,40 @@ func TestBashToolDoesNotExposeParentSecrets(t *testing.T) {
 	assert.NotContains(t, result.Metadata[core.ToolResultDisplayTextMeta], "topsecret")
 }
 
+func TestBashToolAllowsExplicitExtraEnvironment(t *testing.T) {
+	tool, err := NewTool(Config{
+		Root: t.TempDir(),
+		ExtraEnv: map[string]string{
+			"GH_TOKEN": "gh-secret",
+		},
+	})
+	require.NoError(t, err)
+
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": `printf '%s' "$GH_TOKEN"`,
+	})
+	require.NoError(t, err)
+	assert.False(t, metadataBool(result.Metadata, core.ToolResultIsErrorMeta))
+	assert.Equal(t, "gh-secret", result.Metadata[core.ToolResultModelTextMeta])
+}
+
+func TestBashToolAllowsExplicitPassthroughEnvironmentKeys(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "github-secret")
+
+	tool, err := NewTool(Config{
+		Root:               t.TempDir(),
+		PassthroughEnvKeys: []string{"GITHUB_TOKEN"},
+	})
+	require.NoError(t, err)
+
+	result, err := tool.Execute(context.Background(), map[string]any{
+		"command": `printf '%s' "$GITHUB_TOKEN"`,
+	})
+	require.NoError(t, err)
+	assert.False(t, metadataBool(result.Metadata, core.ToolResultIsErrorMeta))
+	assert.Equal(t, "github-secret", result.Metadata[core.ToolResultModelTextMeta])
+}
+
 func TestBashToolTimesOut(t *testing.T) {
 	tool, err := NewTool(Config{
 		Root:    t.TempDir(),

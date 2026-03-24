@@ -1368,6 +1368,10 @@ func (s *stubSessionEventStore) ListBranches(context.Context, string) ([]session
 	return nil, fmt.Errorf("unexpected ListBranches call")
 }
 
+func (s *stubSessionEventStore) ListSessions(context.Context) ([]sessionevent.Session, error) {
+	return nil, fmt.Errorf("unexpected ListSessions call")
+}
+
 func (s *stubSessionEventStore) GetEntry(context.Context, string, string) (*sessionevent.SessionEntry, error) {
 	return nil, fmt.Errorf("unexpected GetEntry call")
 }
