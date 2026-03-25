@@ -145,6 +145,16 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) {
 					Name:         "Gemini 2.0 Flash Lite",
 					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
 				},
+				string(core.ModelGoogleGemini3ProPreview): {
+					ID:           string(core.ModelGoogleGemini3ProPreview),
+					Name:         "Gemini 3 Pro Preview",
+					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
+				},
+				string(core.ModelGoogleGemini3FlashPreview): {
+					ID:           string(core.ModelGoogleGemini3FlashPreview),
+					Name:         "Gemini 3 Flash Preview",
+					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
+				},
 			},
 		},
 		"openai": {
@@ -302,7 +312,9 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 		modelID == core.ModelAnthropicClaude4Sonnet || modelID == core.ModelAnthropicClaude45Sonnet ||
 		strings.HasPrefix(modelStr, "claude-") || strings.HasPrefix(modelStr, "opus-") || strings.HasPrefix(modelStr, "sonnet-"):
 		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(modelStr))
-	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro || modelID == core.ModelGoogleGeminiFlashLite:
+	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro ||
+		modelID == core.ModelGoogleGeminiFlashLite ||
+		modelID == core.ModelGoogleGemini3ProPreview || modelID == core.ModelGoogleGemini3FlashPreview:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo ||
 		modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini ||

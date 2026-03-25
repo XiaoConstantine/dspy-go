@@ -182,6 +182,31 @@ func TestLLMRegistry_IsModelSupported(t *testing.T) {
 	}
 }
 
+func TestLLMRegistry_InferProviderForGemini3PreviewModels(t *testing.T) {
+	registry := NewLLMRegistry()
+
+	testCases := []ModelID{
+		ModelGoogleGemini3ProPreview,
+		ModelGoogleGemini3FlashPreview,
+	}
+
+	for _, modelID := range testCases {
+		t.Run(string(modelID), func(t *testing.T) {
+			if !registry.IsModelSupported(modelID) {
+				t.Fatalf("expected %s to be supported via provider inference", modelID)
+			}
+
+			provider, ok := registry.GetModelProvider(modelID)
+			if !ok {
+				t.Fatalf("expected provider inference for %s", modelID)
+			}
+			if provider != "google" {
+				t.Fatalf("expected google provider for %s, got %s", modelID, provider)
+			}
+		})
+	}
+}
+
 func TestLLMRegistry_RefreshProvider(t *testing.T) {
 	registry := NewLLMRegistry()
 	ctx := context.Background()
