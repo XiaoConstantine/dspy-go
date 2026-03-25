@@ -11,6 +11,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/subagent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
@@ -423,14 +424,15 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			// the executed arguments, but proposed values remain useful for debugging
 			// model behavior and policy decisions.
 			callStep.Arguments = core.ShallowCopyMap(arguments)
-			a.emitEvent(agents.EventToolCallProposed, map[string]any{
+			proposedEvent := map[string]any{
 				"task_id":   taskID,
 				"turn":      turn + 1,
 				"tool_name": toolName,
 				"arguments": core.ShallowCopyMap(arguments),
-			})
+			}
 
 			if strings.EqualFold(toolName, "finish") {
+				a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(nil, proposedEvent, nil))
 				finalAnswer := extractFinishAnswer(arguments, callStep.AssistantText)
 				trace.Completed = true
 				trace.FinalAnswer = finalAnswer
@@ -456,6 +458,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 
 			tool, err := a.toolRegistry.Get(toolName)
 			if err != nil {
+				a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(nil, proposedEvent, nil))
 				callStep.IsError = true
 				callStep.Observation = fmt.Sprintf("unknown tool %q: %v", toolName, err)
 				callStep.ObservationDisplay = callStep.Observation
@@ -471,6 +474,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			}
 
 			if err := tool.Validate(arguments); err != nil {
+				a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(tool, proposedEvent, nil))
 				callStep.IsError = true
 				callStep.Observation = fmt.Sprintf("invalid tool arguments: %v", err)
 				callStep.ObservationDisplay = callStep.Observation
@@ -485,25 +489,26 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				continue
 			}
 
-			a.emitEvent(agents.EventToolCallStarted, map[string]any{
+			a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(tool, proposedEvent, nil))
+			a.emitEvent(agents.EventToolCallStarted, enrichSubagentEventData(tool, map[string]any{
 				"task_id":   taskID,
 				"turn":      turn + 1,
 				"tool_name": toolName,
 				"arguments": core.ShallowCopyMap(arguments),
-			})
+			}, nil))
 
 			observation, err := a.executeTool(ctx, tool, arguments)
 			if errors.Is(err, core.ErrToolBlocked) {
 				reason := blockedReason(err)
 				observation = agents.BlockedToolObservation(toolName, reason)
 				callStep.IsError = true
-				a.emitEvent(agents.EventToolCallBlocked, map[string]any{
+				a.emitEvent(agents.EventToolCallBlocked, enrichSubagentEventData(tool, map[string]any{
 					"task_id":   taskID,
 					"turn":      turn + 1,
 					"tool_name": toolName,
 					"arguments": core.ShallowCopyMap(arguments),
 					"reason":    reason,
-				})
+				}, observation.Details))
 			} else if err != nil {
 				callStep.IsError = true
 				observation = agents.ToolObservation{
@@ -529,7 +534,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				IsError:       callStep.IsError,
 				AssistantText: callStep.AssistantText,
 			})
-			a.emitEvent(agents.EventToolCallFinished, map[string]any{
+			a.emitEvent(agents.EventToolCallFinished, enrichSubagentEventData(tool, map[string]any{
 				"task_id":   taskID,
 				"turn":      turn + 1,
 				"tool_name": toolName,
@@ -537,7 +542,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				"synthetic": callStep.Synthetic,
 				"redacted":  callStep.Redacted,
 				"truncated": callStep.Truncated,
-			})
+			}, observation.Details))
 		}
 	}
 
@@ -669,6 +674,23 @@ func (a *Agent) emitEvent(eventType string, data map[string]any) {
 		return
 	}
 	agents.EmitEvent(a.config.OnEvent, eventType, data)
+}
+
+func enrichSubagentEventData(tool core.Tool, data map[string]any, details map[string]any) map[string]any {
+	info, ok := subagent.InfoFromTool(tool)
+	if !ok {
+		return data
+	}
+	enriched := core.ShallowCopyMap(data)
+	enriched["subagent"] = true
+	enriched["subagent_name"] = info.Name
+	enriched["session_policy"] = info.SessionPolicy
+	if details != nil {
+		if completed, ok := details["completed"].(bool); ok {
+			enriched["child_completed"] = completed
+		}
+	}
+	return enriched
 }
 
 func (a *Agent) executeTool(ctx context.Context, tool core.Tool, arguments map[string]any) (agents.ToolObservation, error) {

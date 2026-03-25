@@ -10,6 +10,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/subagent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -299,6 +300,171 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	assert.Contains(t, eventTypes, agents.EventToolCallBlocked)
 	assert.Contains(t, eventTypes, agents.EventToolCallFinished)
 	assert.Contains(t, eventTypes, agents.EventRunFinished)
+}
+
+func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 1,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Finish immediately.",
+		"task_id": "task-finish-proposed",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+
+	proposed := findEvent(events, agents.EventToolCallProposed, "Finish")
+	require.NotNil(t, proposed)
+	_, hasSubagent := proposed.Data["subagent"]
+	assert.False(t, hasSubagent)
+}
+
+func TestAgent_Execute_EnrichesSubagentToolEvents(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "researcher",
+					"arguments": map[string]any{"query": "inspect auth"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 4,
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	tool, err := subagent.AsTool(subagent.ToolConfig{
+		Name:          "researcher",
+		Description:   "Delegated research worker.",
+		SessionPolicy: subagent.SessionPolicyDerived,
+		BuildAgent: func(context.Context, map[string]any) (agents.Agent, error) {
+			return &subagentChildAgent{
+				output: map[string]any{"final_answer": "delegated result", "completed": true},
+				trace: &agents.ExecutionTrace{
+					AgentID:   "child-1",
+					AgentType: "native",
+					Status:    agents.TraceStatusSuccess,
+				},
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(tool))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task":       "Investigate auth and finish.",
+		"task_id":    "task-subagent",
+		"session_id": "parent-session",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+
+	proposed := findEvent(events, agents.EventToolCallProposed, "researcher")
+	started := findEvent(events, agents.EventToolCallStarted, "researcher")
+	finished := findEvent(events, agents.EventToolCallFinished, "researcher")
+	require.NotNil(t, proposed)
+	require.NotNil(t, started)
+	require.NotNil(t, finished)
+
+	for _, event := range []*agents.AgentEvent{proposed, started, finished} {
+		assert.Equal(t, true, event.Data["subagent"])
+		assert.Equal(t, "researcher", event.Data["subagent_name"])
+		assert.Equal(t, "derived", event.Data["session_policy"])
+	}
+	assert.Equal(t, true, finished.Data["child_completed"])
+}
+
+func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "researcher",
+					"arguments": map[string]any{"query": "blocked"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 4,
+		ToolInterceptors: []core.ToolInterceptor{
+			func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+				return core.ToolResult{}, &core.ToolBlockedError{Reason: "approval denied"}
+			},
+		},
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+
+	tool, err := subagent.AsTool(subagent.ToolConfig{
+		Name:          "researcher",
+		Description:   "Delegated research worker.",
+		SessionPolicy: subagent.SessionPolicyEphemeral,
+		BuildAgent: func(context.Context, map[string]any) (agents.Agent, error) {
+			return &subagentChildAgent{
+				output: map[string]any{"final_answer": "should not run", "completed": true},
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(tool))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task":    "Attempt blocked research and finish.",
+		"task_id": "task-subagent-blocked",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+
+	blocked := findEvent(events, agents.EventToolCallBlocked, "researcher")
+	require.NotNil(t, blocked)
+	assert.Equal(t, true, blocked.Data["subagent"])
+	assert.Equal(t, "researcher", blocked.Data["subagent_name"])
+	assert.Equal(t, "ephemeral", blocked.Data["session_policy"])
+	assert.NotContains(t, blocked.Data, "child_completed")
 }
 
 func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
@@ -1206,6 +1372,44 @@ func noCallResult() map[string]any {
 type simpleTool struct {
 	name string
 	run  func(context.Context, map[string]interface{}) (core.ToolResult, error)
+}
+
+type subagentChildAgent struct {
+	output map[string]any
+	err    error
+	trace  *agents.ExecutionTrace
+}
+
+func (s *subagentChildAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
+	return core.ShallowCopyMap(s.output), s.err
+}
+
+func (s *subagentChildAgent) GetCapabilities() []core.Tool {
+	return nil
+}
+
+func (s *subagentChildAgent) GetMemory() agents.Memory {
+	return agents.NewInMemoryStore()
+}
+
+func (s *subagentChildAgent) LastExecutionTrace() *agents.ExecutionTrace {
+	if s == nil || s.trace == nil {
+		return nil
+	}
+	return s.trace.Clone()
+}
+
+func findEvent(events []agents.AgentEvent, eventType, toolName string) *agents.AgentEvent {
+	for i := range events {
+		if events[i].Type != eventType {
+			continue
+		}
+		if events[i].Data["tool_name"] != toolName {
+			continue
+		}
+		return &events[i]
+	}
+	return nil
 }
 
 func (t simpleTool) Name() string        { return t.name }

@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestAsTool_UsesBuildAgentPerInvocation(t *testing.T) {
 func TestAsTool_ClonesStoredOptimizableAgentPerInvocation(t *testing.T) {
 	t.Parallel()
 
-	cloneCount := 0
+	var cloneCount atomic.Int32
 	base := &cloneableStubAgent{
 		cloneCount: &cloneCount,
 		output: map[string]any{
@@ -65,7 +66,7 @@ func TestAsTool_ClonesStoredOptimizableAgentPerInvocation(t *testing.T) {
 	_, err = tool.Execute(context.Background(), nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, 2, cloneCount)
+	assert.Equal(t, int32(2), cloneCount.Load())
 }
 
 func TestAsTool_RejectsNonCloneableStoredAgent(t *testing.T) {
@@ -78,6 +79,21 @@ func TestAsTool_RejectsNonCloneableStoredAgent(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "optimize.OptimizableAgent")
+}
+
+func TestAsTool_RejectsBuildAgentAndStoredAgentTogether(t *testing.T) {
+	t.Parallel()
+
+	_, err := AsTool(ToolConfig{
+		Name:        "conflict",
+		Description: "Conflicting config.",
+		BuildAgent: func(context.Context, map[string]any) (agents.Agent, error) {
+			return &stubAgent{}, nil
+		},
+		Agent: &cloneableStubAgent{},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot set both BuildAgent and Agent")
 }
 
 func TestTool_ProjectsBestEffortParentContext(t *testing.T) {
@@ -333,6 +349,22 @@ func TestTool_ImplementsCloneableTool(t *testing.T) {
 	assert.NotSame(t, tool, cloned)
 }
 
+func TestTool_CanHandleMatchesRelevantDescriptionTokens(t *testing.T) {
+	t.Parallel()
+
+	tool, err := AsTool(ToolConfig{
+		Name:        "review_chunk",
+		Description: "Inspect authentication diffs for likely issues.",
+		BuildAgent: func(context.Context, map[string]any) (agents.Agent, error) {
+			return &stubAgent{}, nil
+		},
+	})
+	require.NoError(t, err)
+
+	assert.True(t, tool.CanHandle(context.Background(), "inspect auth issues"))
+	assert.False(t, tool.CanHandle(context.Background(), "weather in paris"))
+}
+
 type stubAgent struct {
 	output map[string]any
 	err    error
@@ -352,11 +384,14 @@ func (s *stubAgent) GetMemory() agents.Memory {
 }
 
 func (s *stubAgent) LastExecutionTrace() *agents.ExecutionTrace {
+	if s == nil || s.trace == nil {
+		return nil
+	}
 	return s.trace.Clone()
 }
 
 type cloneableStubAgent struct {
-	cloneCount *int
+	cloneCount *atomic.Int32
 	output     map[string]any
 }
 
@@ -381,7 +416,9 @@ func (s *cloneableStubAgent) SetArtifacts(optimize.AgentArtifacts) error {
 }
 
 func (s *cloneableStubAgent) Clone() (optimize.OptimizableAgent, error) {
-	*s.cloneCount = *s.cloneCount + 1
+	if s.cloneCount != nil {
+		s.cloneCount.Add(1)
+	}
 	return &cloneableStubAgent{
 		cloneCount: s.cloneCount,
 		output:     core.ShallowCopyMap(s.output),
