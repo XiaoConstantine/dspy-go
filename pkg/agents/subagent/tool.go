@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
@@ -55,6 +56,28 @@ type Tool struct {
 
 type traceProvider interface {
 	LastExecutionTrace() *agents.ExecutionTrace
+}
+
+// Info captures static metadata about a subagent-wrapped tool.
+type Info struct {
+	Name          string
+	SessionPolicy string
+}
+
+type infoProvider interface {
+	subagentInfo() Info
+}
+
+// InfoFromTool returns subagent metadata when tool is a subagent-wrapped tool.
+func InfoFromTool(tool core.Tool) (Info, bool) {
+	if tool == nil {
+		return Info{}, false
+	}
+	provider, ok := tool.(infoProvider)
+	if !ok {
+		return Info{}, false
+	}
+	return provider.subagentInfo(), true
 }
 
 func AsTool(cfg ToolConfig) (core.Tool, error) {
@@ -125,8 +148,7 @@ func (t *Tool) CanHandle(_ context.Context, intent string) bool {
 	if intent == "" {
 		return false
 	}
-	return strings.Contains(intent, strings.ToLower(t.name)) ||
-		strings.Contains(intent, strings.ToLower(t.description))
+	return containsIntentToken(intent, t.name) || containsIntentToken(intent, t.description)
 }
 
 func (t *Tool) Validate(_ map[string]any) error {
@@ -145,6 +167,16 @@ func (t *Tool) CloneTool() core.Tool {
 	cloned.staticParentContext = cloneParentContext(t.staticParentContext)
 	cloned.metadata = core.ShallowCopyMap(t.metadata)
 	return &cloned
+}
+
+func (t *Tool) subagentInfo() Info {
+	if t == nil {
+		return Info{}
+	}
+	return Info{
+		Name:          t.name,
+		SessionPolicy: t.sessionPolicy.String(),
+	}
 }
 
 func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
@@ -225,6 +257,9 @@ func (t *Tool) parentContext(ctx context.Context, params map[string]any) ParentC
 }
 
 func makeBuildAgentFunc(cfg ToolConfig) (BuildAgentFunc, error) {
+	if cfg.BuildAgent != nil && cfg.Agent != nil {
+		return nil, fmt.Errorf("subagent tool %q cannot set both BuildAgent and Agent", strings.TrimSpace(cfg.Name))
+	}
 	if cfg.BuildAgent != nil {
 		return cfg.BuildAgent, nil
 	}
@@ -309,6 +344,8 @@ func applySessionPolicy(policy SessionPolicy, name string, childInput map[string
 		if strings.TrimSpace(stringArg(childInput, "session_id")) == "" && strings.TrimSpace(parent.SessionID) != "" {
 			childInput["session_id"] = deriveSessionID(parent.SessionID, name)
 		}
+	case SessionPolicyExplicit:
+		// Explicit sessions are caller-managed. Preserve provided session keys as-is.
 	case SessionPolicyEphemeral:
 		delete(childInput, "session_id")
 		delete(childInput, "session_branch_id")
@@ -433,4 +470,37 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return value[:cut] + "... (truncated)"
+}
+
+func containsIntentToken(intent string, source string) bool {
+	for _, token := range tokenize(source) {
+		if len(token) < 4 || isStopToken(token) {
+			continue
+		}
+		if strings.Contains(intent, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func tokenize(value string) []string {
+	return strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func isStopToken(token string) bool {
+	switch token {
+	case "into", "with", "from", "that", "this", "your", "their", "then", "than":
+		return true
+	case "tool", "tools", "agent", "agents", "worker", "workers":
+		return true
+	case "task", "tasks", "run", "runs", "using", "used":
+		return true
+	case "perform", "return":
+		return true
+	default:
+		return false
+	}
 }
