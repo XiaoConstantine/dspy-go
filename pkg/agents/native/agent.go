@@ -124,11 +124,15 @@ func (s TraceStep) Clone() TraceStep {
 }
 
 type toolTurn struct {
-	AssistantText string
-	ToolName      string
-	Arguments     map[string]any
-	Observation   string
-	IsError       bool
+	LLMTurnIndex     int
+	AssistantText    string
+	AssistantContent []core.ContentBlock
+	ToolCallID       string
+	ToolName         string
+	Arguments        map[string]any
+	ToolCallMetadata map[string]any
+	Observation      string
+	IsError          bool
 }
 
 // Agent executes tasks using provider-native tool calling with a shared dspy-go harness.
@@ -321,6 +325,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 		if content, ok := result["content"].(string); ok && strings.TrimSpace(content) != "" {
 			step.AssistantText = strings.TrimSpace(content)
 		}
+		assistantContent, _ := result["content_blocks"].([]core.ContentBlock)
 		if metadata := toolResponseDiagnosticMetadata(result); len(metadata) > 0 {
 			step.Metadata = metadata
 		}
@@ -379,9 +384,11 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			step.IsError = true
 			trace.Steps = append(trace.Steps, step)
 			transcript = append(transcript, toolTurn{
-				AssistantText: step.AssistantText,
-				Observation:   observation,
-				IsError:       true,
+				LLMTurnIndex:     turn + 1,
+				AssistantText:    step.AssistantText,
+				AssistantContent: cloneContentBlocks(assistantContent),
+				Observation:      observation,
+				IsError:          true,
 			})
 			if noCallStreak >= a.config.MaxConsecutiveNoCallResponses {
 				trace.Duration = time.Since(startedAt)
@@ -414,8 +421,8 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				callStep.AssistantText = ""
 			}
 
-			toolName := agentutil.StringValue(call["name"])
-			arguments, _ := call["arguments"].(map[string]any)
+			toolName := call.Name
+			arguments := core.ShallowCopyMap(call.Arguments)
 			if arguments == nil {
 				arguments = map[string]any{}
 			}
@@ -464,11 +471,15 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				callStep.ObservationDisplay = callStep.Observation
 				trace.Steps = append(trace.Steps, callStep)
 				transcript = append(transcript, toolTurn{
-					ToolName:      toolName,
-					Arguments:     callStep.Arguments,
-					Observation:   callStep.Observation,
-					IsError:       true,
-					AssistantText: callStep.AssistantText,
+					LLMTurnIndex:     turn + 1,
+					AssistantText:    callStep.AssistantText,
+					AssistantContent: cloneContentBlocks(assistantContent),
+					ToolCallID:       call.ID,
+					ToolName:         toolName,
+					Arguments:        callStep.Arguments,
+					ToolCallMetadata: core.ShallowCopyMap(call.Metadata),
+					Observation:      callStep.Observation,
+					IsError:          true,
 				})
 				continue
 			}
@@ -480,11 +491,15 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				callStep.ObservationDisplay = callStep.Observation
 				trace.Steps = append(trace.Steps, callStep)
 				transcript = append(transcript, toolTurn{
-					ToolName:      toolName,
-					Arguments:     callStep.Arguments,
-					Observation:   callStep.Observation,
-					IsError:       true,
-					AssistantText: callStep.AssistantText,
+					LLMTurnIndex:     turn + 1,
+					AssistantText:    callStep.AssistantText,
+					AssistantContent: cloneContentBlocks(assistantContent),
+					ToolCallID:       call.ID,
+					ToolName:         toolName,
+					Arguments:        callStep.Arguments,
+					ToolCallMetadata: core.ShallowCopyMap(call.Metadata),
+					Observation:      callStep.Observation,
+					IsError:          true,
 				})
 				continue
 			}
@@ -528,11 +543,15 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 
 			trace.Steps = append(trace.Steps, callStep)
 			transcript = append(transcript, toolTurn{
-				ToolName:      toolName,
-				Arguments:     callStep.Arguments,
-				Observation:   callStep.Observation,
-				IsError:       callStep.IsError,
-				AssistantText: callStep.AssistantText,
+				LLMTurnIndex:     turn + 1,
+				AssistantText:    callStep.AssistantText,
+				AssistantContent: cloneContentBlocks(assistantContent),
+				ToolCallID:       call.ID,
+				ToolName:         toolName,
+				Arguments:        callStep.Arguments,
+				ToolCallMetadata: core.ShallowCopyMap(call.Metadata),
+				Observation:      callStep.Observation,
+				IsError:          callStep.IsError,
 			})
 			a.emitEvent(agents.EventToolCallFinished, enrichSubagentEventData(tool, map[string]any{
 				"task_id":   taskID,
@@ -723,32 +742,62 @@ func (a *Agent) buildToolMessages(task string, sessionRecall string, turns []too
 			Content: []core.ContentBlock{core.NewTextBlock(a.buildPrompt(task, sessionRecall, nil, currentTurn, maxTurns))},
 		},
 	}
-	for _, turn := range turns {
-		assistant := core.ChatMessage{Role: "assistant"}
-		if strings.TrimSpace(turn.AssistantText) != "" {
-			assistant.Content = []core.ContentBlock{core.NewTextBlock(turn.AssistantText)}
-		}
+	for i := 0; i < len(turns); i++ {
+		turn := turns[i]
 		if strings.TrimSpace(turn.ToolName) != "" {
-			assistant.ToolCalls = []core.ToolCall{{
-				Name:      turn.ToolName,
-				Arguments: core.ShallowCopyMap(turn.Arguments),
-			}}
-		}
-		if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
-			messages = append(messages, assistant)
+			group := []toolTurn{turn}
+			for j := i + 1; j < len(turns); j++ {
+				next := turns[j]
+				if strings.TrimSpace(next.ToolName) == "" || next.LLMTurnIndex != turn.LLMTurnIndex {
+					break
+				}
+				group = append(group, next)
+				i = j
+			}
+
+			assistant := core.ChatMessage{Role: "assistant"}
+			for _, grouped := range group {
+				if len(assistant.Content) == 0 {
+					if len(grouped.AssistantContent) > 0 {
+						assistant.Content = cloneContentBlocks(grouped.AssistantContent)
+					} else if strings.TrimSpace(grouped.AssistantText) != "" {
+						assistant.Content = []core.ContentBlock{core.NewTextBlock(grouped.AssistantText)}
+					}
+				}
+				assistant.ToolCalls = append(assistant.ToolCalls, core.ToolCall{
+					ID:        grouped.ToolCallID,
+					Name:      grouped.ToolName,
+					Arguments: core.ShallowCopyMap(grouped.Arguments),
+					Metadata:  core.ShallowCopyMap(grouped.ToolCallMetadata),
+				})
+			}
+			if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
+				messages = append(messages, assistant)
+			}
+			for _, grouped := range group {
+				messages = append(messages, core.ChatMessage{
+					Role: "tool",
+					ToolResult: &core.ChatToolResult{
+						ToolCallID: grouped.ToolCallID,
+						Name:       grouped.ToolName,
+						Content:    []core.ContentBlock{core.NewTextBlock(grouped.Observation)},
+						IsError:    grouped.IsError,
+					},
+				})
+			}
+			continue
 		}
 
-		switch {
-		case strings.TrimSpace(turn.ToolName) != "":
-			messages = append(messages, core.ChatMessage{
-				Role: "tool",
-				ToolResult: &core.ChatToolResult{
-					Name:    turn.ToolName,
-					Content: []core.ContentBlock{core.NewTextBlock(turn.Observation)},
-					IsError: turn.IsError,
-				},
-			})
-		case strings.TrimSpace(turn.Observation) != "":
+		assistant := core.ChatMessage{Role: "assistant"}
+		if len(turn.AssistantContent) > 0 {
+			assistant.Content = cloneContentBlocks(turn.AssistantContent)
+		} else if strings.TrimSpace(turn.AssistantText) != "" {
+			assistant.Content = []core.ContentBlock{core.NewTextBlock(turn.AssistantText)}
+		}
+		if len(assistant.Content) > 0 {
+			messages = append(messages, assistant)
+		}
+		if strings.TrimSpace(turn.Observation) != "" {
 			messages = append(messages, core.ChatMessage{
 				Role:    "user",
 				Content: []core.ContentBlock{core.NewTextBlock("System observation: " + turn.Observation)},
@@ -921,22 +970,31 @@ func traceTerminationCause(trace *Trace) string {
 	}
 }
 
-func extractFunctionCalls(result map[string]any) ([]map[string]any, error) {
+func extractFunctionCalls(result map[string]any) ([]core.ToolCall, error) {
 	if result == nil {
 		return nil, nil
 	}
-	if call, ok := result["function_call"].(map[string]any); ok {
-		return []map[string]any{call}, nil
-	}
 	if rawCalls, ok := result["tool_calls"].([]core.ToolCall); ok && len(rawCalls) > 0 {
-		calls := make([]map[string]any, 0, len(rawCalls))
+		calls := make([]core.ToolCall, 0, len(rawCalls))
 		for _, rawCall := range rawCalls {
-			calls = append(calls, map[string]any{
-				"name":      rawCall.Name,
-				"arguments": rawCall.Arguments,
+			calls = append(calls, core.ToolCall{
+				ID:        rawCall.ID,
+				Name:      rawCall.Name,
+				Arguments: core.ShallowCopyMap(rawCall.Arguments),
+				Metadata:  core.ShallowCopyMap(rawCall.Metadata),
 			})
 		}
 		return calls, nil
+	}
+	if call, ok := result["function_call"].(map[string]any); ok {
+		arguments, _ := call["arguments"].(map[string]any)
+		metadata, _ := call["metadata"].(map[string]any)
+		return []core.ToolCall{{
+			ID:        agentutil.StringValue(call["id"]),
+			Name:      agentutil.StringValue(call["name"]),
+			Arguments: core.ShallowCopyMap(arguments),
+			Metadata:  core.ShallowCopyMap(metadata),
+		}}, nil
 	}
 	return nil, nil
 }
@@ -1000,6 +1058,23 @@ func cloneRegisteredTool(tool core.Tool) (core.Tool, error) {
 		return nil, fmt.Errorf("tool %q returned nil clone", tool.Name())
 	}
 	return cloned, nil
+}
+
+func cloneContentBlocks(blocks []core.ContentBlock) []core.ContentBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]core.ContentBlock, len(blocks))
+	for i, block := range blocks {
+		cloned[i] = block
+		if block.Metadata != nil {
+			cloned[i].Metadata = core.ShallowCopyMap(block.Metadata)
+		}
+		if len(block.Data) > 0 {
+			cloned[i].Data = append([]byte(nil), block.Data...)
+		}
+	}
+	return cloned
 }
 
 func blockedReason(err error) string {

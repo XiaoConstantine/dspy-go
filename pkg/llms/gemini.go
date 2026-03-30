@@ -69,6 +69,7 @@ type geminiPart struct {
 }
 
 type geminiFunctionResponsePart struct {
+	ID       string                 `json:"id,omitempty"`
 	Name     string                 `json:"name"`
 	Response map[string]interface{} `json:"response"`
 }
@@ -128,6 +129,7 @@ type geminiFunctionCallResponse struct {
 	PromptFeedback map[string]any `json:"promptFeedback,omitempty"`
 }
 type geminiFunctionCall struct {
+	ID        string                 `json:"id,omitempty"`
 	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"args"`
 }
@@ -350,6 +352,7 @@ func supportsGeminiFunctionCalling(_ core.ModelID) bool {
 const (
 	geminiThoughtMetadataKey          = "gemini_thought"
 	geminiThoughtSignatureMetadataKey = "gemini_thought_signature"
+	geminiThoughtSignatureSkipValue   = "skip_thought_signature_validator"
 )
 
 func supportsGeminiThoughtSignatures(modelID core.ModelID) bool {
@@ -420,13 +423,17 @@ func buildGeminiContentResponse(parts []geminiPart) (string, []core.ContentBlock
 				thoughtBlocks = append(thoughtBlocks, block)
 			} else {
 				textParts = append(textParts, part.Text)
-				contentBlocks = append(contentBlocks, block)
 			}
+			contentBlocks = append(contentBlocks, block)
 		}
 
 		if part.FunctionCall != nil {
+			callID := strings.TrimSpace(part.FunctionCall.ID)
+			if callID == "" {
+				callID = fmt.Sprintf("gemini-call-%d", idx)
+			}
 			call := core.ToolCall{
-				ID:        fmt.Sprintf("gemini-call-%d", idx),
+				ID:        callID,
 				Name:      part.FunctionCall.Name,
 				Arguments: part.FunctionCall.Arguments,
 			}
@@ -456,37 +463,61 @@ func buildGeminiContentResponse(parts []geminiPart) (string, []core.ContentBlock
 
 func (g *GeminiLLM) chatMessagesToGeminiContents(messages []core.ChatMessage) []geminiContent {
 	contents := make([]geminiContent, 0, len(messages))
-	for _, msg := range messages {
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
 		// Gemini expects tool results as function_response parts rather than a
-		// standalone "tool" role. If we somehow receive a tool-role message
-		// without a tool result payload, drop it instead of emitting a malformed
-		// synthetic user turn.
-		if msg.Role == "tool" && msg.ToolResult == nil {
+		// standalone "tool" role. Consecutive tool results from the same native
+		// turn are replayed as a single user content turn with multiple
+		// functionResponse parts.
+		if msg.Role == "tool" {
+			content := geminiContent{
+				Role:  geminiRoleForChatMessage(msg.Role),
+				Parts: []geminiPart{},
+			}
+			for ; i < len(messages); i++ {
+				toolMsg := messages[i]
+				if toolMsg.Role != "tool" {
+					i--
+					break
+				}
+				if toolMsg.ToolResult == nil {
+					continue
+				}
+				response := map[string]any{
+					"content": contentBlocksToText(toolMsg.ToolResult.Content),
+				}
+				content.Parts = append(content.Parts, geminiPart{
+					FunctionResponse: &geminiFunctionResponsePart{
+						ID:       strings.TrimSpace(toolMsg.ToolResult.ToolCallID),
+						Name:     toolMsg.ToolResult.Name,
+						Response: response,
+					},
+				})
+			}
+			if len(content.Parts) > 0 {
+				contents = append(contents, content)
+			}
 			continue
+		}
+
+		contentBlocks := msg.Content
+		if len(msg.ToolCalls) > 0 {
+			// Gemini validates function-call signatures for tool replay, but
+			// replaying the full thought text significantly inflates the request
+			// without being required for correctness.
+			contentBlocks = filterGeminiAssistantToolReplayContent(contentBlocks)
 		}
 
 		content := geminiContent{
 			Role:  geminiRoleForChatMessage(msg.Role),
-			Parts: make([]geminiPart, 0, len(msg.Content)+len(msg.ToolCalls)+1),
+			Parts: make([]geminiPart, 0, len(contentBlocks)+len(msg.ToolCalls)+1),
 		}
-
-		if msg.ToolResult != nil {
-			response := map[string]any{
-				"content": contentBlocksToText(msg.ToolResult.Content),
-			}
-			content.Parts = append(content.Parts, geminiPart{
-				FunctionResponse: &geminiFunctionResponsePart{
-					Name:     msg.ToolResult.Name,
-					Response: response,
-				},
-			})
-		} else {
-			content.Parts = append(content.Parts, g.convertToGeminiParts(msg.Content)...)
-		}
+		content.Parts = append(content.Parts, g.convertToGeminiParts(contentBlocks)...)
 
 		for _, toolCall := range msg.ToolCalls {
 			part := geminiPart{
 				FunctionCall: &geminiFunctionCall{
+					ID:        strings.TrimSpace(toolCall.ID),
 					Name:      toolCall.Name,
 					Arguments: toolCall.Arguments,
 				},
@@ -499,6 +530,9 @@ func (g *GeminiLLM) chatMessagesToGeminiContents(messages []core.ChatMessage) []
 					part.ThoughtSignature = signature
 				}
 			}
+			if part.ThoughtSignature == "" && supportsGeminiThoughtSignatures(core.ModelID(g.ModelID())) {
+				part.ThoughtSignature = geminiThoughtSignatureSkipValue
+			}
 			content.Parts = append(content.Parts, part)
 		}
 
@@ -508,6 +542,22 @@ func (g *GeminiLLM) chatMessagesToGeminiContents(messages []core.ChatMessage) []
 		contents = append(contents, content)
 	}
 	return contents
+}
+
+func filterGeminiAssistantToolReplayContent(blocks []core.ContentBlock) []core.ContentBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	filtered := make([]core.ContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Metadata != nil {
+			if thought, ok := block.Metadata[geminiThoughtMetadataKey].(bool); ok && thought {
+				continue
+			}
+		}
+		filtered = append(filtered, block)
+	}
+	return filtered
 }
 
 func geminiRoleForChatMessage(role string) string {
@@ -756,6 +806,7 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 			result["tool_calls"] = toolCalls
 			call := toolCalls[0]
 			result["function_call"] = map[string]interface{}{
+				"id":        call.ID,
 				"name":      call.Name,
 				"arguments": call.Arguments,
 			}
@@ -842,6 +893,7 @@ func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatM
 		result["tool_calls"] = toolCalls
 		first := toolCalls[0]
 		functionCall := map[string]any{
+			"id":        first.ID,
 			"name":      first.Name,
 			"arguments": first.Arguments,
 		}

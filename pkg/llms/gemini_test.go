@@ -819,6 +819,7 @@ func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 		require.Len(t, reqBody.Contents, 2)
 		require.Len(t, reqBody.Contents[1].Parts, 1)
 		require.NotNil(t, reqBody.Contents[1].Parts[0].FunctionResponse)
+		assert.Equal(t, "call-1", reqBody.Contents[1].Parts[0].FunctionResponse.ID)
 		assert.Equal(t, "search", reqBody.Contents[1].Parts[0].FunctionResponse.Name)
 
 		w.WriteHeader(http.StatusOK)
@@ -833,6 +834,7 @@ func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 						},
 						{
 							"functionCall": {
+								"id": "call-1",
 								"name": "search",
 								"args": {"query": "gemini"}
 							},
@@ -896,15 +898,138 @@ func TestGeminiLLM_GenerateWithTools_PreservesThoughtSignature(t *testing.T) {
 	toolCalls, ok := result["tool_calls"].([]core.ToolCall)
 	require.True(t, ok)
 	require.Len(t, toolCalls, 1)
+	assert.Equal(t, "call-1", toolCalls[0].ID)
 	assert.Equal(t, "search", toolCalls[0].Name)
 	assert.Equal(t, "sig-call", toolCalls[0].Metadata["gemini_thought_signature"])
 	assert.Equal(t, true, toolCalls[0].Metadata["gemini_thought"])
+
+	functionCall, ok := result["function_call"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "call-1", functionCall["id"])
 
 	thoughtBlocks, ok := result["thought_blocks"].([]core.ContentBlock)
 	require.True(t, ok)
 	require.Len(t, thoughtBlocks, 1)
 	assert.Equal(t, "sig-thought", thoughtBlocks[0].Metadata["gemini_thought_signature"])
 	assert.Equal(t, 3, result["thoughts_token_count"])
+}
+
+func TestGeminiLLM_ChatMessagesToGeminiContents_AddsSkipThoughtSignatureWhenMissing(t *testing.T) {
+	llm := &GeminiLLM{
+		BaseLLM: core.NewBaseLLM(
+			"google",
+			core.ModelGoogleGemini3FlashPreview,
+			[]core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			nil,
+		),
+	}
+
+	contents := llm.chatMessagesToGeminiContents([]core.ChatMessage{
+		{
+			Role: "assistant",
+			ToolCalls: []core.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "search",
+					Arguments: map[string]any{"query": "gemini"},
+				},
+			},
+		},
+	})
+
+	require.Len(t, contents, 1)
+	require.Len(t, contents[0].Parts, 1)
+	require.NotNil(t, contents[0].Parts[0].FunctionCall)
+	assert.Equal(t, geminiThoughtSignatureSkipValue, contents[0].Parts[0].ThoughtSignature)
+}
+
+func TestGeminiLLM_ChatMessagesToGeminiContents_CollapsesToolResponsesAndDropsThoughtText(t *testing.T) {
+	llm := &GeminiLLM{
+		BaseLLM: core.NewBaseLLM(
+			"google",
+			core.ModelGoogleGemini3FlashPreview,
+			[]core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			nil,
+		),
+	}
+
+	thoughtBlock := core.NewTextBlock("internal chain of thought")
+	thoughtBlock.Metadata = map[string]any{
+		geminiThoughtMetadataKey:          true,
+		geminiThoughtSignatureMetadataKey: "sig-thought",
+	}
+
+	contents := llm.chatMessagesToGeminiContents([]core.ChatMessage{
+		{
+			Role:    "user",
+			Content: []core.ContentBlock{core.NewTextBlock("Check weather in Paris and London.")},
+		},
+		{
+			Role: "assistant",
+			Content: []core.ContentBlock{
+				thoughtBlock,
+				core.NewTextBlock("I'll check both cities."),
+			},
+			ToolCalls: []core.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "weather",
+					Arguments: map[string]any{"city": "Paris"},
+					Metadata: map[string]any{
+						geminiThoughtMetadataKey:          true,
+						geminiThoughtSignatureMetadataKey: "sig-call",
+					},
+				},
+				{
+					ID:        "call-2",
+					Name:      "weather",
+					Arguments: map[string]any{"city": "London"},
+				},
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &core.ChatToolResult{
+				ToolCallID: "call-1",
+				Name:       "weather",
+				Content:    []core.ContentBlock{core.NewTextBlock("15C")},
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &core.ChatToolResult{
+				ToolCallID: "call-2",
+				Name:       "weather",
+				Content:    []core.ContentBlock{core.NewTextBlock("12C")},
+			},
+		},
+	})
+
+	require.Len(t, contents, 3)
+
+	assert.Equal(t, "user", contents[0].Role)
+	require.Len(t, contents[0].Parts, 1)
+	assert.Equal(t, "Check weather in Paris and London.", contents[0].Parts[0].Text)
+
+	assert.Equal(t, "model", contents[1].Role)
+	require.Len(t, contents[1].Parts, 3)
+	assert.Equal(t, "I'll check both cities.", contents[1].Parts[0].Text)
+	assert.False(t, contents[1].Parts[0].Thought)
+	require.NotNil(t, contents[1].Parts[1].FunctionCall)
+	assert.Equal(t, "call-1", contents[1].Parts[1].FunctionCall.ID)
+	assert.Equal(t, "sig-call", contents[1].Parts[1].ThoughtSignature)
+	require.NotNil(t, contents[1].Parts[2].FunctionCall)
+	assert.Equal(t, "call-2", contents[1].Parts[2].FunctionCall.ID)
+	assert.Equal(t, geminiThoughtSignatureSkipValue, contents[1].Parts[2].ThoughtSignature)
+
+	assert.Equal(t, "user", contents[2].Role)
+	require.Len(t, contents[2].Parts, 2)
+	require.NotNil(t, contents[2].Parts[0].FunctionResponse)
+	assert.Equal(t, "call-1", contents[2].Parts[0].FunctionResponse.ID)
+	assert.Equal(t, "15C", contents[2].Parts[0].FunctionResponse.Response["content"])
+	require.NotNil(t, contents[2].Parts[1].FunctionResponse)
+	assert.Equal(t, "call-2", contents[2].Parts[1].FunctionResponse.ID)
+	assert.Equal(t, "12C", contents[2].Parts[1].FunctionResponse.Response["content"])
 }
 
 func TestGeminiLLM_GenerateWithTools_EmptyResponseDiagnostics(t *testing.T) {

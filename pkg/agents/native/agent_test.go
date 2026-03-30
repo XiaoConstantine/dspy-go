@@ -238,6 +238,142 @@ func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	assert.Empty(t, llm.prompts)
 }
 
+func TestAgent_Execute_PreservesToolCallMetadataAcrossNativeRounds(t *testing.T) {
+	llm := &nativeStubLLM{
+		stubLLM: stubLLM{
+			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			results: []map[string]any{
+				{
+					"content_blocks": []core.ContentBlock{
+						{
+							Type: core.FieldTypeText,
+							Text: "Need to inspect package layout",
+							Metadata: map[string]any{
+								"gemini_thought":           true,
+								"gemini_thought_signature": "sig-thought",
+							},
+						},
+					},
+					"tool_calls": []core.ToolCall{
+						{
+							ID:        "call-1",
+							Name:      "write_note",
+							Arguments: map[string]any{"content": "done"},
+							Metadata: map[string]any{
+								"gemini_thought":           true,
+								"gemini_thought_signature": "sig-call",
+							},
+						},
+					},
+					"function_call": map[string]any{
+						"name":      "write_note",
+						"arguments": map[string]any{"content": "done"},
+					},
+				},
+				{
+					"function_call": map[string]any{
+						"name":      "Finish",
+						"arguments": map[string]any{"answer": "done"},
+					},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{MaxTurns: 4})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{
+		name: "write_note",
+		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+			return core.ToolResult{Data: params["content"]}, nil
+		},
+	}))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task": "Write a note and finish.",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.messages, 2)
+	require.GreaterOrEqual(t, len(llm.messages[1]), 3)
+	require.Len(t, llm.messages[1][1].Content, 1)
+	require.Len(t, llm.messages[1][1].ToolCalls, 1)
+
+	assert.Equal(t, "Need to inspect package layout", llm.messages[1][1].Content[0].Text)
+	assert.Equal(t, "sig-thought", llm.messages[1][1].Content[0].Metadata["gemini_thought_signature"])
+	assert.Equal(t, true, llm.messages[1][1].Content[0].Metadata["gemini_thought"])
+
+	toolCall := llm.messages[1][1].ToolCalls[0]
+	assert.Equal(t, "call-1", toolCall.ID)
+	assert.Equal(t, "write_note", toolCall.Name)
+	assert.Equal(t, "sig-call", toolCall.Metadata["gemini_thought_signature"])
+	assert.Equal(t, true, toolCall.Metadata["gemini_thought"])
+
+	require.NotNil(t, llm.messages[1][2].ToolResult)
+	assert.Equal(t, "call-1", llm.messages[1][2].ToolResult.ToolCallID)
+	assert.Equal(t, "write_note", llm.messages[1][2].ToolResult.Name)
+}
+
+func TestAgent_Execute_GroupsMultipleToolCallsFromOneNativeTurn(t *testing.T) {
+	llm := &nativeStubLLM{
+		stubLLM: stubLLM{
+			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+			results: []map[string]any{
+				{
+					"tool_calls": []core.ToolCall{
+						{
+							ID:        "call-1",
+							Name:      "write_note",
+							Arguments: map[string]any{"content": "first"},
+							Metadata: map[string]any{
+								"gemini_thought_signature": "sig-call",
+							},
+						},
+						{
+							ID:        "call-2",
+							Name:      "write_note",
+							Arguments: map[string]any{"content": "second"},
+						},
+					},
+				},
+				{
+					"function_call": map[string]any{
+						"name":      "Finish",
+						"arguments": map[string]any{"answer": "done"},
+					},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{MaxTurns: 4})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{
+		name: "write_note",
+		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+			return core.ToolResult{Data: params["content"]}, nil
+		},
+	}))
+
+	result, err := agent.Execute(context.Background(), map[string]interface{}{
+		"task": "Write two notes and finish.",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.messages, 2)
+	require.GreaterOrEqual(t, len(llm.messages[1]), 4)
+	require.Len(t, llm.messages[1][1].ToolCalls, 2)
+
+	assert.Equal(t, "call-1", llm.messages[1][1].ToolCalls[0].ID)
+	assert.Equal(t, "sig-call", llm.messages[1][1].ToolCalls[0].Metadata["gemini_thought_signature"])
+	assert.Equal(t, "call-2", llm.messages[1][1].ToolCalls[1].ID)
+
+	require.NotNil(t, llm.messages[1][2].ToolResult)
+	assert.Equal(t, "call-1", llm.messages[1][2].ToolResult.ToolCallID)
+	require.NotNil(t, llm.messages[1][3].ToolResult)
+	assert.Equal(t, "call-2", llm.messages[1][3].ToolResult.ToolCallID)
+}
+
 func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
