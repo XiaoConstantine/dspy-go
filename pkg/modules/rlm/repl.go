@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"reflect"
 	"strconv"
 	"strings"
@@ -19,6 +20,8 @@ import (
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
 )
+
+var quotedFinalVarPattern = regexp.MustCompile(`FINAL_VAR\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\)`)
 
 // REPLEnvironment defines the interface for a REPL that can execute code
 // and make LLM queries.
@@ -1176,7 +1179,8 @@ func (r *YaegiREPL) Execute(ctx context.Context, code string) (result *Execution
 		}
 	}()
 
-	_, evalErr := r.interp.Eval(code)
+	normalizedCode := normalizeQuotedFinalVar(code)
+	_, evalErr := r.interp.Eval(normalizedCode)
 
 	result = &ExecutionResult{
 		Stdout:   r.stdout.String(),
@@ -1192,6 +1196,13 @@ func (r *YaegiREPL) Execute(ctx context.Context, code string) (result *Execution
 	}
 
 	return result, nil
+}
+
+func normalizeQuotedFinalVar(code string) string {
+	if code == "" {
+		return code
+	}
+	return quotedFinalVarPattern.ReplaceAllString(code, `FINAL($1)`)
 }
 
 // GetVariable retrieves a variable value from the interpreter.
