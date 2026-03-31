@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/subagent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -22,6 +25,145 @@ func TestNewAgent_RequiresToolCalling(t *testing.T) {
 	_, err := NewAgent(&stubLLM{}, Config{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not support tool calling")
+}
+
+func TestNewAgent_LoadsPersistedSkillPrompt(t *testing.T) {
+	store := skills.NewMemoryStore()
+	require.NoError(t, store.Save(context.Background(), skills.Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Prefer repository-specific debugging heuristics.",
+		Version: 2,
+	}))
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:     1,
+		SystemPrompt: "You are a careful code reviewer.",
+		SkillStore:   store,
+		SkillDomain:  "repo:test",
+	})
+	require.NoError(t, err)
+
+	loadedSkill := agent.GetLoadedSkill()
+	require.NotNil(t, loadedSkill)
+	assert.Equal(t, "repo:test", loadedSkill.Domain)
+	assert.Equal(t, 2, loadedSkill.Version)
+	assert.NoError(t, agent.GetSkillLoadError())
+
+	artifacts := agent.GetArtifacts()
+	assert.Contains(t, artifacts.Text[optimize.ArtifactSkillPack], "You are a careful code reviewer.")
+	assert.Contains(t, artifacts.Text[optimize.ArtifactSkillPack], "Prefer repository-specific debugging heuristics.")
+
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "You are a careful code reviewer.")
+	assert.Contains(t, llm.prompts[0], "SKILL PACK:")
+	assert.Contains(t, llm.prompts[0], "Prefer repository-specific debugging heuristics.")
+}
+
+func TestNewAgent_PersistedSkillNoOpInputs(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+	}{
+		{
+			name: "nil store",
+			config: Config{
+				MaxTurns:     1,
+				SystemPrompt: "You are a careful code reviewer.",
+				SkillDomain:  "repo:test",
+			},
+		},
+		{
+			name: "empty domain",
+			config: Config{
+				MaxTurns:     1,
+				SystemPrompt: "You are a careful code reviewer.",
+				SkillStore:   skills.NewMemoryStore(),
+			},
+		},
+		{
+			name: "missing persisted skill",
+			config: Config{
+				MaxTurns:     1,
+				SystemPrompt: "You are a careful code reviewer.",
+				SkillStore:   skills.NewMemoryStore(),
+				SkillDomain:  "repo:missing",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			llm := &stubLLM{
+				capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+				results: []map[string]any{
+					{
+						"function_call": map[string]any{
+							"name":      "Finish",
+							"arguments": map[string]any{"answer": "done"},
+						},
+					},
+				},
+			}
+
+			agent, err := NewAgent(llm, tt.config)
+			require.NoError(t, err)
+			assert.Nil(t, agent.GetLoadedSkill())
+			assert.NoError(t, agent.GetSkillLoadError())
+
+			result, err := agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
+			require.NoError(t, err)
+			require.True(t, result["completed"].(bool))
+			require.Len(t, llm.prompts, 1)
+			assert.NotContains(t, llm.prompts[0], "SKILL PACK:")
+		})
+	}
+}
+
+func TestNewAgent_PersistedSkillLoadErrorIsNonFatal(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:     1,
+		SystemPrompt: "You are a careful code reviewer.",
+		SkillStore:   nativeErrorSkillStore{err: errors.New("load failed")},
+		SkillDomain:  "repo:test",
+	})
+	require.NoError(t, err)
+	assert.Nil(t, agent.GetLoadedSkill())
+	require.EqualError(t, agent.GetSkillLoadError(), "load failed")
+
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "You are a careful code reviewer.")
+	assert.NotContains(t, llm.prompts[0], "SKILL PACK:")
 }
 
 func TestAgent_Execute_CompletesWithToolAndFinish(t *testing.T) {
@@ -1445,6 +1587,49 @@ func TestAgent_Clone_CopiesCloneableTools(t *testing.T) {
 	assert.Nil(t, cloned.sessionEvent)
 }
 
+func TestAgent_Clone_DoesNotDuplicatePersistedSkillPrompt(t *testing.T) {
+	store := skills.NewMemoryStore()
+	require.NoError(t, store.Save(context.Background(), skills.Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Prefer repository-specific debugging heuristics.",
+		Version: 2,
+	}))
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:     1,
+		SystemPrompt: "You are a careful code reviewer.",
+		SkillStore:   store,
+		SkillDomain:  "repo:test",
+	})
+	require.NoError(t, err)
+
+	clonedAny, err := agent.Clone()
+	require.NoError(t, err)
+	cloned, ok := clonedAny.(*Agent)
+	require.True(t, ok)
+
+	result, err := cloned.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 1)
+	assert.Equal(t, 1, strings.Count(llm.prompts[0], "SKILL PACK:"))
+	assert.Equal(t, 1, strings.Count(llm.prompts[0], "Prefer repository-specific debugging heuristics."))
+	assert.Equal(t, 1, strings.Count(llm.prompts[0], "You are a careful code reviewer."))
+}
+
 func TestAgent_Clone_FailsForNonCloneableTools(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
@@ -1457,6 +1642,54 @@ func TestAgent_Clone_FailsForNonCloneableTools(t *testing.T) {
 	_, err = agent.Clone()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not implement core.CloneableTool")
+}
+
+func TestAgent_SetArtifacts_ClearsPersistedSkillOverlay(t *testing.T) {
+	store := skills.NewMemoryStore()
+	require.NoError(t, store.Save(context.Background(), skills.Skill{
+		Name:    "repo-skill",
+		Domain:  "repo:test",
+		Content: "Prefer repository-specific debugging heuristics.",
+		Version: 2,
+	}))
+
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(llm, Config{
+		MaxTurns:     1,
+		SystemPrompt: "You are a careful code reviewer.",
+		SkillStore:   store,
+		SkillDomain:  "repo:test",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, agent.SetArtifacts(optimize.AgentArtifacts{
+		Text: map[optimize.ArtifactKey]string{
+			optimize.ArtifactSkillPack: "Manual override prompt.",
+		},
+	}))
+
+	assert.Nil(t, agent.GetLoadedSkill())
+	assert.NoError(t, agent.GetSkillLoadError())
+	assert.Equal(t, "Manual override prompt.", agent.GetArtifacts().Text[optimize.ArtifactSkillPack])
+
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.Len(t, llm.prompts, 1)
+	assert.Contains(t, llm.prompts[0], "Manual override prompt.")
+	assert.NotContains(t, llm.prompts[0], "SKILL PACK:")
+	assert.NotContains(t, llm.prompts[0], "Prefer repository-specific debugging heuristics.")
 }
 
 func TestTurnBudgetReminder(t *testing.T) {
@@ -1503,6 +1736,20 @@ func noCallResult() map[string]any {
 			"finish_reason": "STOP",
 		},
 	}
+}
+
+type nativeErrorSkillStore struct {
+	err error
+}
+
+func (s nativeErrorSkillStore) Save(context.Context, skills.Skill) error { return s.err }
+
+func (s nativeErrorSkillStore) Load(context.Context, string) ([]skills.Skill, error) {
+	return nil, s.err
+}
+
+func (s nativeErrorSkillStore) Best(context.Context, string) (*skills.Skill, error) {
+	return nil, s.err
 }
 
 type simpleTool struct {

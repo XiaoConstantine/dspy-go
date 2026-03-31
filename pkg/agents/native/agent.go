@@ -11,9 +11,11 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/subagent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	toolspkg "github.com/XiaoConstantine/dspy-go/pkg/tools"
 )
 
@@ -33,6 +35,8 @@ type Config struct {
 	SessionRecallLimit            int
 	SessionRecallMaxChars         int
 	SessionEventStore             sessionevent.SessionEventStore
+	SkillDomain                   string
+	SkillStore                    skills.Store
 	MaxConsecutiveNoCallResponses int
 	ToolInterceptors              []core.ToolInterceptor
 	OnEvent                       func(agents.AgentEvent)
@@ -144,6 +148,10 @@ type Agent struct {
 	sessions     *agents.SessionStore
 	sessionEvent sessionevent.SessionEventStore
 
+	loadedSkill          *skills.Skill
+	skillLoadErr         error
+	persistedSkillPrompt string
+
 	traceMu         sync.RWMutex
 	lastTrace       *agents.ExecutionTrace
 	lastNativeTrace *Trace
@@ -188,14 +196,29 @@ func NewAgent(llm core.LLM, cfg Config) (*Agent, error) {
 	}
 	cfg.ToolInterceptors = append([]core.ToolInterceptor(nil), cfg.ToolInterceptors...)
 
-	return &Agent{
+	agent := &Agent{
 		llm:          llm,
 		config:       cfg,
 		toolRegistry: toolspkg.NewInMemoryToolRegistry(),
 		memory:       cfg.Memory,
 		sessions:     agents.NewSessionStore(cfg.Memory),
 		sessionEvent: cfg.SessionEventStore,
-	}, nil
+	}
+
+	if cfg.SkillStore != nil && strings.TrimSpace(cfg.SkillDomain) != "" {
+		skill, err := cfg.SkillStore.Best(context.Background(), cfg.SkillDomain)
+		agent.skillLoadErr = err
+		if err != nil {
+			logger := logging.GetLogger()
+			logger.Warn(context.Background(), "Failed to load skill for native agent domain %s: %v", cfg.SkillDomain, err)
+		} else if skill != nil {
+			cloned := skill.Clone()
+			agent.loadedSkill = &cloned
+			agent.persistedSkillPrompt = strings.TrimSpace(cloned.Content)
+		}
+	}
+
+	return agent, nil
 }
 
 // RegisterTool adds a tool to the shared registry.
@@ -611,10 +634,28 @@ func (a *Agent) GetArtifacts() optimize.AgentArtifacts {
 	if a == nil {
 		return artifacts
 	}
-	artifacts.Text[optimize.ArtifactSkillPack] = a.config.SystemPrompt
+	artifacts.Text[optimize.ArtifactSkillPack] = composeSystemPrompt(a.config.SystemPrompt, a.persistedSkillPrompt)
 	artifacts.Text[optimize.ArtifactToolPolicy] = a.config.ToolPolicy
 	artifacts.Int["max_turns"] = a.config.MaxTurns
 	return artifacts
+}
+
+// GetLoadedSkill returns the constructor-loaded persisted skill, if one was applied.
+func (a *Agent) GetLoadedSkill() *skills.Skill {
+	if a == nil || a.loadedSkill == nil {
+		return nil
+	}
+
+	cloned := a.loadedSkill.Clone()
+	return &cloned
+}
+
+// GetSkillLoadError returns the last constructor-time persisted skill load error.
+func (a *Agent) GetSkillLoadError() error {
+	if a == nil {
+		return nil
+	}
+	return a.skillLoadErr
 }
 
 // SetArtifacts updates the prompt/config backed artifacts.
@@ -622,8 +663,15 @@ func (a *Agent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
 	if a == nil {
 		return fmt.Errorf("tool-calling agent is nil")
 	}
-	if prompt, ok := artifacts.Text[optimize.ArtifactSkillPack]; ok && prompt != "" {
+	if prompt, ok := artifacts.Text[optimize.ArtifactSkillPack]; ok && strings.TrimSpace(prompt) != "" {
 		a.config.SystemPrompt = prompt
+		a.persistedSkillPrompt = ""
+		a.loadedSkill = nil
+		a.skillLoadErr = nil
+		// Explicit prompt overrides are authoritative. Clearing constructor-time
+		// skill wiring avoids reloading persisted skills on later Clone() calls.
+		a.config.SkillStore = nil
+		a.config.SkillDomain = ""
 	}
 	if policy, ok := artifacts.Text[optimize.ArtifactToolPolicy]; ok && policy != "" {
 		a.config.ToolPolicy = policy
@@ -815,7 +863,7 @@ func (a *Agent) buildToolMessages(task string, sessionRecall string, turns []too
 
 func (a *Agent) buildPrompt(task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int) string {
 	var b strings.Builder
-	b.WriteString(a.config.SystemPrompt)
+	b.WriteString(composeSystemPrompt(a.config.SystemPrompt, a.persistedSkillPrompt))
 	b.WriteString("\n\n")
 	if strings.TrimSpace(a.config.ToolPolicy) != "" {
 		b.WriteString("TOOL POLICY:\n")
@@ -860,6 +908,18 @@ func (a *Agent) buildPrompt(task string, sessionRecall string, turns []toolTurn,
 	}
 
 	return b.String()
+}
+
+func composeSystemPrompt(base, persistedSkill string) string {
+	base = strings.TrimSpace(base)
+	persistedSkill = strings.TrimSpace(persistedSkill)
+	if persistedSkill == "" {
+		return base
+	}
+	if base == "" {
+		return "SKILL PACK:\n" + persistedSkill
+	}
+	return base + "\n\nSKILL PACK:\n" + persistedSkill
 }
 
 func turnBudgetReminder(currentTurn int, maxTurns int) string {
