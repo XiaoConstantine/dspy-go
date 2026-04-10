@@ -67,18 +67,17 @@ func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (ma
 // GetSignature returns the overall signature of the program
 // This would need to be defined based on the Forward function's expected inputs and outputs.
 func (p Program) GetSignature() Signature {
-	var inputs []InputField
-	var outputs []OutputField
-
-	// Since modules are in a map, we can't rely on order.
-	// We'll use the first module we find for inputs and outputs.
-	for _, module := range p.Modules {
-		sig := module.GetSignature()
-		inputs = sig.Inputs
-		outputs = sig.Outputs
-		break
+	if len(p.Modules) == 0 {
+		return Signature{}
 	}
-	return NewSignature(inputs, outputs)
+
+	moduleNames := make([]string, 0, len(p.Modules))
+	for name := range p.Modules {
+		moduleNames = append(moduleNames, name)
+	}
+	sort.Strings(moduleNames)
+
+	return p.Modules[moduleNames[0]].GetSignature()
 }
 
 // Clone creates a deep copy of the Program.

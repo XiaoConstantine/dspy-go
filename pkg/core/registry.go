@@ -140,42 +140,37 @@ func (r *DefaultLLMRegistry) UnregisterProvider(name string) error {
 // CreateLLM creates an LLM instance using the registry with backward compatibility.
 func (r *DefaultLLMRegistry) CreateLLM(ctx context.Context, apiKey string, modelID ModelID) (LLM, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	// Find the provider for this model
 	providerName, exists := r.modelToProvider[modelID]
 	if !exists {
-		// Try to infer provider from model ID for backward compatibility
 		providerName = r.inferProviderFromModelID(modelID)
 		if providerName == "" {
+			r.mu.RUnlock()
 			return nil, errors.WithFields(
 				errors.New(errors.ModelNotSupported, "model not supported"),
 				errors.Fields{"model_id": modelID})
 		}
 	}
 
-	// Get the provider factory
 	factory, exists := r.providers[providerName]
 	if !exists {
+		r.mu.RUnlock()
 		return nil, errors.WithFields(
 			errors.New(errors.ProviderNotFound, "provider not found"),
 			errors.Fields{"provider": providerName})
 	}
 
-	// Create a basic config for backward compatibility
 	config := ProviderConfig{
 		Name:   providerName,
 		APIKey: apiKey,
 	}
 
-	// If we have a stored config, use it
 	if storedConfig, exists := r.providerConfigs[providerName]; exists {
-		config = storedConfig
-		// Override API key if provided
+		config = cloneProviderConfig(storedConfig)
 		if apiKey != "" {
 			config.APIKey = apiKey
 		}
 	}
+	r.mu.RUnlock()
 
 	return factory(ctx, config, modelID)
 }
@@ -183,16 +178,16 @@ func (r *DefaultLLMRegistry) CreateLLM(ctx context.Context, apiKey string, model
 // CreateLLMWithConfig creates an LLM instance with specific configuration.
 func (r *DefaultLLMRegistry) CreateLLMWithConfig(ctx context.Context, config ProviderConfig, modelID ModelID) (LLM, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	factory, exists := r.providers[config.Name]
 	if !exists {
+		r.mu.RUnlock()
 		return nil, errors.WithFields(
 			errors.New(errors.ProviderNotFound, "provider not found"),
 			errors.Fields{"provider": config.Name})
 	}
+	r.mu.RUnlock()
 
-	return factory(ctx, config, modelID)
+	return factory(ctx, cloneProviderConfig(config), modelID)
 }
 
 // LoadFromConfig loads provider configurations from a config structure.
@@ -364,6 +359,48 @@ func (r *DefaultLLMRegistry) inferProviderFromModelID(modelID ModelID) string {
 	}
 
 	return ""
+}
+
+func cloneProviderConfig(config ProviderConfig) ProviderConfig {
+	cloned := config
+	if config.Models != nil {
+		cloned.Models = make(map[string]ModelConfig, len(config.Models))
+		for key, model := range config.Models {
+			cloned.Models[key] = cloneModelConfig(model)
+		}
+	}
+	if config.Params != nil {
+		cloned.Params = make(map[string]interface{}, len(config.Params))
+		for key, value := range config.Params {
+			cloned.Params[key] = value
+		}
+	}
+	if config.Endpoint != nil {
+		endpoint := *config.Endpoint
+		cloned.Endpoint = &endpoint
+	}
+	return cloned
+}
+
+func cloneModelConfig(config ModelConfig) ModelConfig {
+	cloned := config
+	if config.Capabilities != nil {
+		cloned.Capabilities = append([]string(nil), config.Capabilities...)
+	}
+	if config.Params != nil {
+		cloned.Params = make(map[string]interface{}, len(config.Params))
+		for key, value := range config.Params {
+			cloned.Params[key] = value
+		}
+	}
+	if config.DefaultOptions != nil {
+		options := *config.DefaultOptions
+		if config.DefaultOptions.Stop != nil {
+			options.Stop = append([]string(nil), config.DefaultOptions.Stop...)
+		}
+		cloned.DefaultOptions = &options
+	}
+	return cloned
 }
 
 // GlobalRegistry is the global registry instance.

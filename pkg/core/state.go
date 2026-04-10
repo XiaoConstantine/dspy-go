@@ -65,6 +65,32 @@ type SavedProgramState struct {
 	Metadata map[string]string           `json:"metadata"` // e.g., {"dspy_go_version": "..."}
 }
 
+// persistedModuleTypeName preserves the historical state-file behavior of
+// storing concrete Go type names, while avoiding panics for non-pointer
+// module implementations.
+func persistedModuleTypeName(module Module) string {
+	if module == nil {
+		return ""
+	}
+
+	typ := reflect.TypeOf(module)
+	if typ == nil {
+		return ""
+	}
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+	if typ.Name() != "" {
+		return typ.Name()
+	}
+
+	if moduleType := module.GetModuleType(); moduleType != "" {
+		return moduleType
+	}
+
+	return typ.String()
+}
+
 // SaveProgram serializes the current state of the Program's modules to a JSON file.
 func SaveProgram(p *Program, filepath string) error {
 	// 1. Create SavedProgramState instance
@@ -106,7 +132,7 @@ func SaveProgram(p *Program, filepath string) error {
 			Demos:           savedDemos,
 			LMIdentifier:    lmIdentifier,
 			TunedParameters: tunedParams,
-			ModuleType:      reflect.TypeOf(module).Elem().Name(),
+			ModuleType:      persistedModuleTypeName(module),
 		}
 		state.Modules[name] = moduleState
 	}
@@ -165,7 +191,7 @@ func LoadProgram(p *Program, filepath string) error {
 		loadedModuleNames[name] = true // Mark this saved state as used
 
 		// 5. Module Type Check
-		currentModuleType := reflect.TypeOf(module).Elem().Name()
+		currentModuleType := persistedModuleTypeName(module)
 		if currentModuleType != savedModuleState.ModuleType {
 			log.Printf("[WARN] Type mismatch for module '%s': Program has type '%s', saved state has type '%s'. Skipping loading state for this module.", name, currentModuleType, savedModuleState.ModuleType)
 			continue

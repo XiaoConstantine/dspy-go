@@ -130,6 +130,27 @@ func TestProgram(t *testing.T) {
 		mockModule.AssertExpectations(t)
 	})
 
+	t.Run("GetSignature is deterministic across multiple modules", func(t *testing.T) {
+		alphaModule := new(MockModule)
+		alphaSig := NewSignature(
+			[]InputField{{Field: Field{Name: "alpha_in"}}},
+			[]OutputField{{Field: Field{Name: "alpha_out"}}},
+		)
+		alphaModule.On("GetSignature").Return(alphaSig).Times(2)
+
+		betaModule := new(MockModule)
+
+		program := NewProgram(map[string]Module{
+			"beta":  betaModule,
+			"alpha": alphaModule,
+		}, nil)
+
+		assert.Equal(t, alphaSig, program.GetSignature())
+		assert.Equal(t, alphaSig, program.GetSignature())
+		alphaModule.AssertExpectations(t)
+		betaModule.AssertNotCalled(t, "GetSignature")
+	})
+
 	t.Run("Clone", func(t *testing.T) {
 		expectedSig := NewSignature(
 			[]InputField{{Field: Field{Name: "input"}}},

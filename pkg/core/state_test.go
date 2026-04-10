@@ -158,6 +158,43 @@ func (m *AnotherMockModule) Clone() Module {
 	return cloned
 }
 
+type StateValueModule struct {
+	Sig Signature
+}
+
+func NewStateValueModule(name string) StateValueModule {
+	return StateValueModule{
+		Sig: NewSignature(
+			[]InputField{{Field: Field{Name: name + "_in"}}},
+			[]OutputField{{Field: Field{Name: name + "_out"}}},
+		),
+	}
+}
+
+func (m StateValueModule) Process(context.Context, map[string]any, ...Option) (map[string]any, error) {
+	return map[string]any{m.Sig.Outputs[0].Name: "value_output"}, nil
+}
+
+func (m StateValueModule) GetSignature() Signature {
+	return m.Sig
+}
+
+func (m StateValueModule) SetLLM(LLM) {}
+
+func (m StateValueModule) SetSignature(Signature) {}
+
+func (m StateValueModule) Clone() Module {
+	return m
+}
+
+func (m StateValueModule) GetDisplayName() string {
+	return "StateValueModule"
+}
+
+func (m StateValueModule) GetModuleType() string {
+	return "value"
+}
+
 // --- Test Functions Start Here ---
 
 func TestSaveLoadProgram_Success(t *testing.T) {
@@ -613,6 +650,30 @@ func TestLoadProgram_LMIdentifierMismatch(t *testing.T) {
 	assert.NoError(t, err, "LoadProgram should not error on LM identifier mismatch")
 
 	// TODO: Optionally capture stdout/stderr to verify the warning.
+}
+
+func TestSaveLoadProgram_NonPointerModuleDoesNotPanic(t *testing.T) {
+	module := NewStateValueModule("value")
+	program := NewProgram(map[string]Module{"value": module}, nil)
+	tempFile := tempFilePath(t, "value_module_state.json")
+
+	require.NotPanics(t, func() {
+		err := SaveProgram(&program, tempFile)
+		require.NoError(t, err)
+	})
+
+	jsonData, err := os.ReadFile(tempFile)
+	require.NoError(t, err)
+
+	var savedState SavedProgramState
+	err = json.Unmarshal(jsonData, &savedState)
+	require.NoError(t, err)
+	assert.Equal(t, "StateValueModule", savedState.Modules["value"].ModuleType)
+
+	require.NotPanics(t, func() {
+		err := LoadProgram(&program, tempFile)
+		require.NoError(t, err)
+	})
 }
 
 // Helper function to create a temporary file path.
