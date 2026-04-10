@@ -69,24 +69,23 @@ func isOAuthToken(token string) bool {
 	return strings.HasPrefix(token, "sk-ant-oat")
 }
 
-// NewAnthropicLLM creates a new AnthropicLLM instance.
-func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error) {
-	var clientOpts []option.RequestOption
-
+func anthropicClientOptions(apiKey string) []option.RequestOption {
 	if isOAuthToken(apiKey) {
-		// OAuth token - use Bearer auth with required headers for Claude Max/Pro
-		clientOpts = append(clientOpts,
+		return []option.RequestOption{
 			option.WithAuthToken(apiKey),
 			option.WithHeader("anthropic-beta", "claude-code-20250219,oauth-2025-04-20"),
 			option.WithHeader("anthropic-dangerous-direct-browser-access", "true"),
 			option.WithHeader("user-agent", "claude-cli/2.1.2 (external, cli)"),
 			option.WithHeader("x-app", "cli"),
-		)
-	} else {
-		// Standard API key
-		clientOpts = append(clientOpts, option.WithAPIKey(apiKey))
+		}
 	}
 
+	return []option.RequestOption{option.WithAPIKey(apiKey)}
+}
+
+// NewAnthropicLLM creates a new AnthropicLLM instance.
+func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error) {
+	clientOpts := anthropicClientOptions(apiKey)
 	client := anthropic.NewClient(clientOpts...)
 
 	capabilities := []core.Capability{
@@ -126,21 +125,7 @@ func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, 
 	}
 
 	// Create client with optional configuration
-	var clientOpts []option.RequestOption
-
-	if isOAuthToken(apiKey) {
-		// OAuth token - use Bearer auth with required headers for Claude Max/Pro
-		clientOpts = append(clientOpts,
-			option.WithAuthToken(apiKey),
-			option.WithHeader("anthropic-beta", "claude-code-20250219,oauth-2025-04-20"),
-			option.WithHeader("anthropic-dangerous-direct-browser-access", "true"),
-			option.WithHeader("user-agent", "claude-cli/2.1.2 (external, cli)"),
-			option.WithHeader("x-app", "cli"),
-		)
-	} else {
-		// Standard API key
-		clientOpts = append(clientOpts, option.WithAPIKey(apiKey))
-	}
+	clientOpts := anthropicClientOptions(apiKey)
 
 	// Apply endpoint configuration if provided
 	if config.Endpoint != nil && config.Endpoint.BaseURL != "" {

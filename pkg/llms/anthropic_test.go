@@ -90,6 +90,12 @@ func TestAnthropicLLM_NewClient(t *testing.T) {
 			model:     anthropic.ModelClaudeOpus4_1_20250805,
 			expectErr: false,
 		},
+		{
+			name:      "Valid OAuth token",
+			apiKey:    "sk-ant-oat-test-token",
+			model:     anthropic.ModelClaudeOpus4_1_20250805,
+			expectErr: false,
+		},
 		// Note: The Anthropic library doesn't validate API keys at client creation time
 		// It will only fail when making API calls, so we've removed the "Empty API key" test case
 	}
@@ -442,6 +448,27 @@ func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
 
 		config := core.ProviderConfig{
 			Name: "anthropic",
+		}
+
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus4_1_20250805))
+		assert.NoError(t, err)
+		assert.NotNil(t, llm)
+	})
+
+	t.Run("Config prefers OAuth env token over API key", func(t *testing.T) {
+		oldOAuthToken := os.Getenv("ANTHROPIC_OAUTH_TOKEN")
+		defer func() {
+			if oldOAuthToken != "" {
+				os.Setenv("ANTHROPIC_OAUTH_TOKEN", oldOAuthToken)
+			} else {
+				os.Unsetenv("ANTHROPIC_OAUTH_TOKEN")
+			}
+		}()
+		os.Setenv("ANTHROPIC_OAUTH_TOKEN", "sk-ant-oat-test-token")
+
+		config := core.ProviderConfig{
+			Name:   "anthropic",
+			APIKey: "config-api-key",
 		}
 
 		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus4_1_20250805))
