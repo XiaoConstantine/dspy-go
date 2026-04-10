@@ -47,6 +47,15 @@ type CloneableTool interface {
 	CloneTool() Tool
 }
 
+// ToolCall represents a tool invocation requested by an LLM.
+// Used across packages: core.ChatMessage, agents.Message, tools.ParseToolCalls.
+type ToolCall struct {
+	ID        string         `json:"id"` // provider-assigned ID; required for tool-result correlation
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
 // ToolResult wraps tool execution results with metadata.
 type ToolResult struct {
 	Data        interface{}            // The actual result data
