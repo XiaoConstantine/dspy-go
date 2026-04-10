@@ -22,7 +22,7 @@ var GlobalConfig = &Config{
 
 // ConfigureDefaultLLM sets up the default LLM to be used across the package.
 func ConfigureDefaultLLM(apiKey string, modelID ModelID) error {
-	llmInstance, err := DefaultFactory.CreateLLM(apiKey, modelID)
+	llmInstance, err := GetDefaultFactory().CreateLLM(apiKey, modelID)
 	if err != nil {
 		return fmt.Errorf("failed to configure default LLM: %w", err)
 	}
@@ -32,7 +32,7 @@ func ConfigureDefaultLLM(apiKey string, modelID ModelID) error {
 
 // ConfigureTeacherLLM sets up the teacher LLM.
 func ConfigureTeacherLLM(apiKey string, modelID ModelID) error {
-	llmInstance, err := DefaultFactory.CreateLLM(apiKey, modelID)
+	llmInstance, err := GetDefaultFactory().CreateLLM(apiKey, modelID)
 	if err != nil {
 		return fmt.Errorf("failed to configure teacher LLM: %w", err)
 	}

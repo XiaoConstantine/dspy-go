@@ -77,6 +77,38 @@ func TestConfigureTeacherLLM(t *testing.T) {
 	})
 }
 
+func TestConfigureDefaultLLM_UsesLazyFactoryInitialization(t *testing.T) {
+	originalDefaultLLM := GlobalConfig.DefaultLLM
+	originalDefaultFactory := DefaultFactory
+	originalRegistry := GlobalRegistry
+	defer func() {
+		GlobalConfig.DefaultLLM = originalDefaultLLM
+		DefaultFactory = originalDefaultFactory
+		GlobalRegistry = originalRegistry
+	}()
+
+	DefaultFactory = nil
+	registry := NewLLMRegistry()
+	err := registry.RegisterProvider("openai", func(ctx context.Context, config ProviderConfig, modelID ModelID) (LLM, error) {
+		return &MockLLM{}, nil
+	})
+	if err != nil {
+		t.Fatalf("failed to register mock provider: %v", err)
+	}
+	GlobalRegistry = registry
+
+	err = ConfigureDefaultLLM("test-key", ModelOpenAIGPT4)
+	if err != nil {
+		t.Fatalf("expected lazy factory initialization to succeed, got %v", err)
+	}
+	if DefaultFactory == nil {
+		t.Fatal("expected DefaultFactory to be initialized")
+	}
+	if GlobalConfig.DefaultLLM == nil {
+		t.Fatal("expected DefaultLLM to be configured")
+	}
+}
+
 func TestGetDefaultLLM(t *testing.T) {
 	// Save original state
 	originalDefaultLLM := GlobalConfig.DefaultLLM

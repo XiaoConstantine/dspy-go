@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"reflect"
 )
@@ -146,10 +147,10 @@ func LoadProgram(p *Program, filepath string) error {
 	// 3. Version Check
 	if savedVersion, ok := loadedState.Metadata["dspy_go_version"]; ok {
 		if savedVersion != Version {
-			fmt.Printf("[WARN] Loading state saved with dspy-go version '%s' but current version is '%s'. Compatibility not guaranteed.\n", savedVersion, Version)
+			log.Printf("[WARN] Loading state saved with dspy-go version '%s' but current version is '%s'. Compatibility not guaranteed.", savedVersion, Version)
 		}
 	} else {
-		fmt.Println("[WARN] Saved state file does not contain dspy-go version information.")
+		log.Printf("[WARN] Saved state file does not contain dspy-go version information.")
 	}
 
 	loadedModuleNames := make(map[string]bool)
@@ -158,7 +159,7 @@ func LoadProgram(p *Program, filepath string) error {
 	for name, module := range p.Modules {
 		savedModuleState, ok := loadedState.Modules[name]
 		if !ok {
-			fmt.Printf("[WARN] No saved state found for module '%s' in program.\n", name)
+			log.Printf("[WARN] No saved state found for module '%s' in program.", name)
 			continue // Skip this module if no state was saved for it
 		}
 		loadedModuleNames[name] = true // Mark this saved state as used
@@ -166,7 +167,7 @@ func LoadProgram(p *Program, filepath string) error {
 		// 5. Module Type Check
 		currentModuleType := reflect.TypeOf(module).Elem().Name()
 		if currentModuleType != savedModuleState.ModuleType {
-			fmt.Printf("[WARN] Type mismatch for module '%s': Program has type '%s', saved state has type '%s'. Skipping loading state for this module.\n", name, currentModuleType, savedModuleState.ModuleType)
+			log.Printf("[WARN] Type mismatch for module '%s': Program has type '%s', saved state has type '%s'. Skipping loading state for this module.", name, currentModuleType, savedModuleState.ModuleType)
 			continue
 		}
 
@@ -175,11 +176,11 @@ func LoadProgram(p *Program, filepath string) error {
 			if lmProvider, ok := module.(LMConfigProvider); ok {
 				currentIdentifier := lmProvider.GetLLMIdentifier()
 				if !reflect.DeepEqual(savedModuleState.LMIdentifier, currentIdentifier) {
-					fmt.Printf("[WARN] LM mismatch for module '%s': Saved state used %v, current module uses %v. Loaded demos/params may behave differently.\n", name, savedModuleState.LMIdentifier, currentIdentifier)
+					log.Printf("[WARN] LM mismatch for module '%s': Saved state used %v, current module uses %v. Loaded demos/params may behave differently.", name, savedModuleState.LMIdentifier, currentIdentifier)
 				}
 			} else {
 				// Saved state has LM info, but current module doesn't provide it for comparison
-				fmt.Printf("[WARN] Cannot verify LM config for module '%s': Module does not implement LMConfigProvider, but saved state has LM info: %v\n", name, savedModuleState.LMIdentifier)
+				log.Printf("[WARN] Cannot verify LM config for module '%s': Module does not implement LMConfigProvider, but saved state has LM info: %v", name, savedModuleState.LMIdentifier)
 			}
 		}
 
@@ -200,7 +201,7 @@ func LoadProgram(p *Program, filepath string) error {
 			}
 		} else if len(savedModuleState.Demos) > 0 {
 			// Saved state has demos, but the current module doesn't consume them
-			fmt.Printf("[WARN] Saved state for module '%s' contains demos, but the module does not implement DemoConsumer. Demos not loaded.\n", name)
+			log.Printf("[WARN] Saved state for module '%s' contains demos, but the module does not implement DemoConsumer. Demos not loaded.", name)
 		}
 
 		// 8. Load Tuned Parameters if module supports it
@@ -215,7 +216,7 @@ func LoadProgram(p *Program, filepath string) error {
 			}
 		} else if len(savedModuleState.TunedParameters) > 0 {
 			// Saved state has tuned parameters, but the current module doesn't consume them
-			fmt.Printf("[WARN] Saved state for module '%s' contains tuned parameters, but the module does not implement ParameterConsumer. Parameters not loaded.\n", name)
+			log.Printf("[WARN] Saved state for module '%s' contains tuned parameters, but the module does not implement ParameterConsumer. Parameters not loaded.", name)
 		}
 
 		// NOTE: Signature and full LMConfig object are not loaded from state in this version.
@@ -225,7 +226,7 @@ func LoadProgram(p *Program, filepath string) error {
 	// 9. Check for unused saved state
 	for savedName := range loadedState.Modules {
 		if !loadedModuleNames[savedName] {
-			fmt.Printf("[WARN] Saved state contains data for module '%s', but this module was not found in the current program.\n", savedName)
+			log.Printf("[WARN] Saved state contains data for module '%s', but this module was not found in the current program.", savedName)
 		}
 	}
 

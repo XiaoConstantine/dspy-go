@@ -1,9 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -278,6 +280,36 @@ func TestLoadProgram_VersionMismatch(t *testing.T) {
 
 	// TODO: Optionally capture stdout/stderr to verify the warning message
 	// This often requires more complex test setup (e.g., redirecting os.Stdout)
+}
+
+func TestLoadProgram_WarningsUseLogger(t *testing.T) {
+	savedState := SavedProgramState{
+		Modules:  make(map[string]SavedModuleState),
+		Metadata: map[string]string{},
+	}
+	jsonData, err := json.Marshal(savedState)
+	require.NoError(t, err)
+
+	tempFile := tempFilePath(t, "missing_version.json")
+	err = os.WriteFile(tempFile, jsonData, 0644)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	}()
+
+	mockModule := NewStateTestMockModule("moduleA")
+	program := NewProgram(map[string]Module{"modA": mockModule}, nil)
+
+	err = LoadProgram(&program, tempFile)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "[WARN] Saved state file does not contain dspy-go version information.")
 }
 
 func TestLoadProgram_ModuleTypeMismatch(t *testing.T) {

@@ -92,9 +92,9 @@ func NewImageFromURL(url string) (*ContentBlock, error) {
 
 	block := NewImageBlock(data, mimeType)
 	block.Metadata = map[string]interface{}{
-		"source":      "url",
-		"url":         url,
-		"size":        len(data),
+		"source":       "url",
+		"url":          url,
+		"size":         len(data),
 		"content_type": resp.Header.Get("Content-Type"),
 	}
 
@@ -215,9 +215,9 @@ func NewAudioFromURL(url string) (*ContentBlock, error) {
 
 	block := NewAudioBlock(data, mimeType)
 	block.Metadata = map[string]interface{}{
-		"source":      "url",
-		"url":         url,
-		"size":        len(data),
+		"source":       "url",
+		"url":          url,
+		"size":         len(data),
 		"content_type": resp.Header.Get("Content-Type"),
 	}
 
@@ -239,7 +239,7 @@ func detectImageMimeType(data []byte, filename string) string {
 			return "image/jpeg"
 		}
 		// GIF signature
-		if len(data) >= 6 && string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a" {
+		if len(data) >= 6 && (string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a") {
 			return "image/gif"
 		}
 		// WebP signature

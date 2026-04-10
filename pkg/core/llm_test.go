@@ -171,3 +171,26 @@ func TestWithTransportConfig(t *testing.T) {
 		t.Error("Expected HTTP client to be set")
 	}
 }
+
+func TestNewBaseLLM_DefaultTimeoutHandling(t *testing.T) {
+	t.Run("nil endpoint uses default timeout", func(t *testing.T) {
+		llm := NewBaseLLM("gemini", "test-model", nil, nil)
+		if llm.GetHTTPClient().Timeout != 30*time.Second {
+			t.Fatalf("expected default timeout of 30s, got %v", llm.GetHTTPClient().Timeout)
+		}
+	})
+
+	t.Run("zero endpoint timeout uses default timeout", func(t *testing.T) {
+		llm := NewBaseLLM("gemini", "test-model", nil, &EndpointConfig{TimeoutSec: 0})
+		if llm.GetHTTPClient().Timeout != 30*time.Second {
+			t.Fatalf("expected default timeout of 30s for zero timeout, got %v", llm.GetHTTPClient().Timeout)
+		}
+	})
+
+	t.Run("positive endpoint timeout is honored", func(t *testing.T) {
+		llm := NewBaseLLM("gemini", "test-model", nil, &EndpointConfig{TimeoutSec: 12})
+		if llm.GetHTTPClient().Timeout != 12*time.Second {
+			t.Fatalf("expected timeout of 12s, got %v", llm.GetHTTPClient().Timeout)
+		}
+	})
+}

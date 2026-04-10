@@ -1,10 +1,13 @@
 package core
 
 import (
+	"context"
 	"encoding/hex"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateSpanID(t *testing.T) {
@@ -97,4 +100,23 @@ func BenchmarkGenerateSpanID(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		generateSpanID()
 	}
+}
+
+func TestEndSpan_RestoresParentSpan(t *testing.T) {
+	ctx := WithExecutionState(context.Background())
+
+	ctx, parent := StartSpan(ctx, "parent")
+	childCtx, child := StartSpan(ctx, "child")
+
+	EndSpan(childCtx)
+
+	state := GetExecutionState(ctx)
+	require.NotNil(t, state)
+	require.Same(t, parent, state.activeSpan)
+	require.False(t, child.EndTime.IsZero())
+
+	EndSpan(ctx)
+
+	require.Nil(t, state.activeSpan)
+	require.False(t, parent.EndTime.IsZero())
 }

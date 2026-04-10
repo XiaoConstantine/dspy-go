@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 type TokenInfo struct {
@@ -364,7 +364,7 @@ func (b *BaseLLM) WorkloadType() WorkloadType {
 
 func NewBaseLLM(providerName string, modelID ModelID, capabilities []Capability, endpoint *EndpointConfig, opts ...BaseLLMOption) *BaseLLM {
 	var timeout time.Duration
-	if endpoint != nil && endpoint.TimeoutSec >= 0 {
+	if endpoint != nil && endpoint.TimeoutSec > 0 {
 		timeout = time.Duration(endpoint.TimeoutSec) * time.Second
 	} else {
 		timeout = 30 * time.Second
@@ -580,14 +580,14 @@ type ModelID string
 
 const (
 	// Anthropic models - Claude 3.x and newer series.
-	ModelAnthropicHaiku               ModelID = ModelID(anthropic.ModelClaude_3_Haiku_20240307)
-	ModelAnthropicSonnet              ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929) // For backwards compatibility
-	ModelAnthropicSonnet35            ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
-	ModelAnthropicOpus                ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
-	ModelAnthropicClaude4Opus         ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
-	ModelAnthropicClaude4Sonnet       ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
-	ModelAnthropicClaude45Sonnet      ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
-	ModelAnthropicClaude45Opus        ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
+	ModelAnthropicHaiku          ModelID = ModelID(anthropic.ModelClaude_3_Haiku_20240307)
+	ModelAnthropicSonnet         ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929) // For backwards compatibility
+	ModelAnthropicSonnet35       ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicOpus           ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
+	ModelAnthropicClaude4Opus    ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
+	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicClaude45Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicClaude45Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
 	// Claude 4.6 series.
 	ModelAnthropicClaude46Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
 	ModelAnthropicClaude46Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_6)

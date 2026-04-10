@@ -161,8 +161,20 @@ func EndSpan(ctx context.Context) {
 		defer state.mu.Unlock()
 
 		if state.activeSpan != nil {
-			state.activeSpan.EndTime = time.Now()
+			endedSpan := state.activeSpan
+			endedSpan.EndTime = time.Now()
 			state.activeSpan = nil
+
+			if endedSpan.ParentID == "" {
+				return
+			}
+
+			for i := len(state.spans) - 1; i >= 0; i-- {
+				if state.spans[i].ID == endedSpan.ParentID {
+					state.activeSpan = state.spans[i]
+					return
+				}
+			}
 		}
 	}
 }

@@ -30,7 +30,6 @@ type Module interface {
 	GetModuleType() string
 }
 
-
 // InterceptableModule extends Module with interceptor support.
 // This interface provides backward-compatible enhancement for modules that support interceptors.
 type InterceptableModule interface {
@@ -190,17 +189,11 @@ func (bm *BaseModule) ProcessWithInterceptorsImpl(ctx context.Context, inputs ma
 	// Create module info for interceptors
 	info := NewModuleInfo(bm.GetDisplayName(), bm.GetModuleType(), bm.GetSignature())
 
-	// Create the base handler that calls the provided process function
-	handler := func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
-		result, err := processFunc(ctx, inputs, opts...)
-		return result, err
-	}
-
 	// Chain the interceptors
 	chainedInterceptor := ChainModuleInterceptors(interceptors...)
 
 	// Execute with interceptors
-	result, err := chainedInterceptor(ctx, inputs, info, handler, opts...)
+	result, err := chainedInterceptor(ctx, inputs, info, processFunc, opts...)
 	return result, err
 }
 
