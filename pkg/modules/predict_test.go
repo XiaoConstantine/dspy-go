@@ -168,6 +168,37 @@ func TestPredict_WithGenerateOptions(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
+func TestPredict_SetLLMUpdatesEmbeddedBaseModule(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	predict := NewPredict(signature)
+	mockLLM := new(testutil.MockLLM)
+
+	predict.SetLLM(mockLLM)
+
+	assert.Same(t, mockLLM, predict.LLM)
+	assert.Same(t, mockLLM, predict.BaseModule.LLM)
+}
+
+func TestPredict_ClonePreservesEmbeddedLLM(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	original := NewPredict(signature)
+	mockLLM := new(testutil.MockLLM)
+	original.SetLLM(mockLLM)
+
+	cloned := original.Clone().(*Predict)
+
+	assert.Same(t, mockLLM, cloned.LLM)
+	assert.Same(t, mockLLM, cloned.BaseModule.LLM)
+}
+
 func TestPredict_WithStreamHandler(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)

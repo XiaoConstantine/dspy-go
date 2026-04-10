@@ -2,6 +2,7 @@ package llms
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -131,12 +132,12 @@ func TestDefaultFactoryInitialization(t *testing.T) {
 	resetFactoryForTesting()
 
 	// Ensure the factory gets initialized
-	ensureFactory()
+	require.NoError(t, ensureFactory())
 	assert.NotNil(t, defaultFactory, "Default factory should be initialized")
 	assert.NotNil(t, core.DefaultFactory, "Core default factory should be set")
 
 	// Call again to ensure idempotence via sync.Once
-	ensureFactory()
+	require.NoError(t, ensureFactory())
 	assert.NotNil(t, defaultFactory, "Default factory should remain initialized")
 }
 
@@ -300,15 +301,14 @@ func TestFactoryRegistryInitialization(t *testing.T) {
 	// Reset for testing
 	resetFactoryForTesting()
 
-	// Test that ensureRegistryInitialized doesn't panic
-	ensureRegistryInitialized()
+	require.NoError(t, ensureRegistryInitialized())
 
 	// Verify registry is initialized
 	registry := core.GetRegistry()
 	assert.NotNil(t, registry)
 
 	// Test that calling it again doesn't cause issues (sync.Once behavior)
-	ensureRegistryInitialized()
+	require.NoError(t, ensureRegistryInitialized())
 }
 
 // Test the fallback creation paths.
@@ -443,10 +443,27 @@ func TestLoadDefaultModelConfigurations(t *testing.T) {
 	// Create a new registry for testing
 	registry := core.NewLLMRegistry()
 
-	// Test that loading default configurations works
-	assert.NotPanics(t, func() {
-		loadDefaultModelConfigurations(registry)
-	})
+	require.NoError(t, loadDefaultModelConfigurations(registry))
+}
+
+type failingLoadRegistry struct {
+	core.LLMRegistry
+}
+
+func (r failingLoadRegistry) LoadFromConfig(ctx context.Context, configs map[string]core.ProviderConfig) error {
+	return errors.New("load config boom")
+}
+
+func TestEnsureRegistryInitialized_ReturnsErrorInsteadOfPanic(t *testing.T) {
+	resetFactoryForTesting()
+	t.Cleanup(resetFactoryForTesting)
+
+	core.GlobalRegistry = failingLoadRegistry{LLMRegistry: core.NewLLMRegistry()}
+
+	err := ensureRegistryInitialized()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load default model configurations")
+	assert.Contains(t, err.Error(), "load config boom")
 }
 
 // Test the NewLLM function with registry failure simulation.

@@ -17,7 +17,6 @@ import (
 type Predict struct {
 	core.BaseModule
 	Demos          []core.Example
-	LLM            core.LLM
 	defaultOptions *core.ModuleOptions
 
 	// XML output configuration
@@ -40,11 +39,11 @@ func NewPredict(signature core.Signature) *Predict {
 	baseModule := core.NewModule(signature)
 	baseModule.ModuleType = "Predict"
 	baseModule.DisplayName = "" // Will be set by user or derived from context
+	baseModule.LLM = core.GetDefaultLLM()
 
 	p := &Predict{
 		BaseModule: *baseModule,
 		Demos:      []core.Example{},
-		LLM:        core.GetDefaultLLM(),
 	}
 
 	// Enable XML output by default for structured responses
@@ -135,18 +134,19 @@ func (p *Predict) WithStructuredOutputConfig(config interceptors.StructuredOutpu
 // TODO(#interceptor-preservation): Implement selective removal of only XML interceptors.
 // This requires an interceptor identification mechanism since interceptors are function types.
 // Possible solutions:
-//   1. Wrap interceptors in a struct with metadata
-//   2. Maintain a separate list of XML interceptor indices
-//   3. Use a registry pattern for interceptor management
+//  1. Wrap interceptors in a struct with metadata
+//  2. Maintain a separate list of XML interceptor indices
+//  3. Use a registry pattern for interceptor management
 //
 // Until this is fixed, if you need to preserve custom interceptors:
-//   1. Save your interceptors before calling WithTextOutput()
-//   2. Re-add them after calling WithTextOutput()
+//  1. Save your interceptors before calling WithTextOutput()
+//  2. Re-add them after calling WithTextOutput()
 //
 // Example workaround:
-//   customInterceptors := predict.GetInterceptors()[:2] // Save first 2 custom interceptors
-//   predict.WithTextOutput()
-//   predict.SetInterceptors(customInterceptors) // Re-add them
+//
+//	customInterceptors := predict.GetInterceptors()[:2] // Save first 2 custom interceptors
+//	predict.WithTextOutput()
+//	predict.SetInterceptors(customInterceptors) // Re-add them
 func (p *Predict) WithTextOutput() *Predict {
 	p.enableXMLMode = false
 	p.xmlConfig = nil
@@ -333,7 +333,6 @@ func (p *Predict) Clone() core.Module {
 	cloned := &Predict{
 		BaseModule:     *p.BaseModule.Clone().(*core.BaseModule),
 		Demos:          append([]core.Example{}, p.Demos...),
-		LLM:            p.LLM,
 		defaultOptions: p.defaultOptions,
 		enableXMLMode:  p.enableXMLMode,
 	}
@@ -350,7 +349,6 @@ func (p *Predict) Clone() core.Module {
 func (p *Predict) GetDemos() []core.Example {
 	return p.Demos
 }
-
 
 // GetXMLConfig returns the XML configuration if XML mode is enabled.
 func (p *Predict) GetXMLConfig() *interceptors.XMLConfig {
@@ -779,7 +777,7 @@ func (p *Predict) SetDemos(demos []core.Example) {
 }
 
 func (p *Predict) SetLLM(llm core.LLM) {
-	p.LLM = llm
+	p.BaseModule.SetLLM(llm)
 }
 
 // GetLLMIdentifier implements the LMConfigProvider interface.

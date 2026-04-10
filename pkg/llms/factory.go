@@ -17,6 +17,8 @@ var (
 	defaultFactory     *DefaultLLMFactory
 	defaultFactoryOnce sync.Once
 	registryInitOnce   sync.Once
+	factoryInitErr     error
+	registryInitErr    error
 )
 
 // resetFactoryForTesting resets the factory for testing purposes
@@ -25,22 +27,25 @@ func resetFactoryForTesting() {
 	defaultFactory = nil
 	defaultFactoryOnce = sync.Once{}
 	registryInitOnce = sync.Once{}
+	factoryInitErr = nil
+	registryInitErr = nil
 	core.DefaultFactory = nil
 	// Reset the global registry as well
 	core.GlobalRegistry = core.NewLLMRegistry()
 }
 
-func ensureFactory() {
+func ensureFactory() error {
 	defaultFactoryOnce.Do(func() {
 		defaultFactory = &DefaultLLMFactory{}
 		core.DefaultFactory = defaultFactory
 		// Initialize registry on first factory creation
-		ensureRegistryInitialized()
+		factoryInitErr = ensureRegistryInitialized()
 	})
+	return factoryInitErr
 }
 
 // ensureRegistryInitialized initializes the global registry with default providers.
-func ensureRegistryInitialized() {
+func ensureRegistryInitialized() error {
 	registryInitOnce.Do(func() {
 		// Initialize the global registry if not already done
 		if core.GlobalRegistry == nil {
@@ -52,45 +57,54 @@ func ensureRegistryInitialized() {
 
 		// Register Anthropic provider
 		if err := registry.RegisterProvider("anthropic", AnthropicProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register anthropic provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register anthropic provider: %w", err)
+			return
 		}
 
 		// Register Google/Gemini provider
 		if err := registry.RegisterProvider("google", GeminiProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register google provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register google provider: %w", err)
+			return
 		}
 
 		// Register Ollama provider
 		if err := registry.RegisterProvider("ollama", OllamaProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register ollama provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register ollama provider: %w", err)
+			return
 		}
 
 		// Register LlamaCpp provider if it exists
 		if err := registry.RegisterProvider("llamacpp", LlamacppProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register llamacpp provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register llamacpp provider: %w", err)
+			return
 		}
 
 		// Register OpenAI and compatible providers
 		if err := registry.RegisterProvider("openai", OpenAIProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register openai provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register openai provider: %w", err)
+			return
 		}
 		if err := registry.RegisterProvider("litellm", LiteLLMProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register litellm provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register litellm provider: %w", err)
+			return
 		}
 		if err := registry.RegisterProvider("localai", LocalAIProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register localai provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register localai provider: %w", err)
+			return
 		}
 		if err := registry.RegisterProvider("fastchat", FastChatProviderFactory); err != nil {
-			panic(fmt.Sprintf("failed to register fastchat provider: %v", err))
+			registryInitErr = fmt.Errorf("failed to register fastchat provider: %w", err)
+			return
 		}
 
 		// Load default model configurations
-		loadDefaultModelConfigurations(registry)
+		registryInitErr = loadDefaultModelConfigurations(registry)
 	})
+	return registryInitErr
 }
 
 // loadDefaultModelConfigurations loads the default model configurations into the registry.
-func loadDefaultModelConfigurations(registry core.LLMRegistry) {
+func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
 	defaultConfigs := map[string]core.ProviderConfig{
 		"anthropic": {
 			Name: "anthropic",
@@ -268,14 +282,17 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) {
 	defer cancel()
 
 	if err := registry.LoadFromConfig(ctx, defaultConfigs); err != nil {
-		panic(fmt.Sprintf("failed to load default model configurations: %v", err))
+		return fmt.Errorf("failed to load default model configurations: %w", err)
 	}
+	return nil
 }
 
 // NewLLM creates a new LLM instance based on the provided model ID.
 // This function now uses the registry system for dynamic model creation.
 func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
-	ensureFactory()
+	if err := ensureFactory(); err != nil {
+		return nil, err
+	}
 
 	// Try to use the registry first
 	registry := core.GetRegistry()
@@ -347,11 +364,11 @@ func (f *DefaultLLMFactory) CreateLLM(apiKey string, modelID core.ModelID) (core
 }
 
 func init() {
-	ensureFactory()
+	_ = ensureFactory()
 }
 
 func EnsureFactory() {
-	ensureFactory()
+	_ = ensureFactory()
 }
 
 // Provider factories are defined in their respective LLM files

@@ -316,7 +316,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 			return nil, "", errors.Wrap(err, errors.Canceled, "context canceled during analysis")
 		}
 		// Get task breakdown from analyzer
-		result, err := f.analyzer.Process(ctx, map[string]interface{}{
+		result, err := f.analyzer.Process(attemptCtx, map[string]interface{}{
 			"task":    task,
 			"context": context,
 		}, f.config.Options)
@@ -343,7 +343,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 			continue
 		}
 
-		logger.Debug(ctx, "raw task: %s, result: %s", task, result)
+		logger.Debug(attemptCtx, "raw task: %s, result: %s", task, result)
 
 		tasks, err := f.parser.Parse(result)
 		if err != nil {
@@ -388,29 +388,17 @@ func (f *FlexibleOrchestrator) createExecutionPlan(tasks []Task) ([][]Task, erro
 }
 
 func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
-	// We'll use a top-level pool to manage overall concurrency
-	masterPool := pool.New().WithContext(ctx).WithCancelOnError().WithMaxGoroutines(f.config.MaxConcurrent)
-
-	// Process each phase using the master pool
 	for phaseIdx, phase := range plan {
-		// Capture phase variables for closure
-		currentPhase := phase
-		currentPhaseIdx := phaseIdx
-
-		// Add phase processing to master pool
-		masterPool.Go(func(ctx context.Context) error {
-			phaseCtx, span := core.StartSpan(ctx, fmt.Sprintf("Phase_%d", currentPhaseIdx))
+		if err := func(phaseIdx int, phase []Task) error {
+			phaseCtx, span := core.StartSpan(ctx, fmt.Sprintf("Phase_%d", phaseIdx))
 			defer core.EndSpan(phaseCtx)
 
-			// Create a phase-specific pool
-			phasePool := pool.New().WithContext(phaseCtx).WithCancelOnError()
-			// Process tasks in this phase
-			for _, task := range currentPhase {
-				t := task // Capture task for closure
+			phasePool := pool.New().WithContext(phaseCtx).WithCancelOnError().WithMaxGoroutines(f.config.MaxConcurrent)
+			for _, task := range phase {
+				t := task
 
 				phasePool.Go(func(tCtx context.Context) error {
-					// Execute task with proper context handling
-					if err := f.executeTask(phaseCtx, t, taskContext, result); err != nil {
+					if err := f.executeTask(tCtx, t, taskContext, result); err != nil {
 						span.WithError(err)
 						return errors.WithFields(
 							errors.Wrap(err, errors.StepExecutionFailed, "task execution failed"),
@@ -423,22 +411,22 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 				})
 			}
 
-			// Wait for all tasks in this phase and handle errors
 			if err := phasePool.Wait(); err != nil {
 				return errors.WithFields(
 					errors.Wrap(err, errors.WorkflowExecutionFailed, "phase execution failed"),
 					errors.Fields{
-						"phase_index": currentPhaseIdx,
-						"task_count":  len(currentPhase),
+						"phase_index": phaseIdx,
+						"task_count":  len(phase),
 					})
 			}
 
 			return nil
-		})
+		}(phaseIdx, phase); err != nil {
+			return err
+		}
 	}
 
-	// Wait for all phases to complete
-	return masterPool.Wait()
+	return nil
 }
 
 // executeTask handles single task execution with retries.
@@ -469,8 +457,9 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 	// Apply retry logic if configured
 	var lastErr error
 	attempts := 1
-	if f.config.RetryConfig.MaxAttempts > 1 {
-		attempts = f.config.RetryConfig.MaxAttempts
+	retryConfig := f.config.RetryConfig
+	if retryConfig != nil && retryConfig.MaxAttempts > 1 {
+		attempts = retryConfig.MaxAttempts
 	}
 	logger.Debug(ctx, "Starting execution of task [%s-%s] with max attempts [%d]", task.ID, task.Type, attempts)
 
@@ -496,11 +485,19 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 		lastErr = err
 		if i < attempts-1 {
 			backoff := time.Duration(float64(time.Second) *
-				math.Pow(f.config.RetryConfig.BackoffMultiplier, float64(i)))
+				math.Pow(retryBackoffMultiplier(retryConfig), float64(i)))
 
 			logger.Debug(attemptCtx, "Task [%s-%s] failed attempt %d/%d: %v. Retrying in %v",
 				task.ID, task.Type, i+1, attempts, err, backoff)
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				core.EndSpan(attemptCtx)
+				result.mu.Lock()
+				result.FailedTasks[task.ID] = ctx.Err()
+				result.mu.Unlock()
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
 		}
 
 		core.EndSpan(attemptCtx)
@@ -514,3 +511,9 @@ func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskC
 	return lastErr
 }
 
+func retryBackoffMultiplier(cfg *RetryConfig) float64 {
+	if cfg == nil || cfg.BackoffMultiplier <= 0 {
+		return 1
+	}
+	return cfg.BackoffMultiplier
+}

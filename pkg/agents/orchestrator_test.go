@@ -369,4 +369,105 @@ func TestFlexibleOrchestrator(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, context.Canceled))
 	})
+
+	t.Run("Phases Execute Sequentially", func(t *testing.T) {
+		orchestrator, mockProcessor, mockParser, mockPlanner, mockLLM := setupTestOrchestrator()
+
+		phaseOneTask := Task{ID: "task1", Type: "test", ProcessorType: "test"}
+		phaseTwoTask := Task{ID: "task2", Type: "test", ProcessorType: "test"}
+		tasks := []Task{phaseOneTask, phaseTwoTask}
+
+		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+			Return(&core.LLMResponse{Content: "<response><analysis>Task analyzed</analysis><tasks><tasks><task>test task</task></tasks></tasks></response>", Usage: &core.TokenInfo{}}, nil)
+		mockParser.On("Parse", mock.Anything).Return(tasks, nil)
+		mockPlanner.On("CreatePlan", tasks).Return([][]Task{{phaseOneTask}, {phaseTwoTask}}, nil)
+
+		phaseOneStarted := make(chan struct{})
+		releasePhaseOne := make(chan struct{})
+		phaseTwoStarted := make(chan struct{}, 1)
+
+		mockProcessor.On("Process", mock.Anything, phaseOneTask, mock.Anything).
+			Run(func(args mock.Arguments) {
+				close(phaseOneStarted)
+				<-releasePhaseOne
+			}).
+			Return("phase-one", nil).Once()
+		mockProcessor.On("Process", mock.Anything, phaseTwoTask, mock.Anything).
+			Run(func(args mock.Arguments) {
+				phaseTwoStarted <- struct{}{}
+			}).
+			Return("phase-two", nil).Once()
+
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := orchestrator.Process(setupTestContext(), "Test phase ordering", nil)
+			errCh <- err
+		}()
+
+		<-phaseOneStarted
+
+		select {
+		case <-phaseTwoStarted:
+			t.Fatal("phase 2 started before phase 1 completed")
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		close(releasePhaseOne)
+		require.NoError(t, <-errCh)
+
+		mockLLM.AssertExpectations(t)
+		mockParser.AssertExpectations(t)
+		mockPlanner.AssertExpectations(t)
+		mockProcessor.AssertExpectations(t)
+	})
+
+	t.Run("ExecuteTask Handles Nil RetryConfig", func(t *testing.T) {
+		orchestrator, mockProcessor, _, _, _ := setupTestOrchestrator()
+		orchestrator.config.RetryConfig = nil
+
+		task := Task{ID: "task1", Type: "test", ProcessorType: "test"}
+		result := &OrchestratorResult{
+			CompletedTasks: make(map[string]interface{}),
+			FailedTasks:    make(map[string]error),
+			Metadata:       make(map[string]interface{}),
+		}
+
+		mockProcessor.On("Process", mock.Anything, task, mock.Anything).Return("ok", nil).Once()
+
+		assert.NotPanics(t, func() {
+			err := orchestrator.executeTask(setupTestContext(), task, nil, result)
+			require.NoError(t, err)
+		})
+		assert.Equal(t, "ok", result.CompletedTasks["task1"])
+		mockProcessor.AssertExpectations(t)
+	})
+
+	t.Run("ExecuteTask Stops Retrying When Context Cancels During Backoff", func(t *testing.T) {
+		orchestrator, mockProcessor, _, _, _ := setupTestOrchestrator()
+		orchestrator.config.RetryConfig = &RetryConfig{
+			MaxAttempts:       3,
+			BackoffMultiplier: 2,
+		}
+
+		task := Task{ID: "task1", Type: "test", ProcessorType: "test"}
+		result := &OrchestratorResult{
+			CompletedTasks: make(map[string]interface{}),
+			FailedTasks:    make(map[string]error),
+			Metadata:       make(map[string]interface{}),
+		}
+
+		ctx, cancel := context.WithCancel(setupTestContext())
+		retryErr := errors.New("retry me")
+		mockProcessor.On("Process", mock.Anything, task, mock.Anything).
+			Run(func(args mock.Arguments) {
+				cancel()
+			}).
+			Return(nil, retryErr).Once()
+
+		err := orchestrator.executeTask(ctx, task, nil, result)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		mockProcessor.AssertNumberOfCalls(t, "Process", 1)
+		assert.ErrorIs(t, result.FailedTasks["task1"], context.Canceled)
+	})
 }
