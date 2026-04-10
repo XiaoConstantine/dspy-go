@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	modrlm "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
@@ -198,6 +199,25 @@ func TestGEPAAgentOptimizer_EvaluateCandidate_UsesWholeProgramIntArtifacts(t *te
 	decoded, err := optimizer.CandidateArtifacts(candidate)
 	require.NoError(t, err)
 	assert.Equal(t, 12, decoded.Int["max_turns"])
+}
+
+func TestGEPAAgentOptimizer_buildEngineConfig_UsesConfiguredLLMOverrides(t *testing.T) {
+	generationLLM := &testutil.MockLLM{}
+	reflectionLLM := &testutil.MockLLM{}
+
+	optimizer := NewGEPAAgentOptimizer(nil, nil, GEPAAdapterConfig{
+		PopulationSize:  5,
+		MaxGenerations:  3,
+		GenerationLLM:   generationLLM,
+		ReflectionLLM:   reflectionLLM,
+		SearchBatchSize: 2,
+	})
+
+	engineConfig := optimizer.buildEngineConfig(4)
+
+	assert.Same(t, generationLLM, engineConfig.GenerationLLM)
+	assert.Same(t, reflectionLLM, engineConfig.ReflectionLLM)
+	assert.Equal(t, 2, engineConfig.EvaluationBatchSize)
 }
 
 func TestBuildMultiObjectiveFitness_CountsEvaluationFailuresOnce(t *testing.T) {

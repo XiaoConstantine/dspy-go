@@ -49,6 +49,8 @@ type GEPAAdapterConfig struct {
 	EvalConcurrency  int
 	PassThreshold    float64
 	PrimaryArtifact  ArtifactKey
+	GenerationLLM    core.LLM
+	ReflectionLLM    core.LLM
 	IntMutationPlans map[string]IntMutationConfig
 }
 

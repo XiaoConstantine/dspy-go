@@ -312,6 +312,27 @@ func TestNewGEPA(t *testing.T) {
 	assert.NotNil(t, gepa.generationLLM)
 }
 
+func TestNewGEPA_UsesConfiguredLLMOverrides(t *testing.T) {
+	generationLLM := &testutil.MockLLM{}
+	reflectionLLM := &testutil.MockLLM{}
+	setupGEPAMockLLM(generationLLM)
+	setupGEPAMockLLM(reflectionLLM)
+
+	config := &GEPAConfig{
+		PopulationSize: 10,
+		MaxGenerations: 5,
+		GenerationLLM:  generationLLM,
+		ReflectionLLM:  reflectionLLM,
+	}
+
+	gepa, err := NewGEPA(config)
+	require.NoError(t, err)
+	require.NotNil(t, gepa)
+
+	assert.Same(t, generationLLM, gepa.generationLLM)
+	assert.Same(t, reflectionLLM, gepa.reflectionLLM)
+}
+
 func TestDefaultGEPAConfig(t *testing.T) {
 	config := DefaultGEPAConfig()
 	require.NotNil(t, config)

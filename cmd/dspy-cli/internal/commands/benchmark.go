@@ -10,7 +10,6 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/benchmarks/tblite"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/spf13/cobra"
 )
@@ -279,15 +278,6 @@ func runTBLiteGEPABenchmark(
 		return err
 	}
 
-	originalDefault := core.GetDefaultLLM()
-	originalTeacher := core.GetTeacherLLM()
-	core.SetDefaultLLM(llm)
-	core.GlobalConfig.TeacherLLM = llm
-	defer func() {
-		core.SetDefaultLLM(originalDefault)
-		core.GlobalConfig.TeacherLLM = originalTeacher
-	}()
-
 	baselineAgent, err := newNativeBenchmarkAgentWithLLM(llm, agentCfg)
 	if err != nil {
 		return err
@@ -328,6 +318,8 @@ func runTBLiteGEPABenchmark(
 			PassThreshold:   1.0,
 			ArtifactKeys:    []optimize.ArtifactKey{optimize.ArtifactSkillPack, optimize.ArtifactToolPolicy},
 			PrimaryArtifact: optimize.ArtifactToolPolicy,
+			GenerationLLM:   llm,
+			ReflectionLLM:   llm,
 			IntMutationPlans: map[string]optimize.IntMutationConfig{
 				"max_turns": tbliteMaxTurnMutationConfig(agentCfg.MaxTurns),
 			},

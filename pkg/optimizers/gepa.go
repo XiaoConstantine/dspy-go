@@ -115,10 +115,12 @@ type GEPAConfig struct {
 	AddFormatFailureAsFeedback bool                  `json:"add_format_failure_as_feedback"`
 
 	// LLM parameters
-	GenerationModel string  `json:"generation_model"` // Default: uses core.GetDefaultLLM()
-	ReflectionModel string  `json:"reflection_model"` // Default: uses core.GetTeacherLLM()
-	Temperature     float64 `json:"temperature"`      // Default: 0.8
-	MaxTokens       int     `json:"max_tokens"`       // Default: 500
+	GenerationModel string   `json:"generation_model"` // Default: uses core.GetDefaultLLM()
+	ReflectionModel string   `json:"reflection_model"` // Default: uses core.GetTeacherLLM()
+	GenerationLLM   core.LLM `json:"-"`
+	ReflectionLLM   core.LLM `json:"-"`
+	Temperature     float64  `json:"temperature"` // Default: 0.8
+	MaxTokens       int      `json:"max_tokens"`  // Default: 500
 }
 
 // DefaultGEPAConfig returns the default configuration for GEPA.
@@ -3051,12 +3053,18 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	}
 
 	// Initialize LLMs
-	generationLLM := core.GetDefaultLLM()
+	generationLLM := config.GenerationLLM
+	if generationLLM == nil {
+		generationLLM = core.GetDefaultLLM()
+	}
 	if generationLLM == nil {
 		return nil, fmt.Errorf("no default LLM available for generation")
 	}
 
-	reflectionLLM := core.GetTeacherLLM()
+	reflectionLLM := config.ReflectionLLM
+	if reflectionLLM == nil {
+		reflectionLLM = core.GetTeacherLLM()
+	}
 	if reflectionLLM == nil {
 		reflectionLLM = generationLLM
 	}

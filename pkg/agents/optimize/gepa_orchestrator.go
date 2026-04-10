@@ -103,6 +103,8 @@ func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount int) *optimizers.GE
 	engineConfig.ReflectionFreq = o.config.ReflectionFreq
 	engineConfig.ConcurrencyLevel = o.config.EvalConcurrency
 	engineConfig.StagnationLimit = o.config.StagnationLimit
+	engineConfig.GenerationLLM = o.config.GenerationLLM
+	engineConfig.ReflectionLLM = o.config.ReflectionLLM
 	if trainingCount > 0 {
 		engineConfig.EvaluationBatchSize = trainingCount
 		if o.config.SearchBatchSize > 0 && o.config.SearchBatchSize < engineConfig.EvaluationBatchSize {
