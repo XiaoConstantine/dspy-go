@@ -74,16 +74,15 @@
 //	    "github.com/XiaoConstantine/dspy-go/pkg/core"
 //	    "github.com/XiaoConstantine/dspy-go/pkg/llms"
 //	    "github.com/XiaoConstantine/dspy-go/pkg/modules"
-//	    "github.com/XiaoConstantine/dspy-go/pkg/config"
 //	)
 //
 //	func main() {
 //	    // Configure the default LLM
-//	    llms.EnsureFactory()
-//	    err := config.ConfigureDefaultLLM("your-api-key", core.ModelAnthropicSonnet)
+//	    llm, err := llms.NewAnthropicLLM("your-api-key", core.ModelAnthropicSonnet)
 //	    if err != nil {
 //	        log.Fatalf("Failed to configure LLM: %v", err)
 //	    }
+//	    core.SetDefaultLLM(llm)
 //
 //	    // Create a signature for question answering
 //	    signature := core.NewSignature(
@@ -112,6 +111,9 @@
 //
 //	    fmt.Printf("Answer: %s\n", result["answer"])
 //	}
+//
+// Prefer helper functions such as core.SetDefaultLLM, core.SetTeacherLLM, and
+// core.GetConcurrencyLevel over mutating core.GlobalConfig directly.
 //
 // OpenAI-Compatible API Example:
 //

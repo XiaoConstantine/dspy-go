@@ -599,7 +599,7 @@ func IsMultimodalContent(signature Signature, inputs map[string]any) bool {
 
 // SetDefaultLLM sets the default LLM.
 func SetDefaultLLM(llm LLM) {
-	GlobalConfig.DefaultLLM = llm
+	setDefaultLLM(llm)
 }
 
 // ModelID represents the available model IDs.

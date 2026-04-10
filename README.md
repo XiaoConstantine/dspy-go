@@ -59,8 +59,11 @@ import (
 
 func main() {
     // Configure LLM
-    llms.EnsureFactory()
-    core.ConfigureDefaultLLM("your-api-key", core.ModelGoogleGeminiPro)
+    llm, err := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
+    if err != nil {
+        panic(err)
+    }
+    core.SetDefaultLLM(llm)
 
     // Create signature and module
     signature := core.NewSignature(
@@ -76,6 +79,8 @@ func main() {
     fmt.Println(result["answer"])
 }
 ```
+
+Prefer helper functions such as `core.SetDefaultLLM`, `core.SetTeacherLLM`, and `core.GetConcurrencyLevel` over mutating `core.GlobalConfig` directly.
 
 ## Core Concepts
 

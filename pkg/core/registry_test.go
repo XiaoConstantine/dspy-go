@@ -391,3 +391,17 @@ func TestRegistryConfig_Integration(t *testing.T) {
 		t.Errorf("Expected default LLM model 'test-model', got '%s'", GlobalConfig.DefaultLLM.ModelID())
 	}
 }
+
+func TestGetRegistry_LazyInitialization(t *testing.T) {
+	originalRegistry := GlobalRegistry
+	defer func() {
+		GlobalRegistry = originalRegistry
+	}()
+
+	SetRegistry(nil)
+
+	registry := GetRegistry()
+	if registry == nil {
+		t.Fatal("expected GetRegistry to lazily initialize a registry")
+	}
+}

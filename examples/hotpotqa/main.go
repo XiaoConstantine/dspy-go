@@ -86,7 +86,7 @@ func evaluateModel(ctx context.Context, program core.Program, examples []dataset
 		}
 	}()
 
-	p := pool.New().WithMaxGoroutines(core.GlobalConfig.ConcurrencyLevel)
+	p := pool.New().WithMaxGoroutines(core.GetConcurrencyLevel())
 	for _, ex := range examples {
 		example := ex
 		p.Go(func() {

@@ -405,8 +405,11 @@ func cloneModelConfig(config ModelConfig) ModelConfig {
 
 // GlobalRegistry is the global registry instance.
 var (
+	globalRegistryMu sync.RWMutex
+
+	// GlobalRegistry is the package-level registry for backward compatibility.
+	// Prefer GetRegistry and SetRegistry over direct mutation.
 	GlobalRegistry LLMRegistry
-	registryOnce   sync.Once
 )
 
 // RegistryConfig represents the configuration for the registry system.
@@ -424,13 +427,7 @@ type RegistryConfig struct {
 
 // InitializeRegistry initializes the global registry with the given configuration.
 func InitializeRegistry(ctx context.Context, config RegistryConfig) error {
-	// Use existing registry or create new one
-	var registry LLMRegistry
-	if GlobalRegistry != nil {
-		registry = GlobalRegistry
-	} else {
-		registry = NewLLMRegistry()
-	}
+	registry := GetRegistry()
 
 	// Load provider configurations
 	if len(config.Providers) > 0 {
@@ -446,18 +443,32 @@ func InitializeRegistry(ctx context.Context, config RegistryConfig) error {
 		}
 	}
 
-	GlobalRegistry = registry
+	SetRegistry(registry)
 	return nil
+}
+
+// SetRegistry replaces the package-level registry.
+func SetRegistry(registry LLMRegistry) {
+	globalRegistryMu.Lock()
+	defer globalRegistryMu.Unlock()
+	GlobalRegistry = registry
 }
 
 // GetRegistry returns the global registry instance.
 func GetRegistry() LLMRegistry {
-	registryOnce.Do(func() {
-		if GlobalRegistry == nil {
-			// Initialize with empty config for backward compatibility
-			GlobalRegistry = NewLLMRegistry()
-		}
-	})
+	globalRegistryMu.RLock()
+	registry := GlobalRegistry
+	globalRegistryMu.RUnlock()
+	if registry != nil {
+		return registry
+	}
+
+	globalRegistryMu.Lock()
+	defer globalRegistryMu.Unlock()
+	if GlobalRegistry == nil {
+		// Initialize with empty config for backward compatibility
+		GlobalRegistry = NewLLMRegistry()
+	}
 	return GlobalRegistry
 }
 
@@ -469,10 +480,4 @@ func RegisterProviderFactory(name string, factory ProviderFactory) error {
 // CreateLLMFromRegistry creates an LLM instance using the global registry.
 func CreateLLMFromRegistry(ctx context.Context, apiKey string, modelID ModelID) (LLM, error) {
 	return GetRegistry().CreateLLM(ctx, apiKey, modelID)
-}
-
-// Backward compatibility functions.
-func init() {
-	// Initialize the global registry
-	GlobalRegistry = NewLLMRegistry()
 }

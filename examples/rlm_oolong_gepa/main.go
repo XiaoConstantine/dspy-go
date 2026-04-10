@@ -108,10 +108,10 @@ func main() {
 	originalDefault := core.GetDefaultLLM()
 	originalTeacher := core.GetTeacherLLM()
 	core.SetDefaultLLM(llm)
-	core.GlobalConfig.TeacherLLM = llm
+	core.SetTeacherLLM(llm)
 	defer func() {
 		core.SetDefaultLLM(originalDefault)
-		core.GlobalConfig.TeacherLLM = originalTeacher
+		core.SetTeacherLLM(originalTeacher)
 	}()
 
 	tasks, taskSource, err := loadTasks(*taskFile, *useHuggingFace, *taskOffset, *taskCount)

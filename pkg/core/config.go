@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -15,9 +16,27 @@ type Config struct {
 	Registry *RegistryConfig `json:"registry,omitempty" yaml:"registry,omitempty"`
 }
 
-var GlobalConfig = &Config{
-	// default concurrency 1
-	ConcurrencyLevel: 1,
+var (
+	globalConfigMu sync.RWMutex
+
+	// GlobalConfig holds package-level defaults for backward compatibility.
+	// Prefer the package helper functions over direct field mutation.
+	GlobalConfig = &Config{
+		// default concurrency 1
+		ConcurrencyLevel: 1,
+	}
+)
+
+func setDefaultLLM(llm LLM) {
+	globalConfigMu.Lock()
+	defer globalConfigMu.Unlock()
+	GlobalConfig.DefaultLLM = llm
+}
+
+func setTeacherLLM(llm LLM) {
+	globalConfigMu.Lock()
+	defer globalConfigMu.Unlock()
+	GlobalConfig.TeacherLLM = llm
 }
 
 // ConfigureDefaultLLM sets up the default LLM to be used across the package.
@@ -26,7 +45,7 @@ func ConfigureDefaultLLM(apiKey string, modelID ModelID) error {
 	if err != nil {
 		return fmt.Errorf("failed to configure default LLM: %w", err)
 	}
-	GlobalConfig.DefaultLLM = llmInstance
+	setDefaultLLM(llmInstance)
 	return nil
 }
 
@@ -36,21 +55,39 @@ func ConfigureTeacherLLM(apiKey string, modelID ModelID) error {
 	if err != nil {
 		return fmt.Errorf("failed to configure teacher LLM: %w", err)
 	}
-	GlobalConfig.TeacherLLM = llmInstance
+	setTeacherLLM(llmInstance)
 	return nil
 }
 
 // GetDefaultLLM returns the default LLM.
 func GetDefaultLLM() LLM {
+	globalConfigMu.RLock()
+	defer globalConfigMu.RUnlock()
 	return GlobalConfig.DefaultLLM
 }
 
 // GetTeacherLLM returns the teacher LLM.
 func GetTeacherLLM() LLM {
+	globalConfigMu.RLock()
+	defer globalConfigMu.RUnlock()
 	return GlobalConfig.TeacherLLM
 }
 
+// SetTeacherLLM sets the teacher LLM.
+func SetTeacherLLM(llm LLM) {
+	setTeacherLLM(llm)
+}
+
+// GetConcurrencyLevel returns the configured package concurrency level.
+func GetConcurrencyLevel() int {
+	globalConfigMu.RLock()
+	defer globalConfigMu.RUnlock()
+	return GlobalConfig.ConcurrencyLevel
+}
+
 func SetConcurrencyOptions(level int) {
+	globalConfigMu.Lock()
+	defer globalConfigMu.Unlock()
 	if level > 0 {
 		GlobalConfig.ConcurrencyLevel = level
 	} else {
@@ -65,8 +102,17 @@ func ConfigureFromRegistryConfig(ctx context.Context, config RegistryConfig) err
 		return fmt.Errorf("failed to initialize registry: %w", err)
 	}
 
-	// Update global config to include registry configuration
-	GlobalConfig.Registry = &config
+	cloned := config
+	if config.Providers != nil {
+		cloned.Providers = make(map[string]ProviderConfig, len(config.Providers))
+		for key, provider := range config.Providers {
+			cloned.Providers[key] = cloneProviderConfig(provider)
+		}
+	}
+
+	globalConfigMu.Lock()
+	GlobalConfig.Registry = &cloned
+	globalConfigMu.Unlock()
 
 	return nil
 }
@@ -78,7 +124,7 @@ func ConfigureDefaultLLMFromRegistry(ctx context.Context, apiKey string, modelID
 	if err != nil {
 		return fmt.Errorf("failed to configure default LLM from registry: %w", err)
 	}
-	GlobalConfig.DefaultLLM = llmInstance
+	setDefaultLLM(llmInstance)
 	return nil
 }
 
@@ -89,7 +135,7 @@ func ConfigureTeacherLLMFromRegistry(ctx context.Context, apiKey string, modelID
 	if err != nil {
 		return fmt.Errorf("failed to configure teacher LLM from registry: %w", err)
 	}
-	GlobalConfig.TeacherLLM = llmInstance
+	setTeacherLLM(llmInstance)
 	return nil
 }
 

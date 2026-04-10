@@ -62,7 +62,7 @@ func StructuredOutputInterceptor(config StructuredOutputConfig) core.ModuleInter
 		logger := logging.GetLogger()
 
 		// Check if the LLM supports JSON output
-		llm := core.GlobalConfig.DefaultLLM
+		llm := core.GetDefaultLLM()
 		if llm == nil {
 			logger.Debug(ctx, "No LLM configured, falling back to text-based parsing")
 			return handler(ctx, inputs, opts...)
@@ -239,7 +239,7 @@ func ChainOfThoughtStructuredInterceptor(config ChainOfThoughtStructuredConfig) 
 	return func(ctx context.Context, inputs map[string]any, info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
 		logger := logging.GetLogger()
 
-		llm := core.GlobalConfig.DefaultLLM
+		llm := core.GetDefaultLLM()
 		if llm == nil || !supportsJSONOutput(llm) {
 			return handler(ctx, inputs, opts...)
 		}

@@ -189,6 +189,8 @@ Sentiment: Positive
 
 Congratulations! You've just built your first LLM application with dspy-go. 🎉
 
+For package-level defaults, prefer helper functions such as `core.SetDefaultLLM`, `core.SetTeacherLLM`, and `core.GetConcurrencyLevel` instead of mutating `core.GlobalConfig` directly.
+
 ---
 
 ## What's Next?

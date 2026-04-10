@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -32,11 +33,23 @@ func (f *RegistryBasedFactory) CreateLLM(apiKey string, modelID ModelID) (LLM, e
 	return f.registry.CreateLLM(ctx, apiKey, modelID)
 }
 
+var defaultFactoryMu sync.RWMutex
+
 // DefaultFactory is the global factory instance used by the configuration system.
+// Prefer GetDefaultFactory and SetDefaultFactory over direct mutation.
 var DefaultFactory LLMFactory
+
+// SetDefaultFactory replaces the package default LLM factory.
+func SetDefaultFactory(factory LLMFactory) {
+	defaultFactoryMu.Lock()
+	defer defaultFactoryMu.Unlock()
+	DefaultFactory = factory
+}
 
 // InitializeDefaultFactory initializes the default factory with the registry system.
 func InitializeDefaultFactory() {
+	defaultFactoryMu.Lock()
+	defer defaultFactoryMu.Unlock()
 	if DefaultFactory == nil {
 		DefaultFactory = NewRegistryBasedFactory(GetRegistry())
 	}
@@ -44,8 +57,16 @@ func InitializeDefaultFactory() {
 
 // GetDefaultFactory returns the default factory, initializing it if necessary.
 func GetDefaultFactory() LLMFactory {
-	if DefaultFactory == nil {
-		InitializeDefaultFactory()
+	defaultFactoryMu.RLock()
+	factory := DefaultFactory
+	defaultFactoryMu.RUnlock()
+	if factory != nil {
+		return factory
 	}
+
+	InitializeDefaultFactory()
+
+	defaultFactoryMu.RLock()
+	defer defaultFactoryMu.RUnlock()
 	return DefaultFactory
 }

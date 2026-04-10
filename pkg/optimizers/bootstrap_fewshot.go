@@ -88,7 +88,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		examplesNeeded = len(trainset)
 	}
 
-	p := pool.New().WithMaxGoroutines(core.GlobalConfig.ConcurrencyLevel)
+	p := pool.New().WithMaxGoroutines(core.GetConcurrencyLevel())
 
 	for i := 0; i < examplesNeeded; i++ {
 		if b.enoughBootstrappedDemos(compiledStudent) {

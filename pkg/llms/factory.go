@@ -29,15 +29,15 @@ func resetFactoryForTesting() {
 	registryInitOnce = sync.Once{}
 	factoryInitErr = nil
 	registryInitErr = nil
-	core.DefaultFactory = nil
+	core.SetDefaultFactory(nil)
 	// Reset the global registry as well
-	core.GlobalRegistry = core.NewLLMRegistry()
+	core.SetRegistry(core.NewLLMRegistry())
 }
 
 func ensureFactory() error {
 	defaultFactoryOnce.Do(func() {
 		defaultFactory = &DefaultLLMFactory{}
-		core.DefaultFactory = defaultFactory
+		core.SetDefaultFactory(defaultFactory)
 		// Initialize registry on first factory creation
 		factoryInitErr = ensureRegistryInitialized()
 	})
@@ -47,11 +47,6 @@ func ensureFactory() error {
 // ensureRegistryInitialized initializes the global registry with default providers.
 func ensureRegistryInitialized() error {
 	registryInitOnce.Do(func() {
-		// Initialize the global registry if not already done
-		if core.GlobalRegistry == nil {
-			core.GlobalRegistry = core.NewLLMRegistry()
-		}
-
 		// Register default providers
 		registry := core.GetRegistry()
 

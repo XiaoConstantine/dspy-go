@@ -141,6 +141,20 @@ func TestGetTeacherLLM(t *testing.T) {
 	}
 }
 
+func TestSetTeacherLLM(t *testing.T) {
+	originalTeacherLLM := GlobalConfig.TeacherLLM
+	defer func() {
+		GlobalConfig.TeacherLLM = originalTeacherLLM
+	}()
+
+	mockLLM := &MockLLM{}
+	SetTeacherLLM(mockLLM)
+
+	if GetTeacherLLM() != mockLLM {
+		t.Error("Expected SetTeacherLLM to update the configured teacher LLM")
+	}
+}
+
 func TestSetConcurrencyOptions(t *testing.T) {
 	// Save original state
 	originalConcurrency := GlobalConfig.ConcurrencyLevel
@@ -166,6 +180,18 @@ func TestSetConcurrencyOptions(t *testing.T) {
 			t.Errorf("Expected ConcurrencyLevel to reset to 1, got %d", GlobalConfig.ConcurrencyLevel)
 		}
 	})
+}
+
+func TestGetConcurrencyLevel(t *testing.T) {
+	originalConcurrency := GlobalConfig.ConcurrencyLevel
+	defer func() {
+		GlobalConfig.ConcurrencyLevel = originalConcurrency
+	}()
+
+	SetConcurrencyOptions(3)
+	if got := GetConcurrencyLevel(); got != 3 {
+		t.Errorf("Expected concurrency level 3, got %d", got)
+	}
 }
 
 func TestConfigureFromRegistryConfig(t *testing.T) {
