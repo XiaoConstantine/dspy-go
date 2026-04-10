@@ -4438,6 +4438,7 @@ Requirements:
 
 Variations:`, count-1, moduleName, promptDataBlock("original_instruction", baseInstruction))
 
+	core.RecordLLMCall(ctx, g.generationLLM)
 	response, err := g.generationLLM.Generate(ctx, prompt)
 	if err != nil {
 		return []string{baseInstruction}, fmt.Errorf("failed to generate variations: %w", err)
@@ -5362,6 +5363,7 @@ Mutation requirements for "%s":
 	promptBuilder.WriteString("\nGenerate a mutated version that keeps the core intent but explicitly addresses the recent weaknesses and suggestions when they are relevant.")
 	prompt := promptBuilder.String()
 
+	core.RecordLLMCall(ctx, g.generationLLM)
 	response, err := g.generationLLM.Generate(ctx, prompt)
 	if err != nil {
 		return g.fallbackMutation(candidate)
@@ -5731,6 +5733,7 @@ func (g *GEPA) reflectOnCandidate(ctx context.Context, candidate *GEPACandidate,
 	prompt := g.buildReflectionPrompt(candidate, patterns, reflectionInput)
 
 	// Get reflection from LLM
+	core.RecordLLMCall(ctx, g.reflectionLLM)
 	response, err := g.reflectionLLM.Generate(ctx, prompt)
 	if err != nil {
 		return g.createFallbackReflection(candidate, patterns), nil
@@ -6256,6 +6259,7 @@ func (g *GEPA) selfCritiqueCandidate(ctx context.Context, candidate *GEPACandida
 	critiquePrompt := g.buildCritiquePrompt(candidate, traces)
 
 	// Use reflection LLM for critique
+	core.RecordLLMCall(ctx, g.reflectionLLM)
 	critiqueResponse, err := g.reflectionLLM.Generate(ctx, critiquePrompt, core.WithTemperature(g.config.SelfCritiqueTemp))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate self-critique: %w", err)

@@ -95,6 +95,33 @@ func GetExecutionState(ctx context.Context) *ExecutionState {
 	return nil
 }
 
+// RecordLLMCall stores the current LLM model identifier in execution state so
+// logs and traces can attribute downstream events to the active model.
+func RecordLLMCall(ctx context.Context, llm LLM) {
+	if llm == nil {
+		return
+	}
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return
+	}
+
+	// This helper is best-effort observability. Avoid letting a misconfigured
+	// mock or custom LLM implementation crash execution while reading ModelID.
+	modelID := ""
+	func() {
+		defer func() {
+			if recover() != nil {
+				modelID = ""
+			}
+		}()
+		modelID = llm.ModelID()
+	}()
+	if modelID != "" {
+		state.WithModelID(modelID)
+	}
+}
+
 // StartSpan begins a new operation span.
 func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
 	return StartSpanWithContext(ctx, operation, "", nil)

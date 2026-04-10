@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 const (
@@ -36,6 +38,7 @@ func (g *GEPA) reflectionGuidedMutation(ctx context.Context, candidate *GEPACand
 	}
 
 	prompt := g.buildReflectionMutationPrompt(candidate, sourceCandidateID, reflection, evaluation)
+	core.RecordLLMCall(ctx, g.generationLLM)
 	response, err := g.generationLLM.Generate(ctx, prompt)
 	if err != nil {
 		return nil

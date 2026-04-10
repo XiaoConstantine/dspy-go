@@ -550,6 +550,7 @@ Return EXACTLY %d instructions, one per line, no numbering:`,
 		breadth, inputFields, outputFields, taskDescription, breadth, breadth)
 
 	// Use LLM to generate sophisticated instructions
+	core.RecordLLMCall(ctx, lpg.llm)
 	output, err := lpg.llm.Generate(ctx, generatorPrompt,
 		core.WithTemperature(temperature),
 		core.WithMaxTokens(1024))
@@ -625,6 +626,7 @@ Return ONLY the improved instructions, one per line.`,
 		breadth, lpg.getTaskDescription(),
 		bestInstructions, worstInstructions, breadth)
 
+	core.RecordLLMCall(ctx, lpg.llm)
 	output, err := lpg.llm.Generate(ctx, refinementPrompt,
 		core.WithTemperature(temperature),
 		core.WithMaxTokens(1024))

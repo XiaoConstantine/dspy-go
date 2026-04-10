@@ -257,20 +257,11 @@ func TestFactoryInterface(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported model ID")
 }
 
-func TestLLMCreationWithDecoration(t *testing.T) {
-	// Test that model context decoration works
+func TestLLMCreationReturnsUsableLLM(t *testing.T) {
 	llm, err := NewLLM("test-key", core.ModelAnthropicHaiku)
 	require.NoError(t, err)
 	require.NotNil(t, llm)
-
-	// Create a context with execution state
-	ctx := core.WithExecutionState(context.Background())
-	state := core.GetExecutionState(ctx)
-	assert.NotNil(t, state)
-
-	// Check if it's a ModelContextDecorator
-	_, ok := llm.(interface{ Unwrap() core.LLM })
-	assert.True(t, ok, "Expected decorated LLM with Unwrap method")
+	assert.Equal(t, string(core.ModelAnthropicHaiku), llm.ModelID())
 }
 
 func TestInvalidOllamaFormat(t *testing.T) {
@@ -478,10 +469,8 @@ func TestNewLLMWithRegistryFailure(t *testing.T) {
 	// Should succeed via fallback
 	assert.NoError(t, err)
 	assert.NotNil(t, llm)
-
-	// Verify it's decorated (wrapped)
-	_, ok := llm.(interface{ Unwrap() core.LLM })
-	assert.True(t, ok, "Expected decorated LLM")
+	_, ok := getUnderlyingLLM(llm).(*AnthropicLLM)
+	assert.True(t, ok, "Expected Anthropic fallback LLM")
 }
 
 // Test various edge cases for the factory.

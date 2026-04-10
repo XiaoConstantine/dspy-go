@@ -5,16 +5,22 @@ import (
 	"fmt"
 )
 
-// BaseDecorator provides common functionality for all LLM decorators.
+// Deprecated: prefer explicit RecordLLMCall calls at LLM boundaries instead of
+// wrapping LLM implementations with decorators.
+// BaseDecorator provides common functionality for compatibility with older code.
 type BaseDecorator struct {
 	LLM
 }
 
+// Deprecated: prefer explicit RecordLLMCall calls at LLM boundaries instead of
+// wrapping LLM implementations with decorators.
 // ModelContextDecorator adds model context tracking.
 type ModelContextDecorator struct {
 	BaseDecorator
 }
 
+// Deprecated: prefer explicit RecordLLMCall calls at LLM boundaries instead of
+// wrapping LLM implementations with decorators.
 func NewModelContextDecorator(base LLM) *ModelContextDecorator {
 	return &ModelContextDecorator{
 		BaseDecorator: BaseDecorator{LLM: base},
@@ -34,19 +40,17 @@ func (d *BaseDecorator) GenerateWithTools(ctx context.Context, messages []ChatMe
 }
 
 func (d *ModelContextDecorator) Generate(ctx context.Context, prompt string, options ...GenerateOption) (*LLMResponse, error) {
-	if state := GetExecutionState(ctx); state != nil {
-		state.WithModelID(d.ModelID())
-	}
+	RecordLLMCall(ctx, d.LLM)
 	return d.LLM.Generate(ctx, prompt, options...)
 }
 
 func (d *ModelContextDecorator) GenerateWithTools(ctx context.Context, messages []ChatMessage, tools []map[string]any, opts ...GenerateOption) (map[string]any, error) {
-	if state := GetExecutionState(ctx); state != nil {
-		state.WithModelID(d.ModelID())
-	}
+	RecordLLMCall(ctx, d.LLM)
 	return d.BaseDecorator.GenerateWithTools(ctx, messages, tools, opts...)
 }
 
+// Deprecated: prefer explicit RecordLLMCall calls at LLM boundaries instead of
+// composing LLM decorators.
 // Helper function to compose multiple decorators.
 func Chain(base LLM, decorators ...func(LLM) LLM) LLM {
 	result := base

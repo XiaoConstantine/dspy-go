@@ -773,6 +773,7 @@ func (a *Agent) executeTool(ctx context.Context, tool core.Tool, arguments map[s
 }
 
 func (a *Agent) generateToolCallResponse(ctx context.Context, task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+	core.RecordLLMCall(ctx, a.llm)
 	if supportsNativeToolCalling(a.llm) {
 		chatLLM, ok := a.llm.(core.ToolCallingChatLLM)
 		if !ok {

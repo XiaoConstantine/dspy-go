@@ -120,3 +120,57 @@ func TestEndSpan_RestoresParentSpan(t *testing.T) {
 	require.Nil(t, state.activeSpan)
 	require.False(t, parent.EndTime.IsZero())
 }
+
+type recordLLMCallStub struct {
+	modelID string
+}
+
+func (s *recordLLMCallStub) Generate(context.Context, string, ...GenerateOption) (*LLMResponse, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) GenerateWithJSON(context.Context, string, ...GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...GenerateOption) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) CreateEmbedding(context.Context, string, ...EmbeddingOption) (*EmbeddingResult, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) CreateEmbeddings(context.Context, []string, ...EmbeddingOption) (*BatchEmbeddingResult, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) StreamGenerate(context.Context, string, ...GenerateOption) (*StreamResponse, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) GenerateWithContent(context.Context, []ContentBlock, ...GenerateOption) (*LLMResponse, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) StreamGenerateWithContent(context.Context, []ContentBlock, ...GenerateOption) (*StreamResponse, error) {
+	return nil, nil
+}
+
+func (s *recordLLMCallStub) ProviderName() string { return "stub" }
+func (s *recordLLMCallStub) ModelID() string      { return s.modelID }
+func (s *recordLLMCallStub) Capabilities() []Capability {
+	return nil
+}
+
+func TestRecordLLMCall(t *testing.T) {
+	ctx := WithExecutionState(context.Background())
+	RecordLLMCall(ctx, &recordLLMCallStub{modelID: "test-model"})
+
+	state := GetExecutionState(ctx)
+	require.NotNil(t, state)
+	require.Equal(t, "test-model", state.GetModelID())
+
+	RecordLLMCall(context.Background(), &recordLLMCallStub{modelID: "ignored"})
+	RecordLLMCall(ctx, nil)
+}

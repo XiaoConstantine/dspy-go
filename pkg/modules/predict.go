@@ -244,6 +244,7 @@ func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs 
 		content := core.ConvertInputsToContentBlocks(signature, inputs)
 		logger.Debug(ctx, "Using multimodal content generation with %d blocks", len(content))
 
+		core.RecordLLMCall(ctx, p.LLM)
 		resp, err := p.LLM.GenerateWithContent(ctx, content, finalOptions.GenerateOptions...)
 		if err != nil {
 			span.WithError(err)
@@ -263,6 +264,7 @@ func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs 
 	prompt := formatPrompt(signature, p.Demos, inputs)
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
+	core.RecordLLMCall(ctx, p.LLM)
 	resp, err := p.LLM.Generate(ctx, prompt, finalOptions.GenerateOptions...)
 	if err != nil {
 		span.WithError(err)
@@ -389,6 +391,7 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 	prompt := formatPrompt(signature, p.Demos, inputs)
 
 	// Use StreamGenerate instead of Generate
+	core.RecordLLMCall(ctx, p.LLM)
 	stream, err := p.LLM.StreamGenerate(ctx, prompt, opts.GenerateOptions...)
 	if err != nil {
 		span.WithError(err)

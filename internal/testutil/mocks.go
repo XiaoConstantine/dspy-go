@@ -276,20 +276,28 @@ func (m *MockLLM) StreamGenerate(ctx context.Context, prompt string, opts ...cor
 
 // ModelID mocks the GetModelID method from the LLM interface.
 func (m *MockLLM) ModelID() string {
-	args := m.Called()
+	for _, call := range m.ExpectedCalls {
+		if call.Method == "ModelID" {
+			args := m.Called()
+			ret0, _ := args.Get(0).(string)
+			return ret0
+		}
+	}
 
-	ret0, _ := args.Get(0).(string)
-
-	return ret0
+	return "mock-model"
 }
 
 // GetProviderName mocks the GetProviderName method from the LLM interface.
 func (m *MockLLM) ProviderName() string {
-	args := m.Called()
+	for _, call := range m.ExpectedCalls {
+		if call.Method == "ProviderName" {
+			args := m.Called()
+			ret0, _ := args.Get(0).(string)
+			return ret0
+		}
+	}
 
-	ret0, _ := args.Get(0).(string)
-
-	return ret0
+	return "mock-provider"
 }
 
 func (m *MockLLM) Capabilities() []core.Capability {

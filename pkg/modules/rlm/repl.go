@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,6 +128,7 @@ func NewLLMSubClient(llm core.LLM) *LLMSubClient {
 
 // Query implements SubLLMClient.
 func (c *LLMSubClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
+	core.RecordLLMCall(ctx, c.llm)
 	resp, err := c.llm.Generate(ctx, prompt)
 	if err != nil {
 		return QueryResponse{}, err

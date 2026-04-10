@@ -87,6 +87,7 @@ func StructuredOutputInterceptor(config StructuredOutputConfig) core.ModuleInter
 		logger.Debug(ctx, "Using structured JSON output for %d output fields", len(signature.Outputs))
 
 		// Call LLM with JSON output
+		core.RecordLLMCall(ctx, llm)
 		result, err := llm.GenerateWithJSON(ctx, prompt)
 		if err != nil {
 			logger.Warn(ctx, "GenerateWithJSON failed: %v, falling back to text-based parsing", err)
@@ -258,6 +259,7 @@ func ChainOfThoughtStructuredInterceptor(config ChainOfThoughtStructuredConfig) 
 
 		logger.Debug(ctx, "Using structured JSON output for ChainOfThought with reasoning field '%s'", reasoningField)
 
+		core.RecordLLMCall(ctx, llm)
 		result, err := llm.GenerateWithJSON(ctx, prompt)
 		if err != nil {
 			logger.Warn(ctx, "GenerateWithJSON failed for CoT: %v, falling back", err)

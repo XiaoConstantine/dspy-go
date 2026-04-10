@@ -71,6 +71,7 @@ func (t *TeacherStudentOptimizer) GenerateDemonstration(ctx context.Context, inp
 	if !ok || promptValue == nil {
 		return core.Example{}, fmt.Errorf("teacher generation failed, missing prompt")
 	}
+	core.RecordLLMCall(ctx, t.Teacher)
 	response, err := t.Teacher.Generate(ctx, input.Inputs["prompt"].(string))
 	if err != nil {
 		return core.Example{}, fmt.Errorf("teacher generation failed: %w", err)
@@ -127,6 +128,7 @@ func (g *InstructionGenerator) generateSingleCandidate(
 ) (string, error) {
 	prompt := fmt.Sprintf("Generate an instruction for the following signature: %s", module.GetSignature())
 
+	core.RecordLLMCall(ctx, g.PromptModel)
 	response, err := g.PromptModel.Generate(ctx, prompt)
 	if err != nil {
 		return "", fmt.Errorf("prompt model generation failed: %w", err)
@@ -572,6 +574,7 @@ func (m *MIPRO) runOptimizationLoop(
 // Helper functions for the teacher-student dynamic.
 func (m *MIPRO) teacherDemonstration(ctx context.Context, example core.Example) (core.Example, error) {
 	// Get a high-quality demonstration from the teacher model
+	core.RecordLLMCall(ctx, m.teacherStudent.Teacher)
 	teacherResult, err := m.teacherStudent.Teacher.Generate(ctx, example.Inputs["prompt"].(string))
 	if err != nil {
 		return core.Example{}, fmt.Errorf("teacher demonstration failed: %w", err)

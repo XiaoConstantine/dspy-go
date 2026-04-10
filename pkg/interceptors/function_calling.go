@@ -95,6 +95,7 @@ func NativeFunctionCallingInterceptor(config FunctionCallingConfig) core.ModuleI
 		prompt := buildPromptFromInputs(inputs, info)
 
 		logger.Debug(ctx, "Using native function calling with %d functions", len(functions))
+		core.RecordLLMCall(ctx, llm)
 
 		if chatLLM, ok := llm.(core.ToolCallingChatLLM); ok {
 			result, err := generateWithToolHistory(ctx, chatLLM, inputs, info, functions)
