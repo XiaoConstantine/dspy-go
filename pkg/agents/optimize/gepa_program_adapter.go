@@ -3,6 +3,7 @@ package optimize
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"sort"
 	"strings"
@@ -111,7 +112,7 @@ func (o *GEPAAgentOptimizer) buildOptimizationDataset(examples []AgentExample) c
 			exampleID = fmt.Sprintf("agent-example-%d", idx)
 		}
 
-		inputs := core.ShallowCopyMap(example.Inputs)
+		inputs := maps.Clone(example.Inputs)
 		if inputs == nil {
 			inputs = make(map[string]interface{}, 1)
 		}
@@ -119,7 +120,7 @@ func (o *GEPAAgentOptimizer) buildOptimizationDataset(examples []AgentExample) c
 
 		coreExamples = append(coreExamples, core.Example{
 			Inputs:  inputs,
-			Outputs: core.ShallowCopyMap(example.Outputs),
+			Outputs: maps.Clone(example.Outputs),
 		})
 	}
 
@@ -434,9 +435,9 @@ func indexAgentExamples(examples []AgentExample) map[string]AgentExample {
 func cloneAgentExample(example AgentExample) AgentExample {
 	return AgentExample{
 		ID:       example.ID,
-		Inputs:   core.ShallowCopyMap(example.Inputs),
-		Outputs:  core.ShallowCopyMap(example.Outputs),
-		Metadata: core.ShallowCopyMap(example.Metadata),
+		Inputs:   maps.Clone(example.Inputs),
+		Outputs:  maps.Clone(example.Outputs),
+		Metadata: maps.Clone(example.Metadata),
 	}
 }
 

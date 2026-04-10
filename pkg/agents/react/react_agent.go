@@ -3,6 +3,7 @@ package react
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -817,7 +818,7 @@ func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[stri
 			Thought:     step.Description,
 			Action:      step.Description,
 			Tool:        step.Tool,
-			Arguments:   core.ShallowCopyMap(step.Arguments),
+			Arguments:   maps.Clone(step.Arguments),
 			Observation: formatPlanObservation(stepResult, err),
 			Success:     planStepSucceeded(stepResult, err),
 			Duration:    time.Since(stepStart),
@@ -1312,7 +1313,7 @@ func actionRecordsFromTrace(trace *modules.ReActTrace) []ActionRecord {
 			Thought:     step.Thought,
 			Action:      step.ActionRaw,
 			Tool:        step.Tool,
-			Arguments:   core.ShallowCopyMap(step.Arguments),
+			Arguments:   maps.Clone(step.Arguments),
 			Observation: step.Observation,
 			Success:     step.Success,
 			Duration:    step.Duration,
@@ -1333,7 +1334,7 @@ func cloneActionRecords(actions []ActionRecord) []ActionRecord {
 			Thought:     action.Thought,
 			Action:      action.Action,
 			Tool:        action.Tool,
-			Arguments:   core.ShallowCopyMap(action.Arguments),
+			Arguments:   maps.Clone(action.Arguments),
 			Observation: action.Observation,
 			Success:     action.Success,
 			Duration:    action.Duration,
@@ -1570,7 +1571,7 @@ func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result ma
 				Thought:     step.Thought,
 				ActionRaw:   step.ActionRaw,
 				Tool:        step.Tool,
-				Arguments:   core.ShallowCopyMap(step.Arguments),
+				Arguments:   maps.Clone(step.Arguments),
 				Observation: step.Observation,
 				Duration:    step.Duration,
 				Success:     step.Success,
@@ -1585,7 +1586,7 @@ func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result ma
 				Thought:     action.Thought,
 				ActionRaw:   action.Action,
 				Tool:        action.Tool,
-				Arguments:   core.ShallowCopyMap(action.Arguments),
+				Arguments:   maps.Clone(action.Arguments),
 				Observation: action.Observation,
 				Duration:    action.Duration,
 				Success:     action.Success,
@@ -1631,8 +1632,8 @@ func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result ma
 		AgentID:          r.id,
 		AgentType:        r.GetAgentType(),
 		Task:             r.extractCurrentTask(input),
-		Input:            core.ShallowCopyMap(input),
-		Output:           core.ShallowCopyMap(result),
+		Input:            maps.Clone(input),
+		Output:           maps.Clone(result),
 		Steps:            steps,
 		Status:           status,
 		StartedAt:        completedAt.Add(-processingTime),

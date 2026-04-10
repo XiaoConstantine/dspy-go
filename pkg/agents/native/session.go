@@ -4,12 +4,12 @@ import (
 	"context"
 	goerrors "errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 )
@@ -386,7 +386,7 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 			CreatedAt:  nextTime(),
 			SearchText: strings.TrimSpace(step.ToolName),
 			Payload: map[string]any{
-				"arguments":  core.ShallowCopyMap(step.Arguments),
+				"arguments":  maps.Clone(step.Arguments),
 				"step_index": step.Index,
 			},
 			Metadata: map[string]any{
@@ -407,7 +407,7 @@ func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []se
 			Payload: map[string]any{
 				"observation":         strings.TrimSpace(step.Observation),
 				"observation_display": strings.TrimSpace(step.ObservationDisplay),
-				"details":             core.ShallowCopyMap(step.ObservationDetails),
+				"details":             maps.Clone(step.ObservationDetails),
 				"step_index":          step.Index,
 			},
 			Metadata: map[string]any{

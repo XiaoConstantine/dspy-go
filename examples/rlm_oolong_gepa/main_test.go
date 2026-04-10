@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -189,7 +190,7 @@ type stubOptimizableAgent struct {
 }
 
 func (s *stubOptimizableAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	return core.ShallowCopyMap(s.output), nil
+	return maps.Clone(s.output), nil
 }
 
 func (s *stubOptimizableAgent) GetCapabilities() []core.Tool { return nil }

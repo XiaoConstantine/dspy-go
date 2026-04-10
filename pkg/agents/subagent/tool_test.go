@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -372,7 +373,7 @@ type stubAgent struct {
 }
 
 func (s *stubAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
-	return core.ShallowCopyMap(s.output), s.err
+	return maps.Clone(s.output), s.err
 }
 
 func (s *stubAgent) GetCapabilities() []core.Tool {
@@ -396,7 +397,7 @@ type cloneableStubAgent struct {
 }
 
 func (s *cloneableStubAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
-	return core.ShallowCopyMap(s.output), nil
+	return maps.Clone(s.output), nil
 }
 
 func (s *cloneableStubAgent) GetCapabilities() []core.Tool {
@@ -421,7 +422,7 @@ func (s *cloneableStubAgent) Clone() (optimize.OptimizableAgent, error) {
 	}
 	return &cloneableStubAgent{
 		cloneCount: s.cloneCount,
-		output:     core.ShallowCopyMap(s.output),
+		output:     maps.Clone(s.output),
 	}, nil
 }
 

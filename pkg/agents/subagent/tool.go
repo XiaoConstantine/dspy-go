@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"unicode"
@@ -121,7 +122,7 @@ func AsTool(cfg ToolConfig) (core.Tool, error) {
 		buildResult:         buildResult,
 		sessionPolicy:       cfg.SessionPolicy,
 		timeout:             cfg.Timeout,
-		metadata:            core.ShallowCopyMap(cfg.Metadata),
+		metadata:            maps.Clone(cfg.Metadata),
 	}, nil
 }
 
@@ -165,7 +166,7 @@ func (t *Tool) CloneTool() core.Tool {
 	}
 	cloned := *t
 	cloned.staticParentContext = cloneParentContext(t.staticParentContext)
-	cloned.metadata = core.ShallowCopyMap(t.metadata)
+	cloned.metadata = maps.Clone(t.metadata)
 	return &cloned
 }
 
@@ -180,7 +181,7 @@ func (t *Tool) subagentInfo() Info {
 }
 
 func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
-	params = core.ShallowCopyMap(params)
+	params = maps.Clone(params)
 	parent := t.parentContext(ctx, params)
 
 	runCtx := ctx
@@ -190,7 +191,7 @@ func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolRes
 		defer cancel()
 	}
 
-	child, err := t.buildAgent(runCtx, core.ShallowCopyMap(params))
+	child, err := t.buildAgent(runCtx, maps.Clone(params))
 	if err != nil {
 		return t.errorResult(fmt.Sprintf("subagent %q could not start: %v", t.name, err), nil, SubagentTraceRef{}), nil
 	}
@@ -198,7 +199,7 @@ func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolRes
 		return t.errorResult(fmt.Sprintf("subagent %q returned a nil agent", t.name), nil, SubagentTraceRef{}), nil
 	}
 
-	childInput, err := t.buildInput(core.ShallowCopyMap(params), parent)
+	childInput, err := t.buildInput(maps.Clone(params), parent)
 	if err != nil {
 		return t.errorResult(fmt.Sprintf("subagent %q input build failed: %v", t.name, err), nil, SubagentTraceRef{}), nil
 	}
@@ -210,7 +211,7 @@ func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolRes
 
 	trace := childTrace(child)
 	run := ResultContext{
-		Output:    core.ShallowCopyMap(output),
+		Output:    maps.Clone(output),
 		Duration:  duration,
 		Completed: execErr == nil && completedValue(output),
 		Trace:     trace,
@@ -220,7 +221,7 @@ func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolRes
 		return t.errorResult(fmt.Sprintf("subagent %q failed: %v", t.name, execErr), output, run.TraceRef(t.name)), nil
 	}
 
-	result, err := t.buildResult(core.ShallowCopyMap(output), run)
+	result, err := t.buildResult(maps.Clone(output), run)
 	if err != nil {
 		return t.errorResult(fmt.Sprintf("subagent %q result build failed: %v", t.name, err), output, run.TraceRef(t.name)), nil
 	}
@@ -276,7 +277,7 @@ func makeBuildAgentFunc(cfg ToolConfig) (BuildAgentFunc, error) {
 }
 
 func defaultBuildInput(args map[string]any, _ ParentContext) (map[string]any, error) {
-	return core.ShallowCopyMap(args), nil
+	return maps.Clone(args), nil
 }
 
 func defaultBuildResult(name string, policy SessionPolicy) BuildResultFunc {
@@ -289,7 +290,7 @@ func defaultBuildResult(name string, policy SessionPolicy) BuildResultFunc {
 			"session_policy": policy.String(),
 			"completed":      run.Completed,
 			"duration_ms":    run.Duration.Milliseconds(),
-			"output":         core.ShallowCopyMap(output),
+			"output":         maps.Clone(output),
 			"trace":          traceRef,
 		}
 
@@ -317,7 +318,7 @@ func (t *Tool) errorResult(message string, output map[string]any, traceRef Subag
 		"completed":      false,
 	}
 	if output != nil {
-		details["output"] = core.ShallowCopyMap(output)
+		details["output"] = maps.Clone(output)
 	}
 	if traceRef.Name != "" {
 		details["trace"] = traceRef

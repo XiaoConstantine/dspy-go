@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1764,7 +1765,7 @@ type subagentChildAgent struct {
 }
 
 func (s *subagentChildAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
-	return core.ShallowCopyMap(s.output), s.err
+	return maps.Clone(s.output), s.err
 }
 
 func (s *subagentChildAgent) GetCapabilities() []core.Tool {

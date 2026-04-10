@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
@@ -48,7 +48,7 @@ func (r SessionRecord) Clone() SessionRecord {
 		FinalAnswer: r.FinalAnswer,
 		Error:       r.Error,
 		Highlights:  append([]string(nil), r.Highlights...),
-		Metadata:    core.ShallowCopyMap(r.Metadata),
+		Metadata:    maps.Clone(r.Metadata),
 	}
 }
 

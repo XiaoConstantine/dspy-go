@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"maps"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
@@ -332,4 +333,11 @@ func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, module
 	}
 
 	return result, nil
+}
+
+// ShallowCopyMap returns a shallow copy of the provided map.
+//
+// Deprecated: use maps.Clone.
+func ShallowCopyMap[V any](input map[string]V) map[string]V {
+	return maps.Clone(input)
 }

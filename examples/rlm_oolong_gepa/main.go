@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -376,7 +377,7 @@ type oolongEvaluator struct{}
 
 func (oolongEvaluator) Evaluate(ctx context.Context, agent optimize.OptimizableAgent, ex optimize.AgentExample) (*optimize.EvalResult, error) {
 	startedAt := time.Now()
-	output, execErr := agent.Execute(ctx, core.ShallowCopyMap(ex.Inputs))
+	output, execErr := agent.Execute(ctx, maps.Clone(ex.Inputs))
 	trace := latestTrace(agent)
 	latency := time.Since(startedAt)
 	if trace != nil && trace.ProcessingTime > 0 {

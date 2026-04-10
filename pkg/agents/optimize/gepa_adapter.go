@@ -3,6 +3,7 @@ package optimize
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -393,8 +394,8 @@ func serializeArtifacts(artifacts AgentArtifacts) map[string]interface{} {
 
 	return map[string]interface{}{
 		"text": text,
-		"int":  core.ShallowCopyMap(artifacts.Int),
-		"bool": core.ShallowCopyMap(artifacts.Bool),
+		"int":  maps.Clone(artifacts.Int),
+		"bool": maps.Clone(artifacts.Bool),
 	}
 }
 
@@ -468,7 +469,7 @@ func decodeTextArtifacts(raw interface{}) (map[ArtifactKey]string, error) {
 func decodeIntArtifacts(raw interface{}) (map[string]int, error) {
 	switch value := raw.(type) {
 	case map[string]int:
-		return core.ShallowCopyMap(value), nil
+		return maps.Clone(value), nil
 	case map[string]interface{}:
 		ints := make(map[string]int, len(value))
 		for key, v := range value {
@@ -487,7 +488,7 @@ func decodeIntArtifacts(raw interface{}) (map[string]int, error) {
 func decodeBoolArtifacts(raw interface{}) (map[string]bool, error) {
 	switch value := raw.(type) {
 	case map[string]bool:
-		return core.ShallowCopyMap(value), nil
+		return maps.Clone(value), nil
 	case map[string]interface{}:
 		bools := make(map[string]bool, len(value))
 		for key, v := range value {
@@ -695,7 +696,7 @@ func buildGEPATrace(candidate *optimizers.GEPACandidate, example AgentExample, r
 	trace := optimizers.ExecutionTrace{
 		CandidateID: candidate.ID,
 		ModuleName:  candidate.ModuleName,
-		Inputs:      core.ShallowCopyMap(example.Inputs),
+		Inputs:      maps.Clone(example.Inputs),
 		Outputs:     nil,
 		Success:     false,
 		Timestamp:   time.Now(),
@@ -711,8 +712,8 @@ func buildGEPATrace(candidate *optimizers.GEPACandidate, example AgentExample, r
 
 	sideInfo := result.SideInfo
 	if sideInfo.Trace != nil {
-		trace.Inputs = core.ShallowCopyMap(sideInfo.Trace.Input)
-		trace.Outputs = core.ShallowCopyMap(sideInfo.Trace.Output)
+		trace.Inputs = maps.Clone(sideInfo.Trace.Input)
+		trace.Outputs = maps.Clone(sideInfo.Trace.Output)
 		trace.Duration = sideInfo.Trace.ProcessingTime
 		if !sideInfo.Trace.CompletedAt.IsZero() {
 			trace.Timestamp = sideInfo.Trace.CompletedAt
@@ -723,22 +724,22 @@ func buildGEPATrace(candidate *optimizers.GEPACandidate, example AgentExample, r
 		trace.ContextData["trace_status"] = string(sideInfo.Trace.Status)
 		trace.ContextData["termination_cause"] = sideInfo.Trace.TerminationCause
 		trace.ContextData["step_count"] = len(sideInfo.Trace.Steps)
-		trace.ContextData["token_usage"] = core.ShallowCopyMap(sideInfo.Trace.TokenUsage)
-		trace.ContextData["tool_usage_count"] = core.ShallowCopyMap(sideInfo.Trace.ToolUsageCount)
+		trace.ContextData["token_usage"] = maps.Clone(sideInfo.Trace.TokenUsage)
+		trace.ContextData["tool_usage_count"] = maps.Clone(sideInfo.Trace.ToolUsageCount)
 		trace.ContextData[gepaMetadataTraceSummaryKey] = summarizeAgentTrace(sideInfo.Trace)
 	}
 	if example.Outputs != nil {
-		trace.ContextData["expected_outputs"] = core.ShallowCopyMap(example.Outputs)
+		trace.ContextData["expected_outputs"] = maps.Clone(example.Outputs)
 	}
 	if trace.Duration == 0 && sideInfo.LatencyMS > 0 {
 		trace.Duration = time.Duration(sideInfo.LatencyMS * float64(time.Millisecond))
 	}
 
-	trace.ContextData["scores"] = core.ShallowCopyMap(sideInfo.Scores)
-	trace.ContextData["diagnostics"] = core.ShallowCopyMap(sideInfo.Diagnostics)
+	trace.ContextData["scores"] = maps.Clone(sideInfo.Scores)
+	trace.ContextData["diagnostics"] = maps.Clone(sideInfo.Diagnostics)
 	trace.ContextData["passed_tests"] = append([]string(nil), sideInfo.PassedTests...)
 	trace.ContextData["failed_tests"] = append([]string(nil), sideInfo.FailedTests...)
-	trace.ContextData["tokens"] = core.ShallowCopyMap(sideInfo.Tokens)
+	trace.ContextData["tokens"] = maps.Clone(sideInfo.Tokens)
 	if evidence := buildRichTraceEvidence(sideInfo.Trace, sideInfo); len(evidence) > 0 {
 		trace.ContextData[gepaMetadataTraceEvidenceKey] = evidence
 	}

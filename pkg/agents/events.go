@@ -1,9 +1,8 @@
 package agents
 
 import (
+	"maps"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 const (
@@ -36,7 +35,7 @@ func EmitEvent(onEvent func(AgentEvent), eventType string, data map[string]any) 
 
 	onEvent(AgentEvent{
 		Type:      eventType,
-		Data:      core.ShallowCopyMap(data),
+		Data:      maps.Clone(data),
 		Timestamp: time.Now().UTC(),
 	})
 }

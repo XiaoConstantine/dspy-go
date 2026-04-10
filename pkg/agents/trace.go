@@ -1,9 +1,8 @@
 package agents
 
 import (
+	"maps"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // TraceStatus captures the high-level outcome of an agent trace.
@@ -59,10 +58,10 @@ func (s TraceStep) Clone() TraceStep {
 		Thought:            s.Thought,
 		ActionRaw:          s.ActionRaw,
 		Tool:               s.Tool,
-		Arguments:          core.ShallowCopyMap(s.Arguments),
+		Arguments:          maps.Clone(s.Arguments),
 		Observation:        s.Observation,
 		ObservationDisplay: s.ObservationDisplay,
-		ObservationDetails: core.ShallowCopyMap(s.ObservationDetails),
+		ObservationDetails: maps.Clone(s.ObservationDetails),
 		Duration:           s.Duration,
 		Success:            s.Success,
 		Error:              s.Error,
@@ -82,16 +81,16 @@ func (t *ExecutionTrace) Clone() *ExecutionTrace {
 		AgentID:          t.AgentID,
 		AgentType:        t.AgentType,
 		Task:             t.Task,
-		Input:            core.ShallowCopyMap(t.Input),
-		Output:           core.ShallowCopyMap(t.Output),
+		Input:            maps.Clone(t.Input),
+		Output:           maps.Clone(t.Output),
 		Status:           t.Status,
 		Error:            t.Error,
 		StartedAt:        t.StartedAt,
 		CompletedAt:      t.CompletedAt,
 		ProcessingTime:   t.ProcessingTime,
-		TokenUsage:       core.ShallowCopyMap(t.TokenUsage),
-		ToolUsageCount:   core.ShallowCopyMap(t.ToolUsageCount),
-		ContextMetadata:  core.ShallowCopyMap(t.ContextMetadata),
+		TokenUsage:       maps.Clone(t.TokenUsage),
+		ToolUsageCount:   maps.Clone(t.ToolUsageCount),
+		ContextMetadata:  maps.Clone(t.ContextMetadata),
 		TerminationCause: t.TerminationCause,
 	}
 

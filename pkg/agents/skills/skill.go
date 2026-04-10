@@ -1,10 +1,9 @@
 package skills
 
 import (
+	"maps"
 	"strings"
 	"time"
-
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // Skill is a versioned runtime artifact that can be injected into an agent as a skill pack.
@@ -21,7 +20,7 @@ type Skill struct {
 // Clone returns a deep copy of the skill so stores do not leak shared mutable state.
 func (s Skill) Clone() Skill {
 	cloned := s
-	cloned.Metadata = core.ShallowCopyMap(s.Metadata)
+	cloned.Metadata = maps.Clone(s.Metadata)
 	return cloned
 }
 

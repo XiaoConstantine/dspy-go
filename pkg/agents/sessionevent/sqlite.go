@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/google/uuid"
@@ -81,7 +81,7 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, params CreateSessionPar
 		ActiveBranchID: branchID,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-		Metadata:       core.ShallowCopyMap(params.Metadata),
+		Metadata:       maps.Clone(params.Metadata),
 	}
 	branch := &SessionBranch{
 		ID:        branchID,
@@ -653,7 +653,7 @@ func (s *SQLiteStore) ForkBranch(ctx context.Context, sessionID, fromEntryID, na
 		Status:        BranchStatusActive,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-		Metadata:      core.ShallowCopyMap(metadata),
+		Metadata:      maps.Clone(metadata),
 	}
 	if branch.Name == "" {
 		branch.Name = "branch-" + branch.ID[:8]
@@ -943,13 +943,13 @@ func scanSummary(scanner interface{ Scan(dest ...any) error }) (*SessionSummary,
 }
 
 func cloneEntry(entry SessionEntry) SessionEntry {
-	entry.Payload = core.ShallowCopyMap(entry.Payload)
-	entry.Metadata = core.ShallowCopyMap(entry.Metadata)
+	entry.Payload = maps.Clone(entry.Payload)
+	entry.Metadata = maps.Clone(entry.Metadata)
 	return entry
 }
 
 func cloneSummary(summary SessionSummary) SessionSummary {
-	summary.Metadata = core.ShallowCopyMap(summary.Metadata)
+	summary.Metadata = maps.Clone(summary.Metadata)
 	return summary
 }
 

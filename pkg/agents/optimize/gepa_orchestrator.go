@@ -3,6 +3,7 @@ package optimize
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -257,8 +258,8 @@ func validationAgentExample(validationExamples []AgentExample, idx int, example 
 
 	return AgentExample{
 		ID:      fmt.Sprintf("validation-case-%d", idx),
-		Inputs:  core.ShallowCopyMap(example.Inputs),
-		Outputs: core.ShallowCopyMap(example.Outputs),
+		Inputs:  maps.Clone(example.Inputs),
+		Outputs: maps.Clone(example.Outputs),
 	}
 }
 

@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -85,7 +86,7 @@ func detailsMap(annotations map[string]any) map[string]any {
 		return nil
 	}
 	if typed, ok := raw.(map[string]any); ok {
-		return core.ShallowCopyMap(typed)
+		return maps.Clone(typed)
 	}
 	return map[string]any{"value": raw}
 }

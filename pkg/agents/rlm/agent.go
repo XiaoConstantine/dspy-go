@@ -3,6 +3,7 @@ package rlm
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -240,8 +241,8 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 		AgentID:          a.id,
 		AgentType:        agentTypeRLM,
 		Task:             inputString(input, "query"),
-		Input:            core.ShallowCopyMap(input),
-		Output:           core.ShallowCopyMap(output),
+		Input:            maps.Clone(input),
+		Output:           maps.Clone(output),
 		Steps:            steps,
 		Status:           status,
 		StartedAt:        trace.StartedAt,
@@ -266,7 +267,7 @@ func buildMinimalFailureTrace(agentID string, input map[string]interface{}, err 
 		AgentID:          agentID,
 		AgentType:        agentTypeRLM,
 		Task:             inputString(input, "query"),
-		Input:            core.ShallowCopyMap(input),
+		Input:            maps.Clone(input),
 		Output:           map[string]interface{}{},
 		Status:           agents.TraceStatusFailure,
 		StartedAt:        time.Now(),

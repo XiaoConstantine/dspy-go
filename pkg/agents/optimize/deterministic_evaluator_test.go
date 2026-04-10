@@ -3,6 +3,7 @@ package optimize
 import (
 	"context"
 	"errors"
+	"maps"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func (m *mockOptimizableAgent) Execute(_ context.Context, input map[string]inter
 	m.executeCount++
 	key, _ := input["id"].(string)
 
-	output := core.ShallowCopyMap(m.outputs[key])
+	output := maps.Clone(m.outputs[key])
 	if output == nil {
 		output = map[string]interface{}{}
 	}
@@ -50,8 +51,8 @@ func (m *mockOptimizableAgent) Execute(_ context.Context, input map[string]inter
 		AgentID:        "mock-agent",
 		AgentType:      "mock",
 		Task:           key,
-		Input:          core.ShallowCopyMap(input),
-		Output:         core.ShallowCopyMap(output),
+		Input:          maps.Clone(input),
+		Output:         maps.Clone(output),
 		Status:         agents.TraceStatusSuccess,
 		StartedAt:      time.Now().Add(-25 * time.Millisecond),
 		CompletedAt:    time.Now(),
@@ -407,7 +408,7 @@ func cloneOutputFixtures(input map[string]map[string]interface{}) map[string]map
 
 	cloned := make(map[string]map[string]interface{}, len(input))
 	for key, value := range input {
-		cloned[key] = core.ShallowCopyMap(value)
+		cloned[key] = maps.Clone(value)
 	}
 
 	return cloned

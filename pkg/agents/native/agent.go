@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -114,16 +115,16 @@ func (s TraceStep) Clone() TraceStep {
 		Index:              s.Index,
 		AssistantText:      s.AssistantText,
 		ToolName:           s.ToolName,
-		Arguments:          core.ShallowCopyMap(s.Arguments),
+		Arguments:          maps.Clone(s.Arguments),
 		Observation:        s.Observation,
 		ObservationDisplay: s.ObservationDisplay,
-		ObservationDetails: core.ShallowCopyMap(s.ObservationDetails),
+		ObservationDetails: maps.Clone(s.ObservationDetails),
 		IsError:            s.IsError,
 		Synthetic:          s.Synthetic,
 		Redacted:           s.Redacted,
 		Truncated:          s.Truncated,
 		Usage:              s.Usage,
-		Metadata:           core.ShallowCopyMap(s.Metadata),
+		Metadata:           maps.Clone(s.Metadata),
 	}
 }
 
@@ -445,7 +446,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			}
 
 			toolName := call.Name
-			arguments := core.ShallowCopyMap(call.Arguments)
+			arguments := maps.Clone(call.Arguments)
 			if arguments == nil {
 				arguments = map[string]any{}
 			}
@@ -453,12 +454,12 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 			// Trace the originally proposed call arguments. Interceptors may rewrite
 			// the executed arguments, but proposed values remain useful for debugging
 			// model behavior and policy decisions.
-			callStep.Arguments = core.ShallowCopyMap(arguments)
+			callStep.Arguments = maps.Clone(arguments)
 			proposedEvent := map[string]any{
 				"task_id":   taskID,
 				"turn":      turn + 1,
 				"tool_name": toolName,
-				"arguments": core.ShallowCopyMap(arguments),
+				"arguments": maps.Clone(arguments),
 			}
 
 			if strings.EqualFold(toolName, "finish") {
@@ -500,7 +501,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 					ToolCallID:       call.ID,
 					ToolName:         toolName,
 					Arguments:        callStep.Arguments,
-					ToolCallMetadata: core.ShallowCopyMap(call.Metadata),
+					ToolCallMetadata: maps.Clone(call.Metadata),
 					Observation:      callStep.Observation,
 					IsError:          true,
 				})
@@ -520,7 +521,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 					ToolCallID:       call.ID,
 					ToolName:         toolName,
 					Arguments:        callStep.Arguments,
-					ToolCallMetadata: core.ShallowCopyMap(call.Metadata),
+					ToolCallMetadata: maps.Clone(call.Metadata),
 					Observation:      callStep.Observation,
 					IsError:          true,
 				})
@@ -532,7 +533,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				"task_id":   taskID,
 				"turn":      turn + 1,
 				"tool_name": toolName,
-				"arguments": core.ShallowCopyMap(arguments),
+				"arguments": maps.Clone(arguments),
 			}, nil))
 
 			observation, err := a.executeTool(ctx, tool, arguments)
@@ -544,7 +545,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 					"task_id":   taskID,
 					"turn":      turn + 1,
 					"tool_name": toolName,
-					"arguments": core.ShallowCopyMap(arguments),
+					"arguments": maps.Clone(arguments),
 					"reason":    reason,
 				}, observation.Details))
 			} else if err != nil {
@@ -572,7 +573,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				ToolCallID:       call.ID,
 				ToolName:         toolName,
 				Arguments:        callStep.Arguments,
-				ToolCallMetadata: core.ShallowCopyMap(call.Metadata),
+				ToolCallMetadata: maps.Clone(call.Metadata),
 				Observation:      callStep.Observation,
 				IsError:          callStep.IsError,
 			})
@@ -748,7 +749,7 @@ func enrichSubagentEventData(tool core.Tool, data map[string]any, details map[st
 	if !ok {
 		return data
 	}
-	enriched := core.ShallowCopyMap(data)
+	enriched := maps.Clone(data)
 	enriched["subagent"] = true
 	enriched["subagent_name"] = info.Name
 	enriched["session_policy"] = info.SessionPolicy
@@ -816,8 +817,8 @@ func (a *Agent) buildToolMessages(task string, sessionRecall string, turns []too
 				assistant.ToolCalls = append(assistant.ToolCalls, core.ToolCall{
 					ID:        grouped.ToolCallID,
 					Name:      grouped.ToolName,
-					Arguments: core.ShallowCopyMap(grouped.Arguments),
-					Metadata:  core.ShallowCopyMap(grouped.ToolCallMetadata),
+					Arguments: maps.Clone(grouped.Arguments),
+					Metadata:  maps.Clone(grouped.ToolCallMetadata),
 				})
 			}
 			if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
@@ -962,10 +963,10 @@ func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *
 			Index:              step.Index,
 			Thought:            step.AssistantText,
 			Tool:               step.ToolName,
-			Arguments:          core.ShallowCopyMap(step.Arguments),
+			Arguments:          maps.Clone(step.Arguments),
 			Observation:        step.Observation,
 			ObservationDisplay: step.ObservationDisplay,
-			ObservationDetails: core.ShallowCopyMap(step.ObservationDetails),
+			ObservationDetails: maps.Clone(step.ObservationDetails),
 			Success:            !step.IsError,
 			Error:              boolError(step.IsError, step.Observation),
 			Synthetic:          step.Synthetic,
@@ -993,7 +994,7 @@ func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *
 		AgentID:        fmt.Sprintf("native-%s-%s", a.llm.ProviderName(), a.llm.ModelID()),
 		AgentType:      "native",
 		Task:           firstNonEmpty(trace.TaskID, trace.Task),
-		Input:          core.ShallowCopyMap(input),
+		Input:          maps.Clone(input),
 		Output:         map[string]interface{}{"completed": trace.Completed, "final_answer": trace.FinalAnswer},
 		Steps:          steps,
 		Status:         status,
@@ -1041,8 +1042,8 @@ func extractFunctionCalls(result map[string]any) ([]core.ToolCall, error) {
 			calls = append(calls, core.ToolCall{
 				ID:        rawCall.ID,
 				Name:      rawCall.Name,
-				Arguments: core.ShallowCopyMap(rawCall.Arguments),
-				Metadata:  core.ShallowCopyMap(rawCall.Metadata),
+				Arguments: maps.Clone(rawCall.Arguments),
+				Metadata:  maps.Clone(rawCall.Metadata),
 			})
 		}
 		return calls, nil
@@ -1053,8 +1054,8 @@ func extractFunctionCalls(result map[string]any) ([]core.ToolCall, error) {
 		return []core.ToolCall{{
 			ID:        agentutil.StringValue(call["id"]),
 			Name:      agentutil.StringValue(call["name"]),
-			Arguments: core.ShallowCopyMap(arguments),
-			Metadata:  core.ShallowCopyMap(metadata),
+			Arguments: maps.Clone(arguments),
+			Metadata:  maps.Clone(metadata),
 		}}, nil
 	}
 	return nil, nil
@@ -1129,7 +1130,7 @@ func cloneContentBlocks(blocks []core.ContentBlock) []core.ContentBlock {
 	for i, block := range blocks {
 		cloned[i] = block
 		if block.Metadata != nil {
-			cloned[i].Metadata = core.ShallowCopyMap(block.Metadata)
+			cloned[i].Metadata = maps.Clone(block.Metadata)
 		}
 		if len(block.Data) > 0 {
 			cloned[i].Data = append([]byte(nil), block.Data...)

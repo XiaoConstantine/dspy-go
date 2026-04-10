@@ -2,10 +2,10 @@ package subagent
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // SessionPolicy controls whether and how a child agent run should persist
@@ -76,7 +76,7 @@ func ParentContextFromContext(ctx context.Context) ParentContext {
 }
 
 func cloneParentContext(parent ParentContext) ParentContext {
-	parent.Input = core.ShallowCopyMap(parent.Input)
+	parent.Input = maps.Clone(parent.Input)
 	return parent
 }
 
@@ -98,7 +98,7 @@ func mergeParentContext(base, overlay ParentContext) ParentContext {
 		merged.BranchID = overlay.BranchID
 	}
 	if overlay.Input != nil {
-		merged.Input = core.ShallowCopyMap(overlay.Input)
+		merged.Input = maps.Clone(overlay.Input)
 	}
 	return merged
 }

@@ -2,6 +2,7 @@ package interceptors
 
 import (
 	"context"
+	"maps"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -15,7 +16,7 @@ func ApprovalToolInterceptor(approve core.ToolApprovalFunc) core.ToolInterceptor
 			return handler(ctx, args)
 		}
 
-		decision, err := approve(ctx, info, core.ShallowCopyMap(args))
+		decision, err := approve(ctx, info, maps.Clone(args))
 		if err != nil {
 			return core.ToolResult{}, err
 		}
@@ -69,7 +70,7 @@ func RedactionToolInterceptor(redact func(string) string) core.ToolInterceptor {
 		result.Metadata[core.ToolResultDisplayTextMeta] = redactedDisplay
 
 		if details, ok := result.Annotations[core.ToolResultDetailsAnnotation].(map[string]any); ok {
-			scrubbed := core.ShallowCopyMap(details)
+			scrubbed := maps.Clone(details)
 			for key, value := range scrubbed {
 				text, ok := value.(string)
 				if !ok {

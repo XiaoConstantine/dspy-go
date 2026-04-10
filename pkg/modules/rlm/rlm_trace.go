@@ -1,6 +1,7 @@
 package rlm
 
 import (
+	"maps"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -50,8 +51,8 @@ func (t *RLMTrace) Clone() *RLMTrace {
 	}
 
 	cloned := &RLMTrace{
-		Input:             core.ShallowCopyMap(t.Input),
-		Output:            core.ShallowCopyMap(t.Output),
+		Input:             maps.Clone(t.Input),
+		Output:            maps.Clone(t.Output),
 		StartedAt:         t.StartedAt,
 		CompletedAt:       t.CompletedAt,
 		ProcessingTime:    t.ProcessingTime,

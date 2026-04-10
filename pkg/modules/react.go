@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -148,7 +149,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 	startTime := time.Now()
 
 	trace := &ReActTrace{
-		Input: core.ShallowCopyMap(inputs),
+		Input: maps.Clone(inputs),
 		Steps: make([]ReActTraceStep, 0, r.MaxIters),
 	}
 
@@ -231,14 +232,14 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 			continue
 		}
 		step.Tool = parsedToolName
-		step.Arguments = core.ShallowCopyMap(parsedArgsMap)
+		step.Arguments = maps.Clone(parsedArgsMap)
 
 		// Check if this is a finish action
 		if strings.ToLower(parsedToolName) == "finish" {
 			logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
 			step.Success = true
 			trace.Steps = append(trace.Steps, step)
-			trace.Output = core.ShallowCopyMap(prediction)
+			trace.Output = maps.Clone(prediction)
 			trace.ProcessingTime = time.Since(startTime)
 			trace.TerminationCause = "finish"
 			return prediction, trace, nil // End with success
@@ -288,7 +289,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 		trace.Error = err.Error()
 		return nil, trace, err
 	}
-	trace.Output = core.ShallowCopyMap(result)
+	trace.Output = maps.Clone(result)
 	return result, trace, nil
 }
 

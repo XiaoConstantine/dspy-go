@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -325,11 +326,11 @@ func nativeTraceToToolCallTrace(trace *sharednative.Trace, instruction string) T
 			Index:         step.Index,
 			AssistantText: step.AssistantText,
 			ToolName:      step.ToolName,
-			Arguments:     core.ShallowCopyMap(step.Arguments),
+			Arguments:     maps.Clone(step.Arguments),
 			Observation:   step.Observation,
 			IsError:       step.IsError,
 			Usage:         tokenUsageFromShared(step.Usage),
-			Metadata:      core.ShallowCopyMap(step.Metadata),
+			Metadata:      maps.Clone(step.Metadata),
 		})
 	}
 

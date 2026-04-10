@@ -3,12 +3,12 @@ package optimize
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // ComparisonResult captures deterministic output-comparison details.
@@ -71,7 +71,7 @@ func (e *DeterministicEvaluator) Evaluate(ctx context.Context, agent Optimizable
 	}
 
 	startedAt := time.Now()
-	output, execErr := agent.Execute(ctx, core.ShallowCopyMap(ex.Inputs))
+	output, execErr := agent.Execute(ctx, maps.Clone(ex.Inputs))
 	trace := latestExecutionTrace(agent)
 	latency := time.Since(startedAt)
 	if trace != nil && trace.ProcessingTime > 0 {
@@ -86,13 +86,13 @@ func (e *DeterministicEvaluator) Evaluate(ctx context.Context, agent Optimizable
 	}
 
 	if trace != nil {
-		sideInfo.Tokens = core.ShallowCopyMap(trace.TokenUsage)
+		sideInfo.Tokens = maps.Clone(trace.TokenUsage)
 		sideInfo.Diagnostics["trace_status"] = string(trace.Status)
 		if trace.TerminationCause != "" {
 			sideInfo.Diagnostics["termination_cause"] = trace.TerminationCause
 		}
 		if len(trace.ToolUsageCount) > 0 {
-			sideInfo.Diagnostics["tool_usage_count"] = core.ShallowCopyMap(trace.ToolUsageCount)
+			sideInfo.Diagnostics["tool_usage_count"] = maps.Clone(trace.ToolUsageCount)
 		}
 	}
 
