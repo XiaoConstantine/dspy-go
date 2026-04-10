@@ -1,12 +1,14 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"gopkg.in/yaml.v3"
 )
 
@@ -294,8 +296,7 @@ func (m *Manager) watchFile() {
 
 					// Reload configuration
 					if err := m.Reload(); err != nil {
-						// Log error but continue watching
-						fmt.Printf("Failed to reload configuration: %v\n", err)
+						logging.GetLogger().Warn(context.Background(), "Failed to reload configuration: %v", err)
 					}
 				}
 			}
