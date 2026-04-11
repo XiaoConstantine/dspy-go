@@ -139,11 +139,26 @@ type Module interface {
 
 #### LLM
 ```go
+type PromptModel interface {
+    Generate(ctx context.Context, prompt string, opts ...GenerateOption) (*LLMResponse, error)
+    ModelID() string
+}
+
 type LLM interface {
-    Generate(ctx context.Context, input string) (string, error)
-    GenerateWithOptions(ctx context.Context, input string, opts GenerateOptions) (string, error)
+    PromptModel
+    GenerateWithJSON(ctx context.Context, prompt string, opts ...GenerateOption) (map[string]interface{}, error)
+    GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, opts ...GenerateOption) (map[string]interface{}, error)
+    CreateEmbedding(ctx context.Context, input string, opts ...EmbeddingOption) (*EmbeddingResult, error)
+    CreateEmbeddings(ctx context.Context, inputs []string, opts ...EmbeddingOption) (*BatchEmbeddingResult, error)
+    StreamGenerate(ctx context.Context, prompt string, opts ...GenerateOption) (*StreamResponse, error)
+    GenerateWithContent(ctx context.Context, content []ContentBlock, opts ...GenerateOption) (*LLMResponse, error)
+    StreamGenerateWithContent(ctx context.Context, content []ContentBlock, opts ...GenerateOption) (*StreamResponse, error)
+    ProviderName() string
+    Capabilities() []Capability
 }
 ```
+
+`LLM` is the full compatibility interface. New code should prefer the smallest capability interface it needs, such as `PromptModel`, `TextGenerator`, or `CapabilityProvider`.
 
 ---
 

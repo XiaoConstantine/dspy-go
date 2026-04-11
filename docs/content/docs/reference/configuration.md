@@ -431,22 +431,27 @@ core.SetDefaultLLM(llm)
 ### Monitoring
 
 ```go
-// Add logging middleware
-type LoggingLLM struct {
-    wrapped core.LLM
+// When calling an LLM directly, attach execution state for tracing
+llm := core.GetDefaultLLM()
+if llm == nil {
+    log.Fatal("no default LLM configured")
 }
 
-func (l *LoggingLLM) Generate(ctx context.Context, prompt string) (string, error) {
-    start := time.Now()
-    result, err := l.wrapped.Generate(ctx, prompt)
-    duration := time.Since(start)
+ctx := core.WithExecutionState(context.Background())
 
-    log.Printf("LLM call completed in %v (tokens: %d, error: %v)",
-        duration, len(result), err)
+core.RecordLLMCall(ctx, llm)
+resp, err := llm.Generate(ctx, "Summarize the request", core.WithMaxTokens(256))
+if err != nil {
+    log.Fatal(err)
+}
 
-    return result, err
+if state := core.GetExecutionState(ctx); state != nil {
+    log.Printf("LLM call completed (model=%s, content_len=%d)",
+        state.GetModelID(), len(resp.Content))
 }
 ```
+
+If you only depend on a narrower interface that exposes `ModelID()`, use `core.RecordModelCall(ctx, model)` instead.
 
 ---
 
