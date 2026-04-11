@@ -319,7 +319,7 @@ func TestLoadProgram_VersionMismatch(t *testing.T) {
 	// This often requires more complex test setup (e.g., redirecting os.Stdout)
 }
 
-func TestLoadProgram_WarningsUseLogger(t *testing.T) {
+func TestLoadProgram_IsSilentByDefault(t *testing.T) {
 	savedState := SavedProgramState{
 		Modules:  make(map[string]SavedModuleState),
 		Metadata: map[string]string{},
@@ -346,7 +346,34 @@ func TestLoadProgram_WarningsUseLogger(t *testing.T) {
 
 	err = LoadProgram(&program, tempFile)
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "[WARN] Saved state file does not contain dspy-go version information.")
+	assert.Empty(t, buf.String())
+}
+
+func TestLoadProgramWithOptions_CapturesWarnings(t *testing.T) {
+	savedState := SavedProgramState{
+		Modules:  make(map[string]SavedModuleState),
+		Metadata: map[string]string{},
+	}
+	jsonData, err := json.Marshal(savedState)
+	require.NoError(t, err)
+
+	tempFile := tempFilePath(t, "missing_version_with_options.json")
+	err = os.WriteFile(tempFile, jsonData, 0644)
+	require.NoError(t, err)
+
+	mockModule := NewStateTestMockModule("moduleA")
+	program := NewProgram(map[string]Module{"modA": mockModule}, nil)
+
+	var warnings []string
+	err = LoadProgramWithOptions(&program, tempFile, LoadProgramOptions{
+		WarningHandler: func(message string) {
+			warnings = append(warnings, message)
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, warnings, 2)
+	assert.Contains(t, warnings[0], "saved state file does not contain dspy-go version information")
+	assert.Contains(t, warnings[1], `no saved state found for module "modA" in program`)
 }
 
 func TestLoadProgram_ModuleTypeMismatch(t *testing.T) {
