@@ -125,52 +125,70 @@ type recordLLMCallStub struct {
 	modelID string
 }
 
-func (s *recordLLMCallStub) Generate(context.Context, string, ...GenerateOption) (*LLMResponse, error) {
+func (s *recordLLMCallStub) ModelID() string { return s.modelID }
+
+type recordLLMCallCompatStub struct {
+	modelID string
+}
+
+func (s *recordLLMCallCompatStub) Generate(context.Context, string, ...GenerateOption) (*LLMResponse, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) GenerateWithJSON(context.Context, string, ...GenerateOption) (map[string]interface{}, error) {
+func (s *recordLLMCallCompatStub) GenerateWithJSON(context.Context, string, ...GenerateOption) (map[string]interface{}, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...GenerateOption) (map[string]interface{}, error) {
+func (s *recordLLMCallCompatStub) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...GenerateOption) (map[string]interface{}, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) CreateEmbedding(context.Context, string, ...EmbeddingOption) (*EmbeddingResult, error) {
+func (s *recordLLMCallCompatStub) CreateEmbedding(context.Context, string, ...EmbeddingOption) (*EmbeddingResult, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) CreateEmbeddings(context.Context, []string, ...EmbeddingOption) (*BatchEmbeddingResult, error) {
+func (s *recordLLMCallCompatStub) CreateEmbeddings(context.Context, []string, ...EmbeddingOption) (*BatchEmbeddingResult, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) StreamGenerate(context.Context, string, ...GenerateOption) (*StreamResponse, error) {
+func (s *recordLLMCallCompatStub) StreamGenerate(context.Context, string, ...GenerateOption) (*StreamResponse, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) GenerateWithContent(context.Context, []ContentBlock, ...GenerateOption) (*LLMResponse, error) {
+func (s *recordLLMCallCompatStub) GenerateWithContent(context.Context, []ContentBlock, ...GenerateOption) (*LLMResponse, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) StreamGenerateWithContent(context.Context, []ContentBlock, ...GenerateOption) (*StreamResponse, error) {
+func (s *recordLLMCallCompatStub) StreamGenerateWithContent(context.Context, []ContentBlock, ...GenerateOption) (*StreamResponse, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallStub) ProviderName() string { return "stub" }
-func (s *recordLLMCallStub) ModelID() string      { return s.modelID }
-func (s *recordLLMCallStub) Capabilities() []Capability {
+func (s *recordLLMCallCompatStub) ProviderName() string { return "stub" }
+func (s *recordLLMCallCompatStub) ModelID() string      { return s.modelID }
+func (s *recordLLMCallCompatStub) Capabilities() []Capability {
 	return nil
 }
 
-func TestRecordLLMCall(t *testing.T) {
+func TestRecordModelCall(t *testing.T) {
 	ctx := WithExecutionState(context.Background())
-	RecordLLMCall(ctx, &recordLLMCallStub{modelID: "test-model"})
+	RecordModelCall(ctx, &recordLLMCallStub{modelID: "test-model"})
 
 	state := GetExecutionState(ctx)
 	require.NotNil(t, state)
 	require.Equal(t, "test-model", state.GetModelID())
 
-	RecordLLMCall(context.Background(), &recordLLMCallStub{modelID: "ignored"})
+	RecordModelCall(context.Background(), &recordLLMCallStub{modelID: "ignored"})
+	RecordModelCall(ctx, nil)
+}
+
+func TestRecordLLMCall(t *testing.T) {
+	ctx := WithExecutionState(context.Background())
+	RecordLLMCall(ctx, &recordLLMCallCompatStub{modelID: "test-model"})
+
+	state := GetExecutionState(ctx)
+	require.NotNil(t, state)
+	require.Equal(t, "test-model", state.GetModelID())
+
+	RecordLLMCall(context.Background(), &recordLLMCallCompatStub{modelID: "ignored"})
 	RecordLLMCall(ctx, nil)
 }

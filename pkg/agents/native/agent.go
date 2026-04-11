@@ -1068,7 +1068,7 @@ func extractFinishAnswer(arguments map[string]any, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-func supportsToolCalling(llm core.LLM) bool {
+func supportsToolCalling(llm core.CapabilityProvider) bool {
 	for _, capability := range llm.Capabilities() {
 		if capability == core.CapabilityToolCalling {
 			return true

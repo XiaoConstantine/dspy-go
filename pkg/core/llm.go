@@ -121,27 +121,86 @@ type ChatToolResult struct {
 	IsError    bool           `json:"is_error,omitempty"`
 }
 
-// LLM represents an interface for language models.
-type LLM interface {
-	// Generate produces text completions based on the given prompt
+// TextGenerator produces text completions from a string prompt.
+type TextGenerator interface {
 	Generate(ctx context.Context, prompt string, options ...GenerateOption) (*LLMResponse, error)
+}
 
-	// GenerateWithJSON produces structured JSON output based on the given prompt
+// JSONGenerator produces structured JSON output from a string prompt.
+type JSONGenerator interface {
 	GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error)
+}
 
+// FunctionCaller produces structured function-call responses from a string prompt.
+type FunctionCaller interface {
 	GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error)
+}
+
+// Embedder produces a single embedding.
+type Embedder interface {
 	CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error)
+}
+
+// BatchEmbedder produces embeddings for multiple inputs.
+type BatchEmbedder interface {
 	CreateEmbeddings(ctx context.Context, inputs []string, options ...EmbeddingOption) (*BatchEmbeddingResult, error)
+}
 
+// StreamGenerator streams text completions from a string prompt.
+type StreamGenerator interface {
 	StreamGenerate(ctx context.Context, prompt string, options ...GenerateOption) (*StreamResponse, error)
+}
 
-	// Multimodal methods - new additions that don't break existing interface
+// ContentGenerator produces completions from multimodal content blocks.
+type ContentGenerator interface {
 	GenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*LLMResponse, error)
-	StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error)
+}
 
+// StreamContentGenerator streams completions from multimodal content blocks.
+type StreamContentGenerator interface {
+	StreamGenerateWithContent(ctx context.Context, content []ContentBlock, options ...GenerateOption) (*StreamResponse, error)
+}
+
+// ProviderNamer identifies the underlying LLM provider.
+type ProviderNamer interface {
 	ProviderName() string
+}
+
+// ModelIdentifier identifies the underlying model.
+type ModelIdentifier interface {
 	ModelID() string
+}
+
+// PromptModel identifies a model that can generate text from prompts and expose its model ID.
+type PromptModel interface {
+	TextGenerator
+	ModelIdentifier
+}
+
+// CapabilityProvider reports supported model capabilities.
+type CapabilityProvider interface {
 	Capabilities() []Capability
+}
+
+// LLMMetadata provides provider/model metadata independent of generation methods.
+type LLMMetadata interface {
+	ProviderNamer
+	ModelIdentifier
+	CapabilityProvider
+}
+
+// LLM is the full compatibility interface for model implementations.
+// New code should prefer the smallest capability interface it needs.
+type LLM interface {
+	TextGenerator
+	JSONGenerator
+	FunctionCaller
+	Embedder
+	BatchEmbedder
+	StreamGenerator
+	ContentGenerator
+	StreamContentGenerator
+	LLMMetadata
 }
 
 // ToolCallingChatLLM is an OPTIONAL interface for providers that support

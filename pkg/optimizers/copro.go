@@ -489,14 +489,14 @@ func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modul
 
 // LLMPromptGenerator handles sophisticated prompt generation using LLM assistance.
 type LLMPromptGenerator struct {
-	llm                core.LLM
+	llm                core.PromptModel
 	signature          core.Signature
 	candidateCache     map[string]PromptCandidate
 	diversityThreshold float64
 }
 
 // NewLLMPromptGenerator creates a new LLM-assisted prompt generator.
-func NewLLMPromptGenerator(llm core.LLM, signature core.Signature) *LLMPromptGenerator {
+func NewLLMPromptGenerator(llm core.PromptModel, signature core.Signature) *LLMPromptGenerator {
 	return &LLMPromptGenerator{
 		llm:                llm,
 		signature:          signature,
@@ -550,7 +550,7 @@ Return EXACTLY %d instructions, one per line, no numbering:`,
 		breadth, inputFields, outputFields, taskDescription, breadth, breadth)
 
 	// Use LLM to generate sophisticated instructions
-	core.RecordLLMCall(ctx, lpg.llm)
+	core.RecordModelCall(ctx, lpg.llm)
 	output, err := lpg.llm.Generate(ctx, generatorPrompt,
 		core.WithTemperature(temperature),
 		core.WithMaxTokens(1024))
@@ -626,7 +626,7 @@ Return ONLY the improved instructions, one per line.`,
 		breadth, lpg.getTaskDescription(),
 		bestInstructions, worstInstructions, breadth)
 
-	core.RecordLLMCall(ctx, lpg.llm)
+	core.RecordModelCall(ctx, lpg.llm)
 	output, err := lpg.llm.Generate(ctx, refinementPrompt,
 		core.WithTemperature(temperature),
 		core.WithMaxTokens(1024))

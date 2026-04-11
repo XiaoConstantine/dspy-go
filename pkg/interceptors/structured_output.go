@@ -101,7 +101,7 @@ func StructuredOutputInterceptor(config StructuredOutputConfig) core.ModuleInter
 }
 
 // supportsJSONOutput checks if the LLM supports native JSON output.
-func supportsJSONOutput(llm core.LLM) bool {
+func supportsJSONOutput(llm core.CapabilityProvider) bool {
 	capabilities := llm.Capabilities()
 	return slices.Contains(capabilities, core.CapabilityJSON)
 }

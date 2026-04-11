@@ -115,20 +115,20 @@ type SubLLMClient interface {
 	QueryBatched(ctx context.Context, prompts []string) ([]QueryResponse, error)
 }
 
-// LLMSubClient adapts a core.LLM to the SubLLMClient interface.
-// This allows any dspy-go LLM to be used for sub-queries in RLM.
+// LLMSubClient adapts a prompt-capable model to the SubLLMClient interface.
+// This allows any compatible dspy-go model to be used for sub-queries in RLM.
 type LLMSubClient struct {
-	llm core.LLM
+	llm core.PromptModel
 }
 
-// NewLLMSubClient creates a SubLLMClient from a core.LLM.
-func NewLLMSubClient(llm core.LLM) *LLMSubClient {
+// NewLLMSubClient creates a SubLLMClient from a prompt-capable model.
+func NewLLMSubClient(llm core.PromptModel) *LLMSubClient {
 	return &LLMSubClient{llm: llm}
 }
 
 // Query implements SubLLMClient.
 func (c *LLMSubClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
-	core.RecordLLMCall(ctx, c.llm)
+	core.RecordModelCall(ctx, c.llm)
 	resp, err := c.llm.Generate(ctx, prompt)
 	if err != nil {
 		return QueryResponse{}, err

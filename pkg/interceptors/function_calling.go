@@ -216,7 +216,7 @@ func appendPendingToolResult(history []core.ChatMessage, inputs map[string]any) 
 }
 
 // supportsToolCalling checks if the LLM supports native function/tool calling.
-func supportsToolCalling(llm core.LLM) bool {
+func supportsToolCalling(llm core.CapabilityProvider) bool {
 	capabilities := llm.Capabilities()
 	return slices.Contains(capabilities, core.CapabilityToolCalling)
 }

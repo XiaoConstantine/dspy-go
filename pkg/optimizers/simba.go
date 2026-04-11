@@ -191,8 +191,8 @@ type SIMBA struct {
 	metric func(expected, actual map[string]interface{}) float64
 
 	// Language models
-	primaryModel  core.LLM // Primary optimization model
-	analyzerModel core.LLM // Introspective analysis model
+	primaryModel  core.PromptModel // Primary optimization model
+	analyzerModel core.PromptModel // Introspective analysis model
 
 	// Internal state
 	state  *SIMBAState
@@ -748,7 +748,7 @@ Original: %s
 
 Variation:`, originalInstruction)
 
-	core.RecordLLMCall(ctx, s.primaryModel)
+	core.RecordModelCall(ctx, s.primaryModel)
 	response, err := s.primaryModel.Generate(ctx, prompt)
 	if err != nil {
 		// Handle LLM failures gracefully by returning original instruction
@@ -936,7 +936,7 @@ func (s *SIMBA) extractComparativeRules(ctx context.Context, successful, failed 
 		return []string{}, nil
 	}
 
-	core.RecordLLMCall(ctx, s.analyzerModel)
+	core.RecordModelCall(ctx, s.analyzerModel)
 	response, err := s.analyzerModel.Generate(ctx, analysisPrompt)
 	if err != nil {
 		return []string{}, err
@@ -977,7 +977,7 @@ func (s *SIMBA) extractSuccessPatternRules(ctx context.Context, successful []Tra
 		return []string{}, nil
 	}
 
-	core.RecordLLMCall(ctx, s.analyzerModel)
+	core.RecordModelCall(ctx, s.analyzerModel)
 	response, err := s.analyzerModel.Generate(ctx, prompt)
 	if err != nil {
 		return []string{}, err
@@ -1081,7 +1081,7 @@ Create an enhanced instruction that:
 
 Enhanced Instruction:`, originalInstruction, selectedRule)
 
-	core.RecordLLMCall(ctx, s.primaryModel)
+	core.RecordModelCall(ctx, s.primaryModel)
 	response, err := s.primaryModel.Generate(ctx, prompt)
 	if err != nil {
 		// Fall back to simple concatenation
@@ -1605,7 +1605,7 @@ func (s *SIMBA) performIntrospection(ctx context.Context) *IntrospectionResult {
 	recentSteps := s.getRecentSteps(5)
 	analysisPrompt := s.buildIntrospectionPrompt(recentSteps)
 
-	core.RecordLLMCall(ctx, s.analyzerModel)
+	core.RecordModelCall(ctx, s.analyzerModel)
 	response, err := s.analyzerModel.Generate(ctx, analysisPrompt)
 	if err != nil {
 		s.logger.Debug(ctx, "Introspection failed: %v", err)

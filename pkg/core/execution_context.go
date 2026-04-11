@@ -95,10 +95,10 @@ func GetExecutionState(ctx context.Context) *ExecutionState {
 	return nil
 }
 
-// RecordLLMCall stores the current LLM model identifier in execution state so
+// RecordModelCall stores the current model identifier in execution state so
 // logs and traces can attribute downstream events to the active model.
-func RecordLLMCall(ctx context.Context, llm LLM) {
-	if llm == nil {
+func RecordModelCall(ctx context.Context, model ModelIdentifier) {
+	if model == nil {
 		return
 	}
 	state := GetExecutionState(ctx)
@@ -115,11 +115,17 @@ func RecordLLMCall(ctx context.Context, llm LLM) {
 				modelID = ""
 			}
 		}()
-		modelID = llm.ModelID()
+		modelID = model.ModelID()
 	}()
 	if modelID != "" {
 		state.WithModelID(modelID)
 	}
+}
+
+// RecordLLMCall stores the current LLM model identifier in execution state so
+// logs and traces can attribute downstream events to the active model.
+func RecordLLMCall(ctx context.Context, llm LLM) {
+	RecordModelCall(ctx, llm)
 }
 
 // StartSpan begins a new operation span.
