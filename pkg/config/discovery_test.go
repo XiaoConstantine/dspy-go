@@ -293,15 +293,10 @@ func TestCreateDefaultConfigFileInCurrentDir(t *testing.T) {
 }
 
 func TestCreateDefaultConfigFileInHomeDir(t *testing.T) {
-	// Skip if we can't access home directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("Cannot access home directory")
-	}
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
 
-	// Use a temp subdirectory to avoid polluting home directory
-	testConfigDir := filepath.Join(homeDir, ".config", "dspy-go-test")
-	defer os.RemoveAll(testConfigDir)
+	testConfigDir := filepath.Join(tempHome, ".config", "dspy-go-test")
 
 	// Test the function directly by creating config in test directory
 	discovery := NewDiscovery()
@@ -357,23 +352,11 @@ func TestDiscoverFirstConfigFileGlobal(t *testing.T) {
 }
 
 func TestCreateDefaultConfigFileInHomeDirActual(t *testing.T) {
-	// Test actual function (not method)
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("Cannot access home directory")
-	}
-
-	testConfigDir := filepath.Join(homeDir, ".config", "dspy-go-test-actual")
-	defer os.RemoveAll(filepath.Dir(testConfigDir))
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
 
 	configPath, err := CreateDefaultConfigFileInHomeDir()
-	if err == nil {
-		// If successful, clean up the created file
-		defer os.RemoveAll(filepath.Dir(configPath))
-		assert.FileExists(t, configPath)
-		assert.Contains(t, configPath, "dspy.yaml")
-	} else {
-		// It's ok if this fails due to permissions
-		t.Logf("CreateDefaultConfigFileInHomeDir failed (expected): %v", err)
-	}
+	require.NoError(t, err)
+	assert.FileExists(t, configPath)
+	assert.Equal(t, filepath.Join(tempHome, ".config", "dspy-go", "dspy.yaml"), configPath)
 }
