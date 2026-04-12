@@ -18,6 +18,8 @@ seo:
 
 Interceptors provide composable middleware for modules, agents, and tools. They follow the gRPC interceptor pattern, allowing you to add cross-cutting concerns like logging, caching, security, and structured output parsing without modifying core logic.
 
+Interceptors that invoke the model directly, such as structured-output and native function-calling interceptors, resolve the model in the same order as module execution: module-local `SetLLM`, request-local `core.WithRuntime`, then the package default.
+
 ## Architecture
 
 Each interceptor can:

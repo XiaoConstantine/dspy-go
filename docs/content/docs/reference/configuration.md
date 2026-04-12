@@ -255,16 +255,39 @@ llm, err := llms.NewOllamaLLM("mistral",
 Override LLM for specific modules:
 
 ```go
-// Create module with default LLM
+// Create a module that will use the current default LLM at execution time
 predictor := modules.NewPredict(signature)
 
-// Override with specific LLM
+// Pin the module to a specific LLM
 customLLM, _ := llms.NewAnthropicLLM("key", core.ModelAnthropicOpus)
 predictor.SetLLM(customLLM)
 
 // Now this module uses Claude Opus
 result, _ := predictor.Process(ctx, inputs)
 ```
+
+If you do not call `SetLLM`, modules resolve models in this order when they execute:
+
+1. module-local LLM set with `SetLLM`
+2. request-local runtime from `core.WithRuntime`
+3. package default configured with `core.SetDefaultLLM`
+
+### Per-Request Runtime Overrides
+
+Use a runtime to override the model for a single request without mutating package globals or permanently changing the module:
+
+```go
+predictor := modules.NewPredict(signature)
+
+runtimeLLM, _ := llms.NewOpenAI(core.ModelOpenAIGPT4, "api-key")
+ctx := core.WithRuntime(context.Background(), &core.Runtime{
+    DefaultLLM: runtimeLLM,
+})
+
+result, err := predictor.Process(ctx, inputs)
+```
+
+This runtime override is also respected by interceptors that invoke the model directly, such as structured-output and native function-calling interceptors.
 
 ---
 

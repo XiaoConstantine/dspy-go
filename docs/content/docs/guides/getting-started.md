@@ -260,6 +260,8 @@ predictor := modules.NewPredict(signature)
 predictor.SetLLM(llm)
 ```
 
+If you do not call `SetLLM`, the module uses the current default LLM when it executes.
+
 ---
 
 ## Troubleshooting

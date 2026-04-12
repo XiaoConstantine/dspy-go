@@ -82,6 +82,8 @@ func main() {
 
 Prefer helper functions such as `core.SetDefaultLLM`, `core.SetTeacherLLM`, and `core.GetConcurrencyLevel` over mutating `core.GlobalConfig` directly.
 
+Modules resolve their model at execution time in this order: module-local via `SetLLM`, request-local via `core.WithRuntime`, then the package default configured with `core.SetDefaultLLM`.
+
 ## Core Concepts
 
 ### Signatures
