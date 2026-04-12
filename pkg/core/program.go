@@ -9,18 +9,18 @@ import (
 
 // ForwardFactory rebuilds a program forward function against a specific module map.
 // Programs created with a factory can safely rebind their forward logic during Clone().
-type ForwardFactory func(modules map[string]Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error)
+type ForwardFactory func(modules map[string]Module) func(context.Context, map[string]any) (map[string]any, error)
 
 // Program represents a complete DSPy pipeline or workflow.
 type Program struct {
 	Modules map[string]Module
-	Forward func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error)
+	Forward func(ctx context.Context, inputs map[string]any) (map[string]any, error)
 
 	forwardFactory ForwardFactory
 }
 
 // NewProgram creates a new Program with the given modules and forward function.
-func NewProgram(modules map[string]Module, forward func(context.Context, map[string]interface{}) (map[string]interface{}, error)) Program {
+func NewProgram(modules map[string]Module, forward func(context.Context, map[string]any) (map[string]any, error)) Program {
 	return Program{
 		Modules: modules,
 		Forward: forward,
@@ -41,7 +41,7 @@ func NewProgramWithForwardFactory(modules map[string]Module, factory ForwardFact
 }
 
 // Execute runs the program with the given inputs.
-func (p Program) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+func (p Program) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 	if p.Forward == nil {
 		return nil, errors.New("forward function is not defined")
 	}
@@ -128,11 +128,14 @@ func (p Program) Equal(other Program) bool {
 
 // AddModule adds a new module to the Program.
 func (p *Program) AddModule(name string, module Module) {
+	if p.Modules == nil {
+		p.Modules = make(map[string]Module)
+	}
 	p.Modules[name] = module
 }
 
 // SetForward sets the forward function for the Program.
-func (p *Program) SetForward(forward func(context.Context, map[string]interface{}) (map[string]interface{}, error)) {
+func (p *Program) SetForward(forward func(context.Context, map[string]any) (map[string]any, error)) {
 	p.Forward = forward
 	p.forwardFactory = nil
 }

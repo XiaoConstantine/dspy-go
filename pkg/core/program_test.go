@@ -59,7 +59,7 @@ func TestProgram(t *testing.T) {
 	t.Run("NewProgram", func(t *testing.T) {
 		mockModule := new(MockModule)
 		modules := map[string]Module{"test": mockModule}
-		forward := func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+		forward := func(context.Context, map[string]any) (map[string]any, error) {
 			return nil, nil
 		}
 
@@ -70,15 +70,15 @@ func TestProgram(t *testing.T) {
 
 	t.Run("Execute with valid inputs", func(t *testing.T) {
 		mockModule := new(MockModule)
-		expectedOutputs := map[string]interface{}{"result": "success"}
-		forward := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		expectedOutputs := map[string]any{"result": "success"}
+		forward := func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return expectedOutputs, nil
 		}
 
 		program := NewProgram(map[string]Module{"test": mockModule}, forward)
 		ctx := WithExecutionState(context.Background())
 
-		outputs, err := program.Execute(ctx, map[string]interface{}{"input": "test"})
+		outputs, err := program.Execute(ctx, map[string]any{"input": "test"})
 		assert.NoError(t, err)
 		assert.Equal(t, expectedOutputs, outputs)
 
@@ -99,7 +99,7 @@ func TestProgram(t *testing.T) {
 
 	t.Run("Execute with forward error", func(t *testing.T) {
 		expectedErr := errors.New("forward error")
-		forward := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		forward := func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return nil, expectedErr
 		}
 
@@ -170,12 +170,12 @@ func TestProgram(t *testing.T) {
 		// Set up the Clone expectation
 		mockOriginal.On("Clone").Return(mockCloned)
 
-		mockOriginal.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"test": "original"}, nil).Once()
-		mockCloned.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"test": "clone"}, nil).Once()
+		mockOriginal.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"test": "original"}, nil).Once()
+		mockCloned.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"test": "clone"}, nil).Once()
 
 		// Create the original program using a clone-safe forward factory.
-		original := NewProgramWithForwardFactory(map[string]Module{"test": mockOriginal}, func(modules map[string]Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		original := NewProgramWithForwardFactory(map[string]Module{"test": mockOriginal}, func(modules map[string]Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return modules["test"].Process(ctx, inputs)
 			}
 		})
@@ -199,12 +199,12 @@ func TestProgram(t *testing.T) {
 
 		// Test the forward function behavior
 		ctx := context.Background()
-		originalResult, originalErr := original.Forward(ctx, map[string]interface{}{"input": "test"})
-		cloneResult, cloneErr := clone.Forward(ctx, map[string]interface{}{"input": "test"})
+		originalResult, originalErr := original.Forward(ctx, map[string]any{"input": "test"})
+		cloneResult, cloneErr := clone.Forward(ctx, map[string]any{"input": "test"})
 
 		// Verify the clone's forward function rebinds to the cloned module.
-		assert.Equal(t, map[string]interface{}{"test": "original"}, originalResult)
-		assert.Equal(t, map[string]interface{}{"test": "clone"}, cloneResult)
+		assert.Equal(t, map[string]any{"test": "original"}, originalResult)
+		assert.Equal(t, map[string]any{"test": "clone"}, cloneResult)
 		assert.Equal(t, originalErr, cloneErr)
 
 		// Verify all mock expectations were met
@@ -214,8 +214,8 @@ func TestProgram(t *testing.T) {
 
 	t.Run("RebindModules preserves plain forward when no factory exists", func(t *testing.T) {
 		mockModule := new(MockModule)
-		forward := func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{"ok": true}, nil
+		forward := func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{"ok": true}, nil
 		}
 
 		program := NewProgram(map[string]Module{"test": mockModule}, forward)
@@ -285,7 +285,7 @@ func TestProgram(t *testing.T) {
 		assert.Contains(t, program.Modules, "test")
 		assert.Same(t, mockModule, program.Modules["test"])
 
-		forward := func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		forward := func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return nil, nil
 		}
 		program.SetForward(forward)
@@ -294,18 +294,29 @@ func TestProgram(t *testing.T) {
 
 	t.Run("SetForwardFactory", func(t *testing.T) {
 		mockModule := new(MockModule)
-		mockModule.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"result": "ok"}, nil).Once()
+		mockModule.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"result": "ok"}, nil).Once()
 
 		program := NewProgram(map[string]Module{"test": mockModule}, nil)
-		program.SetForwardFactory(func(modules map[string]Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		program.SetForwardFactory(func(modules map[string]Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return modules["test"].Process(ctx, inputs)
 			}
 		})
 
-		output, err := program.Execute(context.Background(), map[string]interface{}{"input": "x"})
+		output, err := program.Execute(context.Background(), map[string]any{"input": "x"})
 		require.NoError(t, err)
-		assert.Equal(t, map[string]interface{}{"result": "ok"}, output)
+		assert.Equal(t, map[string]any{"result": "ok"}, output)
+		mockModule.AssertExpectations(t)
+	})
+
+	t.Run("AddModule initializes nil module map", func(t *testing.T) {
+		var program Program
+		mockModule := new(MockModule)
+
+		program.AddModule("test", mockModule)
+
+		require.Contains(t, program.Modules, "test")
+		assert.Same(t, mockModule, program.Modules["test"])
 		mockModule.AssertExpectations(t)
 	})
 }
