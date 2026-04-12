@@ -354,20 +354,20 @@ func TestZeroConfigStructs(t *testing.T) {
 func TestZeroConfigWithMinimalOverrides(t *testing.T) {
 	// Test Level 1: minimal overrides when needed
 	type InputWithOverrides struct {
-		Question string `dspy:",required"`     // Just mark as required
-		Context  string                       // Uses zero-config defaults
+		Question string `dspy:",required"` // Just mark as required
+		Context  string // Uses zero-config defaults
 	}
 
 	type OutputWithOverrides struct {
-		Answer string `dspy:"final_answer"`   // Custom field name only
+		Answer string `dspy:"final_answer"` // Custom field name only
 	}
 
 	sig := NewTypedSignature[InputWithOverrides, OutputWithOverrides]()
 	metadata := sig.GetFieldMetadata()
 
 	// Verify required override works
-	assert.True(t, metadata.Inputs[0].Required)   // Question is required
-	assert.False(t, metadata.Inputs[1].Required)  // Context uses default (optional)
+	assert.True(t, metadata.Inputs[0].Required)  // Question is required
+	assert.False(t, metadata.Inputs[1].Required) // Context uses default (optional)
 
 	// Verify field name override works
 	assert.Equal(t, "question", metadata.Inputs[0].Name)      // Uses lowercase default
@@ -424,4 +424,17 @@ func TestNewTypedSignatureCachedConcurrency(t *testing.T) {
 	metadata := firstSig.GetFieldMetadata()
 	assert.Len(t, metadata.Inputs, 3)
 	assert.Len(t, metadata.Outputs, 2)
+}
+
+func TestNewTypedSignatureCached_DistinguishesPointerAndValueTypes(t *testing.T) {
+	typedSignatureCache = sync.Map{}
+
+	valueSig := NewTypedSignatureCached[TestInputs, TestOutputs]()
+	pointerSig := NewTypedSignatureCached[*TestInputs, *TestOutputs]()
+
+	require.NotNil(t, valueSig)
+	require.NotNil(t, pointerSig)
+	assert.NotEqual(t, valueSig, pointerSig, "pointer and value signatures must not collide in cache")
+	assert.Equal(t, reflect.TypeOf(TestInputs{}), valueSig.GetInputType())
+	assert.Equal(t, reflect.TypeOf(TestInputs{}), pointerSig.GetInputType())
 }

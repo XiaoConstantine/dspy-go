@@ -29,6 +29,7 @@ type ExecutionState struct {
 
 // Span represents a single operation within the execution.
 type Span struct {
+	mu          sync.Mutex
 	ID          string
 	ParentID    string
 	Operation   string
@@ -49,8 +50,6 @@ type TokenUsage struct {
 type spanIDGenerator struct {
 	// counter ensures uniqueness even with identical timestamps
 	counter uint64
-	// lastTimestamp helps detect time backwards movement
-	lastTimestamp int64
 }
 
 // ExecutionContextKey is the type for context keys specific to dspy-go.
@@ -78,10 +77,14 @@ func WithExecutionState(ctx context.Context) context.Context {
 // WithFreshExecutionState creates a new context with a fresh ExecutionState,
 // even if the parent context already has one. This is useful for parallel workers
 // that need isolated execution state to avoid mutex contention while still
-// inheriting other context values (deadlines, trace IDs, etc.) from the parent.
+// inheriting other context values from the parent while preserving the trace ID.
 func WithFreshExecutionState(ctx context.Context) context.Context {
+	traceID := generateTraceID()
+	if state := GetExecutionState(ctx); state != nil {
+		traceID = state.GetTraceID()
+	}
 	return context.WithValue(ctx, stateKey, &ExecutionState{
-		traceID:     generateTraceID(),
+		traceID:     traceID,
 		annotations: make(map[string]interface{}),
 		spans:       make([]*Span, 0),
 	})
@@ -240,10 +243,17 @@ func (s *ExecutionState) GetTokenUsage() *TokenUsage {
 
 // Span methods.
 func (s *Span) WithError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Error = err
 }
 
 func (s *Span) WithAnnotation(key string, value interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Annotations == nil {
+		s.Annotations = make(map[string]interface{})
+	}
 	s.Annotations[key] = value
 }
 
@@ -309,7 +319,6 @@ func generateSpanID() string {
 // For testing and debugging.
 func resetSpanIDGenerator() {
 	atomic.StoreUint64(&defaultGenerator.counter, 0)
-	defaultGenerator.lastTimestamp = 0
 }
 
 func (s *ExecutionState) GetCurrentSpan() *Span {

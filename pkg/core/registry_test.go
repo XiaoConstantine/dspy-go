@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // RegistryMockLLM is a simple mock implementation for registry testing.
@@ -207,6 +209,56 @@ func TestLLMRegistry_InferProviderForGemini3PreviewModels(t *testing.T) {
 	}
 }
 
+func TestLLMRegistry_InferProviderForGemini20Models(t *testing.T) {
+	registry := NewLLMRegistry()
+
+	testCases := []ModelID{
+		ModelGoogleGemini20Flash,
+		ModelGoogleGemini20FlashLite,
+	}
+
+	for _, modelID := range testCases {
+		t.Run(string(modelID), func(t *testing.T) {
+			if !registry.IsModelSupported(modelID) {
+				t.Fatalf("expected %s to be supported via provider inference", modelID)
+			}
+
+			provider, ok := registry.GetModelProvider(modelID)
+			if !ok {
+				t.Fatalf("expected provider inference for %s", modelID)
+			}
+			if provider != "google" {
+				t.Fatalf("expected google provider for %s, got %s", modelID, provider)
+			}
+		})
+	}
+}
+
+func TestLLMRegistry_InferProviderForPlainOllamaModels(t *testing.T) {
+	registry := NewLLMRegistry()
+
+	testCases := []ModelID{
+		ModelOllamaLlama3_8B,
+		ModelOllamaNomicEmbed,
+	}
+
+	for _, modelID := range testCases {
+		t.Run(string(modelID), func(t *testing.T) {
+			if !registry.IsModelSupported(modelID) {
+				t.Fatalf("expected %s to be supported via provider inference", modelID)
+			}
+
+			provider, ok := registry.GetModelProvider(modelID)
+			if !ok {
+				t.Fatalf("expected provider inference for %s", modelID)
+			}
+			if provider != "ollama" {
+				t.Fatalf("expected ollama provider for %s, got %s", modelID, provider)
+			}
+		})
+	}
+}
+
 func TestLLMRegistry_RefreshProvider(t *testing.T) {
 	registry := NewLLMRegistry()
 	ctx := context.Background()
@@ -404,4 +456,67 @@ func TestGetRegistry_LazyInitialization(t *testing.T) {
 	if registry == nil {
 		t.Fatal("expected GetRegistry to lazily initialize a registry")
 	}
+}
+
+func TestLLMRegistry_LoadFromConfigClonesProviderConfig(t *testing.T) {
+	registry := NewLLMRegistry()
+	ctx := context.Background()
+
+	source := ProviderConfig{
+		Name: "mock",
+		Models: map[string]ModelConfig{
+			"test-model": {ID: "test-model", Params: map[string]interface{}{"a": "1"}},
+		},
+		Params: map[string]interface{}{"top_p": "0.9"},
+	}
+
+	require.NoError(t, registry.LoadFromConfig(ctx, map[string]ProviderConfig{"mock": source}))
+
+	source.Models["test-model"] = ModelConfig{ID: "mutated"}
+	source.Params["top_p"] = "changed"
+
+	stored, ok := registry.GetProviderConfig("mock")
+	require.True(t, ok)
+	require.Equal(t, "test-model", stored.Models["test-model"].ID)
+	require.Equal(t, "0.9", stored.Params["top_p"])
+
+	stored.Params["top_p"] = "returned-copy-mutated"
+	stored.Models["test-model"] = ModelConfig{ID: "returned-copy"}
+
+	reloaded, ok := registry.GetProviderConfig("mock")
+	require.True(t, ok)
+	require.Equal(t, "test-model", reloaded.Models["test-model"].ID)
+	require.Equal(t, "0.9", reloaded.Params["top_p"])
+}
+
+func TestLLMRegistry_RefreshProviderClonesProviderConfig(t *testing.T) {
+	registry := NewLLMRegistry()
+	ctx := context.Background()
+
+	require.NoError(t, registry.RegisterProvider("mock", MockProviderFactory))
+	require.NoError(t, registry.LoadFromConfig(ctx, map[string]ProviderConfig{
+		"mock": {
+			Name: "mock",
+			Models: map[string]ModelConfig{
+				"model1": {ID: "model1"},
+			},
+		},
+	}))
+
+	refreshed := ProviderConfig{
+		Name: "mock",
+		Models: map[string]ModelConfig{
+			"model2": {ID: "model2", Params: map[string]interface{}{"size": "2"}},
+		},
+		Params: map[string]interface{}{"mode": "fresh"},
+	}
+	require.NoError(t, registry.RefreshProvider(ctx, "mock", refreshed))
+
+	refreshed.Params["mode"] = "changed"
+	refreshed.Models["model2"] = ModelConfig{ID: "mutated"}
+
+	stored, ok := registry.GetProviderConfig("mock")
+	require.True(t, ok)
+	require.Equal(t, "model2", stored.Models["model2"].ID)
+	require.Equal(t, "fresh", stored.Params["mode"])
 }

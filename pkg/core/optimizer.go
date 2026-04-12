@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"sync"
 )
 
 // Optimizer represents an interface for optimizing DSPy programs.
@@ -12,7 +13,7 @@ type Optimizer interface {
 }
 
 // Metric is a function type that evaluates the performance of a program.
-type Metric func(expected, actual map[string]interface{}) float64
+type Metric func(expected, actual map[string]any) float64
 
 // Dataset represents a collection of examples for training/evaluation.
 type Dataset interface {
@@ -24,8 +25,8 @@ type Dataset interface {
 
 // Example represents a single training/evaluation example.
 type Example struct {
-	Inputs  map[string]interface{}
-	Outputs map[string]interface{}
+	Inputs  map[string]any
+	Outputs map[string]any
 }
 
 // DatasetToSlice converts a Dataset to a slice of Examples.
@@ -58,6 +59,7 @@ type OptimizerFactory func() (Optimizer, error)
 
 // OptimizerRegistry maintains a registry of available Optimizer implementations.
 type OptimizerRegistry struct {
+	mu        sync.RWMutex
 	factories map[string]OptimizerFactory
 }
 
@@ -70,12 +72,16 @@ func NewOptimizerRegistry() *OptimizerRegistry {
 
 // Register adds a new Optimizer factory to the registry.
 func (r *OptimizerRegistry) Register(name string, factory OptimizerFactory) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.factories[name] = factory
 }
 
 // Create instantiates a new Optimizer based on the given name.
 func (r *OptimizerRegistry) Create(name string) (Optimizer, error) {
+	r.mu.RLock()
 	factory, exists := r.factories[name]
+	r.mu.RUnlock()
 	if !exists {
 		return nil, errors.New("unknown Optimizer type: " + name)
 	}

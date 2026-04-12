@@ -188,7 +188,7 @@ func (bm *BaseModule) ProcessWithInterceptorsImpl(ctx context.Context, inputs ma
 	}
 
 	// Create module info for interceptors
-	info := NewModuleInfo(bm.GetDisplayName(), bm.GetModuleType(), bm.GetSignature())
+	info := NewModuleInfo(bm.GetDisplayName(), bm.GetModuleType(), bm.GetSignature()).WithLLM(bm.LLM)
 
 	// Chain the interceptors
 	chainedInterceptor := ChainModuleInterceptors(interceptors...)
@@ -278,9 +278,77 @@ func NewModuleChain(modules ...Module) *ModuleChain {
 
 	return &ModuleChain{
 		BaseModule: BaseModule{
-			Signature: Signature{Inputs: inputs, Outputs: outputs},
+			Signature:  Signature{Inputs: inputs, Outputs: outputs},
+			ModuleType: "ModuleChain",
 		},
 		Modules: modules,
+	}
+}
+
+// Process executes each module in sequence, merging prior outputs into the
+// next module's inputs while returning the last module's outputs.
+func (mc *ModuleChain) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
+	if len(mc.Modules) == 0 {
+		return maps.Clone(inputs), nil
+	}
+
+	currentInputs := maps.Clone(inputs)
+	if currentInputs == nil {
+		currentInputs = make(map[string]any)
+	}
+
+	var lastOutputs map[string]any
+	for i, module := range mc.Modules {
+		if module == nil {
+			return nil, errors.New("module chain contains nil module")
+		}
+
+		outputs, err := module.Process(ctx, currentInputs, opts...)
+		if err != nil {
+			return nil, err
+		}
+		lastOutputs = outputs
+
+		if i == len(mc.Modules)-1 {
+			break
+		}
+
+		nextInputs := maps.Clone(currentInputs)
+		if nextInputs == nil {
+			nextInputs = make(map[string]any)
+		}
+		for key, value := range outputs {
+			nextInputs[key] = value
+		}
+		currentInputs = nextInputs
+	}
+
+	return lastOutputs, nil
+}
+
+// SetLLM sets the LLM on the chain and propagates it to child modules.
+func (mc *ModuleChain) SetLLM(llm LLM) {
+	mc.BaseModule.SetLLM(llm)
+	for _, module := range mc.Modules {
+		if module != nil {
+			module.SetLLM(llm)
+		}
+	}
+}
+
+// Clone deep-copies the module chain and its child modules.
+func (mc *ModuleChain) Clone() Module {
+	modules := make([]Module, len(mc.Modules))
+	for i, module := range mc.Modules {
+		if module != nil {
+			modules[i] = module.Clone()
+		}
+	}
+
+	baseClone := mc.BaseModule.Clone().(*BaseModule)
+	return &ModuleChain{
+		BaseModule: *baseClone,
+		Modules:    modules,
 	}
 }
 

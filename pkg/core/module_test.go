@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -160,6 +161,56 @@ func TestModuleChain(t *testing.T) {
 	}
 	if len(sig.Outputs) != 1 || sig.Outputs[0].Name != "output2" {
 		t.Error("Chain signature outputs are incorrect")
+	}
+}
+
+type moduleChainStub struct {
+	*BaseModule
+	outputs map[string]any
+}
+
+func newModuleChainStub(sig Signature, outputs map[string]any) *moduleChainStub {
+	return &moduleChainStub{
+		BaseModule: NewModule(sig),
+		outputs:    outputs,
+	}
+}
+
+func (m *moduleChainStub) Process(context.Context, map[string]any, ...Option) (map[string]any, error) {
+	return maps.Clone(m.outputs), nil
+}
+
+func (m *moduleChainStub) Clone() Module {
+	return newModuleChainStub(m.GetSignature(), m.outputs)
+}
+
+func TestModuleChainProcessAndClone(t *testing.T) {
+	module1 := newModuleChainStub(NewSignature(
+		[]InputField{{Field: Field{Name: "input"}}},
+		[]OutputField{{Field: Field{Name: "middle"}}},
+	), map[string]any{"middle": "value"})
+
+	module2 := newModuleChainStub(NewSignature(
+		[]InputField{{Field: Field{Name: "middle"}}},
+		[]OutputField{{Field: Field{Name: "final"}}},
+	), map[string]any{"final": "done"})
+
+	chain := NewModuleChain(module1, module2)
+	result, err := chain.Process(context.Background(), map[string]any{"input": "start"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result["final"] != "done" {
+		t.Fatalf("expected final output, got %v", result)
+	}
+
+	cloned, ok := chain.Clone().(*ModuleChain)
+	if !ok {
+		t.Fatalf("expected ModuleChain clone, got %T", chain.Clone())
+	}
+	if len(cloned.Modules) != 2 {
+		t.Fatalf("expected 2 cloned modules, got %d", len(cloned.Modules))
 	}
 }
 

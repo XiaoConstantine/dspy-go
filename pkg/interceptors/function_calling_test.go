@@ -578,6 +578,46 @@ func TestNativeFunctionCallingInterceptor_FallbackWithoutToolCalling(t *testing.
 	assert.Equal(t, true, result["fallback"])
 }
 
+func TestNativeFunctionCallingInterceptor_PrefersModuleLocalLLM(t *testing.T) {
+	globalLLM := newMockLLMWithoutFunctionCalling()
+	moduleLLM := newMockLLMWithFunctionCalling()
+	moduleLLM.generateWithToolsResult = map[string]interface{}{
+		"tool_calls": []core.ToolCall{
+			{
+				ID:        "call-module",
+				Name:      "Finish",
+				Arguments: map[string]any{"answer": "done"},
+			},
+		},
+	}
+
+	originalLLM := core.GlobalConfig.DefaultLLM
+	core.GlobalConfig.DefaultLLM = globalLLM
+	defer func() { core.GlobalConfig.DefaultLLM = originalLLM }()
+
+	registry := tools.NewInMemoryToolRegistry()
+	require.NoError(t, registry.Register(&mockTool{
+		name:        "search",
+		description: "Search",
+		schema:      models.InputSchema{Type: "object", Properties: map[string]models.ParameterSchema{}},
+	}))
+
+	interceptor := NativeFunctionCallingInterceptor(FunctionCallingConfig{
+		ToolRegistry:      registry,
+		IncludeFinishTool: true,
+	})
+	info := core.NewModuleInfo("TestModule", "ReAct", core.Signature{}).WithLLM(moduleLLM)
+
+	handlerCalled := false
+	result, err := interceptor(context.Background(), map[string]any{"task": "Find information"}, info, func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+		handlerCalled = true
+		return map[string]any{"fallback": true}, nil
+	})
+	require.NoError(t, err)
+	assert.False(t, handlerCalled)
+	assert.Equal(t, "Finish", result["action"].(map[string]any)["tool_name"])
+}
+
 func TestFunctionCallingReActAdapter(t *testing.T) {
 	registry := tools.NewInMemoryToolRegistry()
 

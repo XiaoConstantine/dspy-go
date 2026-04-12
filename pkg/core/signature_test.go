@@ -253,9 +253,9 @@ func TestSignatureChaining(t *testing.T) {
 
 		// Verify outputs (prepended in reverse order)
 		assert.Len(t, newSig.Outputs, 3)
-		assert.Equal(t, "rationale", newSig.Outputs[0].Name)   // Last prepended
-		assert.Equal(t, "output0", newSig.Outputs[1].Name)    // First prepended
-		assert.Equal(t, "output1", newSig.Outputs[2].Name)    // Original
+		assert.Equal(t, "rationale", newSig.Outputs[0].Name) // Last prepended
+		assert.Equal(t, "output0", newSig.Outputs[1].Name)   // First prepended
+		assert.Equal(t, "output1", newSig.Outputs[2].Name)   // Original
 
 		// Verify instruction is preserved
 		assert.Equal(t, "Original instruction", newSig.Instruction)
@@ -328,6 +328,22 @@ func TestSignatureImmutability(t *testing.T) {
 		assert.Equal(t, originalInputName, original.Inputs[0].Name)
 	})
 
+	t.Run("AppendInput does not mutate shared backing array", func(t *testing.T) {
+		inputs := make([]InputField, 1, 4)
+		inputs[0] = InputField{Field: Field{Name: "input"}}
+		original := NewSignature(
+			inputs,
+			[]OutputField{{Field: Field{Name: "output"}}},
+		)
+
+		modified := original.AppendInput("new_input", "prefix", "desc")
+
+		assert.Len(t, original.Inputs, 1)
+		assert.Equal(t, "input", original.Inputs[0].Name)
+		assert.Len(t, modified.Inputs, 2)
+		assert.Equal(t, "new_input", modified.Inputs[1].Name)
+	})
+
 	t.Run("Original signature unchanged after PrependOutput", func(t *testing.T) {
 		original := NewSignature(
 			[]InputField{{Field: Field{Name: "input"}}},
@@ -343,6 +359,22 @@ func TestSignatureImmutability(t *testing.T) {
 
 		assert.Len(t, original.Outputs, originalOutputLen)
 		assert.Equal(t, originalOutputName, original.Outputs[0].Name)
+	})
+
+	t.Run("PrependOutput does not mutate shared backing array", func(t *testing.T) {
+		outputs := make([]OutputField, 1, 4)
+		outputs[0] = OutputField{Field: Field{Name: "output"}}
+		original := NewSignature(
+			[]InputField{{Field: Field{Name: "input"}}},
+			outputs,
+		)
+
+		modified := original.PrependOutput("prepended", "prefix", "desc")
+
+		assert.Len(t, original.Outputs, 1)
+		assert.Equal(t, "output", original.Outputs[0].Name)
+		assert.Len(t, modified.Outputs, 2)
+		assert.Equal(t, "prepended", modified.Outputs[0].Name)
 	})
 }
 

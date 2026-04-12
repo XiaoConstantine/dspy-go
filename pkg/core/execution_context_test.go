@@ -121,6 +121,38 @@ func TestEndSpan_RestoresParentSpan(t *testing.T) {
 	require.False(t, parent.EndTime.IsZero())
 }
 
+func TestWithFreshExecutionStatePreservesTraceID(t *testing.T) {
+	parentCtx := WithExecutionState(context.Background())
+	parentState := GetExecutionState(parentCtx)
+	require.NotNil(t, parentState)
+
+	childCtx := WithFreshExecutionState(parentCtx)
+	childState := GetExecutionState(childCtx)
+	require.NotNil(t, childState)
+
+	require.NotSame(t, parentState, childState)
+	require.Equal(t, parentState.GetTraceID(), childState.GetTraceID())
+	require.Nil(t, childState.GetCurrentSpan())
+	require.Empty(t, CollectSpans(childCtx))
+}
+
+func TestSpanConcurrentAnnotations(t *testing.T) {
+	span := &Span{
+		Annotations: make(map[string]interface{}),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			span.WithAnnotation(string(rune('a'+(i%26))), i)
+			span.WithError(nil)
+		}(i)
+	}
+	wg.Wait()
+}
+
 type recordLLMCallStub struct {
 	modelID string
 }

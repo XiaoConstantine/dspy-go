@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,10 +203,11 @@ func (r *DefaultLLMRegistry) LoadFromConfig(ctx context.Context, configs map[str
 		}
 
 		// Store provider configuration
-		r.providerConfigs[name] = config
+		storedConfig := cloneProviderConfig(config)
+		r.providerConfigs[name] = storedConfig
 
 		// Map models to providers
-		for modelIDStr := range config.Models {
+		for modelIDStr := range storedConfig.Models {
 			modelID := ModelID(modelIDStr)
 			r.modelToProvider[modelID] = name
 		}
@@ -233,7 +235,10 @@ func (r *DefaultLLMRegistry) GetProviderConfig(name string) (ProviderConfig, boo
 	defer r.mu.RUnlock()
 
 	config, exists := r.providerConfigs[name]
-	return config, exists
+	if !exists {
+		return ProviderConfig{}, false
+	}
+	return cloneProviderConfig(config), true
 }
 
 // IsModelSupported checks if a model is supported by any provider.
@@ -293,7 +298,8 @@ func (r *DefaultLLMRegistry) RefreshProvider(ctx context.Context, name string, c
 	}
 
 	// Update configuration
-	r.providerConfigs[name] = config
+	storedConfig := cloneProviderConfig(config)
+	r.providerConfigs[name] = storedConfig
 
 	// Update model mappings
 	for modelID, providerName := range r.modelToProvider {
@@ -303,7 +309,7 @@ func (r *DefaultLLMRegistry) RefreshProvider(ctx context.Context, name string, c
 	}
 
 	// Add new model mappings
-	for modelIDStr := range config.Models {
+	for modelIDStr := range storedConfig.Models {
 		modelID := ModelID(modelIDStr)
 		r.modelToProvider[modelID] = name
 	}
@@ -315,50 +321,60 @@ func (r *DefaultLLMRegistry) RefreshProvider(ctx context.Context, name string, c
 func (r *DefaultLLMRegistry) inferProviderFromModelID(modelID ModelID) string {
 	modelStr := string(modelID)
 
-	// Anthropic models - check known constants and claude- prefix patterns
-	if modelID == ModelAnthropicHaiku || modelID == ModelAnthropicSonnet || modelID == ModelAnthropicOpus ||
-		modelID == ModelAnthropicClaude45Opus || modelID == ModelAnthropicClaude4Opus ||
-		modelID == ModelAnthropicClaude4Sonnet || modelID == ModelAnthropicClaude45Sonnet {
+	// Known provider model sets.
+	if modelInList(modelID, ProviderModels["anthropic"]) {
 		return "anthropic"
 	}
-	// Also check for claude- prefix patterns (e.g., claude-opus-4-5, claude-sonnet-4-5)
-	if len(modelStr) >= 7 && modelStr[:7] == "claude-" {
+	if modelInList(modelID, ProviderModels["google"]) {
+		return "google"
+	}
+	if modelInList(modelID, ProviderModels["openai"]) {
+		return "openai"
+	}
+	if modelInList(modelID, ProviderModels["ollama"]) {
+		return "ollama"
+	}
+
+	// Anthropic prefix patterns (e.g., claude-opus-4-5, claude-sonnet-4-5)
+	if strings.HasPrefix(modelStr, "claude-") {
 		return "anthropic"
 	}
 	// Check for short aliases (opus-4.5, sonnet-4.5)
-	if len(modelStr) >= 5 && modelStr[:5] == "opus-" {
+	if strings.HasPrefix(modelStr, "opus-") {
 		return "anthropic"
 	}
-	if len(modelStr) >= 7 && modelStr[:7] == "sonnet-" {
+	if strings.HasPrefix(modelStr, "sonnet-") {
 		return "anthropic"
-	}
-
-	// Google models
-	if modelID == ModelGoogleGeminiFlash || modelID == ModelGoogleGeminiPro ||
-		modelID == ModelGoogleGeminiFlashLite ||
-		modelID == ModelGoogleGemini3ProPreview || modelID == ModelGoogleGemini3FlashPreview {
-		return "google"
 	}
 
 	// OpenAI models - check for gpt-, o1, o3 prefixes
-	if len(modelStr) >= 4 && modelStr[:4] == "gpt-" {
+	if strings.HasPrefix(modelStr, "gpt-") {
 		return "openai"
 	}
-	if len(modelStr) >= 2 && (modelStr[:2] == "o1" || modelStr[:2] == "o3") {
+	if strings.HasPrefix(modelStr, "o1") || strings.HasPrefix(modelStr, "o3") {
 		return "openai"
 	}
 
 	// Ollama models
-	if len(modelStr) > 7 && modelStr[:7] == "ollama:" {
+	if strings.HasPrefix(modelStr, "ollama:") {
 		return "ollama"
 	}
 
 	// LlamaCpp models
-	if len(modelStr) > 9 && modelStr[:9] == "llamacpp:" {
+	if strings.HasPrefix(modelStr, "llamacpp:") {
 		return "llamacpp"
 	}
 
 	return ""
+}
+
+func modelInList(modelID ModelID, models []ModelID) bool {
+	for _, candidate := range models {
+		if candidate == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneProviderConfig(config ProviderConfig) ProviderConfig {

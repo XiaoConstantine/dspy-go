@@ -202,11 +202,11 @@ func TestTransformJSONResult(t *testing.T) {
 	)
 
 	tests := []struct {
-		name          string
-		result        map[string]interface{}
-		config        StructuredOutputConfig
-		expectedKeys  []string
-		expectError   bool
+		name         string
+		result       map[string]interface{}
+		config       StructuredOutputConfig
+		expectedKeys []string
+		expectError  bool
 	}{
 		{
 			name: "all fields present",
@@ -353,6 +353,33 @@ func TestStructuredOutputInterceptor_FallbackWithoutJSONCapability(t *testing.T)
 	// Handler SHOULD be called since LLM doesn't support JSON
 	assert.True(t, handlerCalled, "Handler should be called when LLM doesn't support JSON output")
 	assert.Equal(t, true, result["fallback"])
+}
+
+func TestStructuredOutputInterceptor_PrefersModuleLocalLLM(t *testing.T) {
+	globalLLM := newMockLLMWithoutJSON()
+	moduleLLM := newMockLLMWithJSON()
+	moduleLLM.generateWithJSONResult = map[string]interface{}{
+		"answer": "module-local",
+	}
+
+	originalLLM := core.GlobalConfig.DefaultLLM
+	core.GlobalConfig.DefaultLLM = globalLLM
+	defer func() { core.GlobalConfig.DefaultLLM = originalLLM }()
+
+	interceptor := StructuredOutputInterceptor(DefaultStructuredOutputConfig())
+	info := core.NewModuleInfo("TestModule", "Predict", core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)).WithLLM(moduleLLM)
+
+	handlerCalled := false
+	result, err := interceptor(context.Background(), map[string]any{"question": "test"}, info, func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+		handlerCalled = true
+		return map[string]any{"fallback": true}, nil
+	})
+	require.NoError(t, err)
+	assert.False(t, handlerCalled)
+	assert.Equal(t, "module-local", result["answer"])
 }
 
 func TestDefaultChainOfThoughtStructuredConfig(t *testing.T) {

@@ -177,6 +177,7 @@ func parseOutputFields(fieldsStr string) []OutputField {
 	return fields
 }
 
+// Deprecated: use ParseSignature.
 // ShorthandNotation creates a Signature from a shorthand notation string.
 func ShorthandNotation(notation string) (Signature, error) {
 	return ParseSignature(notation)
@@ -191,7 +192,7 @@ func (s Signature) AppendInput(name string, prefix string, description string) S
 			Description: description,
 		},
 	}
-	s.Inputs = append(s.Inputs, newInput)
+	s.Inputs = append(append([]InputField(nil), s.Inputs...), newInput)
 	return s
 }
 
@@ -204,6 +205,6 @@ func (s Signature) PrependOutput(name string, prefix string, description string)
 			Description: description,
 		},
 	}
-	s.Outputs = append([]OutputField{newOutput}, s.Outputs...)
+	s.Outputs = append(append([]OutputField(nil), newOutput), s.Outputs...)
 	return s
 }

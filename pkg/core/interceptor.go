@@ -39,6 +39,10 @@ type ModuleInfo struct {
 	// Signature contains the input/output structure definition
 	Signature Signature
 
+	// LLM is the module-local language model when one is configured.
+	// Interceptors should prefer this over process-global defaults.
+	LLM LLM
+
 	// Version is the module version for compatibility tracking
 	Version string
 
@@ -333,6 +337,14 @@ func (mi *ModuleInfo) WithMetadata(key string, value interface{}) *ModuleInfo {
 		mi.Metadata = make(map[string]interface{})
 	}
 	mi.Metadata[key] = value
+	return mi
+}
+
+// WithLLM records the module-local LLM for downstream interceptor resolution.
+func (mi *ModuleInfo) WithLLM(llm LLM) *ModuleInfo {
+	if mi != nil {
+		mi.LLM = llm
+	}
 	return mi
 }
 

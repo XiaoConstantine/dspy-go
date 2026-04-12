@@ -71,30 +71,28 @@ func createTypedSignatureImpl[TInput, TOutput any](inputType, outputType reflect
 	}
 }
 
-// getReflectTypes extracts and normalizes reflect.Type information for the given generic types.
-// It handles pointer types by extracting the underlying element type.
+// getReflectTypes extracts the raw reflect.Type information for the given generic types.
 func getReflectTypes[TInput, TOutput any]() (reflect.Type, reflect.Type) {
 	var input TInput
 	var output TOutput
 
-	inputType := reflect.TypeOf(input)
-	outputType := reflect.TypeOf(output)
+	return reflect.TypeOf(input), reflect.TypeOf(output)
+}
 
+// normalizeReflectType extracts the underlying element type for pointers while
+// preserving nil and non-pointer types.
+func normalizeReflectType(t reflect.Type) reflect.Type {
 	// Handle pointer types
-	if inputType != nil && inputType.Kind() == reflect.Ptr {
-		inputType = inputType.Elem()
+	if t != nil && t.Kind() == reflect.Ptr {
+		return t.Elem()
 	}
-	if outputType != nil && outputType.Kind() == reflect.Ptr {
-		outputType = outputType.Elem()
-	}
-
-	return inputType, outputType
+	return t
 }
 
 // NewTypedSignature creates a new typed signature for the given input/output types.
 func NewTypedSignature[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
-	inputType, outputType := getReflectTypes[TInput, TOutput]()
-	return createTypedSignatureImpl[TInput, TOutput](inputType, outputType)
+	rawInputType, rawOutputType := getReflectTypes[TInput, TOutput]()
+	return createTypedSignatureImpl[TInput, TOutput](normalizeReflectType(rawInputType), normalizeReflectType(rawOutputType))
 }
 
 // Global cache for TypedSignature instances to improve performance.
@@ -109,12 +107,12 @@ type signatureCacheKey struct {
 // NewTypedSignatureCached creates a cached typed signature for the given input/output types.
 // This function provides better performance for repeated calls with the same types.
 func NewTypedSignatureCached[TInput, TOutput any]() TypedSignature[TInput, TOutput] {
-	inputType, outputType := getReflectTypes[TInput, TOutput]()
+	rawInputType, rawOutputType := getReflectTypes[TInput, TOutput]()
 
 	// Create cache key
 	key := signatureCacheKey{
-		inputType:  inputType,
-		outputType: outputType,
+		inputType:  rawInputType,
+		outputType: rawOutputType,
 	}
 
 	// Try to get from cache first
@@ -123,7 +121,7 @@ func NewTypedSignatureCached[TInput, TOutput any]() TypedSignature[TInput, TOutp
 	}
 
 	// Not in cache, create new signature using the helper
-	signature := createTypedSignatureImpl[TInput, TOutput](inputType, outputType)
+	signature := createTypedSignatureImpl[TInput, TOutput](normalizeReflectType(rawInputType), normalizeReflectType(rawOutputType))
 
 	// Use LoadOrStore to prevent race condition where multiple goroutines
 	// could create and store signatures for the same key concurrently
@@ -238,7 +236,7 @@ func parseStructFields(t reflect.Type, isInput bool) []FieldMetadata {
 func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 	metadata := FieldMetadata{
 		Name:        strings.ToLower(field.Name),
-		GoFieldName: field.Name,                 // Cache the Go field name for efficient lookup
+		GoFieldName: field.Name, // Cache the Go field name for efficient lookup
 		GoType:      field.Type,
 		Type:        FieldTypeText, // Default to text
 		Required:    false,         // Default to optional

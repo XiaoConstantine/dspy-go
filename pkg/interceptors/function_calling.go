@@ -66,7 +66,7 @@ func NativeFunctionCallingInterceptor(config FunctionCallingConfig) core.ModuleI
 		logger := logging.GetLogger()
 
 		// Check if the LLM supports function calling
-		llm := core.GetDefaultLLM()
+		llm := core.ResolveDefaultLLM(ctx, info)
 		if llm == nil {
 			// Fall back to normal handler if no LLM configured
 			logger.Debug(ctx, "No LLM configured, falling back to text-based parsing")
