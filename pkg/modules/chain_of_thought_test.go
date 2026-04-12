@@ -201,8 +201,8 @@ func TestChainOfThought_WithStreamHandler(t *testing.T) {
 
 	// Setup streaming
 	streamConfig := &testutil.MockStreamConfig{
-		Content:    "rationale: Streaming rationale\n\nanswer: Streaming response",
-		ChunkSize:  5,
+		Content:   "rationale: Streaming rationale\n\nanswer: Streaming response",
+		ChunkSize: 5,
 		TokenCounts: &core.TokenInfo{
 			PromptTokens: 10,
 		},
@@ -242,75 +242,101 @@ func TestChainOfThought_WithStreamHandler(t *testing.T) {
 	mockLLM.AssertExpectations(t)
 }
 
+func TestChainOfThought_ProcessWithInterceptors_PopulatesModuleLLM(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	cot := NewChainOfThought(signature)
+	mockLLM := new(testutil.MockLLM)
+	cot.SetLLM(mockLLM)
+
+	var capturedLLM core.LLM
+	interceptor := func(ctx context.Context, inputs map[string]any, info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
+		capturedLLM = info.LLM
+		return map[string]any{
+			"rationale": "captured",
+			"answer":    "ok",
+		}, nil
+	}
+
+	outputs, err := cot.ProcessWithInterceptors(context.Background(), map[string]any{"question": "test"}, []core.ModuleInterceptor{interceptor})
+
+	require.NoError(t, err)
+	assert.Same(t, mockLLM, capturedLLM)
+	assert.Equal(t, "ok", outputs["answer"])
+}
+
 func TestChainOfThought_Clone(t *testing.T) {
-    // Create original instance
-    signature := core.NewSignature(
-        []core.InputField{{Field: core.Field{Name: "question"}}},
-        []core.OutputField{{Field: core.NewField("answer")}},
-    )
-    original := NewChainOfThought(signature)
+	// Create original instance
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	original := NewChainOfThought(signature)
 
-    // Test Clone method
-    cloned := original.Clone()
+	// Test Clone method
+	cloned := original.Clone()
 
-    // Verify it's the correct type
-    clonedCOT, ok := cloned.(*ChainOfThought)
-    assert.True(t, ok, "Clone should return a ChainOfThought instance")
+	// Verify it's the correct type
+	clonedCOT, ok := cloned.(*ChainOfThought)
+	assert.True(t, ok, "Clone should return a ChainOfThought instance")
 
-    // Verify the signature was cloned correctly
-    assert.Equal(t, original.GetSignature(), clonedCOT.GetSignature())
+	// Verify the signature was cloned correctly
+	assert.Equal(t, original.GetSignature(), clonedCOT.GetSignature())
 
-    // Verify the Predict module was cloned (not just referenced)
-    assert.NotSame(t, original.Predict, clonedCOT.Predict,
-        "The Predict module should be cloned, not just referenced")
+	// Verify the Predict module was cloned (not just referenced)
+	assert.NotSame(t, original.Predict, clonedCOT.Predict,
+		"The Predict module should be cloned, not just referenced")
 }
 
 func TestChainOfThought_Compose(t *testing.T) {
-    // Create two modules
-    signature1 := core.NewSignature(
-        []core.InputField{{Field: core.Field{Name: "question"}}},
-        []core.OutputField{{Field: core.NewField("answer")}},
-    )
-    cot := NewChainOfThought(signature1)
+	// Create two modules
+	signature1 := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	cot := NewChainOfThought(signature1)
 
-    signature2 := core.NewSignature(
-        []core.InputField{{Field: core.Field{Name: "answer"}}},
-        []core.OutputField{{Field: core.NewField("summary")}},
-    )
-    predict := NewPredict(signature2)
+	signature2 := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.NewField("summary")}},
+	)
+	predict := NewPredict(signature2)
 
-    // Compose the modules
-    composed := cot.Compose(predict)
+	// Compose the modules
+	composed := cot.Compose(predict)
 
-    // Verify the type and structure
-    chain, ok := composed.(*core.ModuleChain)
-    assert.True(t, ok, "Compose should return a ModuleChain")
-    assert.Equal(t, 2, len(chain.Modules), "Chain should have 2 modules")
+	// Verify the type and structure
+	chain, ok := composed.(*core.ModuleChain)
+	assert.True(t, ok, "Compose should return a ModuleChain")
+	assert.Equal(t, 2, len(chain.Modules), "Chain should have 2 modules")
 
-    // Verify the modules in the chain
-    assert.Same(t, cot, chain.Modules[0], "First module should be the ChainOfThought")
-    assert.Same(t, predict, chain.Modules[1], "Second module should be the Predict")
+	// Verify the modules in the chain
+	assert.Same(t, cot, chain.Modules[0], "First module should be the ChainOfThought")
+	assert.Same(t, predict, chain.Modules[1], "Second module should be the Predict")
 }
 
 func TestChainOfThought_GetSetSubModules(t *testing.T) {
-    // Create original module
-    signature := core.NewSignature(
-        []core.InputField{{Field: core.Field{Name: "question"}}},
-        []core.OutputField{{Field: core.NewField("answer")}},
-    )
-    cot := NewChainOfThought(signature)
+	// Create original module
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	cot := NewChainOfThought(signature)
 
-    // Get submodules
-    subModules := cot.GetSubModules()
-    assert.Equal(t, 1, len(subModules), "Should have 1 submodule")
-    assert.Same(t, cot.Predict, subModules[0], "Submodule should be the Predict module")
+	// Get submodules
+	subModules := cot.GetSubModules()
+	assert.Equal(t, 1, len(subModules), "Should have 1 submodule")
+	assert.Same(t, cot.Predict, subModules[0], "Submodule should be the Predict module")
 
-    // Create a new Predict module
-    newPredict := NewPredict(signature)
+	// Create a new Predict module
+	newPredict := NewPredict(signature)
 
-    // Set submodules
-    cot.SetSubModules([]core.Module{newPredict})
+	// Set submodules
+	cot.SetSubModules([]core.Module{newPredict})
 
-    // Verify the submodule was set
-    assert.Same(t, newPredict, cot.Predict, "Predict module should be updated")
+	// Verify the submodule was set
+	assert.Same(t, newPredict, cot.Predict, "Predict module should be updated")
 }

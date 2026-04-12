@@ -13,9 +13,9 @@ type ChainOfThought struct {
 }
 
 var (
-	_ core.Module             = (*ChainOfThought)(nil)
+	_ core.Module              = (*ChainOfThought)(nil)
 	_ core.InterceptableModule = (*ChainOfThought)(nil)
-	_ core.Composable         = (*ChainOfThought)(nil)
+	_ core.Composable          = (*ChainOfThought)(nil)
 )
 
 func NewChainOfThought(signature core.Signature) *ChainOfThought {
@@ -147,7 +147,7 @@ func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map
 	}
 
 	// Create correct ModuleInfo for ChainOfThought (not Predict)
-	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature())
+	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature()).WithLLM(c.Predict.LLM)
 
 	// Create handler that calls our own Process method
 	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {

@@ -39,7 +39,6 @@ func NewPredict(signature core.Signature) *Predict {
 	baseModule := core.NewModule(signature)
 	baseModule.ModuleType = "Predict"
 	baseModule.DisplayName = "" // Will be set by user or derived from context
-	baseModule.LLM = core.GetDefaultLLM()
 
 	p := &Predict{
 		BaseModule: *baseModule,
@@ -235,17 +234,31 @@ func (p *Predict) executeGeneration(ctx context.Context, inputs map[string]inter
 	return p.formatResponse(ctx, resp.Content, signature, returnRawForXML, span)
 }
 
+func (p *Predict) resolveLLM(ctx context.Context) (core.LLM, error) {
+	info := core.NewModuleInfo(p.GetDisplayName(), p.GetModuleType(), p.GetSignature()).WithLLM(p.LLM)
+	llm := core.ResolveDefaultLLM(ctx, info)
+	if llm == nil {
+		return nil, errors.New(errors.ConfigurationError, "no LLM configured for Predict")
+	}
+	return llm, nil
+}
+
 // callLLM executes the appropriate LLM call based on content type.
 func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs map[string]interface{}, finalOptions *core.ModuleOptions, span *core.Span) (*core.LLMResponse, error) {
 	logger := logging.GetLogger()
+	llm, err := p.resolveLLM(ctx)
+	if err != nil {
+		span.WithError(err)
+		return nil, err
+	}
 
 	// Check if inputs contain multimodal content
 	if core.IsMultimodalContent(signature, inputs) {
 		content := core.ConvertInputsToContentBlocks(signature, inputs)
 		logger.Debug(ctx, "Using multimodal content generation with %d blocks", len(content))
 
-		core.RecordLLMCall(ctx, p.LLM)
-		resp, err := p.LLM.GenerateWithContent(ctx, content, finalOptions.GenerateOptions...)
+		core.RecordLLMCall(ctx, llm)
+		resp, err := llm.GenerateWithContent(ctx, content, finalOptions.GenerateOptions...)
 		if err != nil {
 			span.WithError(err)
 			return nil, errors.WithFields(
@@ -253,7 +266,7 @@ func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs 
 				errors.Fields{
 					"module":         "Predict",
 					"content_blocks": len(content),
-					"model":          p.LLM.ModelID(),
+					"model":          llm.ModelID(),
 				})
 		}
 		logger.Debug(ctx, "LLM Multimodal Completion: %v", resp.Content)
@@ -264,8 +277,8 @@ func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs 
 	prompt := formatPrompt(signature, p.Demos, inputs)
 	logger.Debug(ctx, "Generated prompt with prompt: %v", prompt)
 
-	core.RecordLLMCall(ctx, p.LLM)
-	resp, err := p.LLM.Generate(ctx, prompt, finalOptions.GenerateOptions...)
+	core.RecordLLMCall(ctx, llm)
+	resp, err := llm.Generate(ctx, prompt, finalOptions.GenerateOptions...)
 	if err != nil {
 		span.WithError(err)
 		return nil, errors.WithFields(
@@ -273,7 +286,7 @@ func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs 
 			errors.Fields{
 				"module": "Predict",
 				"prompt": prompt,
-				"model":  p.LLM.ModelID(),
+				"model":  llm.ModelID(),
 			})
 	}
 	logger.Debug(ctx, "LLM Completion: %v", resp.Content)
@@ -363,6 +376,10 @@ func (p *Predict) GetXMLConfig() *interceptors.XMLConfig {
 func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]interface{},
 	handler core.StreamHandler, opts *core.ModuleOptions) (map[string]interface{}, error) {
 	logger := logging.GetLogger()
+	llm, err := p.resolveLLM(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Use semantic name if set, otherwise fall back to operation name
 	displayName := p.GetDisplayName()
 	if displayName == p.GetModuleType() {
@@ -391,8 +408,8 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 	prompt := formatPrompt(signature, p.Demos, inputs)
 
 	// Use StreamGenerate instead of Generate
-	core.RecordLLMCall(ctx, p.LLM)
-	stream, err := p.LLM.StreamGenerate(ctx, prompt, opts.GenerateOptions...)
+	core.RecordLLMCall(ctx, llm)
+	stream, err := llm.StreamGenerate(ctx, prompt, opts.GenerateOptions...)
 	if err != nil {
 		span.WithError(err)
 		return nil, errors.WithFields(
@@ -400,7 +417,7 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 			errors.Fields{
 				"module": "Predict",
 				"prompt": prompt,
-				"model":  p.LLM.ModelID(),
+				"model":  llm.ModelID(),
 			})
 	}
 
@@ -785,13 +802,16 @@ func (p *Predict) SetLLM(llm core.LLM) {
 
 // GetLLMIdentifier implements the LMConfigProvider interface.
 func (p *Predict) GetLLMIdentifier() map[string]string {
-	if p.LLM == nil {
-		return nil // Or return an empty map? Depends on desired behavior
+	llm := p.LLM
+	if llm == nil {
+		llm = core.GetDefaultLLM()
+	}
+	if llm == nil {
+		return nil
 	}
 	return map[string]string{
-		"provider": p.LLM.ProviderName(),
-		"model":    p.LLM.ModelID(),
-		// Add other identifiers like BaseURL for Ollama if needed/possible
+		"provider": llm.ProviderName(),
+		"model":    llm.ModelID(),
 	}
 }
 

@@ -300,21 +300,28 @@ func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *module
 	logger := logging.GetLogger()
 	// Initialize LLM prompt generator if not already done
 	if c.PromptGenerator == nil {
-		// Use the predictor's LLM for prompt generation, or default model
-		promptLLM := c.PromptModel
-		if promptLLM == nil {
-			promptLLM = predictor.LLM
+		promptLLM := c.resolvePromptLLM(ctx, predictor)
+		if promptLLM != nil {
+			c.PromptGenerator = NewLLMPromptGenerator(promptLLM, signature)
 		}
-		c.PromptGenerator = NewLLMPromptGenerator(promptLLM, signature)
 	}
 
-	// Generate sophisticated instructions using LLM assistance with retry logic
 	taskDescription := c.getTaskDescription(signature, baseInstruction)
-	instructions, err := c.PromptGenerator.generateBasicInstructionsWithRetry(ctx, taskDescription, c.Breadth, c.InitTemperature)
-	logger.Info(ctx, "COPRO: Generated %d initial candidates", len(instructions))
-	if err != nil {
-		logger.Error(ctx, "COPRO: Failed to generate LLM-assisted instructions after retries, falling back to enhanced templates: %v", err)
-		// Fallback to enhanced template-based generation
+	instructions := []string{}
+	if c.PromptGenerator != nil {
+		// Generate sophisticated instructions using LLM assistance with retry logic
+		generated, err := c.PromptGenerator.generateBasicInstructionsWithRetry(ctx, taskDescription, c.Breadth, c.InitTemperature)
+		logger.Info(ctx, "COPRO: Generated %d initial candidates", len(generated))
+		if err != nil {
+			logger.Error(ctx, "COPRO: Failed to generate LLM-assisted instructions after retries, falling back to enhanced templates: %v", err)
+		} else {
+			instructions = generated
+		}
+	}
+	if len(instructions) == 0 {
+		if c.PromptGenerator == nil {
+			logger.Info(ctx, "COPRO: No prompt generation model resolved, falling back to enhanced templates")
+		}
 		instructions = c.getEnhancedInstructionTemplates(signature, baseInstruction)
 	}
 
@@ -339,6 +346,14 @@ func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *module
 	c.calculatePromptDiversity(candidates)
 
 	return candidates
+}
+
+func (c *COPRO) resolvePromptLLM(ctx context.Context, predictor *modules.Predict) core.LLM {
+	if c.PromptModel != nil {
+		return c.PromptModel
+	}
+	info := core.NewModuleInfo(predictor.GetDisplayName(), predictor.GetModuleType(), predictor.GetSignature()).WithLLM(predictor.LLM)
+	return core.ResolveDefaultLLM(ctx, info)
 }
 
 // refineCandidates generates sophisticated refined candidates using performance feedback.

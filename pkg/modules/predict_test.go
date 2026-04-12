@@ -199,6 +199,92 @@ func TestPredict_ClonePreservesEmbeddedLLM(t *testing.T) {
 	assert.Same(t, mockLLM, cloned.BaseModule.LLM)
 }
 
+func TestPredict_ProcessUsesRuntimeLLMWhenModuleLLMUnset(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	runtimeLLM := new(testutil.MockLLM)
+	runtimeLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: "answer: runtime",
+	}, nil).Once()
+
+	globalLLM := new(testutil.MockLLM)
+	original := core.GetDefaultLLM()
+	core.GlobalConfig.DefaultLLM = globalLLM
+	t.Cleanup(func() {
+		core.GlobalConfig.DefaultLLM = original
+	})
+
+	predict := NewPredict(signature)
+
+	ctx := core.WithExecutionState(context.Background())
+	ctx = core.WithRuntime(ctx, &core.Runtime{DefaultLLM: runtimeLLM})
+
+	outputs, err := predict.Process(ctx, map[string]any{"question": "Which model?"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "runtime", outputs["answer"])
+	runtimeLLM.AssertExpectations(t)
+	globalLLM.AssertNotCalled(t, "Generate", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPredict_ProcessResolvesGlobalDefaultAtExecutionTime(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	initialLLM := new(testutil.MockLLM)
+	activeLLM := new(testutil.MockLLM)
+	activeLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+		Content: "answer: global",
+	}, nil).Once()
+
+	original := core.GetDefaultLLM()
+	core.GlobalConfig.DefaultLLM = initialLLM
+	t.Cleanup(func() {
+		core.GlobalConfig.DefaultLLM = original
+	})
+
+	predict := NewPredict(signature)
+	core.GlobalConfig.DefaultLLM = activeLLM
+
+	ctx := core.WithExecutionState(context.Background())
+	outputs, err := predict.Process(ctx, map[string]any{"question": "Which global?"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "global", outputs["answer"])
+	activeLLM.AssertExpectations(t)
+	initialLLM.AssertNotCalled(t, "Generate", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestPredict_GetLLMIdentifierFallsBackToGlobalDefault(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+
+	globalLLM := new(testutil.MockLLM)
+	globalLLM.On("ProviderName").Return("global-provider").Once()
+	globalLLM.On("ModelID").Return("global-model").Once()
+
+	original := core.GetDefaultLLM()
+	core.GlobalConfig.DefaultLLM = globalLLM
+	t.Cleanup(func() {
+		core.GlobalConfig.DefaultLLM = original
+	})
+
+	predict := NewPredict(signature)
+
+	assert.Equal(t, map[string]string{
+		"provider": "global-provider",
+		"model":    "global-model",
+	}, predict.GetLLMIdentifier())
+	globalLLM.AssertExpectations(t)
+}
+
 func TestPredict_WithStreamHandler(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
