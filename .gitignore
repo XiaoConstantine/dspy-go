@@ -36,3 +36,5 @@ docs/.hugo_build.lock
 # Go workspace (local development only)
 go.work
 go.work.sum
+
+council-out/
