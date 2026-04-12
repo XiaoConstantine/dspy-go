@@ -1,5 +1,5 @@
 package modules
 
 type Module interface {
-	Forward(inputs map[string]interface{}) (Predict, error)
+	Forward(inputs map[string]any) (Predict, error)
 }

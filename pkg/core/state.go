@@ -31,30 +31,30 @@ type LMConfigProvider interface {
 // ParameterProvider is an interface that modules can optionally implement
 // to allow their tuned parameters to be saved.
 type ParameterProvider interface {
-	GetTunedParameters() map[string]interface{}
+	GetTunedParameters() map[string]any
 }
 
 // ParameterConsumer is an interface that modules can optionally implement
 // to allow their tuned parameters to be loaded.
 type ParameterConsumer interface {
-	SetTunedParameters(params map[string]interface{}) error // Return error for validation
+	SetTunedParameters(params map[string]any) error // Return error for validation
 }
 
 // SavedExample represents a serializable dspy.Example.
 type SavedExample struct {
-	Inputs  map[string]interface{} `json:"inputs"`
-	Outputs map[string]interface{} `json:"outputs"`
+	Inputs  map[string]any `json:"inputs"`
+	Outputs map[string]any `json:"outputs"`
 	// TODO: Add any other relevant metadata from the Example struct if needed.
 }
 
 // SavedModuleState represents the serializable state of a single DSPy module.
 // Specific fields might vary depending on the module type (Predict, CoT, etc.).
 type SavedModuleState struct {
-	Signature       string                 `json:"signature"`                  // Module's signature string representation (READ-ONLY during load)
-	Demos           []SavedExample         `json:"demos,omitempty"`            // Saved demos, if the module provides them
-	LMIdentifier    map[string]string      `json:"lm_identifier,omitempty"`    // Identifying info for the LM used (e.g., provider, model)
-	TunedParameters map[string]interface{} `json:"tuned_parameters,omitempty"` // Module-specific tuned parameters (e.g., k for retriever)
-	ModuleType      string                 `json:"module_type"`                // Concrete type name (e.g., "Predict")
+	Signature       string            `json:"signature"`                  // Module's signature string representation (READ-ONLY during load)
+	Demos           []SavedExample    `json:"demos,omitempty"`            // Saved demos, if the module provides them
+	LMIdentifier    map[string]string `json:"lm_identifier,omitempty"`    // Identifying info for the LM used (e.g., provider, model)
+	TunedParameters map[string]any    `json:"tuned_parameters,omitempty"` // Module-specific tuned parameters (e.g., k for retriever)
+	ModuleType      string            `json:"module_type"`                // Concrete type name (e.g., "Predict")
 	// TODO: Add other potential module-specific tuned parameters (e.g., k for retrievers).
 }
 
@@ -134,7 +134,7 @@ func SaveProgram(p *Program, filepath string) error {
 		}
 
 		// Get Tuned Parameters
-		var tunedParams map[string]interface{}
+		var tunedParams map[string]any
 		if paramProvider, ok := module.(ParameterProvider); ok {
 			tunedParams = paramProvider.GetTunedParameters()
 		}
@@ -235,9 +235,9 @@ func LoadProgramWithOptions(p *Program, filepath string, opts LoadProgramOptions
 				for i, savedDemo := range savedModuleState.Demos {
 					// Convert SavedExample back to Example.
 					// This direct assignment is type-safe because both SavedExample and Example
-					// use map[string]interface{} for Inputs and Outputs. json.Unmarshal has
+					// use map[string]any for Inputs and Outputs. json.Unmarshal has
 					// already parsed the JSON into this structure. The responsibility for handling
-					// the specific concrete types within the interface{} values lies with the
+					// the specific concrete types within the any values lies with the
 					// code that consumes the loaded Example later.
 					demosToLoad[i] = Example(savedDemo)
 				}

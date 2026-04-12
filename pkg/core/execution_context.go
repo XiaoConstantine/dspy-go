@@ -24,7 +24,7 @@ type ExecutionState struct {
 	tokenUsage *TokenUsage
 
 	// Custom annotations
-	annotations map[string]interface{}
+	annotations map[string]any
 }
 
 // Span represents a single operation within the execution.
@@ -36,7 +36,7 @@ type Span struct {
 	StartTime   time.Time
 	EndTime     time.Time
 	Error       error
-	Annotations map[string]interface{}
+	Annotations map[string]any
 }
 
 // TokenUsage tracks token consumption.
@@ -69,7 +69,7 @@ func WithExecutionState(ctx context.Context) context.Context {
 	}
 	return context.WithValue(ctx, stateKey, &ExecutionState{
 		traceID:     generateTraceID(),
-		annotations: make(map[string]interface{}),
+		annotations: make(map[string]any),
 		spans:       make([]*Span, 0),
 	})
 }
@@ -85,7 +85,7 @@ func WithFreshExecutionState(ctx context.Context) context.Context {
 	}
 	return context.WithValue(ctx, stateKey, &ExecutionState{
 		traceID:     traceID,
-		annotations: make(map[string]interface{}),
+		annotations: make(map[string]any),
 		spans:       make([]*Span, 0),
 	})
 }
@@ -137,7 +137,7 @@ func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
 }
 
 // StartSpanWithContext begins a new operation span with additional context information.
-func StartSpanWithContext(ctx context.Context, operation string, moduleName string, metadata map[string]interface{}) (context.Context, *Span) {
+func StartSpanWithContext(ctx context.Context, operation string, moduleName string, metadata map[string]any) (context.Context, *Span) {
 	state := GetExecutionState(ctx)
 	if state == nil {
 		ctx = WithExecutionState(ctx)
@@ -154,14 +154,14 @@ func StartSpanWithContext(ctx context.Context, operation string, moduleName stri
 	}
 
 	// Initialize annotations with provided metadata
-	annotations := make(map[string]interface{})
+	annotations := make(map[string]any)
 	for k, v := range metadata {
 		annotations[k] = v
 	}
 
 	// Add module information to annotations
 	if moduleName != "" {
-		moduleInfo := map[string]interface{}{
+		moduleInfo := map[string]any{
 			"name": moduleName,
 		}
 		if moduleType, ok := metadata["module_type"].(string); ok {
@@ -248,11 +248,11 @@ func (s *Span) WithError(err error) {
 	s.Error = err
 }
 
-func (s *Span) WithAnnotation(key string, value interface{}) {
+func (s *Span) WithAnnotation(key string, value any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Annotations == nil {
-		s.Annotations = make(map[string]interface{})
+		s.Annotations = make(map[string]any)
 	}
 	s.Annotations[key] = value
 }

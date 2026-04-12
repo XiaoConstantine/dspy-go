@@ -87,7 +87,7 @@ func (m *MultiChainComparison) WithName(name string) *MultiChainComparison {
 
 // Process implements the core.Module interface.
 // It takes completions and processes them into reasoning attempts for comparison.
-func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	// Extract completions from inputs
 	completionsRaw, ok := inputs["completions"]
 	if !ok {
@@ -100,7 +100,7 @@ func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]in
 	}
 
 	// Convert completions to the expected format
-	completions, ok := completionsRaw.([]map[string]interface{})
+	completions, ok := completionsRaw.([]map[string]any)
 	if !ok {
 		return nil, errors.WithFields(
 			errors.New(errors.ValidationFailed, "completions must be a slice of maps"),
@@ -133,7 +133,7 @@ func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]in
 	}
 
 	// Add attempts to inputs for the predict module
-	processedInputs := make(map[string]interface{})
+	processedInputs := make(map[string]any)
 	for key, value := range inputs {
 		if key != "completions" { // Skip the completions key
 			processedInputs[key] = value
@@ -150,7 +150,7 @@ func (m *MultiChainComparison) Process(ctx context.Context, inputs map[string]in
 }
 
 // processCompletions converts completions into formatted reasoning attempts.
-func (m *MultiChainComparison) processCompletions(completions []map[string]interface{}) ([]string, error) {
+func (m *MultiChainComparison) processCompletions(completions []map[string]any) ([]string, error) {
 	attempts := make([]string, 0, len(completions))
 
 	for _, completion := range completions {

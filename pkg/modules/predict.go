@@ -157,7 +157,7 @@ func (p *Predict) WithTextOutput() *Predict {
 	return p
 }
 
-func (p *Predict) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (p *Predict) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	// If XML mode is enabled, automatically use ProcessWithInterceptors for proper XML handling
 	if p.enableXMLMode {
 		return p.ProcessWithInterceptors(ctx, inputs, nil, opts...)
@@ -175,7 +175,7 @@ func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string
 
 // processCore handles the core prediction logic for interceptor pipeline.
 // When called via ProcessWithInterceptors, XML interceptors handle response parsing.
-func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (p *Predict) processCore(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	// For XML mode via interceptors, return raw response for XML interceptor to parse
 	return p.executeGeneration(ctx, inputs, p.enableXMLMode, opts...)
 }
@@ -183,7 +183,7 @@ func (p *Predict) processCore(ctx context.Context, inputs map[string]interface{}
 // executeGeneration contains the shared generation logic for both Process and processCore.
 // The returnRawForXML parameter controls whether to return raw LLM response (for XML interceptor parsing)
 // or parsed/formatted outputs (for traditional text mode).
-func (p *Predict) executeGeneration(ctx context.Context, inputs map[string]interface{}, returnRawForXML bool, opts ...core.Option) (map[string]interface{}, error) {
+func (p *Predict) executeGeneration(ctx context.Context, inputs map[string]any, returnRawForXML bool, opts ...core.Option) (map[string]any, error) {
 	callOptions := &core.ModuleOptions{}
 	for _, opt := range opts {
 		opt(callOptions)
@@ -201,7 +201,7 @@ func (p *Predict) executeGeneration(ctx context.Context, inputs map[string]inter
 		displayName = "Predict"
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"module_type":   p.GetModuleType(),
 		"module_config": p.GetSignature().String(),
 	}
@@ -244,7 +244,7 @@ func (p *Predict) resolveLLM(ctx context.Context) (core.LLM, error) {
 }
 
 // callLLM executes the appropriate LLM call based on content type.
-func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs map[string]interface{}, finalOptions *core.ModuleOptions, span *core.Span) (*core.LLMResponse, error) {
+func (p *Predict) callLLM(ctx context.Context, signature core.Signature, inputs map[string]any, finalOptions *core.ModuleOptions, span *core.Span) (*core.LLMResponse, error) {
 	logger := logging.GetLogger()
 	llm, err := p.resolveLLM(ctx)
 	if err != nil {
@@ -322,12 +322,12 @@ func recordTokenUsage(ctx context.Context, usage *core.TokenUsage) {
 }
 
 // formatResponse formats the LLM response based on the processing mode.
-func (p *Predict) formatResponse(ctx context.Context, content string, signature core.Signature, returnRawForXML bool, span *core.Span) (map[string]interface{}, error) {
+func (p *Predict) formatResponse(ctx context.Context, content string, signature core.Signature, returnRawForXML bool, span *core.Span) (map[string]any, error) {
 	logger := logging.GetLogger()
 
 	// For XML mode, return raw LLM content for interceptor to parse
 	if returnRawForXML {
-		return map[string]interface{}{
+		return map[string]any{
 			"response": content,
 		}, nil
 	}
@@ -373,8 +373,8 @@ func (p *Predict) GetXMLConfig() *interceptors.XMLConfig {
 	return nil
 }
 
-func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]interface{},
-	handler core.StreamHandler, opts *core.ModuleOptions) (map[string]interface{}, error) {
+func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]any,
+	handler core.StreamHandler, opts *core.ModuleOptions) (map[string]any, error) {
 	logger := logging.GetLogger()
 	llm, err := p.resolveLLM(ctx)
 	if err != nil {
@@ -386,7 +386,7 @@ func (p *Predict) processWithStreaming(ctx context.Context, inputs map[string]in
 		displayName = "PredictStream"
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"module_type":   p.GetModuleType(),
 		"module_config": p.GetSignature().String(),
 	}
@@ -832,7 +832,7 @@ func parseJSONResponse(content string, signature core.Signature) string {
 	jsonContent := strings.TrimSpace(content[jsonStart : jsonStart+jsonEnd])
 
 	// Parse the JSON
-	var jsonData map[string]interface{}
+	var jsonData map[string]any
 	if err := json.Unmarshal([]byte(jsonContent), &jsonData); err != nil {
 		return content // Fall back if JSON parsing fails
 	}

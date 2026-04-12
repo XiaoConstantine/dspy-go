@@ -14,7 +14,7 @@ import (
 // RewardFunction represents a function that evaluates the quality of a prediction.
 // It takes the inputs used and the outputs produced, and returns a reward score.
 // Higher scores indicate better predictions.
-type RewardFunction func(inputs map[string]interface{}, outputs map[string]interface{}) float64
+type RewardFunction func(inputs map[string]any, outputs map[string]any) float64
 
 // RefineConfig holds configuration options for the Refine module.
 type RefineConfig struct {
@@ -69,7 +69,7 @@ func (r *Refine) WithName(name string) *Refine {
 
 // Process executes the refinement logic by running the module multiple times
 // with different temperatures and selecting the best result based on the reward function.
-func (r *Refine) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	logger := logging.GetLogger()
 
 	// Use semantic name if set, otherwise fall back to operation name
@@ -78,7 +78,7 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]interface{}, opt
 		displayName = "Refine"
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"module_type":   r.GetModuleType(),
 		"module_config": r.GetSignature().String(),
 	}
@@ -92,7 +92,7 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]interface{}, opt
 	// Generate temperature sequence for refinement attempts
 	temperatures := r.generateTemperatureSequence()
 
-	var bestOutputs map[string]interface{}
+	var bestOutputs map[string]any
 	var bestReward = -math.Inf(1) // Start with negative infinity
 	var bestError error
 	attemptCount := 0
@@ -284,7 +284,7 @@ func NewOfferFeedback() *OfferFeedback {
 }
 
 // Process generates feedback and advice for improving module performance.
-func (of *OfferFeedback) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (of *OfferFeedback) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	ctx, span := core.StartSpan(ctx, "OfferFeedback")
 	defer core.EndSpan(ctx)
 

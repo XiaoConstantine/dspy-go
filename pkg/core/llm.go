@@ -20,7 +20,7 @@ type TokenInfo struct {
 type LLMResponse struct {
 	Content  string
 	Usage    *TokenInfo
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 type StreamChunk struct {
@@ -61,7 +61,7 @@ type ContentBlock struct {
 	Data     []byte    `json:"-"` // Raw binary data for images/audio
 	MimeType string    `json:"mime_type,omitempty"`
 	// Optional metadata for extensibility
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // NewTextBlock creates a text content block.
@@ -128,12 +128,12 @@ type TextGenerator interface {
 
 // JSONGenerator produces structured JSON output from a string prompt.
 type JSONGenerator interface {
-	GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error)
+	GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]any, error)
 }
 
 // FunctionCaller produces structured function-call responses from a string prompt.
 type FunctionCaller interface {
-	GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error)
+	GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...GenerateOption) (map[string]any, error)
 }
 
 // Embedder produces a single embedding.
@@ -232,7 +232,7 @@ type EmbeddingOptions struct {
 	// Optional batch size for bulk embeddings
 	BatchSize int
 	// Additional model-specific parameters
-	Params map[string]interface{}
+	Params map[string]any
 }
 
 // EmbeddingResult represents the result of embedding generation.
@@ -242,7 +242,7 @@ type EmbeddingResult struct {
 	// Token count and other metadata
 	TokenCount int
 	// Any model-specific metadata
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // BatchEmbeddingResult represents results for multiple inputs.
@@ -320,10 +320,10 @@ func WithBatchSize(size int) EmbeddingOption {
 	}
 }
 
-func WithParams(params map[string]interface{}) EmbeddingOption {
+func WithParams(params map[string]any) EmbeddingOption {
 	return func(o *EmbeddingOptions) {
 		if o.Params == nil {
-			o.Params = make(map[string]interface{})
+			o.Params = make(map[string]any)
 		}
 		for k, v := range params {
 			o.Params[k] = v
@@ -335,7 +335,7 @@ func WithParams(params map[string]interface{}) EmbeddingOption {
 func NewEmbeddingOptions() *EmbeddingOptions {
 	return &EmbeddingOptions{
 		BatchSize: 32, // Default batch size
-		Params:    make(map[string]interface{}),
+		Params:    make(map[string]any),
 	}
 }
 

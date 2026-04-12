@@ -121,7 +121,7 @@ func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opt
 	// Use ChainOfThought's own display name
 	displayName := c.GetDisplayName()
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"module_type":   c.GetModuleType(),
 		"module_config": c.GetSignature().String(),
 	}

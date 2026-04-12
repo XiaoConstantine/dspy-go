@@ -10,17 +10,17 @@
 //		modules.WithMaxWorkers(4),
 //		modules.WithReturnFailures(true))
 //
-//	batchInputs := []map[string]interface{}{
+//	batchInputs := []map[string]any{
 //		{"input": "first example"},
 //		{"input": "second example"},
 //		{"input": "third example"},
 //	}
 //
-//	result, err := parallel.Process(ctx, map[string]interface{}{
+//	result, err := parallel.Process(ctx, map[string]any{
 //		"batch_inputs": batchInputs,
 //	})
 //
-//	results := result["results"].([]map[string]interface{})
+//	results := result["results"].([]map[string]any)
 //
 // The parallel module automatically manages worker pools, error handling,
 // and result collection while maintaining the order of inputs in outputs.
@@ -50,10 +50,10 @@ type ParallelOptions struct {
 
 // ParallelResult contains the result of a parallel execution.
 type ParallelResult struct {
-	Index   int                    // Original index in the input batch
-	Success bool                   // Whether execution succeeded
-	Output  map[string]interface{} // The actual output
-	Error   error                  // Error if execution failed
+	Index   int            // Original index in the input batch
+	Success bool           // Whether execution succeeded
+	Output  map[string]any // The actual output
+	Error   error          // Error if execution failed
 }
 
 // Parallel executes a module against multiple inputs concurrently.
@@ -139,13 +139,13 @@ func WithStopOnFirstError(stopOnError bool) ParallelOption {
 }
 
 // Process executes the inner module against multiple inputs in parallel.
-func (p *Parallel) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (p *Parallel) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	logger := logging.GetLogger()
 	ctx, span := core.StartSpan(ctx, "ParallelProcess")
 	defer core.EndSpan(ctx)
 
 	// Extract batch inputs - expect a special key "batch_inputs" containing slice of input maps
-	batchInputs, ok := inputs["batch_inputs"].([]map[string]interface{})
+	batchInputs, ok := inputs["batch_inputs"].([]map[string]any)
 	if !ok {
 		// If not batch, treat as single input
 		result, err := p.innerModule.Process(ctx, inputs, opts...)
@@ -153,7 +153,7 @@ func (p *Parallel) Process(ctx context.Context, inputs map[string]interface{}, o
 	}
 
 	if len(batchInputs) == 0 {
-		return map[string]interface{}{"results": []map[string]interface{}{}}, nil
+		return map[string]any{"results": []map[string]any{}}, nil
 	}
 
 	effectiveWorkerCount := p.effectiveWorkers()
@@ -259,7 +259,7 @@ func (p *Parallel) Process(ctx context.Context, inputs map[string]interface{}, o
 // jobInput represents a single job for the worker pool.
 type jobInput struct {
 	index  int
-	inputs map[string]interface{}
+	inputs map[string]any
 }
 
 // worker processes jobs from the jobs channel.
@@ -306,9 +306,9 @@ func (p *Parallel) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan j
 // formatResults converts ParallelResult slice to output format.
 // The outputs slice maintains the same length and order as the input batch,
 // with nil placeholders for failed items to preserve index correspondence.
-func (p *Parallel) formatResults(results []ParallelResult) map[string]interface{} {
-	outputs := make([]map[string]interface{}, len(results))
-	failures := make([]map[string]interface{}, 0)
+func (p *Parallel) formatResults(results []ParallelResult) map[string]any {
+	outputs := make([]map[string]any, len(results))
+	failures := make([]map[string]any, 0)
 
 	for i, result := range results {
 		if result.Success {
@@ -320,7 +320,7 @@ func (p *Parallel) formatResults(results []ParallelResult) map[string]interface{
 				if result.Error != nil {
 					errStr = result.Error.Error()
 				}
-				failureInfo := map[string]interface{}{
+				failureInfo := map[string]any{
 					"index": result.Index,
 					"error": errStr,
 				}
@@ -329,7 +329,7 @@ func (p *Parallel) formatResults(results []ParallelResult) map[string]interface{
 		}
 	}
 
-	output := map[string]interface{}{
+	output := map[string]any{
 		"results": outputs,
 	}
 

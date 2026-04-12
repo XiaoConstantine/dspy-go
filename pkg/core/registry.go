@@ -22,7 +22,7 @@ type ProviderConfig struct {
 	Models map[string]ModelConfig `json:"models,omitempty" yaml:"models,omitempty"`
 
 	// Provider-specific parameters
-	Params map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 
 	// Endpoint configuration
 	Endpoint *EndpointConfig `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
@@ -40,7 +40,7 @@ type ModelConfig struct {
 	Capabilities []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 
 	// Model-specific parameters
-	Params map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 
 	// Default generation options
 	DefaultOptions *GenerateOptions `json:"default_options,omitempty" yaml:"default_options,omitempty"`
@@ -386,7 +386,7 @@ func cloneProviderConfig(config ProviderConfig) ProviderConfig {
 		}
 	}
 	if config.Params != nil {
-		cloned.Params = make(map[string]interface{}, len(config.Params))
+		cloned.Params = make(map[string]any, len(config.Params))
 		for key, value := range config.Params {
 			cloned.Params[key] = value
 		}
@@ -404,7 +404,7 @@ func cloneModelConfig(config ModelConfig) ModelConfig {
 		cloned.Capabilities = append([]string(nil), config.Capabilities...)
 	}
 	if config.Params != nil {
-		cloned.Params = make(map[string]interface{}, len(config.Params))
+		cloned.Params = make(map[string]any, len(config.Params))
 		for key, value := range config.Params {
 			cloned.Params[key] = value
 		}

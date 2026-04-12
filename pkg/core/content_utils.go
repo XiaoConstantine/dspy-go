@@ -42,7 +42,7 @@ func NewImageFromFile(path string) (*ContentBlock, error) {
 	}
 
 	block := NewImageBlock(data, mimeType)
-	block.Metadata = map[string]interface{}{
+	block.Metadata = map[string]any{
 		"source": "file",
 		"path":   path,
 		"size":   len(data),
@@ -91,7 +91,7 @@ func NewImageFromURL(url string) (*ContentBlock, error) {
 	}
 
 	block := NewImageBlock(data, mimeType)
-	block.Metadata = map[string]interface{}{
+	block.Metadata = map[string]any{
 		"source":       "url",
 		"url":          url,
 		"size":         len(data),
@@ -132,7 +132,7 @@ func NewImageFromBase64(data string, mimeType string) (*ContentBlock, error) {
 	}
 
 	block := NewImageBlock(decoded, mimeType)
-	block.Metadata = map[string]interface{}{
+	block.Metadata = map[string]any{
 		"source": "base64",
 		"size":   len(decoded),
 	}
@@ -165,7 +165,7 @@ func NewAudioFromFile(path string) (*ContentBlock, error) {
 	}
 
 	block := NewAudioBlock(data, mimeType)
-	block.Metadata = map[string]interface{}{
+	block.Metadata = map[string]any{
 		"source": "file",
 		"path":   path,
 		"size":   len(data),
@@ -214,7 +214,7 @@ func NewAudioFromURL(url string) (*ContentBlock, error) {
 	}
 
 	block := NewAudioBlock(data, mimeType)
-	block.Metadata = map[string]interface{}{
+	block.Metadata = map[string]any{
 		"source":       "url",
 		"url":          url,
 		"size":         len(data),
@@ -397,7 +397,7 @@ func NewAudioFromBase64(data string, mimeType string) (*ContentBlock, error) {
 	}
 
 	block := NewAudioBlock(decoded, mimeType)
-	block.Metadata = map[string]interface{}{
+	block.Metadata = map[string]any{
 		"source": "base64",
 		"size":   len(decoded),
 	}

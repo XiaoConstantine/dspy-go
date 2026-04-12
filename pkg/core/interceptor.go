@@ -10,10 +10,10 @@ import (
 type ModuleHandler func(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error)
 
 // AgentHandler represents the actual agent execute function.
-type AgentHandler func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error)
+type AgentHandler func(ctx context.Context, input map[string]any) (map[string]any, error)
 
 // ToolHandler represents the actual tool execute function.
-type ToolHandler func(ctx context.Context, args map[string]interface{}) (ToolResult, error)
+type ToolHandler func(ctx context.Context, args map[string]any) (ToolResult, error)
 
 // ModuleInterceptor wraps Module.Process() calls with additional functionality.
 // It follows the gRPC interceptor pattern: the interceptor can inspect/modify the request,
@@ -22,11 +22,11 @@ type ModuleInterceptor func(ctx context.Context, inputs map[string]any, info *Mo
 
 // AgentInterceptor wraps Agent.Execute() calls with additional functionality.
 // Similar to ModuleInterceptor but for agent operations.
-type AgentInterceptor func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error)
+type AgentInterceptor func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error)
 
 // ToolInterceptor wraps Tool.Execute() calls with additional functionality.
 // This allows interception of tool invocations for logging, validation, security, etc.
-type ToolInterceptor func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error)
+type ToolInterceptor func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error)
 
 // ModuleInfo contains metadata about a module for interceptor use.
 type ModuleInfo struct {
@@ -47,7 +47,7 @@ type ModuleInfo struct {
 	Version string
 
 	// Metadata contains additional module-specific information
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // AgentInfo contains metadata about an agent for interceptor use.
@@ -65,7 +65,7 @@ type AgentInfo struct {
 	Version string
 
 	// Metadata contains additional agent-specific information
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // ToolInfo contains metadata about a tool for interceptor use.
@@ -89,7 +89,7 @@ type ToolInfo struct {
 	Capabilities []string
 
 	// Metadata contains additional tool-specific information
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // InterceptorChain manages a collection of interceptors for a specific component type.
@@ -189,7 +189,7 @@ func ChainAgentInterceptors(interceptors ...AgentInterceptor) AgentInterceptor {
 	n := len(interceptors)
 	if n == 0 {
 		// Return a pass-through interceptor that just calls the handler
-		return func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+		return func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 			return handler(ctx, input)
 		}
 	}
@@ -199,14 +199,14 @@ func ChainAgentInterceptors(interceptors ...AgentInterceptor) AgentInterceptor {
 	}
 
 	// Build the chain from the inside out
-	return func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 		// Create a chain of handlers, starting with the final handler
 		var chainer func(int, AgentHandler) AgentHandler
 		chainer = func(currentIndex int, currentHandler AgentHandler) AgentHandler {
 			if currentIndex == n {
 				return currentHandler
 			}
-			return func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+			return func(ctx context.Context, input map[string]any) (map[string]any, error) {
 				return interceptors[currentIndex](ctx, input, info, chainer(currentIndex+1, currentHandler))
 			}
 		}
@@ -221,7 +221,7 @@ func ChainToolInterceptors(interceptors ...ToolInterceptor) ToolInterceptor {
 	n := len(interceptors)
 	if n == 0 {
 		// Return a pass-through interceptor that just calls the handler
-		return func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+		return func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 			return handler(ctx, args)
 		}
 	}
@@ -231,14 +231,14 @@ func ChainToolInterceptors(interceptors ...ToolInterceptor) ToolInterceptor {
 	}
 
 	// Build the chain from the inside out
-	return func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 		// Create a chain of handlers, starting with the final handler
 		var chainer func(int, ToolHandler) ToolHandler
 		chainer = func(currentIndex int, currentHandler ToolHandler) ToolHandler {
 			if currentIndex == n {
 				return currentHandler
 			}
-			return func(ctx context.Context, args map[string]interface{}) (ToolResult, error) {
+			return func(ctx context.Context, args map[string]any) (ToolResult, error) {
 				return interceptors[currentIndex](ctx, args, info, chainer(currentIndex+1, currentHandler))
 			}
 		}
@@ -301,7 +301,7 @@ func NewModuleInfo(moduleName, moduleType string, signature Signature) *ModuleIn
 		ModuleType: moduleType,
 		Signature:  signature,
 		Version:    "1.0.0", // Default version
-		Metadata:   make(map[string]interface{}),
+		Metadata:   make(map[string]any),
 	}
 }
 
@@ -313,7 +313,7 @@ func NewAgentInfo(agentID, agentType string, capabilities []Tool) *AgentInfo {
 		AgentType:    agentType,
 		Capabilities: capabilities,
 		Version:      "1.0.0", // Default version
-		Metadata:     make(map[string]interface{}),
+		Metadata:     make(map[string]any),
 	}
 }
 
@@ -327,14 +327,14 @@ func NewToolInfo(name, description, toolType string, inputSchema models.InputSch
 		ToolType:     toolType,
 		Version:      "1.0.0", // Default version
 		Capabilities: make([]string, 0),
-		Metadata:     make(map[string]interface{}),
+		Metadata:     make(map[string]any),
 	}
 }
 
 // WithMetadata adds metadata to ModuleInfo.
-func (mi *ModuleInfo) WithMetadata(key string, value interface{}) *ModuleInfo {
+func (mi *ModuleInfo) WithMetadata(key string, value any) *ModuleInfo {
 	if mi.Metadata == nil {
-		mi.Metadata = make(map[string]interface{})
+		mi.Metadata = make(map[string]any)
 	}
 	mi.Metadata[key] = value
 	return mi
@@ -355,9 +355,9 @@ func (mi *ModuleInfo) WithVersion(version string) *ModuleInfo {
 }
 
 // WithMetadata adds metadata to AgentInfo.
-func (ai *AgentInfo) WithMetadata(key string, value interface{}) *AgentInfo {
+func (ai *AgentInfo) WithMetadata(key string, value any) *AgentInfo {
 	if ai.Metadata == nil {
-		ai.Metadata = make(map[string]interface{})
+		ai.Metadata = make(map[string]any)
 	}
 	ai.Metadata[key] = value
 	return ai
@@ -370,9 +370,9 @@ func (ai *AgentInfo) WithVersion(version string) *AgentInfo {
 }
 
 // WithMetadata adds metadata to ToolInfo.
-func (ti *ToolInfo) WithMetadata(key string, value interface{}) *ToolInfo {
+func (ti *ToolInfo) WithMetadata(key string, value any) *ToolInfo {
 	if ti.Metadata == nil {
-		ti.Metadata = make(map[string]interface{})
+		ti.Metadata = make(map[string]any)
 	}
 	ti.Metadata[key] = value
 	return ti
