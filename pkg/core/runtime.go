@@ -32,7 +32,7 @@ func RuntimeFromContext(ctx context.Context) *Runtime {
 // following order:
 // 1. module-local LLM from ModuleInfo
 // 2. explicit runtime on the context
-// 3. package-level default LLM for backward compatibility
+// 3. package-level default LLM for backward compatibility.
 func ResolveDefaultLLM(ctx context.Context, info *ModuleInfo) LLM {
 	if info != nil && info.LLM != nil {
 		return info.LLM
