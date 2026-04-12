@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 	"strings"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // FieldType represents the type of data a field can contain.
@@ -148,7 +150,7 @@ func (s Signature) String() string {
 func ParseSignature(signatureStr string) (Signature, error) {
 	parts := strings.Split(signatureStr, "->")
 	if len(parts) != 2 {
-		return Signature{}, fmt.Errorf("invalid signature format: %s", signatureStr)
+		return Signature{}, errors.New(errors.InvalidInput, fmt.Sprintf("invalid signature format: %s", signatureStr))
 	}
 
 	inputs := parseInputFields(strings.TrimSpace(parts[0]))

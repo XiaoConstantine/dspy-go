@@ -1,9 +1,11 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
+	pkgerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -85,6 +87,10 @@ func TestSignatureParser(t *testing.T) {
 		_, err := ParseSignature(invalidStr)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid signature format")
+
+		var typedErr *pkgerrors.Error
+		assert.True(t, errors.As(err, &typedErr))
+		assert.Equal(t, pkgerrors.InvalidInput, typedErr.Code())
 	})
 
 	t.Run("ShorthandNotation", func(t *testing.T) {

@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	pkgerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // // MockLLM is a mock implementation of the LLM interface for testing.
@@ -131,10 +133,32 @@ func TestBaseModule(t *testing.T) {
 	if err == nil || err.Error() != "Process method not implemented" {
 		t.Error("Expected 'Process method not implemented' error")
 	}
+	var typedErr *pkgerrors.Error
+	if !errors.As(err, &typedErr) || typedErr.Code() != pkgerrors.UnsupportedOperation {
+		t.Fatalf("expected UnsupportedOperation error, got %v", err)
+	}
 
 	clone := bm.Clone()
 	if !reflect.DeepEqual(clone.GetSignature(), bm.GetSignature()) {
 		t.Error("Cloned module does not have the same signature")
+	}
+}
+
+func TestBaseModuleValidateInputsReturnsValidationError(t *testing.T) {
+	sig := NewSignature(
+		[]InputField{{Field: Field{Name: "input"}}},
+		[]OutputField{{Field: Field{Name: "output"}}},
+	)
+	bm := NewModule(sig)
+
+	err := bm.ValidateInputs(map[string]any{})
+	if err == nil || err.Error() != "missing required input: input" {
+		t.Fatalf("expected missing input error, got %v", err)
+	}
+
+	var typedErr *pkgerrors.Error
+	if !errors.As(err, &typedErr) || typedErr.Code() != pkgerrors.ValidationFailed {
+		t.Fatalf("expected ValidationFailed error, got %v", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	pkgerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -95,6 +96,10 @@ func TestProgram(t *testing.T) {
 		_, err := program.Execute(ctx, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "forward function is not defined")
+
+		var typedErr *pkgerrors.Error
+		require.True(t, errors.As(err, &typedErr))
+		assert.Equal(t, pkgerrors.InvalidWorkflowState, typedErr.Code())
 	})
 
 	t.Run("Execute with forward error", func(t *testing.T) {

@@ -2,7 +2,10 @@ package core
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	pkgerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // TestOptimizerRegistry tests the OptimizerRegistry.
@@ -27,6 +30,10 @@ func TestOptimizerRegistry(t *testing.T) {
 	_, err = registry.Create("nonexistent")
 	if err == nil {
 		t.Error("Expected error when creating unregistered Optimizer, got nil")
+	}
+	var typedErr *pkgerrors.Error
+	if !errors.As(err, &typedErr) || typedErr.Code() != pkgerrors.InvalidInput {
+		t.Fatalf("expected InvalidInput error, got %v", err)
 	}
 }
 
@@ -95,6 +102,22 @@ func TestBootstrapFewShot(t *testing.T) {
 
 	if len(optimizedProgram.Modules) != 1 {
 		t.Errorf("Expected 1 module in optimized program, got %d", len(optimizedProgram.Modules))
+	}
+}
+
+func TestBaseOptimizerCompileReturnsUnsupportedOperation(t *testing.T) {
+	optimizer := &BaseOptimizer{Name: "base"}
+
+	_, err := optimizer.Compile(context.Background(), Program{}, &MockDataset{}, func(expected, actual map[string]any) float64 {
+		return 0
+	})
+	if err == nil {
+		t.Fatal("expected error from BaseOptimizer.Compile")
+	}
+
+	var typedErr *pkgerrors.Error
+	if !errors.As(err, &typedErr) || typedErr.Code() != pkgerrors.UnsupportedOperation {
+		t.Fatalf("expected UnsupportedOperation error, got %v", err)
 	}
 }
 

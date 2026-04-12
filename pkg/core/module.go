@@ -2,9 +2,9 @@ package core
 
 import (
 	"context"
-	"errors"
 	"maps"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
 
@@ -152,7 +152,7 @@ func (bm *BaseModule) GetModuleType() string {
 
 // Process is a placeholder implementation and should be overridden by specific modules.
 func (bm *BaseModule) Process(ctx context.Context, inputs map[string]any, opts ...Option) (map[string]any, error) {
-	return nil, errors.New("Process method not implemented")
+	return nil, errors.New(errors.UnsupportedOperation, "Process method not implemented")
 }
 
 // Clone creates a deep copy of the BaseModule.
@@ -228,7 +228,7 @@ func NewModule(signature Signature) *BaseModule {
 func (bm *BaseModule) ValidateInputs(inputs map[string]any) error {
 	for _, field := range bm.Signature.Inputs {
 		if _, ok := inputs[field.Name]; !ok {
-			return errors.New("missing required input: " + field.Name)
+			return errors.New(errors.ValidationFailed, "missing required input: "+field.Name)
 		}
 	}
 	return nil
@@ -300,7 +300,7 @@ func (mc *ModuleChain) Process(ctx context.Context, inputs map[string]any, opts 
 	var lastOutputs map[string]any
 	for i, module := range mc.Modules {
 		if module == nil {
-			return nil, errors.New("module chain contains nil module")
+			return nil, errors.New(errors.InvalidWorkflowState, "module chain contains nil module")
 		}
 
 		outputs, err := module.Process(ctx, currentInputs, opts...)

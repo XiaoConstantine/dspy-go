@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
@@ -140,8 +141,14 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...cor
 
 	// If no successful attempts, return the error
 	if bestOutputs == nil {
-		span.WithError(bestError)
-		return nil, fmt.Errorf("all refinement attempts failed, last error: %w", bestError)
+		var finalErr error
+		if bestError != nil {
+			finalErr = errors.Wrap(bestError, errors.StepExecutionFailed, "all refinement attempts failed, last error")
+		} else {
+			finalErr = errors.New(errors.StepExecutionFailed, "all refinement attempts failed")
+		}
+		span.WithError(finalErr)
+		return nil, finalErr
 	}
 
 	// Log final results
@@ -156,6 +163,9 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...cor
 // generateTemperatureSequence creates a sequence of temperatures for refinement attempts.
 // This follows a similar strategy to the Python implementation.
 func (r *Refine) generateTemperatureSequence() []float64 {
+	if r.config.N <= 0 {
+		return nil
+	}
 	if r.config.N == 1 {
 		return []float64{0.7} // Single attempt with moderate temperature
 	}

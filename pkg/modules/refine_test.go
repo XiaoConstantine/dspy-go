@@ -2,12 +2,14 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	pkgerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -217,6 +219,47 @@ func TestRefineAllAttemptsFail(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, outputs)
 	assert.Contains(t, err.Error(), "all refinement attempts failed")
+	assert.Contains(t, err.Error(), "last error")
+
+	var typedErr *pkgerrors.Error
+	require.True(t, errors.As(err, &typedErr))
+	assert.Equal(t, pkgerrors.StepExecutionFailed, typedErr.Code())
+}
+
+func TestRefineZeroAttemptsReturnsStepExecutionFailed(t *testing.T) {
+	ctx := context.Background()
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("input")}},
+		[]core.OutputField{{Field: core.NewField("output")}},
+	)
+
+	predict := NewPredict(signature)
+	refine := NewRefine(predict, RefineConfig{
+		N: 1,
+		RewardFn: func(inputs, outputs map[string]interface{}) float64 {
+			return 0.5
+		},
+		Threshold: 0.8,
+	})
+
+	refine.UpdateConfig(RefineConfig{
+		N: 0,
+		RewardFn: func(inputs, outputs map[string]interface{}) float64 {
+			return 0.5
+		},
+		Threshold: 0.8,
+	})
+
+	outputs, err := refine.Process(ctx, map[string]interface{}{"input": "test"})
+
+	assert.Error(t, err)
+	assert.Nil(t, outputs)
+	assert.Equal(t, "all refinement attempts failed", err.Error())
+
+	var typedErr *pkgerrors.Error
+	require.True(t, errors.As(err, &typedErr))
+	assert.Equal(t, pkgerrors.StepExecutionFailed, typedErr.Code())
 }
 
 func TestGenerateTemperatureSequence(t *testing.T) {

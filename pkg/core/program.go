@@ -2,9 +2,10 @@ package core
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"sort"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // ForwardFactory rebuilds a program forward function against a specific module map.
@@ -43,7 +44,7 @@ func NewProgramWithForwardFactory(modules map[string]Module, factory ForwardFact
 // Execute runs the program with the given inputs.
 func (p Program) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 	if p.Forward == nil {
-		return nil, errors.New("forward function is not defined")
+		return nil, errors.New(errors.InvalidWorkflowState, "forward function is not defined")
 	}
 	// Ensure we have execution state
 	if GetExecutionState(ctx) == nil {

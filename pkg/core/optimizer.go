@@ -2,8 +2,9 @@ package core
 
 import (
 	"context"
-	"errors"
 	"sync"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // Optimizer represents an interface for optimizing DSPy programs.
@@ -51,7 +52,7 @@ type BaseOptimizer struct {
 
 // Compile is a placeholder implementation and should be overridden by specific optimizer implementations.
 func (bo *BaseOptimizer) Compile(ctx context.Context, program Program, dataset Dataset, metric Metric) (Program, error) {
-	return Program{}, errors.New("Compile method not implemented")
+	return Program{}, errors.New(errors.UnsupportedOperation, "Compile method not implemented")
 }
 
 // OptimizerFactory is a function type for creating Optimizer instances.
@@ -83,7 +84,7 @@ func (r *OptimizerRegistry) Create(name string) (Optimizer, error) {
 	factory, exists := r.factories[name]
 	r.mu.RUnlock()
 	if !exists {
-		return nil, errors.New("unknown Optimizer type: " + name)
+		return nil, errors.New(errors.InvalidInput, "unknown Optimizer type: "+name)
 	}
 	return factory()
 }
