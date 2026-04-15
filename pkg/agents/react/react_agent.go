@@ -545,6 +545,51 @@ func (r *ReActAgent) GetArtifacts() optimize.AgentArtifacts {
 	return r.artifacts.Clone()
 }
 
+// OptimizationAgentType returns the stable persisted optimization envelope type.
+func (r *ReActAgent) OptimizationAgentType() string {
+	return "react"
+}
+
+// ListOptimizationTargets returns the stable optimization targets supported by the ReAct agent.
+func (r *ReActAgent) ListOptimizationTargets() []optimize.OptimizationTargetDescriptor {
+	return []optimize.OptimizationTargetDescriptor{
+		{
+			ID:          "root.skill_pack",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Repository- or domain-specific task guidance.",
+			ArtifactKey: optimize.ArtifactSkillPack,
+		},
+		{
+			ID:          "root.tool_policy",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Tool-use and evidence-seeking policy guidance.",
+			ArtifactKey: optimize.ArtifactToolPolicy,
+		},
+		{
+			ID:          "root.reflection",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Self-reflection guidance injected into ReAct prompts.",
+			ArtifactKey: optimize.ArtifactReflectionPrompt,
+		},
+		{
+			ID:          "root.planner",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Planning guidance used ahead of ReAct execution.",
+			ArtifactKey: optimize.ArtifactPlannerPrompt,
+		},
+	}
+}
+
+// ExportOptimizedProgram exports the ReAct agent's current artifacts into the shared persisted envelope.
+func (r *ReActAgent) ExportOptimizedProgram() (*optimize.OptimizedAgentProgram, error) {
+	return optimize.ExportOptimizedAgentProgram(r)
+}
+
+// ApplyOptimizedProgram applies a shared persisted optimization envelope onto the ReAct agent.
+func (r *ReActAgent) ApplyOptimizedProgram(program *optimize.OptimizedAgentProgram) error {
+	return optimize.ApplyOptimizedAgentProgram(r, program)
+}
+
 // GetLoadedSkill returns the constructor-loaded persisted skill, if one was applied.
 func (r *ReActAgent) GetLoadedSkill() *skills.Skill {
 	r.mu.RLock()
@@ -573,6 +618,23 @@ func (r *ReActAgent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
 	defer r.mu.Unlock()
 
 	r.artifacts = artifacts.Clone()
+	return r.applyArtifactsLocked()
+}
+
+// UpdateArtifacts atomically reads, transforms, and reapplies the mutable artifact set.
+func (r *ReActAgent) UpdateArtifacts(update func(optimize.AgentArtifacts) (optimize.AgentArtifacts, error)) error {
+	if update == nil {
+		return fmt.Errorf("artifact update function is nil")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	next, err := update(r.artifacts.Clone())
+	if err != nil {
+		return err
+	}
+	r.artifacts = next.Clone()
 	return r.applyArtifactsLocked()
 }
 

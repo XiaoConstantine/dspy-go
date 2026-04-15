@@ -93,13 +93,21 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_UsesSearchBatchAndStagnationLimit(
 		},
 	)
 
-	engineConfig := optimizer.buildEngineConfig(13)
+	engineConfig := optimizer.buildEngineConfig(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack: "Use the repository debugging guide.",
+		},
+	}, 13)
 	assert.Equal(t, 4, engineConfig.EvaluationBatchSize)
 	assert.Equal(t, 60, engineConfig.StagnationLimit)
 	assert.Zero(t, engineConfig.ValidationSplit)
 	assert.Nil(t, engineConfig.ValidationExamples)
 
-	engineConfig = optimizer.buildEngineConfig(3)
+	engineConfig = optimizer.buildEngineConfig(AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack: "Use the repository debugging guide.",
+		},
+	}, 3)
 	assert.Equal(t, 3, engineConfig.EvaluationBatchSize)
 	assert.Zero(t, engineConfig.ValidationSplit)
 }

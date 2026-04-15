@@ -46,7 +46,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 		return nil, err
 	}
 
-	engineConfig := o.buildEngineConfig(len(trainExamples))
+	engineConfig := o.buildEngineConfig(req.SeedArtifacts, len(trainExamples))
 	if len(validationExamples) > 0 {
 		engineConfig.ValidationExamples = core.DatasetToSlice(o.buildOptimizationDataset(validationExamples))
 	}
@@ -97,15 +97,24 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 	}, nil
 }
 
-func (o *GEPAAgentOptimizer) buildEngineConfig(trainingCount int) *optimizers.GEPAConfig {
+func (o *GEPAAgentOptimizer) buildEngineConfig(seed AgentArtifacts, trainingCount int) *optimizers.GEPAConfig {
 	engineConfig := optimizers.DefaultGEPAConfig()
 	engineConfig.PopulationSize = o.config.PopulationSize
 	engineConfig.MaxGenerations = o.config.MaxGenerations
 	engineConfig.ReflectionFreq = o.config.ReflectionFreq
 	engineConfig.ConcurrencyLevel = o.config.EvalConcurrency
 	engineConfig.StagnationLimit = o.config.StagnationLimit
+	engineConfig.ValidationFrequency = o.config.ValidationFrequency
+	engineConfig.MaxMetricCalls = o.config.MaxMetricCalls
+	engineConfig.ScoreThreshold = o.config.ScoreThreshold
+	engineConfig.MaxRuntime = o.config.MaxRuntime
 	engineConfig.GenerationLLM = o.config.GenerationLLM
 	engineConfig.ReflectionLLM = o.config.ReflectionLLM
+	engineConfig.FeedbackEvaluator = o.config.FeedbackEvaluator
+	engineConfig.AddFormatFailureAsFeedback = o.config.AddFormatFailureAsFeedback
+	if engineConfig.FeedbackEvaluator == nil {
+		engineConfig.FeedbackEvaluator = o.defaultFeedbackEvaluator(seed)
+	}
 	if trainingCount > 0 {
 		engineConfig.EvaluationBatchSize = trainingCount
 		if o.config.SearchBatchSize > 0 && o.config.SearchBatchSize < engineConfig.EvaluationBatchSize {

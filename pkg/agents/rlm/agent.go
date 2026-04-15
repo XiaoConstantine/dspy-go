@@ -118,6 +118,87 @@ func (a *Agent) GetArtifacts() optimize.AgentArtifacts {
 	return a.artifacts.Clone()
 }
 
+// OptimizationAgentType returns the stable persisted optimization envelope type.
+func (a *Agent) OptimizationAgentType() string {
+	return "rlm"
+}
+
+// ListOptimizationTargets returns the stable optimization targets supported by the RLM-backed agent.
+func (a *Agent) ListOptimizationTargets() []optimize.OptimizationTargetDescriptor {
+	return []optimize.OptimizationTargetDescriptor{
+		{
+			ID:          "root.rlm.outer",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Top-level RLM orchestration prompt.",
+			ArtifactKey: optimize.ArtifactRLMOuterPrompt,
+		},
+		{
+			ID:          "root.rlm.iteration",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Per-iteration RLM reasoning prompt.",
+			ArtifactKey: optimize.ArtifactRLMIterationPrompt,
+		},
+		{
+			ID:          "root.rlm.max_iterations",
+			Kind:        optimize.OptimizationTargetInt,
+			Description: "Maximum root RLM iterations.",
+			IntKey:      ArtifactMaxIterations,
+		},
+		{
+			ID:          "root.rlm.max_tokens",
+			Kind:        optimize.OptimizationTargetInt,
+			Description: "Maximum cumulative token budget.",
+			IntKey:      ArtifactMaxTokens,
+		},
+		{
+			ID:          "root.rlm.adaptive.base_iterations",
+			Kind:        optimize.OptimizationTargetInt,
+			Description: "Adaptive-iteration base loop count.",
+			IntKey:      ArtifactAdaptiveBaseIterations,
+		},
+		{
+			ID:          "root.rlm.adaptive.max_iterations",
+			Kind:        optimize.OptimizationTargetInt,
+			Description: "Adaptive-iteration hard cap.",
+			IntKey:      ArtifactAdaptiveMaxIterations,
+		},
+		{
+			ID:          "root.rlm.adaptive.confidence_threshold",
+			Kind:        optimize.OptimizationTargetInt,
+			Description: "Adaptive early-stop confidence threshold.",
+			IntKey:      ArtifactAdaptiveConfidenceThreshold,
+		},
+		{
+			ID:          "root.rlm.use_iteration_demos",
+			Kind:        optimize.OptimizationTargetBool,
+			Description: "Whether iteration demos are injected into the runtime prompt.",
+			BoolKey:     ArtifactUseIterationDemos,
+		},
+		{
+			ID:          "root.rlm.compact_iteration_prompt",
+			Kind:        optimize.OptimizationTargetBool,
+			Description: "Whether the compact iteration prompt variant is used.",
+			BoolKey:     ArtifactCompactIterationPrompt,
+		},
+		{
+			ID:          "root.rlm.adaptive.enabled",
+			Kind:        optimize.OptimizationTargetBool,
+			Description: "Whether adaptive iteration is enabled.",
+			BoolKey:     ArtifactAdaptiveIterationEnabled,
+		},
+	}
+}
+
+// ExportOptimizedProgram exports the RLM agent's current artifacts into the shared persisted envelope.
+func (a *Agent) ExportOptimizedProgram() (*optimize.OptimizedAgentProgram, error) {
+	return optimize.ExportOptimizedAgentProgram(a)
+}
+
+// ApplyOptimizedProgram applies a shared persisted optimization envelope onto the RLM agent.
+func (a *Agent) ApplyOptimizedProgram(program *optimize.OptimizedAgentProgram) error {
+	return optimize.ApplyOptimizedAgentProgram(a, program)
+}
+
 // SetArtifacts applies a full artifact set to the wrapped RLM module.
 func (a *Agent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
 	if a == nil || a.module == nil {
@@ -132,6 +213,30 @@ func (a *Agent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
 	a.artifacts = artifactsFromConfig(cfg)
 	a.mu.Unlock()
 
+	return nil
+}
+
+// UpdateArtifacts atomically reads, transforms, and reapplies the RLM-backed artifact set.
+func (a *Agent) UpdateArtifacts(update func(optimize.AgentArtifacts) (optimize.AgentArtifacts, error)) error {
+	if a == nil || a.module == nil {
+		return fmt.Errorf("rlm agent is not initialized")
+	}
+	if update == nil {
+		return fmt.Errorf("artifact update function is nil")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	next, err := update(a.artifacts.Clone())
+	if err != nil {
+		return err
+	}
+
+	cfg := a.module.Config()
+	applyArtifactsToConfig(&cfg, next)
+	a.module.SetConfig(cfg)
+	a.artifacts = artifactsFromConfig(cfg)
 	return nil
 }
 
@@ -218,6 +323,10 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 		"total_tokens":      int64(trace.Usage.TotalTokens),
 	}
 
+	cfg := modrlm.DefaultConfig()
+	if a.module != nil {
+		cfg = a.module.Config()
+	}
 	contextMetadata := map[string]interface{}{
 		modrlm.TraceMetadataIterations:                   trace.Iterations,
 		modrlm.TraceMetadataTerminationCause:             trace.TerminationCause,
@@ -229,12 +338,17 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 		modrlm.TraceMetadataAdaptiveBaseIterations:       a.artifacts.Int[ArtifactAdaptiveBaseIterations],
 		modrlm.TraceMetadataAdaptiveMaxIterations:        a.artifacts.Int[ArtifactAdaptiveMaxIterations],
 		modrlm.TraceMetadataAdaptiveConfidenceThreshold:  a.artifacts.Int[ArtifactAdaptiveConfidenceThreshold],
+		modrlm.TraceMetadataContextPolicyPreset:          string(cfg.ContextPolicy),
 		modrlm.TraceMetadataSubLLMCallCount:              trace.SubLLMCallCount,
 		modrlm.TraceMetadataSubRLMCallCount:              trace.SubRLMCallCount,
 		modrlm.TraceMetadataConfidenceSignals:            trace.ConfidenceSignals,
 		modrlm.TraceMetadataHistoryCompressions:          trace.CompressionCount,
 		modrlm.TraceMetadataRootPromptMeanTokens:         meanPromptTokens(trace.RootSnapshots),
 		modrlm.TraceMetadataRootPromptMaxTokens:          maxPromptTokens(trace.RootSnapshots),
+	}
+	if cfg.SubRLM != nil {
+		contextMetadata[modrlm.TraceMetadataSubRLMMaxDirectCalls] = cfg.SubRLM.MaxDirectSubRLMCalls
+		contextMetadata[modrlm.TraceMetadataSubRLMMaxTotalCalls] = cfg.SubRLM.MaxTotalSubRLMCalls
 	}
 
 	executionTrace := &agents.ExecutionTrace{

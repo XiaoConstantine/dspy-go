@@ -213,7 +213,7 @@ func TestGEPAAgentOptimizer_buildEngineConfig_UsesConfiguredLLMOverrides(t *test
 		SearchBatchSize: 2,
 	})
 
-	engineConfig := optimizer.buildEngineConfig(4)
+	engineConfig := optimizer.buildEngineConfig(AgentArtifacts{}, 4)
 
 	assert.Same(t, generationLLM, engineConfig.GenerationLLM)
 	assert.Same(t, reflectionLLM, engineConfig.ReflectionLLM)

@@ -250,6 +250,12 @@ func (a *artifactProgramAdapter) candidateForArtifacts(ctx context.Context, arti
 		gepaMetadataIntArtifactKeysKey: sortedIntArtifactKeys(a.optimizer.config.normalizedIntMutationPlans()),
 		gepaMetadataPrimaryArtifactKey: string(primary),
 	}
+	if targetIDs := a.optimizer.optimizationTargetIDs(artifacts); len(targetIDs) > 0 {
+		metadata[gepaMetadataOptimizationTargetsKey] = maps.Clone(targetIDs)
+		if primaryTargetID := optimizationTargetIDForModule(string(primary), targetIDs); primaryTargetID != "" {
+			metadata[gepaMetadataOptimizationTargetKey] = primaryTargetID
+		}
+	}
 
 	return &optimizers.GEPACandidate{
 		ID:             optimizers.CurrentCandidateID(ctx),

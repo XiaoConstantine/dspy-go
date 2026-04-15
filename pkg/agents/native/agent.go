@@ -153,6 +153,7 @@ type Agent struct {
 	skillLoadErr         error
 	persistedSkillPrompt string
 
+	artifactMu      sync.RWMutex
 	traceMu         sync.RWMutex
 	lastTrace       *agents.ExecutionTrace
 	lastNativeTrace *Trace
@@ -635,10 +636,49 @@ func (a *Agent) GetArtifacts() optimize.AgentArtifacts {
 	if a == nil {
 		return artifacts
 	}
-	artifacts.Text[optimize.ArtifactSkillPack] = composeSystemPrompt(a.config.SystemPrompt, a.persistedSkillPrompt)
-	artifacts.Text[optimize.ArtifactToolPolicy] = a.config.ToolPolicy
-	artifacts.Int["max_turns"] = a.config.MaxTurns
-	return artifacts
+
+	a.artifactMu.RLock()
+	defer a.artifactMu.RUnlock()
+	return a.artifactsLocked()
+}
+
+// OptimizationAgentType returns the stable persisted optimization envelope type.
+func (a *Agent) OptimizationAgentType() string {
+	return "native"
+}
+
+// ListOptimizationTargets returns the stable optimization targets supported by the native agent.
+func (a *Agent) ListOptimizationTargets() []optimize.OptimizationTargetDescriptor {
+	return []optimize.OptimizationTargetDescriptor{
+		{
+			ID:          "root.system",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Primary system prompt and persisted skill guidance.",
+			ArtifactKey: optimize.ArtifactSkillPack,
+		},
+		{
+			ID:          "root.tool_policy",
+			Kind:        optimize.OptimizationTargetText,
+			Description: "Tool-use policy and guardrails.",
+			ArtifactKey: optimize.ArtifactToolPolicy,
+		},
+		{
+			ID:          "root.max_turns",
+			Kind:        optimize.OptimizationTargetInt,
+			Description: "Maximum tool-calling turns for one task.",
+			IntKey:      "max_turns",
+		},
+	}
+}
+
+// ExportOptimizedProgram exports the native agent's current artifacts into the shared persisted envelope.
+func (a *Agent) ExportOptimizedProgram() (*optimize.OptimizedAgentProgram, error) {
+	return optimize.ExportOptimizedAgentProgram(a)
+}
+
+// ApplyOptimizedProgram applies a shared persisted optimization envelope onto the native agent.
+func (a *Agent) ApplyOptimizedProgram(program *optimize.OptimizedAgentProgram) error {
+	return optimize.ApplyOptimizedAgentProgram(a, program)
 }
 
 // GetLoadedSkill returns the constructor-loaded persisted skill, if one was applied.
@@ -664,23 +704,28 @@ func (a *Agent) SetArtifacts(artifacts optimize.AgentArtifacts) error {
 	if a == nil {
 		return fmt.Errorf("tool-calling agent is nil")
 	}
-	if prompt, ok := artifacts.Text[optimize.ArtifactSkillPack]; ok && strings.TrimSpace(prompt) != "" {
-		a.config.SystemPrompt = prompt
-		a.persistedSkillPrompt = ""
-		a.loadedSkill = nil
-		a.skillLoadErr = nil
-		// Explicit prompt overrides are authoritative. Clearing constructor-time
-		// skill wiring avoids reloading persisted skills on later Clone() calls.
-		a.config.SkillStore = nil
-		a.config.SkillDomain = ""
+	a.artifactMu.Lock()
+	defer a.artifactMu.Unlock()
+	return a.setArtifactsLocked(artifacts)
+}
+
+// UpdateArtifacts atomically reads, transforms, and reapplies the native agent artifacts.
+func (a *Agent) UpdateArtifacts(update func(optimize.AgentArtifacts) (optimize.AgentArtifacts, error)) error {
+	if a == nil {
+		return fmt.Errorf("tool-calling agent is nil")
 	}
-	if policy, ok := artifacts.Text[optimize.ArtifactToolPolicy]; ok && policy != "" {
-		a.config.ToolPolicy = policy
+	if update == nil {
+		return fmt.Errorf("artifact update function is nil")
 	}
-	if maxTurns, ok := artifacts.Int["max_turns"]; ok && maxTurns > 0 {
-		a.config.MaxTurns = maxTurns
+
+	a.artifactMu.Lock()
+	defer a.artifactMu.Unlock()
+
+	next, err := update(a.artifactsLocked())
+	if err != nil {
+		return err
 	}
-	return nil
+	return a.setArtifactsLocked(next)
 }
 
 // Clone creates a fresh agent with the same LLM, config, and registered tools.
@@ -689,7 +734,9 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 		return nil, fmt.Errorf("tool-calling agent is nil")
 	}
 
+	a.artifactMu.RLock()
 	cfg := a.config
+	a.artifactMu.RUnlock()
 	cfg.Memory = nil
 	cfg.SessionID = ""
 	cfg.SessionBranchID = ""
@@ -708,6 +755,38 @@ func (a *Agent) Clone() (optimize.OptimizableAgent, error) {
 		}
 	}
 	return cloned, nil
+}
+
+func (a *Agent) artifactsLocked() optimize.AgentArtifacts {
+	artifacts := optimize.AgentArtifacts{
+		Text: make(map[optimize.ArtifactKey]string),
+		Int:  make(map[string]int),
+		Bool: make(map[string]bool),
+	}
+	artifacts.Text[optimize.ArtifactSkillPack] = composeSystemPrompt(a.config.SystemPrompt, a.persistedSkillPrompt)
+	artifacts.Text[optimize.ArtifactToolPolicy] = a.config.ToolPolicy
+	artifacts.Int["max_turns"] = a.config.MaxTurns
+	return artifacts
+}
+
+func (a *Agent) setArtifactsLocked(artifacts optimize.AgentArtifacts) error {
+	if prompt, ok := artifacts.Text[optimize.ArtifactSkillPack]; ok && strings.TrimSpace(prompt) != "" {
+		a.config.SystemPrompt = prompt
+		a.persistedSkillPrompt = ""
+		a.loadedSkill = nil
+		a.skillLoadErr = nil
+		// Explicit prompt overrides are authoritative. Clearing constructor-time
+		// skill wiring avoids reloading persisted skills on later Clone() calls.
+		a.config.SkillStore = nil
+		a.config.SkillDomain = ""
+	}
+	if policy, ok := artifacts.Text[optimize.ArtifactToolPolicy]; ok && policy != "" {
+		a.config.ToolPolicy = policy
+	}
+	if maxTurns, ok := artifacts.Int["max_turns"]; ok && maxTurns > 0 {
+		a.config.MaxTurns = maxTurns
+	}
+	return nil
 }
 
 // LastExecutionTrace returns the most recent execution trace.

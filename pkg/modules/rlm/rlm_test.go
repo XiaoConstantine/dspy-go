@@ -317,6 +317,8 @@ func TestConfig(t *testing.T) {
 	assert.False(t, cfg.Verbose)
 	assert.False(t, cfg.UseIterationDemos)
 	assert.True(t, cfg.CompactIterationInstructions)
+	assert.Equal(t, ContextPolicyAdaptive, cfg.ContextPolicy)
+	assert.Equal(t, 5, cfg.AdaptiveCheckpointThreshold)
 	require.NotNil(t, cfg.OutputTruncation)
 	assert.Equal(t, DefaultOutputTruncationConfig(), *cfg.OutputTruncation)
 	assert.Equal(t, 160, cfg.ContextInfoPreviewChars)
@@ -350,6 +352,14 @@ func TestConfig(t *testing.T) {
 	cfg = DefaultConfig()
 	WithREPLSetup(func(repl *YaegiREPL) error { return nil })(&cfg)
 	assert.NotNil(t, cfg.REPLSetup)
+
+	cfg = DefaultConfig()
+	WithContextPolicyPreset(ContextPolicyCheckpointed)(&cfg)
+	assert.Equal(t, ContextPolicyCheckpointed, cfg.ContextPolicy)
+
+	cfg = DefaultConfig()
+	WithAdaptiveCheckpointThreshold(7)(&cfg)
+	assert.Equal(t, 7, cfg.AdaptiveCheckpointThreshold)
 
 	cfg = DefaultConfig()
 	WithContextInfoPreviewChars(0)(&cfg)
@@ -886,64 +896,29 @@ func TestComputeMaxIterations(t *testing.T) {
 	}
 }
 
-// TestHistoryCompression tests the history compression functionality.
+// TestHistoryCompression tests checkpointed replay of older iterations.
 func TestHistoryCompression(t *testing.T) {
 	mockRoot := &mockLLM{}
 	mockSub := &mockSubLLMClient{}
 
 	rlm := New(mockRoot, mockSub, WithHistoryCompression(2, 500))
 
-	// Build history with multiple iterations
-	history := `
---- Iteration 1 ---
-Action: explore
-Reasoning: Looking at the first part
-Code:
-` + "```go" + `
-fmt.Println("test1")
-` + "```" + `
-Output:
-test1
+	history := NewImmutableHistory()
+	for i := 1; i <= 4; i++ {
+		history.Append(HistoryEntry{
+			Iteration: i,
+			Action:    "explore",
+			Code:      `fmt.Println("test")`,
+			Output:    "output",
+			Success:   true,
+		})
+	}
 
---- Iteration 2 ---
-Action: explore
-Reasoning: Looking at the second part
-Code:
-` + "```go" + `
-fmt.Println("test2")
-` + "```" + `
-Output:
-test2
-
---- Iteration 3 ---
-Action: explore
-Reasoning: Looking at the third part
-Code:
-` + "```go" + `
-fmt.Println("test3")
-` + "```" + `
-Output:
-test3
-
---- Iteration 4 ---
-Action: explore
-Reasoning: Looking at the fourth part with an Error: something went wrong
-Code:
-` + "```go" + `
-fmt.Println("test4")
-` + "```" + `
-Output:
-test4
-`
-
-	// Compress the history keeping last 2 iterations verbatim
-	compressed := rlm.compressHistory(history, 4)
-
-	// Should contain summary of iterations 1-2 and verbatim 3-4
-	assert.Contains(t, compressed, "[Previous iterations summary]")
-	assert.Contains(t, compressed, "--- Iteration 3 ---")          // Verbatim
-	assert.Contains(t, compressed, "--- Iteration 4 ---")          // Verbatim
-	assert.NotContains(t, compressed, "Looking at the first part") // Summarized
+	rendered := rlm.renderHistoryPrompt(history)
+	assert.Contains(t, rendered, "[History checkpoint]")
+	assert.Contains(t, rendered, "--- Iteration 3 ---")
+	assert.Contains(t, rendered, "--- Iteration 4 ---")
+	assert.NotContains(t, rendered, "--- Iteration 1 ---")
 }
 
 // TestDetectConfidence tests confidence detection.
@@ -1734,16 +1709,22 @@ func TestSubRLMConfig(t *testing.T) {
 	assert.Equal(t, 3, cfg.SubRLM.MaxDepth)
 	assert.Equal(t, 0, cfg.SubRLM.CurrentDepth)
 	assert.Equal(t, 10, cfg.SubRLM.MaxIterationsPerSubRLM)
+	assert.Equal(t, 0, cfg.SubRLM.MaxDirectSubRLMCalls)
+	assert.Equal(t, 0, cfg.SubRLM.MaxTotalSubRLMCalls)
 
 	// Apply custom config
 	cfg2 := DefaultConfig()
 	WithSubRLMConfig(SubRLMConfig{
 		MaxDepth:               5,
 		MaxIterationsPerSubRLM: 15,
+		MaxDirectSubRLMCalls:   2,
+		MaxTotalSubRLMCalls:    6,
 	})(&cfg2)
 	require.NotNil(t, cfg2.SubRLM)
 	assert.Equal(t, 5, cfg2.SubRLM.MaxDepth)
 	assert.Equal(t, 15, cfg2.SubRLM.MaxIterationsPerSubRLM)
+	assert.Equal(t, 2, cfg2.SubRLM.MaxDirectSubRLMCalls)
+	assert.Equal(t, 6, cfg2.SubRLM.MaxTotalSubRLMCalls)
 }
 
 // TestSubRLMTokenTracker tests sub-RLM token tracking.
@@ -1840,7 +1821,7 @@ func TestSubRLMDepthLimit(t *testing.T) {
 
 	// Try to execute sub-RLM at max depth
 	ctx := context.Background()
-	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now(), NewTokenTracker())
+	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now(), NewTokenTracker(), NewImmutableHistory())
 
 	// Should fail due to depth limit
 	require.Error(t, err)
@@ -2021,6 +2002,97 @@ func TestImmutableHistory(t *testing.T) {
 	// Test truncation
 	truncatedStr := history.String(10) // Very short truncation
 	assert.Contains(t, truncatedStr, "...")
+}
+
+func TestImmutableHistoryRenderCheckpointed(t *testing.T) {
+	history := NewImmutableHistory()
+	for i := 1; i <= 4; i++ {
+		history.Append(HistoryEntry{
+			Iteration: i,
+			Action:    "explore",
+			Code:      `fmt.Println("step")`,
+			Output:    "output",
+			Success:   true,
+		})
+	}
+
+	rendered := history.RenderCheckpointed(1000, 2, 200)
+	assert.Contains(t, rendered, "[History checkpoint]")
+	assert.Contains(t, rendered, "Iteration 1: action=explore")
+	assert.Contains(t, rendered, "--- Iteration 3 ---")
+	assert.Contains(t, rendered, "--- Iteration 4 ---")
+}
+
+func TestRenderHistoryPrompt_UsesCheckpointPolicy(t *testing.T) {
+	rlm := New(&mockLLM{}, &mockSubLLMClient{}, WithContextPolicyPreset(ContextPolicyCheckpointed))
+	history := NewImmutableHistory()
+	for i := 1; i <= 5; i++ {
+		history.Append(HistoryEntry{
+			Iteration: i,
+			Action:    "explore",
+			Output:    "step-output",
+			Success:   true,
+		})
+	}
+
+	rendered := rlm.renderHistoryPrompt(history)
+	assert.Contains(t, rendered, "[History checkpoint]")
+	assert.Contains(t, rendered, "--- Iteration 4 ---")
+	assert.Contains(t, rendered, "--- Iteration 5 ---")
+}
+
+func TestRenderHistoryPrompt_AdaptiveThresholdIsConfigurable(t *testing.T) {
+	rlm := New(
+		&mockLLM{},
+		&mockSubLLMClient{},
+		WithAdaptiveCheckpointThreshold(6),
+	)
+	history := NewImmutableHistory()
+	for i := 1; i <= 5; i++ {
+		history.Append(HistoryEntry{
+			Iteration: i,
+			Action:    "explore",
+			Output:    "step-output",
+			Success:   true,
+		})
+	}
+
+	rendered := rlm.renderHistoryPrompt(history)
+	assert.NotContains(t, rendered, "[History checkpoint]")
+	assert.Contains(t, rendered, "--- Iteration 5 ---")
+
+	history.Append(HistoryEntry{
+		Iteration: 6,
+		Action:    "explore",
+		Output:    "step-output",
+		Success:   true,
+	})
+	rendered = rlm.renderHistoryPrompt(history)
+	assert.Contains(t, rendered, "[History checkpoint]")
+}
+
+func TestEnforceSubRLMBudgets(t *testing.T) {
+	r := New(&mockLLM{}, &mockSubLLMClient{}, WithSubRLMConfig(SubRLMConfig{
+		MaxDepth:               3,
+		MaxIterationsPerSubRLM: 5,
+		MaxDirectSubRLMCalls:   1,
+		MaxTotalSubRLMCalls:    2,
+	}))
+
+	history := NewImmutableHistory()
+	history.Append(HistoryEntry{Iteration: 1, Action: "subrlm", Success: true})
+
+	err := r.enforceSubRLMBudgets(history, NewTokenTracker())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "direct child budget")
+
+	tracker := NewTokenTracker()
+	tracker.AddSubRLMCall(SubRLMCall{Query: "one"})
+	tracker.AddSubRLMCall(SubRLMCall{Query: "two"})
+
+	err = r.enforceSubRLMBudgets(NewImmutableHistory(), tracker)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "total budget")
 }
 
 // TestFormatREPLStateRich tests the rich variable formatting.

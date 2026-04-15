@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,9 +13,6 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 )
-
-// iterationPattern matches "--- Iteration N ---" headers in history.
-var iterationPattern = regexp.MustCompile(`(?m)^--- Iteration (\d+) ---$`)
 
 const (
 	truncateLenShort  = 100
@@ -45,6 +41,8 @@ type HistoryEntry struct {
 	Code      string    // Code that was executed (if any)
 	Output    string    // Execution output (truncated)
 	Duration  time.Duration
+	Success   bool
+	Error     string
 	SubRLM    *SubRLMEntry // Non-nil if this was a subrlm action
 }
 
@@ -85,31 +83,124 @@ func (h *ImmutableHistory) Len() int {
 	return len(h.entries)
 }
 
+// CountAction returns the number of entries with the provided action.
+func (h *ImmutableHistory) CountAction(action string) int {
+	if h == nil {
+		return 0
+	}
+	action = strings.TrimSpace(strings.ToLower(action))
+	if action == "" {
+		return 0
+	}
+	count := 0
+	for _, entry := range h.entries {
+		if strings.ToLower(strings.TrimSpace(entry.Action)) == action {
+			count++
+		}
+	}
+	return count
+}
+
 // String converts history to a string for LLM prompts.
 // Uses configurable truncation settings.
 func (h *ImmutableHistory) String(maxEntryLen int) string {
-	if len(h.entries) == 0 {
+	return h.render(maxEntryLen, h.entries)
+}
+
+// RenderCheckpointed summarizes older entries and keeps recent entries verbatim.
+func (h *ImmutableHistory) RenderCheckpointed(maxEntryLen, verbatimEntries, maxSummaryTokens int) string {
+	if h == nil || len(h.entries) == 0 {
+		return ""
+	}
+	if verbatimEntries <= 0 || len(h.entries) <= verbatimEntries {
+		return h.String(maxEntryLen)
+	}
+
+	checkpointEntries := h.entries[:len(h.entries)-verbatimEntries]
+	verbatimEntriesSlice := h.entries[len(h.entries)-verbatimEntries:]
+
+	var result strings.Builder
+	result.WriteString(renderHistoryCheckpoint(checkpointEntries, maxEntryLen, maxSummaryTokens))
+	result.WriteString(h.render(maxEntryLen, verbatimEntriesSlice))
+	return result.String()
+}
+
+func (h *ImmutableHistory) render(maxEntryLen int, entries []HistoryEntry) string {
+	if len(entries) == 0 {
 		return ""
 	}
 
 	var result strings.Builder
-	for _, entry := range h.entries {
-		fmt.Fprintf(&result, "\n--- Iteration %d ---\n", entry.Iteration)
-		fmt.Fprintf(&result, "Action: %s\n", entry.Action)
-		if entry.Code != "" {
-			fmt.Fprintf(&result, "Code:\n```go\n%s\n```\n", entry.Code)
-			output := entry.Output
-			if maxEntryLen > 0 && len(output) > maxEntryLen {
-				output = output[:maxEntryLen] + "..."
-			}
-			fmt.Fprintf(&result, "Output:\n%s\n", output)
-		}
-		if entry.SubRLM != nil {
-			fmt.Fprintf(&result, "SubRLM Query: %s\n", entry.SubRLM.Query)
-			fmt.Fprintf(&result, "SubRLM Result: %s\n", entry.SubRLM.Result)
-		}
+	for _, entry := range entries {
+		appendHistoryEntry(&result, entry, maxEntryLen)
 	}
 	return result.String()
+}
+
+func appendHistoryEntry(result *strings.Builder, entry HistoryEntry, maxEntryLen int) {
+	if result == nil {
+		return
+	}
+	fmt.Fprintf(result, "\n--- Iteration %d ---\n", entry.Iteration)
+	fmt.Fprintf(result, "Action: %s\n", entry.Action)
+	if entry.Code != "" {
+		fmt.Fprintf(result, "Code:\n```go\n%s\n```\n", truncateHistoryText(entry.Code, maxEntryLen))
+	}
+	if entry.Output != "" {
+		fmt.Fprintf(result, "Output:\n%s\n", truncateHistoryText(entry.Output, maxEntryLen))
+	}
+	if entry.Error != "" {
+		fmt.Fprintf(result, "Error: %s\n", truncateHistoryText(entry.Error, maxEntryLen))
+	}
+	if entry.SubRLM != nil {
+		fmt.Fprintf(result, "SubRLM Query: %s\n", truncateHistoryText(entry.SubRLM.Query, maxEntryLen))
+		fmt.Fprintf(result, "SubRLM Result: %s\n", truncateHistoryText(entry.SubRLM.Result, maxEntryLen))
+	}
+}
+
+func renderHistoryCheckpoint(entries []HistoryEntry, maxEntryLen, maxSummaryTokens int) string {
+	if len(entries) == 0 {
+		return ""
+	}
+
+	var result strings.Builder
+	result.WriteString("[History checkpoint]\n")
+	for _, entry := range entries {
+		result.WriteString("- Iteration ")
+		result.WriteString(fmt.Sprintf("%d: action=%s", entry.Iteration, entry.Action))
+		if entry.SubRLM != nil {
+			result.WriteString(", subquery=")
+			result.WriteString(truncateHistoryText(entry.SubRLM.Query, maxEntryLen))
+			if entry.SubRLM.Result != "" {
+				result.WriteString(", result=")
+				result.WriteString(truncateHistoryText(entry.SubRLM.Result, maxEntryLen))
+			}
+		}
+		if entry.Error != "" {
+			result.WriteString(", error=")
+			result.WriteString(truncateHistoryText(entry.Error, maxEntryLen))
+		} else if entry.Output != "" {
+			result.WriteString(", output=")
+			result.WriteString(truncateHistoryText(entry.Output, maxEntryLen))
+		}
+		result.WriteString("\n")
+	}
+
+	checkpoint := result.String()
+	if maxSummaryTokens > 0 {
+		maxChars := maxSummaryTokens * 4
+		if len(checkpoint) > maxChars {
+			checkpoint = checkpoint[:maxChars] + "\n[...truncated]\n"
+		}
+	}
+	return checkpoint
+}
+
+func truncateHistoryText(text string, maxEntryLen int) string {
+	if maxEntryLen > 0 && len(text) > maxEntryLen {
+		return text[:maxEntryLen] + "..."
+	}
+	return text
 }
 
 // CompletionResult represents the final result of an RLM completion.
@@ -380,8 +471,8 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 	// Track confidence signals for early termination
 	var confidenceSignals int
 
-	// Build iteration history
-	var history strings.Builder
+	// Build structured iteration history.
+	history := NewImmutableHistory()
 
 	// Iteration loop
 	for i := 0; i < maxIterations; i++ {
@@ -412,7 +503,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		iterInputs := map[string]any{
 			"context_info": replEnv.ContextInfo(),
 			"query":        query,
-			"history":      history.String(),
+			"history":      r.renderHistoryPrompt(history),
 			"repl_state":   r.formatREPLStateInput(replEnv),
 		}
 
@@ -461,19 +552,44 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 
 		// Check for subrlm action (nested RLM loop)
 		if action == "subrlm" {
-			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start, tokenTracker)
+			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start, tokenTracker, history)
 			if err != nil {
 				logger.Warn(ctx, "[RLM] Sub-RLM execution error: %v", err)
-				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM error: %v", err))
+				r.appendHistoryEntry(history, HistoryEntry{
+					Iteration: i + 1,
+					Timestamp: iterStart,
+					Action:    action,
+					Output:    fmt.Sprintf("Sub-RLM error: %v", err),
+					Duration:  time.Since(iterStart),
+					Success:   false,
+					Error:     err.Error(),
+					SubRLM: &SubRLMEntry{
+						Query:    subquery,
+						Duration: time.Since(iterStart),
+					},
+				})
 				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, "", fmt.Sprintf("Sub-RLM error: %v", err), time.Since(iterStart), false, err))
 			} else {
 				// Store result in REPL variable for access in subsequent iterations
-				_ = replEnv.SetVariable("subrlm_result", subRLMResult)
-				r.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Sub-RLM completed: %s", subRLMResult))
-				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, fmt.Sprintf("Sub-RLM completed: %s", subRLMResult), "", time.Since(iterStart), true, nil))
+				_ = replEnv.SetVariable("subrlm_result", subRLMResult.Response)
+				r.appendHistoryEntry(history, HistoryEntry{
+					Iteration: i + 1,
+					Timestamp: iterStart,
+					Action:    action,
+					Output:    fmt.Sprintf("Sub-RLM completed: %s", subRLMResult.Response),
+					Duration:  time.Since(iterStart),
+					Success:   true,
+					SubRLM: &SubRLMEntry{
+						Query:      subquery,
+						Result:     subRLMResult.Response,
+						Iterations: subRLMResult.Iterations,
+						Duration:   subRLMResult.Duration,
+					},
+				})
+				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, fmt.Sprintf("Sub-RLM completed: %s", subRLMResult.Response), "", time.Since(iterStart), true, nil))
 
 				if r.config.Verbose {
-					logger.Debug(ctx, "[RLM] Sub-RLM result: %s", utils.TruncateString(subRLMResult, truncateLenMedium))
+					logger.Debug(ctx, "[RLM] Sub-RLM result: %s", utils.TruncateString(subRLMResult.Response, truncateLenMedium))
 				}
 			}
 			continue
@@ -685,7 +801,16 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					execOutput = execOutput + "\n\n" + callSummary
 				}
 			}
-			r.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
+			r.appendHistoryEntry(history, HistoryEntry{
+				Iteration: i + 1,
+				Timestamp: iterStart,
+				Action:    action,
+				Code:      code,
+				Output:    execOutput,
+				Duration:  time.Since(iterStart),
+				Success:   execErr == nil,
+				Error:     errString(execErr),
+			})
 			trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, code, subquery, execOutput, "", time.Since(iterStart), execErr == nil, execErr))
 		} else if action != "final" {
 			// Log non-code iteration to trace
@@ -698,7 +823,13 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					time.Since(iterStart),
 				)
 			}
-			r.appendIterationHistory(&history, i+1, action, reasoning, "", "")
+			r.appendHistoryEntry(history, HistoryEntry{
+				Iteration: i + 1,
+				Timestamp: iterStart,
+				Action:    action,
+				Duration:  time.Since(iterStart),
+				Success:   true,
+			})
 			trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, "", "", time.Since(iterStart), true, nil))
 		}
 
@@ -717,35 +848,21 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			if r.config.Verbose {
 				logger.Info(ctx, "[RLM] Early termination triggered (confidence signals: %d)", confidenceSignals)
 			}
-			result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations, tokenTracker)
+			result, err := r.forceDefaultAnswer(ctx, replEnv, query, r.renderHistoryPrompt(history), start, maxIterations, tokenTracker)
 			finalizeRLMTrace(trace, result, "early_termination", err)
 			return result, trace, err
-		}
-
-		// Apply history compression if enabled
-		if r.config.HistoryCompression != nil && r.config.HistoryCompression.Enabled {
-			historyStr := history.String()
-			compressedHistory := r.compressHistory(historyStr, i+1)
-			if compressedHistory != historyStr {
-				history.Reset()
-				history.WriteString(compressedHistory)
-				trace.CompressionCount++
-				if r.config.Verbose {
-					logger.Debug(ctx, "[RLM] History compressed: %d -> %d chars", len(historyStr), len(compressedHistory))
-				}
-			}
 		}
 	}
 
 	// Max iterations exhausted - force final answer
-	result, err := r.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations, tokenTracker)
+	result, err := r.forceDefaultAnswer(ctx, replEnv, query, r.renderHistoryPrompt(history), start, maxIterations, tokenTracker)
 	finalizeRLMTrace(trace, result, "max_iterations", err)
 	return result, trace, err
 }
 
 // executeSubRLM spawns a nested RLM loop that shares REPL state with the parent.
 // It respects depth limits to prevent infinite recursion.
-func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time, parentTracker *TokenTracker) (string, error) {
+func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time, parentTracker *TokenTracker, history *ImmutableHistory) (*CompletionResult, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
 
@@ -762,13 +879,17 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 		}
 	}
 
+	if err := r.enforceSubRLMBudgets(history, parentTracker); err != nil {
+		return nil, err
+	}
+
 	// Check depth limit
 	if currentDepth+1 >= maxDepth {
-		return "", fmt.Errorf("sub-RLM depth limit reached (max: %d)", maxDepth)
+		return nil, fmt.Errorf("sub-RLM depth limit reached (max: %d)", maxDepth)
 	}
 
 	if subquery == "" {
-		return "", fmt.Errorf("sub-RLM requires a subquery")
+		return nil, fmt.Errorf("sub-RLM requires a subquery")
 	}
 
 	if r.config.Verbose {
@@ -802,7 +923,7 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 	subTracker := NewTokenTracker()
 	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery, subTracker)
 	if err != nil {
-		return "", fmt.Errorf("sub-RLM execution failed: %w", err)
+		return nil, fmt.Errorf("sub-RLM execution failed: %w", err)
 	}
 	subRLM.setTokenTracker(subTracker)
 
@@ -822,7 +943,7 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 		logger.Debug(ctx, "[RLM] Sub-RLM completed in %d iterations, %v", result.Iterations, time.Since(start))
 	}
 
-	return result.Response, nil
+	return result, nil
 }
 
 // completeWithSharedREPL runs an RLM completion loop using an existing REPL environment.
@@ -846,10 +967,12 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 	maxIterations := subRLM.computeMaxIterations(contextSize)
 
 	var confidenceSignals int
-	var history strings.Builder
+	history := NewImmutableHistory()
 
 	// Sub-RLM iteration loop
 	for i := 0; i < maxIterations; i++ {
+		iterStart := time.Now()
+
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -867,7 +990,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 		iterInputs := map[string]any{
 			"context_info": replEnv.ContextInfo(),
 			"query":        query,
-			"history":      history.String(),
+			"history":      subRLM.renderHistoryPrompt(history),
 			"repl_state":   subRLM.formatREPLStateInput(replEnv),
 		}
 
@@ -894,13 +1017,38 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		// Handle nested subrlm action
 		if action == "subrlm" {
-			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start, tokenTracker)
+			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start, tokenTracker, history)
 			if err != nil {
 				logger.Warn(ctx, "[SubRLM] Nested sub-RLM error: %v", err)
-				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM error: %v", err))
+				subRLM.appendHistoryEntry(history, HistoryEntry{
+					Iteration: i + 1,
+					Timestamp: iterStart,
+					Action:    action,
+					Output:    fmt.Sprintf("Nested sub-RLM error: %v", err),
+					Duration:  time.Since(iterStart),
+					Success:   false,
+					Error:     err.Error(),
+					SubRLM: &SubRLMEntry{
+						Query:    subquery,
+						Duration: time.Since(iterStart),
+					},
+				})
 			} else {
-				_ = replEnv.SetVariable("subrlm_result", nestedResult)
-				subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", fmt.Sprintf("Nested sub-RLM completed: %s", nestedResult))
+				_ = replEnv.SetVariable("subrlm_result", nestedResult.Response)
+				subRLM.appendHistoryEntry(history, HistoryEntry{
+					Iteration: i + 1,
+					Timestamp: iterStart,
+					Action:    action,
+					Output:    fmt.Sprintf("Nested sub-RLM completed: %s", nestedResult.Response),
+					Duration:  time.Since(iterStart),
+					Success:   true,
+					SubRLM: &SubRLMEntry{
+						Query:      subquery,
+						Result:     nestedResult.Response,
+						Iterations: nestedResult.Iterations,
+						Duration:   nestedResult.Duration,
+					},
+				})
 			}
 			continue
 		}
@@ -940,7 +1088,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		if code != "" {
 			replEnv.ClearFinal()
-			result, _ := replEnv.Execute(ctx, code)
+			result, execErr := replEnv.Execute(ctx, code)
 
 			// Collect sub-LLM calls
 			fullExecOutput := FormatExecutionResult(result)
@@ -983,9 +1131,24 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 					execOutput = execOutput + "\n\n" + callSummary
 				}
 			}
-			subRLM.appendIterationHistory(&history, i+1, action, reasoning, code, execOutput)
+			subRLM.appendHistoryEntry(history, HistoryEntry{
+				Iteration: i + 1,
+				Timestamp: iterStart,
+				Action:    action,
+				Code:      code,
+				Output:    execOutput,
+				Duration:  time.Since(iterStart),
+				Success:   execErr == nil,
+				Error:     errString(execErr),
+			})
 		} else if action != "final" {
-			subRLM.appendIterationHistory(&history, i+1, action, reasoning, "", "")
+			subRLM.appendHistoryEntry(history, HistoryEntry{
+				Iteration: i + 1,
+				Timestamp: iterStart,
+				Action:    action,
+				Duration:  time.Since(iterStart),
+				Success:   true,
+			})
 		}
 
 		// Detect confidence signals
@@ -998,7 +1161,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 	}
 
 	// Max iterations exhausted - force final answer
-	return subRLM.forceDefaultAnswer(ctx, replEnv, query, history.String(), start, maxIterations, tokenTracker)
+	return subRLM.forceDefaultAnswer(ctx, replEnv, query, subRLM.renderHistoryPrompt(history), start, maxIterations, tokenTracker)
 }
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
@@ -1213,98 +1376,88 @@ func (r *RLM) shouldTerminateEarly(confidenceSignals int, hasCode bool) bool {
 	return confidenceSignals >= r.config.AdaptiveIteration.ConfidenceThreshold
 }
 
-// compressHistory compresses older iterations in the history string.
-// It keeps the most recent N iterations verbatim and summarizes older ones.
-func (r *RLM) compressHistory(history string, currentIteration int) string {
-	cfg := r.config.HistoryCompression
-	if cfg == nil || !cfg.Enabled {
-		return history
+func (r *RLM) appendHistoryEntry(history *ImmutableHistory, entry HistoryEntry) {
+	if history == nil {
+		return
 	}
-
-	// Find all iteration boundaries
-	matches := iterationPattern.FindAllStringSubmatchIndex(history, -1)
-	if len(matches) <= cfg.VerbatimIterations {
-		return history // Nothing to compress
-	}
-
-	// Calculate the split point
-	splitIndex := len(matches) - cfg.VerbatimIterations
-	if splitIndex <= 0 {
-		return history
-	}
-
-	// Get the position where verbatim content starts
-	verbatimStartPos := matches[splitIndex][0]
-
-	// Content to summarize
-	toSummarize := history[:verbatimStartPos]
-
-	// Content to keep verbatim
-	verbatim := history[verbatimStartPos:]
-
-	// Create summary
-	summary := r.summarizeIterations(toSummarize, cfg.MaxSummaryTokens)
-
-	return summary + verbatim
+	history.Append(entry)
 }
 
-// summarizeIterations creates a concise summary of older iteration history.
-func (r *RLM) summarizeIterations(history string, maxTokens int) string {
-	var summary strings.Builder
-	summary.WriteString("[Previous iterations summary]\n")
-
-	// Find iterations in the history to summarize
-	matches := iterationPattern.FindAllStringSubmatchIndex(history, -1)
-
-	for i, match := range matches {
-		iterNum := "?"
-		if len(match) >= 4 {
-			iterNum = history[match[2]:match[3]]
-		}
-
-		// Find the content of this iteration (until next iteration or end)
-		startPos := match[1] // End of the header line
-		var endPos int
-		if i+1 < len(matches) {
-			endPos = matches[i+1][0]
-		} else {
-			endPos = len(history)
-		}
-
-		iterContent := history[startPos:endPos]
-
-		// Extract key information
-		hasCode := strings.Contains(iterContent, "```go")
-		hasFinal := strings.Contains(iterContent, "FINAL")
-		hasError := strings.Contains(iterContent, "Error:") || strings.Contains(iterContent, "error")
-
-		summary.WriteString(fmt.Sprintf("- Iteration %s: ", iterNum))
-		var parts []string
-		if hasCode {
-			parts = append(parts, "executed code")
-		}
-		if hasError {
-			parts = append(parts, "had errors")
-		}
-		if hasFinal {
-			parts = append(parts, "mentioned FINAL")
-		}
-		if len(parts) == 0 {
-			parts = append(parts, "reasoning only")
-		}
-		summary.WriteString(strings.Join(parts, ", "))
-		summary.WriteString("\n")
+func (r *RLM) renderHistoryPrompt(history *ImmutableHistory) string {
+	if history == nil || history.Len() == 0 {
+		return ""
 	}
 
-	result := summary.String()
-
-	// Rough token estimation: ~4 chars per token
-	maxChars := maxTokens * 4
-	if len(result) > maxChars {
-		result = result[:maxChars] + "\n[...truncated]"
+	maxEntryLen := 0
+	cfg := r.outputTruncationConfig()
+	if cfg.Enabled {
+		maxEntryLen = cfg.MaxHistoryEntryLen
 	}
 
-	return result
+	switch normalizeContextPolicyPreset(r.config.ContextPolicy) {
+	case ContextPolicyFull:
+		return history.String(maxEntryLen)
+	case ContextPolicyCheckpointed:
+		verbatimEntries, maxSummaryTokens := r.historyCheckpointSettings()
+		return history.RenderCheckpointed(maxEntryLen, verbatimEntries, maxSummaryTokens)
+	case ContextPolicyAdaptive:
+		fallthrough
+	default:
+		if r.config.HistoryCompression != nil && r.config.HistoryCompression.Enabled {
+			verbatimEntries, maxSummaryTokens := r.historyCheckpointSettings()
+			return history.RenderCheckpointed(maxEntryLen, verbatimEntries, maxSummaryTokens)
+		}
+		if history.Len() >= r.adaptiveCheckpointThreshold() {
+			verbatimEntries, maxSummaryTokens := r.historyCheckpointSettings()
+			return history.RenderCheckpointed(maxEntryLen, verbatimEntries, maxSummaryTokens)
+		}
+		return history.String(maxEntryLen)
+	}
+}
+
+func (r *RLM) historyCheckpointSettings() (int, int) {
+	if r.config.HistoryCompression != nil && r.config.HistoryCompression.Enabled {
+		return r.config.HistoryCompression.VerbatimIterations, r.config.HistoryCompression.MaxSummaryTokens
+	}
+	return 3, 500
+}
+
+func (r *RLM) adaptiveCheckpointThreshold() int {
+	if r == nil || r.config.AdaptiveCheckpointThreshold <= 0 {
+		return DefaultConfig().AdaptiveCheckpointThreshold
+	}
+	return r.config.AdaptiveCheckpointThreshold
+}
+
+func normalizeContextPolicyPreset(preset ContextPolicyPreset) ContextPolicyPreset {
+	switch preset {
+	case ContextPolicyFull, ContextPolicyCheckpointed, ContextPolicyAdaptive:
+		return preset
+	default:
+		return ContextPolicyAdaptive
+	}
+}
+
+func (r *RLM) enforceSubRLMBudgets(history *ImmutableHistory, parentTracker *TokenTracker) error {
+	if r == nil || r.config.SubRLM == nil {
+		return nil
+	}
+
+	cfg := r.config.SubRLM
+	if cfg.MaxDirectSubRLMCalls > 0 && history != nil && history.CountAction("subrlm") >= cfg.MaxDirectSubRLMCalls {
+		return fmt.Errorf("sub-RLM direct child budget exceeded (limit %d)", cfg.MaxDirectSubRLMCalls)
+	}
+	if cfg.MaxTotalSubRLMCalls > 0 && parentTracker != nil && len(parentTracker.GetSubRLMCalls()) >= cfg.MaxTotalSubRLMCalls {
+		return fmt.Errorf("sub-RLM total budget exceeded (limit %d)", cfg.MaxTotalSubRLMCalls)
+	}
+	return nil
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // Clone creates a copy of the RLM module.

@@ -19,15 +19,17 @@ import (
 )
 
 const (
-	gepaMetadataArtifactsKey       = "artifacts"
-	gepaMetadataArtifactKeysKey    = "artifact_keys"
-	gepaMetadataIntArtifactKeysKey = "int_artifact_keys"
-	gepaMetadataPrimaryArtifactKey = "primary_artifact"
-	gepaMetadataTraceSummaryKey    = "rich_trace_summary"
-	gepaMetadataTraceEvidenceKey   = "rich_trace_evidence"
-	maxTraceSummarySteps           = 5
-	maxTraceEvidenceItems          = 12
-	maxFailedStepEvidence          = 4
+	gepaMetadataArtifactsKey           = "artifacts"
+	gepaMetadataArtifactKeysKey        = "artifact_keys"
+	gepaMetadataIntArtifactKeysKey     = "int_artifact_keys"
+	gepaMetadataPrimaryArtifactKey     = "primary_artifact"
+	gepaMetadataOptimizationTargetKey  = "optimization_target_id"
+	gepaMetadataOptimizationTargetsKey = "optimization_target_ids"
+	gepaMetadataTraceSummaryKey        = "rich_trace_summary"
+	gepaMetadataTraceEvidenceKey       = "rich_trace_evidence"
+	maxTraceSummarySteps               = 5
+	maxTraceEvidenceItems              = 12
+	maxFailedStepEvidence              = 4
 )
 
 // IntMutationConfig defines a bounded deterministic search neighborhood for an
@@ -40,32 +42,39 @@ type IntMutationConfig struct {
 
 // GEPAAdapterConfig configures the agent-to-GEPA bridge layer.
 type GEPAAdapterConfig struct {
-	PopulationSize   int
-	MaxGenerations   int
-	ReflectionFreq   int
-	SearchBatchSize  int
-	StagnationLimit  int
-	ValidationSplit  float64
-	ArtifactKeys     []ArtifactKey
-	EvalConcurrency  int
-	PassThreshold    float64
-	PrimaryArtifact  ArtifactKey
-	GenerationLLM    core.LLM
-	ReflectionLLM    core.LLM
-	IntMutationPlans map[string]IntMutationConfig
+	PopulationSize             int
+	MaxGenerations             int
+	ReflectionFreq             int
+	SearchBatchSize            int
+	StagnationLimit            int
+	ValidationSplit            float64
+	ValidationFrequency        int
+	ArtifactKeys               []ArtifactKey
+	EvalConcurrency            int
+	PassThreshold              float64
+	PrimaryArtifact            ArtifactKey
+	MaxMetricCalls             int
+	ScoreThreshold             float64
+	MaxRuntime                 time.Duration
+	GenerationLLM              core.LLM
+	ReflectionLLM              core.LLM
+	FeedbackEvaluator          optimizers.GEPAFeedbackEvaluator
+	AddFormatFailureAsFeedback bool
+	IntMutationPlans           map[string]IntMutationConfig
 }
 
 // DefaultGEPAAdapterConfig returns a conservative default adapter config.
 func DefaultGEPAAdapterConfig() GEPAAdapterConfig {
 	return GEPAAdapterConfig{
-		PopulationSize:  8,
-		MaxGenerations:  4,
-		ReflectionFreq:  1,
-		SearchBatchSize: 4,
-		StagnationLimit: 60,
-		ValidationSplit: 0.2,
-		EvalConcurrency: 1,
-		PassThreshold:   1.0,
+		PopulationSize:      8,
+		MaxGenerations:      4,
+		ReflectionFreq:      1,
+		SearchBatchSize:     4,
+		StagnationLimit:     60,
+		ValidationSplit:     0.2,
+		ValidationFrequency: 1,
+		EvalConcurrency:     1,
+		PassThreshold:       1.0,
 	}
 }
 
@@ -119,10 +128,24 @@ func (o *GEPAAgentOptimizer) SeedCandidate(seed AgentArtifacts) (*optimizers.GEP
 	if err != nil {
 		return nil, err
 	}
+	targetIDs := o.optimizationTargetIDs(seed)
 	componentTexts := make(map[string]string, len(specs))
 	for _, spec := range specs {
 		componentTexts[spec.moduleName] = spec.instruction(seed)
 	}
+	metadata := map[string]interface{}{
+		gepaMetadataArtifactsKey:       serializeArtifacts(seed),
+		gepaMetadataArtifactKeysKey:    serializeArtifactKeys(artifactKeys),
+		gepaMetadataIntArtifactKeysKey: sortedIntArtifactKeys(o.config.normalizedIntMutationPlans()),
+		gepaMetadataPrimaryArtifactKey: string(primary),
+	}
+	if len(targetIDs) > 0 {
+		metadata[gepaMetadataOptimizationTargetsKey] = maps.Clone(targetIDs)
+		if primaryTargetID := optimizationTargetIDForModule(string(primary), targetIDs); primaryTargetID != "" {
+			metadata[gepaMetadataOptimizationTargetKey] = primaryTargetID
+		}
+	}
+
 	candidate := &optimizers.GEPACandidate{
 		ID:             fmt.Sprintf("agent-candidate-%d", time.Now().UnixNano()),
 		ModuleName:     string(primary),
@@ -130,12 +153,7 @@ func (o *GEPAAgentOptimizer) SeedCandidate(seed AgentArtifacts) (*optimizers.GEP
 		ComponentTexts: componentTexts,
 		Generation:     0,
 		CreatedAt:      time.Now(),
-		Metadata: map[string]interface{}{
-			gepaMetadataArtifactsKey:       serializeArtifacts(seed),
-			gepaMetadataArtifactKeysKey:    serializeArtifactKeys(artifactKeys),
-			gepaMetadataIntArtifactKeysKey: sortedIntArtifactKeys(o.config.normalizedIntMutationPlans()),
-			gepaMetadataPrimaryArtifactKey: string(primary),
-		},
+		Metadata:       metadata,
 	}
 
 	return candidate, nil
@@ -311,11 +329,17 @@ func (cfg GEPAAdapterConfig) withDefaults() GEPAAdapterConfig {
 	if cfg.ValidationSplit < 0 {
 		cfg.ValidationSplit = defaults.ValidationSplit
 	}
+	if cfg.ValidationFrequency <= 0 {
+		cfg.ValidationFrequency = defaults.ValidationFrequency
+	}
 	if cfg.EvalConcurrency <= 0 {
 		cfg.EvalConcurrency = defaults.EvalConcurrency
 	}
 	if cfg.PassThreshold <= 0 {
 		cfg.PassThreshold = defaults.PassThreshold
+	}
+	if cfg.MaxRuntime < 0 {
+		cfg.MaxRuntime = defaults.MaxRuntime
 	}
 	return cfg
 }

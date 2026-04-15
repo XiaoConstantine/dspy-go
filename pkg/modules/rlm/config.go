@@ -5,6 +5,16 @@ package rlm
 
 import "time"
 
+// ContextPolicyPreset controls how structured iteration history is replayed
+// back to the root model on subsequent iterations.
+type ContextPolicyPreset string
+
+const (
+	ContextPolicyFull         ContextPolicyPreset = "full"
+	ContextPolicyCheckpointed ContextPolicyPreset = "checkpointed"
+	ContextPolicyAdaptive     ContextPolicyPreset = "adaptive"
+)
+
 // Config holds RLM configuration.
 type Config struct {
 	// OuterInstruction overrides the top-level RLM module instruction.
@@ -42,8 +52,21 @@ type Config struct {
 	CompactIterationInstructions bool
 
 	// HistoryCompression configures incremental history compression.
-	// When enabled, older iterations are summarized to reduce context size.
+	// When enabled, older iterations are replayed as checkpoint summaries while
+	// recent iterations stay verbatim.
 	HistoryCompression *HistoryCompressionConfig
+
+	// ContextPolicy controls how iteration history is replayed into subsequent
+	// prompts. "full" replays everything verbatim, "checkpointed" summarizes
+	// older entries and keeps recent entries verbatim, and "adaptive" switches
+	// between the two based on history size and compression settings.
+	ContextPolicy ContextPolicyPreset
+
+	// AdaptiveCheckpointThreshold is the history-entry count where the adaptive
+	// context policy switches from full replay to checkpointed replay when no
+	// explicit HistoryCompression policy is configured. Values <= 0 use the
+	// built-in default.
+	AdaptiveCheckpointThreshold int
 
 	// AdaptiveIteration configures adaptive iteration strategy.
 	// When enabled, max iterations are dynamically calculated based on context size.
@@ -102,11 +125,19 @@ type SubRLMConfig struct {
 	// MaxIterationsPerSubRLM limits iterations for each sub-RLM call.
 	// Default: 10. Use 0 to inherit parent's max iterations.
 	MaxIterationsPerSubRLM int
+
+	// MaxDirectSubRLMCalls limits direct child sub-RLM invocations from one RLM
+	// node. Zero disables the budget.
+	MaxDirectSubRLMCalls int
+
+	// MaxTotalSubRLMCalls limits total sub-RLM invocations across the whole
+	// request tree. Zero disables the budget.
+	MaxTotalSubRLMCalls int
 }
 
-// HistoryCompressionConfig configures how message history is compressed.
+// HistoryCompressionConfig configures checkpointed replay of older iterations.
 type HistoryCompressionConfig struct {
-	// Enabled turns on history compression (default: false).
+	// Enabled turns on checkpointed replay (default: false).
 	Enabled bool
 
 	// VerbatimIterations is the number of recent iterations to keep verbatim.
@@ -187,6 +218,8 @@ func DefaultConfig() Config {
 		UseIterationDemos:            false,
 		CompactIterationInstructions: true,
 		OutputTruncation:             outputTruncationConfigPtr(DefaultOutputTruncationConfig()),
+		ContextPolicy:                ContextPolicyAdaptive,
+		AdaptiveCheckpointThreshold:  5,
 		ContextInfoPreviewChars:      160,
 		MaxFullContextQueryChars:     0,
 	}
@@ -285,7 +318,7 @@ func WithCompactIterationInstructions(enabled bool) Option {
 	}
 }
 
-// WithHistoryCompression enables incremental history compression.
+// WithHistoryCompression enables checkpointed replay for older iterations.
 // verbatimIterations is how many recent iterations to keep in full (default: 3).
 // maxSummaryTokens is the approximate max tokens for the summary (default: 500).
 func WithHistoryCompression(verbatimIterations, maxSummaryTokens int) Option {
@@ -300,6 +333,28 @@ func WithHistoryCompression(verbatimIterations, maxSummaryTokens int) Option {
 			Enabled:            true,
 			VerbatimIterations: verbatimIterations,
 			MaxSummaryTokens:   maxSummaryTokens,
+		}
+	}
+}
+
+// WithAdaptiveCheckpointThreshold sets the history-entry count where adaptive
+// replay switches from full to checkpointed mode.
+func WithAdaptiveCheckpointThreshold(n int) Option {
+	return func(c *Config) {
+		if n > 0 {
+			c.AdaptiveCheckpointThreshold = n
+		}
+	}
+}
+
+// WithContextPolicyPreset sets how structured history is replayed into prompts.
+func WithContextPolicyPreset(preset ContextPolicyPreset) Option {
+	return func(c *Config) {
+		switch preset {
+		case ContextPolicyFull, ContextPolicyCheckpointed, ContextPolicyAdaptive:
+			c.ContextPolicy = preset
+		default:
+			c.ContextPolicy = ContextPolicyAdaptive
 		}
 	}
 }
@@ -357,6 +412,8 @@ func WithSubRLM() Option {
 			MaxDepth:               3,
 			CurrentDepth:           0,
 			MaxIterationsPerSubRLM: 10,
+			MaxDirectSubRLMCalls:   0,
+			MaxTotalSubRLMCalls:    0,
 		}
 	}
 }
@@ -369,6 +426,12 @@ func WithSubRLMConfig(cfg SubRLMConfig) Option {
 		}
 		if cfg.MaxIterationsPerSubRLM <= 0 {
 			cfg.MaxIterationsPerSubRLM = 10
+		}
+		if cfg.MaxDirectSubRLMCalls < 0 {
+			cfg.MaxDirectSubRLMCalls = 0
+		}
+		if cfg.MaxTotalSubRLMCalls < 0 {
+			cfg.MaxTotalSubRLMCalls = 0
 		}
 		c.SubRLM = &cfg
 	}
