@@ -9,6 +9,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/cache"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/registry"
 )
 
 type DefaultLLMFactory struct{}
@@ -20,6 +21,12 @@ var (
 	factoryInitErr     error
 	registryInitErr    error
 )
+
+func init() {
+	core.SetRegistryConstructor(func() core.LLMRegistry {
+		return registry.NewLLMRegistry()
+	})
+}
 
 // resetFactoryForTesting resets the factory for testing purposes
 // This should only be called from tests.

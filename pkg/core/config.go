@@ -106,7 +106,7 @@ func ConfigureFromRegistryConfig(ctx context.Context, config RegistryConfig) err
 	if config.Providers != nil {
 		cloned.Providers = make(map[string]ProviderConfig, len(config.Providers))
 		for key, provider := range config.Providers {
-			cloned.Providers[key] = cloneProviderConfig(provider)
+			cloned.Providers[key] = provider.Clone()
 		}
 	}
 
