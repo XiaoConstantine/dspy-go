@@ -88,6 +88,32 @@ func TestGEPAAgentOptimizer_SeedCandidatePrefersToolPolicyByDefault(t *testing.T
 	assert.Equal(t, "Use narrow, evidence-seeking tool calls.", candidate.Instruction)
 }
 
+func TestGEPAAgentOptimizer_SeedCandidateAllowsDeclaredEmptyPrimaryArtifact(t *testing.T) {
+	optimizer := NewGEPAAgentOptimizer(nil, nil, GEPAAdapterConfig{
+		ArtifactKeys:    []ArtifactKey{ArtifactSkillPack, ArtifactToolPolicy},
+		PrimaryArtifact: ArtifactSkillPack,
+	})
+
+	seed := AgentArtifacts{
+		Text: map[ArtifactKey]string{
+			ArtifactSkillPack:  "",
+			ArtifactToolPolicy: "Prefer deterministic tools first.",
+		},
+	}
+
+	candidate, err := optimizer.SeedCandidate(seed)
+	require.NoError(t, err)
+	require.NotNil(t, candidate)
+
+	assert.Equal(t, string(ArtifactSkillPack), candidate.ModuleName)
+	assert.Empty(t, candidate.Instruction)
+
+	decoded, err := optimizer.CandidateArtifacts(candidate)
+	require.NoError(t, err)
+	assert.Equal(t, "", decoded.Text[ArtifactSkillPack])
+	assert.Equal(t, seed.Text[ArtifactToolPolicy], decoded.Text[ArtifactToolPolicy])
+}
+
 func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
 	baseAgent.outputs["first"] = map[string]interface{}{

@@ -393,8 +393,11 @@ func (cfg GEPAAdapterConfig) resolveArtifactKeys(seed AgentArtifacts) []Artifact
 
 func (cfg GEPAAdapterConfig) primaryArtifact(seed AgentArtifacts) (ArtifactKey, error) {
 	cfg = cfg.withDefaults()
-	if cfg.PrimaryArtifact != "" && strings.TrimSpace(seed.Text[cfg.PrimaryArtifact]) != "" {
-		return cfg.PrimaryArtifact, nil
+	keys := cfg.resolveArtifactKeys(seed)
+	if cfg.PrimaryArtifact != "" {
+		if strings.TrimSpace(seed.Text[cfg.PrimaryArtifact]) != "" || containsArtifactKey(keys, cfg.PrimaryArtifact) {
+			return cfg.PrimaryArtifact, nil
+		}
 	}
 	if strings.TrimSpace(seed.Text[ArtifactToolPolicy]) != "" {
 		return ArtifactToolPolicy, nil
@@ -403,11 +406,19 @@ func (cfg GEPAAdapterConfig) primaryArtifact(seed AgentArtifacts) (ArtifactKey, 
 		return ArtifactSkillPack, nil
 	}
 
-	keys := cfg.resolveArtifactKeys(seed)
 	if len(keys) == 0 {
-		return "", fmt.Errorf("optimize: seed artifacts must include at least one non-empty text artifact")
+		return "", fmt.Errorf("optimize: seed artifacts must include at least one optimizable text artifact")
 	}
 	return keys[0], nil
+}
+
+func containsArtifactKey(keys []ArtifactKey, want ArtifactKey) bool {
+	for _, key := range keys {
+		if key == want {
+			return true
+		}
+	}
+	return false
 }
 
 func serializeArtifacts(artifacts AgentArtifacts) map[string]interface{} {
