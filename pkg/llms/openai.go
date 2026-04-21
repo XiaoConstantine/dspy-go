@@ -997,11 +997,21 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
 		}
-		fields := errors.Fields{
-			"type": errorResp.Error.Type,
-			"code": errorResp.Error.Code,
+		var errType, errCode, errMsg string
+		if errorResp.Error != nil {
+			errType = errorResp.Error.Type
+			errCode = errorResp.Error.Code
+			errMsg = errorResp.Error.Message
+		} else {
+			errType = errorResp.Type
+			errCode = errorResp.Code
+			errMsg = errorResp.Message
 		}
-		if errorResp.Error.Type == "invalid_request_error" {
+		fields := errors.Fields{
+			"type": errType,
+			"code": errCode,
+		}
+		if errType == "invalid_request_error" {
 			summary := summarizeOpenAIRequest(request, jsonData)
 			dumpPath, dumpErr := writeOpenAIInvalidRequestDebug(request, jsonData, resp.StatusCode, body)
 			logger.Error(
@@ -1015,7 +1025,8 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 				summary.MaxTokens,
 				summary.MaxCompletionTokens,
 				dumpPath,
-				strings.TrimSpace(errorResp.Error.Message),
+				dumpPath,
+				strings.TrimSpace(errMsg),
 			)
 			fields["request_body_bytes"] = summary.BodyBytes
 			fields["request_body_sha256"] = summary.BodySHA256
@@ -1028,7 +1039,7 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 			if dumpErr != nil {
 				fields["debug_dump_error"] = dumpErr.Error()
 			}
-			if allowRetry && shouldRetryOpenAIInvalidJSON(errorResp.Error) {
+			if allowRetry && shouldRetryOpenAIInvalidJSON(errType, errMsg) {
 				logger.Warn(
 					ctx,
 					"Retrying OpenAI request after transient invalid_request_error with a fresh connection: model=%s dump=%s",
@@ -1039,7 +1050,7 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 			}
 		}
 		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, errorResp.Error.Message),
+			errors.New(errors.LLMGenerationFailed, errMsg),
 			fields)
 	}
 
@@ -1051,11 +1062,11 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 	return &response, nil
 }
 
-func shouldRetryOpenAIInvalidJSON(apiError openai.APIError) bool {
-	if apiError.Type != "invalid_request_error" {
+func shouldRetryOpenAIInvalidJSON(errType, errMsg string) bool {
+	if errType != "invalid_request_error" {
 		return false
 	}
-	message := strings.ToLower(strings.TrimSpace(apiError.Message))
+	message := strings.ToLower(strings.TrimSpace(errMsg))
 	return strings.Contains(message, "parse the json body")
 }
 
@@ -1097,9 +1108,19 @@ func (o *OpenAILLM) makeEmbeddingRequest(ctx context.Context, request *openai.Em
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
 		}
+		var errType, errCode, errMsg string
+		if errorResp.Error != nil {
+			errType = errorResp.Error.Type
+			errCode = errorResp.Error.Code
+			errMsg = errorResp.Error.Message
+		} else {
+			errType = errorResp.Type
+			errCode = errorResp.Code
+			errMsg = errorResp.Message
+		}
 		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, errorResp.Error.Message),
-			errors.Fields{"type": errorResp.Error.Type, "code": errorResp.Error.Code})
+			errors.New(errors.LLMGenerationFailed, errMsg),
+			errors.Fields{"type": errType, "code": errCode})
 	}
 
 	var response openai.EmbeddingResponse
@@ -1144,9 +1165,19 @@ func (o *OpenAILLM) makeStreamingRequest(ctx context.Context, request *openai.Ch
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
 		}
+		var errType, errCode, errMsg string
+		if errorResp.Error != nil {
+			errType = errorResp.Error.Type
+			errCode = errorResp.Error.Code
+			errMsg = errorResp.Error.Message
+		} else {
+			errType = errorResp.Type
+			errCode = errorResp.Code
+			errMsg = errorResp.Message
+		}
 		return nil, errors.WithFields(
-			errors.New(errors.LLMGenerationFailed, errorResp.Error.Message),
-			errors.Fields{"type": errorResp.Error.Type, "code": errorResp.Error.Code})
+			errors.New(errors.LLMGenerationFailed, errMsg),
+			errors.Fields{"type": errType, "code": errCode})
 	}
 
 	return resp, nil

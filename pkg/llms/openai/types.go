@@ -135,7 +135,13 @@ type APIError struct {
 
 // ErrorResponse represents an error response from the OpenAI API.
 type ErrorResponse struct {
-	Error APIError `json:"error"`
+	Error *APIError `json:"error,omitempty"`
+
+	// fallback for flat structure
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Param   string `json:"param,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
 // GenerateOptions holds configuration that can be applied to a chat completion request.
