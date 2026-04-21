@@ -144,6 +144,14 @@ type ErrorResponse struct {
 	Code    string `json:"code,omitempty"`
 }
 
+// GetError returns the error details, prioritizing the nested Error field.
+func (e ErrorResponse) GetError() (errType, errCode, errMsg string) {
+	if e.Error != nil {
+		return e.Error.Type, e.Error.Code, e.Error.Message
+	}
+	return e.Type, e.Code, e.Message
+}
+
 // GenerateOptions holds configuration that can be applied to a chat completion request.
 // This mirrors core.GenerateOptions but avoids import cycles.
 type GenerateOptions struct {

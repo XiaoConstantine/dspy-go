@@ -997,16 +997,7 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
 		}
-		var errType, errCode, errMsg string
-		if errorResp.Error != nil {
-			errType = errorResp.Error.Type
-			errCode = errorResp.Error.Code
-			errMsg = errorResp.Error.Message
-		} else {
-			errType = errorResp.Type
-			errCode = errorResp.Code
-			errMsg = errorResp.Message
-		}
+		errType, errCode, errMsg := errorResp.GetError()
 		fields := errors.Fields{
 			"type": errType,
 			"code": errCode,
@@ -1024,7 +1015,6 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 				summary.ToolChoice,
 				summary.MaxTokens,
 				summary.MaxCompletionTokens,
-				dumpPath,
 				dumpPath,
 				strings.TrimSpace(errMsg),
 			)

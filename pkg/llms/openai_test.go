@@ -771,7 +771,7 @@ func TestOpenAILLM_ErrorHandling(t *testing.T) {
 		// Return API error
 		w.WriteHeader(http.StatusBadRequest)
 		errorResp := openai.ErrorResponse{
-			Error: openai.APIError{
+			Error: &openai.APIError{
 				Message: "Invalid request",
 				Type:    "invalid_request_error",
 				Code:    "invalid_api_key",
