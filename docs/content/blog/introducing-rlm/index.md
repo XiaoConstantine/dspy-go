@@ -206,7 +206,7 @@ The savings come from:
 1. **Programmatic chunking** — Only load what's needed
 2. **Incremental exploration** — Build understanding progressively
 3. **Sub-call optimization** — Batch related queries
-4. **History compression** — Summarize previous iterations
+4. **Structured replay policies** — Use full, checkpointed, or adaptive history replay
 
 ### Token Tracking
 
@@ -239,6 +239,48 @@ rlm.NewFromLLM(llm,
     rlm.WithTimeout(1*time.Minute),
 )
 ```
+
+### Structured Replay Policies
+
+Recent RLM work added explicit context-policy presets instead of relying on one fixed history strategy:
+
+```go
+// Replay everything verbatim
+rlm.NewFromLLM(llm,
+    rlm.WithContextPolicyPreset(rlm.ContextPolicyFull),
+)
+
+// Summarize older entries, keep recent ones verbatim
+rlm.NewFromLLM(llm,
+    rlm.WithContextPolicyPreset(rlm.ContextPolicyCheckpointed),
+    rlm.WithHistoryCompression(2, 300),
+)
+
+// Start full, then checkpoint once the history gets large enough
+rlm.NewFromLLM(llm,
+    rlm.WithContextPolicyPreset(rlm.ContextPolicyAdaptive),
+    rlm.WithAdaptiveCheckpointThreshold(5),
+)
+```
+
+This makes long-running RLM traces much cheaper to replay while still preserving recent local context.
+
+### Sub-RLM Budgets
+
+Nested sub-RLMs are now explicitly budgeted:
+
+```go
+rlm.NewFromLLM(llm,
+    rlm.WithSubRLMConfig(rlm.SubRLMConfig{
+        MaxDepth:               3,
+        MaxIterationsPerSubRLM: 6,
+        MaxDirectSubRLMCalls:   2,
+        MaxTotalSubRLMCalls:    8,
+    }),
+)
+```
+
+That gives you direct-child and whole-tree delegation guardrails instead of unbounded recursive fan-out.
 
 ### Execution Tracing
 

@@ -771,6 +771,65 @@ func main() {
 
 ---
 
+## Optimizable Agents
+
+dspy-go now has a shared optimization surface for several agent families:
+
+- native agents in `pkg/agents/native`
+- ReAct agents in `pkg/agents/react`
+- RLM-backed agents in `pkg/agents/rlm`
+
+These agents expose mutable artifact state through the `OptimizableAgent` contract and can participate in GEPA workflows.
+
+### Persisted Optimized Programs
+
+Optimizable agents can export and apply a shared persisted envelope:
+
+```go
+program, err := agent.ExportOptimizedProgram()
+if err != nil {
+    panic(err)
+}
+
+loaded, err := optimize.ReadOptimizedAgentProgram("optimized_program.json")
+if err != nil {
+    panic(err)
+}
+
+if err := agent.ApplyOptimizedProgram(loaded); err != nil {
+    panic(err)
+}
+```
+
+That envelope stores stable target IDs rather than only raw artifact maps, which makes saved optimization state portable across agent types.
+
+### Stable Optimization Targets
+
+Examples of user-facing target IDs include:
+
+- `root.rlm.iteration`
+- `root.rlm.max_iterations`
+- `root.rlm.adaptive.enabled`
+- `root.react.tool_policy`
+
+These stable IDs are what GEPA feedback, persisted optimized programs, and replay workflows operate on.
+
+### Full Workflow
+
+For end-to-end optimization, prefer `optimize.RunGEPAWorkflow(...)` over hand-wiring `Optimize(...)` and `SetArtifacts(...)`.
+
+That workflow gives you:
+
+- baseline evaluation
+- GEPA optimization
+- saved optimized-program artifacts
+- restore + replay on held-out examples
+
+See:
+
+- `examples/rlm_oolong_gepa`
+- the [Optimizers](optimizers/) guide
+
 ## Key Agent Features
 
 | Feature | Description | Example |

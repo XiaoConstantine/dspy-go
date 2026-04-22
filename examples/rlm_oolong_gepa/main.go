@@ -26,6 +26,7 @@ const (
 	passThreshold     = 1.0
 	defaultMaxIters   = 8
 	defaultValidation = 0.25
+	defaultArtifact   = "optimized_program.json"
 	safetyWarning     = "Warning: this example executes model-generated Go code through RLM. Only run it on trusted datasets and task files."
 )
 
@@ -33,6 +34,8 @@ type evalConfig struct {
 	Provider        string  `json:"provider"`
 	Model           string  `json:"model"`
 	TaskSource      string  `json:"task_source"`
+	ArtifactPath    string  `json:"artifact_path,omitempty"`
+	ReplayOnly      bool    `json:"replay_only,omitempty"`
 	TaskOffset      int     `json:"task_offset"`
 	TaskCount       int     `json:"task_count"`
 	Population      int     `json:"population"`
@@ -80,6 +83,8 @@ func main() {
 	taskCount := flag.Int("tasks", 5, "Number of OOLONG tasks to evaluate")
 	taskOffset := flag.Int("task-offset", 0, "Deterministic offset into the selected OOLONG task source")
 	maxIters := flag.Int("max-iters", defaultMaxIters, "Maximum RLM iterations per task")
+	artifactPath := flag.String("artifact", defaultArtifact, "Path to write/read the optimized program JSON artifact")
+	replayOnly := flag.Bool("replay-only", false, "Skip optimization and replay a previously saved optimized program")
 	outputFile := flag.String("output", "", "Optional path to write a JSON evaluation report")
 	verbose := flag.Bool("verbose", false, "Enable verbose RLM logging")
 	flag.Parse()
@@ -127,73 +132,93 @@ func main() {
 		PassThreshold: passThreshold,
 	}
 
-	seedAgent := newAdaptiveAgent(llm, weakSeedPrompt(), *maxIters, *verbose)
-	baselineRun, err := harness.Run(ctx, seedAgent, examples)
-	if err != nil {
-		logger.Fatalf(ctx, "Baseline run failed: %v", err)
-	}
+	seedPrompt := weakSeedPrompt()
+	seedAgent := newAdaptiveAgent(llm, seedPrompt, *maxIters, *verbose)
+
+	var (
+		baselineRun     *optimize.HarnessRunResult
+		optimizedRun    *optimize.HarnessRunResult
+		optimizedPrompt string
+		bestValidation  *optimize.GEPACandidateEvaluation
+	)
 
 	fmt.Println("=== Live RLM GEPA OOLONG Example ===")
 	fmt.Printf("Provider: %s\n", *provider)
 	fmt.Printf("Model: %s\n", modelName)
 	fmt.Printf("Tasks: %d total (%d train / %d validation)\n", len(examples), len(trainExamples), len(validationExamples))
 	fmt.Printf("Max RLM iterations: %d\n", *maxIters)
+	fmt.Printf("Artifact path: %s\n", strings.TrimSpace(*artifactPath))
+	if *replayOnly {
+		fmt.Println("Mode: restore saved optimized program and replay")
+	} else {
+		fmt.Println("Mode: baseline -> optimize -> save -> restore -> replay")
+	}
 	fmt.Println("This example uses real model calls on OOLONG-style long-context tasks.")
 	fmt.Println(safetyWarning)
 	fmt.Println()
+
+	if *replayOnly {
+		baselineRun, err = harness.Run(ctx, seedAgent, examples)
+		if err != nil {
+			logger.Fatalf(ctx, "Baseline run failed: %v", err)
+		}
+		optimizedRun, optimizedPrompt, err = replaySavedProgram(ctx, llm, strings.TrimSpace(*artifactPath), *maxIters, *verbose, harness, examples)
+		if err != nil {
+			logger.Fatalf(ctx, "Replay saved optimized program failed: %v", err)
+		}
+	} else {
+		workflow, err := optimize.RunGEPAWorkflow(ctx, seedAgent, optimize.GEPAWorkflowRequest{
+			Evaluator:          oolongEvaluator{},
+			TrainingExamples:   trainExamples,
+			ValidationExamples: validationExamples,
+			BaselineExamples:   examples,
+			ReplayExamples:     examples,
+			PassThreshold:      passThreshold,
+			ApplyBest:          true,
+			ArtifactPath:       strings.TrimSpace(*artifactPath),
+			Config: optimize.GEPAAdapterConfig{
+				PopulationSize:  *population,
+				MaxGenerations:  *generations,
+				ReflectionFreq:  1,
+				EvalConcurrency: 1,
+				PassThreshold:   passThreshold,
+				PrimaryArtifact: optimize.ArtifactRLMIterationPrompt,
+				ValidationSplit: defaultValidation,
+			},
+		})
+		if err != nil {
+			logger.Fatalf(ctx, "GEPA workflow failed: %v", err)
+		}
+
+		baselineRun = workflow.BaselineRun
+		bestValidation = workflow.Optimization.BestValidationEvaluation
+		optimizedRun, optimizedPrompt, err = replaySavedProgram(ctx, llm, strings.TrimSpace(*artifactPath), *maxIters, *verbose, harness, examples)
+		if err != nil {
+			logger.Fatalf(ctx, "Replay saved optimized program failed: %v", err)
+		}
+		fmt.Printf("Saved optimized program to %s\n", strings.TrimSpace(*artifactPath))
+		fmt.Println()
+	}
+
 	printRunSummary("Baseline", baselineRun)
-
-	seedPrompt := weakSeedPrompt()
-	optimizer := optimize.NewGEPAAgentOptimizer(
-		newAdaptiveAgent(llm, seedPrompt, *maxIters, *verbose),
-		oolongEvaluator{},
-		optimize.GEPAAdapterConfig{
-			PopulationSize:  *population,
-			MaxGenerations:  *generations,
-			ReflectionFreq:  1,
-			EvalConcurrency: 1,
-			PassThreshold:   passThreshold,
-			PrimaryArtifact: optimize.ArtifactRLMIterationPrompt,
-			ValidationSplit: defaultValidation,
-		},
-	)
-
-	result, err := optimizer.Optimize(ctx, optimize.GEPAOptimizeRequest{
-		SeedArtifacts:      seedAgent.GetArtifacts(),
-		TrainingExamples:   trainExamples,
-		ValidationExamples: validationExamples,
-	})
-	if err != nil {
-		logger.Fatalf(ctx, "GEPA optimization failed: %v", err)
-	}
-
-	optimizedAgent := newAdaptiveAgent(llm, weakSeedPrompt(), *maxIters, *verbose)
-	if err := optimizedAgent.SetArtifacts(result.BestArtifacts); err != nil {
-		logger.Fatalf(ctx, "Applying optimized artifacts failed: %v", err)
-	}
-
-	optimizedRun, err := harness.Run(ctx, optimizedAgent, examples)
-	if err != nil {
-		logger.Fatalf(ctx, "Optimized run failed: %v", err)
-	}
-
-	optimizedPrompt := strings.TrimSpace(result.BestArtifacts.Text[optimize.ArtifactRLMIterationPrompt])
 	fmt.Println()
 	fmt.Println("Optimized iteration prompt:")
 	fmt.Println(optimizedPrompt)
-	if result.BestValidationEvaluation != nil && result.BestValidationEvaluation.Fitness != nil {
+	if bestValidation != nil && bestValidation.Fitness != nil {
 		fmt.Println()
-		fmt.Printf("Best validation weighted fitness: %.2f\n", result.BestValidationEvaluation.Fitness.WeightedScore)
-		fmt.Printf("Best validation average score: %.2f\n", result.BestValidationEvaluation.AverageScore)
+		fmt.Printf("Best validation weighted fitness: %.2f\n", bestValidation.Fitness.WeightedScore)
+		fmt.Printf("Best validation average score: %.2f\n", bestValidation.AverageScore)
 	}
 	fmt.Println()
-	printRunSummary("Optimized", optimizedRun)
+	printRunSummary("Optimized (restored)", optimizedRun)
 
 	report := buildEvalReport(evalReportInput{
 		Config: evalConfig{
 			Provider:        *provider,
 			Model:           modelName,
 			TaskSource:      taskSource,
+			ArtifactPath:    strings.TrimSpace(*artifactPath),
+			ReplayOnly:      *replayOnly,
 			TaskOffset:      *taskOffset,
 			TaskCount:       len(tasks),
 			Population:      *population,
@@ -208,7 +233,7 @@ func main() {
 		OptimizedPrompt:     optimizedPrompt,
 		Baseline:            baselineRun,
 		Optimized:           optimizedRun,
-		BestValidation:      result.BestValidationEvaluation,
+		BestValidation:      bestValidation,
 	})
 
 	if *outputFile != "" {
@@ -516,6 +541,37 @@ Review the context methodically and answer the question once you can support it 
 Prefer one strong exploration or query step over many small loops.
 If the answer is numeric or categorical, extract it exactly before finalizing.
 `)
+}
+
+func replaySavedProgram(
+	ctx context.Context,
+	llm core.LLM,
+	artifactPath string,
+	maxIterations int,
+	verbose bool,
+	harness *optimize.Harness,
+	examples []optimize.AgentExample,
+) (*optimize.HarnessRunResult, string, error) {
+	if strings.TrimSpace(artifactPath) == "" {
+		return nil, "", fmt.Errorf("artifact path is required to restore an optimized program")
+	}
+
+	program, err := optimize.ReadOptimizedAgentProgram(artifactPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("read optimized program: %w", err)
+	}
+
+	replayAgent := newAdaptiveAgent(llm, weakSeedPrompt(), maxIterations, verbose)
+	if err := replayAgent.ApplyOptimizedProgram(program); err != nil {
+		return nil, "", fmt.Errorf("apply optimized program: %w", err)
+	}
+
+	replayRun, err := harness.Run(ctx, replayAgent, examples)
+	if err != nil {
+		return nil, "", fmt.Errorf("replay harness run: %w", err)
+	}
+
+	return replayRun, strings.TrimSpace(replayAgent.GetArtifacts().Text[optimize.ArtifactRLMIterationPrompt]), nil
 }
 
 type evalReportInput struct {

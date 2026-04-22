@@ -139,9 +139,14 @@ interceptors.ApplyXMLInterceptors(predict, interceptors.DefaultXMLConfig())
 
 ### Modules
 - **[rlm](examples/rlm/)** - Large context exploration
+- **[rlm_context_policy](examples/rlm_context_policy/)** - Compare `full`, `checkpointed`, and `adaptive` replay
+- **[rlm_subrlm_budgets](examples/rlm_subrlm_budgets/)** - Deterministic sub-RLM direct/total budget demo
 - **[xml_adapter](examples/xml_adapter/)** - XML structured output
 - **[parallel](examples/parallel/)** - Batch processing
 - **[refine](examples/refine/)** - Quality improvement
+
+### Optimization
+- **[rlm_oolong_gepa](examples/rlm_oolong_gepa/)** - Optimize an adaptive RLM agent, save the optimized program, restore it, and replay it
 
 ### Tools
 - **[smart_tool_registry](examples/smart_tool_registry/)** - Intelligent tool selection

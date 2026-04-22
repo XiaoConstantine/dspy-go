@@ -194,6 +194,114 @@ config := &optimizers.GEPAConfig{
 
 ---
 
+## Agent Optimization Workflows
+
+GEPA is no longer just for prompt modules. Native, ReAct, and RLM-backed agents can now export a shared optimized-program envelope, save it, restore it, and replay it on held-out tasks.
+
+### Baseline -> Optimize -> Save -> Restore -> Replay
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+
+    agentrlm "github.com/XiaoConstantine/dspy-go/pkg/agents/rlm"
+    "github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
+    "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
+)
+
+func main() {
+    baseAgent := agentrlm.NewAgent(
+        "demo-rlm",
+        rlm.NewFromLLM(
+            llm,
+            rlm.WithMaxIterations(8),
+            rlm.WithContextPolicyPreset(rlm.ContextPolicyAdaptive),
+        ),
+    )
+
+    workflow, err := optimize.RunGEPAWorkflow(ctx, baseAgent, optimize.GEPAWorkflowRequest{
+        Evaluator:        evaluator,
+        TrainingExamples: trainExamples,
+        ValidationExamples: validationExamples,
+        ReplayExamples:   heldOutExamples,
+        PassThreshold:    0.9,
+        ApplyBest:        true,
+        ArtifactPath:     "optimized_program.json",
+        Config: optimize.GEPAAdapterConfig{
+            PopulationSize:             4,
+            MaxGenerations:             2,
+            ValidationFrequency:        1,
+            MaxMetricCalls:             50,
+            ScoreThreshold:             0.95,
+            MaxRuntime:                 2 * time.Minute,
+            AddFormatFailureAsFeedback: true,
+            PrimaryArtifact:            optimize.ArtifactRLMIterationPrompt,
+        },
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    restored, err := optimize.ReadOptimizedAgentProgram("optimized_program.json")
+    if err != nil {
+        panic(err)
+    }
+
+    replayAgent, _ := baseAgent.Clone()
+    _ = optimize.ApplyOptimizedAgentProgram(replayAgent, restored)
+
+    _ = workflow
+}
+```
+
+`RunGEPAWorkflow` gives you:
+
+- a baseline harness run
+- GEPA optimization over agent artifacts
+- a persisted `optimized_program.json` envelope
+- a replay run on held-out examples
+
+### Named Targets And Stable IDs
+
+Agents can expose stable target IDs instead of one opaque prompt blob. That means GEPA can optimize surfaces like:
+
+- `root.rlm.iteration`
+- `root.rlm.max_iterations`
+- `root.rlm.adaptive.confidence_threshold`
+- `root.react.tool_policy`
+
+These target IDs are what get persisted into the optimized-program envelope.
+
+### Forward-Compatible Restore
+
+`ApplyOptimizedAgentProgram` skips unknown target IDs instead of failing hard. That matters when you restore an older saved program onto a newer agent shape that dropped or renamed a target.
+
+In practice:
+
+- known target IDs are applied
+- obsolete target IDs are ignored
+- missing values do not wipe unrelated defaults
+
+That makes saved optimized programs much safer to carry across agent revisions.
+
+### GEPA Adapter Controls
+
+For agent workflows, the most useful GEPA controls are:
+
+- `ValidationFrequency`
+- `MaxMetricCalls`
+- `ScoreThreshold`
+- `MaxRuntime`
+- `FeedbackEvaluator`
+- `AddFormatFailureAsFeedback`
+
+The `examples/rlm_oolong_gepa` directory shows the full persisted agent workflow in a live RLM setting.
+
+---
+
 ## MIPRO - Multi-step Interactive Prompt Optimization
 
 **Systematic optimization** using TPE (Tree-structured Parzen Estimator) search. MIPRO is ideal for methodical, data-driven prompt improvement.
