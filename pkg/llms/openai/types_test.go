@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,4 +84,69 @@ func TestNewGenerateOptions(t *testing.T) {
 	assert.Equal(t, 0.1, opts.PresencePenalty)
 	assert.Equal(t, -0.2, opts.FrequencyPenalty)
 	assert.Equal(t, []string{"STOP"}, opts.Stop)
+}
+
+func TestErrorResponseUnmarshal(t *testing.T) {
+	t.Run("nested error object", func(t *testing.T) {
+		jsonData := []byte(`{
+			"error": {
+				"message": "nested message",
+				"type": "nested_type",
+				"param": "nested_param",
+				"code": "nested_code"
+			}
+		}`)
+		var resp ErrorResponse
+		err := json.Unmarshal(jsonData, &resp)
+		require.NoError(t, err)
+		require.NotNil(t, resp.Error)
+		assert.Equal(t, "nested message", resp.Error.Message)
+		assert.Equal(t, "nested_type", resp.Error.Type)
+		assert.Equal(t, "nested_param", resp.Error.Param)
+		assert.Equal(t, "nested_code", resp.Error.Code)
+	})
+
+	t.Run("flat structure", func(t *testing.T) {
+		jsonData := []byte(`{
+			"message": "flat message",
+			"type": "flat_type",
+			"param": "flat_param",
+			"code": "flat_code"
+		}`)
+		var resp ErrorResponse
+		err := json.Unmarshal(jsonData, &resp)
+		require.NoError(t, err)
+		assert.Equal(t, "flat message", resp.Error.Message)
+		assert.Equal(t, "flat_type", resp.Error.Type)
+		assert.Equal(t, "flat_param", resp.Error.Param)
+		assert.Equal(t, "flat_code", resp.Error.Code)
+	})
+}
+
+func TestErrorResponseGetError(t *testing.T) {
+	t.Run("nested error object", func(t *testing.T) {
+		resp := ErrorResponse{
+			Error: APIError{
+				Message: "nested message",
+				Type:    "nested_type",
+				Code:    "nested_code",
+			},
+		}
+		assert.Equal(t, "nested_type", resp.Error.Type)
+		assert.Equal(t, "nested_code", resp.Error.Code)
+		assert.Equal(t, "nested message", resp.Error.Message)
+	})
+
+	t.Run("flat structure", func(t *testing.T) {
+		resp := ErrorResponse{
+			Error: APIError{
+				Message: "flat message",
+				Type:    "flat_type",
+				Code:    "flat_code",
+			},
+		}
+		assert.Equal(t, "flat_type", resp.Error.Type)
+		assert.Equal(t, "flat_code", resp.Error.Code)
+		assert.Equal(t, "flat message", resp.Error.Message)
+	})
 }

@@ -1028,7 +1028,7 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 			if dumpErr != nil {
 				fields["debug_dump_error"] = dumpErr.Error()
 			}
-			if allowRetry && shouldRetryOpenAIInvalidJSON(errorResp.Error) {
+			if allowRetry && shouldRetryOpenAIInvalidJSON(errorResp.Error.Type, errorResp.Error.Message) {
 				logger.Warn(
 					ctx,
 					"Retrying OpenAI request after transient invalid_request_error with a fresh connection: model=%s dump=%s",
@@ -1051,11 +1051,11 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 	return &response, nil
 }
 
-func shouldRetryOpenAIInvalidJSON(apiError openai.APIError) bool {
-	if apiError.Type != "invalid_request_error" {
+func shouldRetryOpenAIInvalidJSON(errType, errMsg string) bool {
+	if errType != "invalid_request_error" {
 		return false
 	}
-	message := strings.ToLower(strings.TrimSpace(apiError.Message))
+	message := strings.ToLower(strings.TrimSpace(errMsg))
 	return strings.Contains(message, "parse the json body")
 }
 
