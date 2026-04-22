@@ -1,6 +1,9 @@
 package openai
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // ChatCompletionRequest represents a request to the OpenAI Chat Completions API.
 type ChatCompletionRequest struct {
@@ -135,21 +138,32 @@ type APIError struct {
 
 // ErrorResponse represents an error response from the OpenAI API.
 type ErrorResponse struct {
-	Error *APIError `json:"error,omitempty"`
-
-	// fallback for flat structure
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Param   string `json:"param,omitempty"`
-	Code    string `json:"code,omitempty"`
+	Error APIError `json:"error"`
 }
 
-// GetError returns the error details, prioritizing the nested Error field.
-func (e ErrorResponse) GetError() (errType, errCode, errMsg string) {
-	if e.Error != nil {
-		return e.Error.Type, e.Error.Code, e.Error.Message
+// UnmarshalJSON normalizes the error response format.
+func (e *ErrorResponse) UnmarshalJSON(data []byte) error {
+	type Alias ErrorResponse
+	var alias Alias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
 	}
-	return e.Type, e.Code, e.Message
+
+	if alias.Error.Message != "" || alias.Error.Type != "" || alias.Error.Code != "" {
+		e.Error = alias.Error
+		return nil
+	}
+
+	var apiError APIError
+	if err := json.Unmarshal(data, &apiError); err != nil {
+		return err
+	}
+
+	if apiError.Message != "" || apiError.Type != "" || apiError.Code != "" {
+		e.Error = apiError
+	}
+
+	return nil
 }
 
 // GenerateOptions holds configuration that can be applied to a chat completion request.

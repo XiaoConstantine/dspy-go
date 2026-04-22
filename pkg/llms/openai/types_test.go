@@ -116,41 +116,37 @@ func TestErrorResponseUnmarshal(t *testing.T) {
 		var resp ErrorResponse
 		err := json.Unmarshal(jsonData, &resp)
 		require.NoError(t, err)
-		assert.Nil(t, resp.Error)
-		assert.Equal(t, "flat message", resp.Message)
-		assert.Equal(t, "flat_type", resp.Type)
-		assert.Equal(t, "flat_param", resp.Param)
-		assert.Equal(t, "flat_code", resp.Code)
+		assert.Equal(t, "flat message", resp.Error.Message)
+		assert.Equal(t, "flat_type", resp.Error.Type)
+		assert.Equal(t, "flat_param", resp.Error.Param)
+		assert.Equal(t, "flat_code", resp.Error.Code)
 	})
 }
 
 func TestErrorResponseGetError(t *testing.T) {
 	t.Run("nested error object", func(t *testing.T) {
 		resp := ErrorResponse{
-			Error: &APIError{
+			Error: APIError{
 				Message: "nested message",
 				Type:    "nested_type",
 				Code:    "nested_code",
 			},
-			Message: "flat message",
-			Type:    "flat_type",
-			Code:    "flat_code",
 		}
-		errType, errCode, errMsg := resp.GetError()
-		assert.Equal(t, "nested_type", errType)
-		assert.Equal(t, "nested_code", errCode)
-		assert.Equal(t, "nested message", errMsg)
+		assert.Equal(t, "nested_type", resp.Error.Type)
+		assert.Equal(t, "nested_code", resp.Error.Code)
+		assert.Equal(t, "nested message", resp.Error.Message)
 	})
 
 	t.Run("flat structure", func(t *testing.T) {
 		resp := ErrorResponse{
-			Message: "flat message",
-			Type:    "flat_type",
-			Code:    "flat_code",
+			Error: APIError{
+				Message: "flat message",
+				Type:    "flat_type",
+				Code:    "flat_code",
+			},
 		}
-		errType, errCode, errMsg := resp.GetError()
-		assert.Equal(t, "flat_type", errType)
-		assert.Equal(t, "flat_code", errCode)
-		assert.Equal(t, "flat message", errMsg)
+		assert.Equal(t, "flat_type", resp.Error.Type)
+		assert.Equal(t, "flat_code", resp.Error.Code)
+		assert.Equal(t, "flat message", resp.Error.Message)
 	})
 }
