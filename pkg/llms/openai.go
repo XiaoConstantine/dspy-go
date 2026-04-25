@@ -244,6 +244,14 @@ var validOpenAIModels = []core.ModelID{
 	core.ModelOpenAIGPT52ThinkHigh,
 	core.ModelOpenAIGPT52Pro,
 	core.ModelOpenAIGPT52Codex,
+	// GPT-5.4 series
+	core.ModelOpenAIGPT54,
+	core.ModelOpenAIGPT54Mini,
+	core.ModelOpenAIGPT54Nano,
+	core.ModelOpenAIGPT54Pro,
+	// GPT-5.5 series
+	core.ModelOpenAIGPT55,
+	core.ModelOpenAIGPT55Pro,
 }
 
 // isValidOpenAIModel checks if the model is a valid OpenAI model.

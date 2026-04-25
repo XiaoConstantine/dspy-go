@@ -64,9 +64,15 @@ func TestNewGeminiLLM(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name:      "Valid configuration with Gemini 3 Pro Preview model",
+			name:      "Valid configuration with Gemini 3.1 Pro Preview model",
 			apiKey:    "test-api-key",
-			model:     core.ModelGoogleGemini3ProPreview,
+			model:     core.ModelGoogleGemini31ProPreview,
+			wantError: false,
+		},
+		{
+			name:      "Valid configuration with Gemini 3.1 Flash-Lite Preview model",
+			apiKey:    "test-api-key",
+			model:     core.ModelGoogleGemini31FlashLitePreview,
 			wantError: false,
 		},
 		{
@@ -74,6 +80,12 @@ func TestNewGeminiLLM(t *testing.T) {
 			apiKey:    "test-api-key",
 			model:     core.ModelGoogleGemini3FlashPreview,
 			wantError: false,
+		},
+		{
+			name:      "Deprecated Gemini 2.0 model",
+			apiKey:    "test-api-key",
+			model:     core.ModelGoogleGemini20Flash,
+			wantError: true,
 		},
 		{
 			name:      "Empty API key",
@@ -201,7 +213,7 @@ func TestGeminiLLM_Generate(t *testing.T) {
 			// Create GeminiLLM instance with proper initialization
 			endpoint := &core.EndpointConfig{
 				BaseURL:    server.URL,
-				Path:       "/models/gemini-2.0-flash-exp:generateContent",
+				Path:       "/models/gemini-2.5-flash-exp:generateContent",
 				Headers:    map[string]string{"Content-Type": "application/json"},
 				TimeoutSec: 30,
 			}
@@ -274,7 +286,7 @@ func TestGeminiLLM_GenerateWithJSON(t *testing.T) {
 			// Create GeminiLLM instance with proper initialization
 			endpoint := &core.EndpointConfig{
 				BaseURL:    server.URL,
-				Path:       "/models/gemini-2.0-flash-exp:generateContent",
+				Path:       "/models/gemini-2.5-flash-exp:generateContent",
 				Headers:    map[string]string{"Content-Type": "application/json"},
 				TimeoutSec: 30,
 			}
@@ -326,7 +338,7 @@ func TestGeminiLLM_StreamGenerate_Cancel(t *testing.T) {
 	// Create GeminiLLM with mocked server
 	endpoint := &core.EndpointConfig{
 		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.0-flash:generateContent",
+		Path:       "/models/gemini-2.5-flash:generateContent",
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		TimeoutSec: 30,
 	}
@@ -431,7 +443,7 @@ func TestGeminiLLM_GenerateErrorCases(t *testing.T) {
 			// Create GeminiLLM
 			endpoint := &core.EndpointConfig{
 				BaseURL:    server.URL,
-				Path:       "/models/gemini-2.0-flash:generateContent",
+				Path:       "/models/gemini-2.5-flash:generateContent",
 				Headers:    map[string]string{"Content-Type": "application/json"},
 				TimeoutSec: 30,
 			}
@@ -537,7 +549,7 @@ func TestGeminiLLM_Embeddings(t *testing.T) {
 	// Create GeminiLLM with mock server
 	endpoint := &core.EndpointConfig{
 		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.0-flash:generateContent",
+		Path:       "/models/gemini-2.5-flash:generateContent",
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		TimeoutSec: 30,
 	}
@@ -583,7 +595,7 @@ func TestGeminiLLM_Embeddings(t *testing.T) {
 		result, err := llm.CreateEmbedding(
 			context.Background(),
 			"Test with options",
-			core.WithModel("text-embedding-004"),
+			core.WithModel("gemini-embedding-2"),
 		)
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -688,7 +700,7 @@ func TestGeminiLLM_GenerateWithFunctions(t *testing.T) {
 	// Create GeminiLLM
 	endpoint := &core.EndpointConfig{
 		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.0-flash:generateContent",
+		Path:       "/models/gemini-2.5-flash:generateContent",
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		TimeoutSec: 30,
 	}
@@ -772,7 +784,7 @@ func TestGeminiLLM_GenerateWithFunctions_EmptyResponseDiagnostics(t *testing.T) 
 
 	endpoint := &core.EndpointConfig{
 		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.0-flash:generateContent",
+		Path:       "/models/gemini-2.5-flash:generateContent",
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		TimeoutSec: 30,
 	}
@@ -1119,7 +1131,7 @@ func TestGeminiLLM_StreamGenerate_ChunkHandling(t *testing.T) {
 	// Create GeminiLLM
 	endpoint := &core.EndpointConfig{
 		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.0-flash:generateContent",
+		Path:       "/models/gemini-2.5-flash:generateContent",
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		TimeoutSec: 30,
 	}
@@ -1402,7 +1414,7 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 				// If we have a server, point to it
 				endpoint := &core.EndpointConfig{
 					BaseURL:    server.URL,
-					Path:       "/models/gemini-2.0-flash:generateContent",
+					Path:       "/models/gemini-2.5-flash:generateContent",
 					Headers:    map[string]string{"Content-Type": "application/json"},
 					TimeoutSec: 30,
 				}
@@ -1554,7 +1566,7 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 			// Create GeminiLLM instance
 			endpoint := &core.EndpointConfig{
 				BaseURL:    server.URL,
-				Path:       "/models/gemini-2.0-flash:generateContent",
+				Path:       "/models/gemini-2.5-flash:generateContent",
 				Headers:    map[string]string{"Content-Type": "application/json"},
 				TimeoutSec: 30,
 			}
@@ -1667,7 +1679,7 @@ func TestGeminiLLM_GenerateWithFunctions_OptionsHandling(t *testing.T) {
 	// Create GeminiLLM instance
 	endpoint := &core.EndpointConfig{
 		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.0-flash:generateContent",
+		Path:       "/models/gemini-2.5-flash:generateContent",
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		TimeoutSec: 30,
 	}
@@ -1775,7 +1787,7 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 			input:   "Test input",
 			options: []core.EmbeddingOption{},
 			expectedReq: map[string]interface{}{
-				"model": "models/text-embedding-004",
+				"model": "models/gemini-embedding-2",
 				"content": map[string]interface{}{
 					"parts": []interface{}{
 						map[string]interface{}{
@@ -1790,10 +1802,10 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 			name:  "With custom model",
 			input: "Test input",
 			options: []core.EmbeddingOption{
-				core.WithModel("gemini-embedding-exp-03-07"),
+				core.WithModel("gemini-embedding-001"),
 			},
 			expectedReq: map[string]interface{}{
-				"model": "models/gemini-embedding-exp-03-07",
+				"model": "models/gemini-embedding-001",
 				"content": map[string]interface{}{
 					"parts": []interface{}{
 						map[string]interface{}{
@@ -1821,7 +1833,7 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 				}),
 			},
 			expectedReq: map[string]interface{}{
-				"model": "models/text-embedding-004",
+				"model": "models/gemini-embedding-2",
 				"content": map[string]interface{}{
 					"parts": []interface{}{
 						map[string]interface{}{
@@ -1846,7 +1858,7 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 				}),
 			},
 			expectedReq: map[string]interface{}{
-				"model": "models/text-embedding-004",
+				"model": "models/gemini-embedding-2",
 				"content": map[string]interface{}{
 					"parts": []interface{}{
 						map[string]interface{}{
@@ -1923,7 +1935,7 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 			// Create GeminiLLM with mock server
 			endpoint := &core.EndpointConfig{
 				BaseURL:    server.URL,
-				Path:       "/models/gemini-2.0-flash:generateContent",
+				Path:       "/models/gemini-2.5-flash:generateContent",
 				Headers:    map[string]string{"Content-Type": "application/json"},
 				TimeoutSec: 30,
 			}
@@ -1964,6 +1976,7 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 		name          string
 		inputs        []string
 		batchSize     int
+		model         string
 		expectedBatch int
 		serverError   bool
 	}{
@@ -1988,6 +2001,14 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 			expectedBatch: 3,
 			serverError:   true,
 		},
+		{
+			name:          "Custom embedding model",
+			inputs:        []string{"input1", "input2"},
+			batchSize:     2,
+			model:         "gemini-embedding-2",
+			expectedBatch: 2,
+			serverError:   false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -2009,6 +2030,13 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 
 				// Check URL for batch endpoint
 				if strings.Contains(r.URL.Path, "batchEmbedContents") {
+					expectedModel := "gemini-embedding-2"
+					if tc.model != "" {
+						expectedModel = tc.model
+					}
+					assert.Equal(t, "models/"+expectedModel, reqMap["model"])
+					assert.Contains(t, r.URL.Path, "/models/"+expectedModel+":batchEmbedContents")
+
 					// Verify batch size
 					requests, ok := reqMap["requests"].([]interface{})
 					assert.True(t, ok, "Expected requests array in batch request")
@@ -2060,7 +2088,7 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 			// Create GeminiLLM with mock server
 			endpoint := &core.EndpointConfig{
 				BaseURL:    server.URL,
-				Path:       "/models/gemini-2.0-flash:generateContent",
+				Path:       "/models/gemini-2.5-flash:generateContent",
 				Headers:    map[string]string{"Content-Type": "application/json"},
 				TimeoutSec: 30,
 			}
@@ -2075,11 +2103,11 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 			}
 
 			// Call CreateEmbeddings with batch size option
-			result, err := llm.CreateEmbeddings(
-				context.Background(),
-				tc.inputs,
-				core.WithBatchSize(tc.batchSize),
-			)
+			options := []core.EmbeddingOption{core.WithBatchSize(tc.batchSize)}
+			if tc.model != "" {
+				options = append(options, core.WithModel(tc.model))
+			}
+			result, err := llm.CreateEmbeddings(context.Background(), tc.inputs, options...)
 
 			if tc.serverError {
 				assert.Nil(t, result)

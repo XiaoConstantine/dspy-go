@@ -22,24 +22,36 @@ type AnthropicLLM struct {
 	*core.BaseLLM
 }
 
+const anthropicModelClaudeOpus47 anthropic.Model = "claude-opus-4-7"
+
 // Model name compatibility layer for backwards compatibility.
 var modelNameMapping = map[string]anthropic.Model{
-	// Old Claude 3 names to new equivalents
-	"claude-3-opus-20240229":     anthropic.ModelClaudeOpus4_1_20250805,
-	"claude-3-sonnet-20240229":   anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-3-haiku-20240307":    anthropic.ModelClaude_3_Haiku_20240307,
-	"claude-3.5-sonnet-20241022": anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-3-5-sonnet-20240620": anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-3.5-sonnet-20250929": anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-3-opus":              anthropic.ModelClaudeOpus4_1_20250805,
-	"claude-3-sonnet":            anthropic.ModelClaudeSonnet4_5_20250929,
-	"claude-3-haiku":             anthropic.ModelClaude_3_Haiku_20240307,
+	// Old Claude 3 names to current equivalents
+	"claude-3-opus-20240229":     anthropicModelClaudeOpus47,
+	"claude-3-sonnet-20240229":   anthropic.ModelClaudeSonnet4_6,
+	"claude-3-haiku-20240307":    anthropic.ModelClaudeHaiku4_5_20251001,
+	"claude-3.5-sonnet-20241022": anthropic.ModelClaudeSonnet4_6,
+	"claude-3-5-sonnet-20240620": anthropic.ModelClaudeSonnet4_6,
+	"claude-3.5-sonnet-20250929": anthropic.ModelClaudeSonnet4_6,
+	"claude-3-opus":              anthropicModelClaudeOpus47,
+	"claude-3-sonnet":            anthropic.ModelClaudeSonnet4_6,
+	"claude-3-haiku":             anthropic.ModelClaudeHaiku4_5_20251001,
+	// Haiku 4.5 aliases
+	"haiku-4.5":                 anthropic.ModelClaudeHaiku4_5_20251001,
+	"haiku-4-5":                 anthropic.ModelClaudeHaiku4_5_20251001,
+	"claude-haiku-4.5":          anthropic.ModelClaudeHaiku4_5_20251001,
+	"claude-haiku-4-5":          anthropic.ModelClaudeHaiku4_5,
+	"claude-haiku-4-5-20251001": anthropic.ModelClaudeHaiku4_5_20251001,
 	// Opus 4.5 aliases
 	"opus-4.5":                 anthropic.ModelClaudeOpus4_5_20251101,
 	"opus-4-5":                 anthropic.ModelClaudeOpus4_5_20251101,
 	"claude-opus-4.5":          anthropic.ModelClaudeOpus4_5_20251101,
 	"claude-opus-4-5":          anthropic.ModelClaudeOpus4_5,
 	"claude-opus-4-5-20251101": anthropic.ModelClaudeOpus4_5_20251101,
+	// Opus 4.7 aliases
+	"opus-4.7":        anthropicModelClaudeOpus47,
+	"opus-4-7":        anthropicModelClaudeOpus47,
+	"claude-opus-4.7": anthropicModelClaudeOpus47,
 	// Sonnet 4.5 aliases
 	"sonnet-4.5":        anthropic.ModelClaudeSonnet4_5_20250929,
 	"sonnet-4-5":        anthropic.ModelClaudeSonnet4_5_20250929,
@@ -94,6 +106,8 @@ func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error
 		core.CapabilityJSON,
 		core.CapabilityStreaming,
 		core.CapabilityToolCalling,
+		core.CapabilityMultimodal,
+		core.CapabilityVision,
 	}
 
 	return &AnthropicLLM{
@@ -140,6 +154,8 @@ func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, 
 		core.CapabilityJSON,
 		core.CapabilityStreaming,
 		core.CapabilityToolCalling,
+		core.CapabilityMultimodal,
+		core.CapabilityVision,
 	}
 
 	return &AnthropicLLM{
@@ -168,6 +184,7 @@ func isValidAnthropicModel(model string) bool {
 		"claude-opus",   // claude-opus-4, etc.
 		"opus-",         // opus-4.5, opus-4-5, etc.
 		"sonnet-",       // sonnet-4.5, sonnet-4-5, etc.
+		"haiku-",        // haiku-4.5, haiku-4-5, etc.
 	}
 
 	for _, prefix := range validPrefixes {

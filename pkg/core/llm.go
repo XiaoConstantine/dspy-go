@@ -665,29 +665,39 @@ func SetDefaultLLM(llm LLM) {
 type ModelID string
 
 const (
-	// Anthropic models - Claude 3.x and newer series.
-	ModelAnthropicHaiku          ModelID = ModelID(anthropic.ModelClaude_3_Haiku_20240307)
-	ModelAnthropicSonnet         ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929) // For backwards compatibility
-	ModelAnthropicSonnet35       ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
-	ModelAnthropicOpus           ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
-	ModelAnthropicClaude4Opus    ModelID = ModelID(anthropic.ModelClaudeOpus4_1_20250805)
-	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	// Anthropic models - current Claude 4.x series.
+	ModelAnthropicHaiku          ModelID = ModelID(anthropic.ModelClaudeHaiku4_5_20251001)
+	ModelAnthropicSonnet         ModelID = ModelID(anthropic.ModelClaudeSonnet4_6) // For backwards compatibility
+	ModelAnthropicSonnet35       ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
+	ModelAnthropicOpus           ModelID = "claude-opus-4-7"
+	ModelAnthropicClaude4Opus    ModelID = "claude-opus-4-7"
+	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
+	ModelAnthropicClaude45Haiku  ModelID = ModelID(anthropic.ModelClaudeHaiku4_5_20251001)
 	ModelAnthropicClaude45Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
 	ModelAnthropicClaude45Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
 	// Claude 4.6 series.
 	ModelAnthropicClaude46Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
 	ModelAnthropicClaude46Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_6)
+	// Claude 4.7 series.
+	ModelAnthropicClaude47Opus ModelID = "claude-opus-4-7"
 
 	// Google Gemini models (existing).
 	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"
 	ModelGoogleGeminiPro       ModelID = "gemini-2.5-pro"
 	ModelGoogleGeminiFlashLite ModelID = "gemini-2.5-flash-lite"
-	// Google Gemini 3 series (new).
+	// Google Gemini 3 series.
+	ModelGoogleGemini31ProPreview       ModelID = "gemini-3.1-pro-preview"
+	ModelGoogleGemini31ProPreviewTools  ModelID = "gemini-3.1-pro-preview-customtools"
+	ModelGoogleGemini31FlashLitePreview ModelID = "gemini-3.1-flash-lite-preview"
+	// Deprecated: shut down by Google on March 9, 2026. Kept only for source compatibility.
 	ModelGoogleGemini3ProPreview   ModelID = "gemini-3-pro-preview"
 	ModelGoogleGemini3FlashPreview ModelID = "gemini-3-flash-preview"
-	// Google Gemini 2.0 series (new).
+	// Deprecated: scheduled by Google to shut down June 1, 2026. Kept only for
+	// source compatibility and omitted from active provider support.
 	ModelGoogleGemini20Flash     ModelID = "gemini-2.0-flash"
 	ModelGoogleGemini20FlashLite ModelID = "gemini-2.0-flash-lite"
+	// Google embedding models.
+	ModelGoogleGeminiEmbedding2 ModelID = "gemini-embedding-2"
 
 	// OpenAI models - GPT-4 series.
 	ModelOpenAIGPT4       ModelID = "gpt-4"
@@ -717,6 +727,14 @@ const (
 	ModelOpenAIGPT52ThinkHigh ModelID = "gpt-5.2-thinking-high"
 	ModelOpenAIGPT52Pro       ModelID = "gpt-5.2-pro"
 	ModelOpenAIGPT52Codex     ModelID = "gpt-5.2-codex"
+	// OpenAI models - GPT-5.4 series.
+	ModelOpenAIGPT54     ModelID = "gpt-5.4"
+	ModelOpenAIGPT54Mini ModelID = "gpt-5.4-mini"
+	ModelOpenAIGPT54Nano ModelID = "gpt-5.4-nano"
+	ModelOpenAIGPT54Pro  ModelID = "gpt-5.4-pro"
+	// OpenAI models - GPT-5.5 series.
+	ModelOpenAIGPT55    ModelID = "gpt-5.5"
+	ModelOpenAIGPT55Pro ModelID = "gpt-5.5-pro"
 
 	// LiteLLM models (can proxy to any provider).
 	ModelLiteLLMGPT4    ModelID = "gpt-4"
@@ -735,13 +753,21 @@ const (
 	ModelOllamaMistral7B    ModelID = "mistral:7b"
 	ModelOllamaGemma2B      ModelID = "gemma:2b"
 	ModelOllamaGemma7B      ModelID = "gemma:7b"
+	ModelOllamaGemma3_4B    ModelID = "gemma3:4b"
+	ModelOllamaGemma3_12B   ModelID = "gemma3:12b"
+	ModelOllamaGemma3_27B   ModelID = "gemma3:27b"
 	ModelOllamaQwen2_5_7B   ModelID = "qwen2.5:7b"
 	ModelOllamaQwen2_5_14B  ModelID = "qwen2.5:14b"
+	ModelOllamaQwen3_8B     ModelID = "qwen3:8b"
+	ModelOllamaQwen3_14B    ModelID = "qwen3:14b"
+	ModelOllamaQwen3_32B    ModelID = "qwen3:32b"
 
 	// Ollama embedding models.
-	ModelOllamaNomicEmbed ModelID = "nomic-embed-text"
-	ModelOllamaMxbaiEmbed ModelID = "mxbai-embed-large"
-	ModelOllamaAllMiniLM  ModelID = "all-minilm"
+	ModelOllamaNomicEmbed     ModelID = "nomic-embed-text"
+	ModelOllamaMxbaiEmbed     ModelID = "mxbai-embed-large"
+	ModelOllamaAllMiniLM      ModelID = "all-minilm"
+	ModelOllamaQwen3Embedding ModelID = "qwen3-embedding"
+	ModelOllamaEmbeddingGemma ModelID = "embeddinggemma"
 
 	// LocalAI models.
 	ModelLocalAILlama2    ModelID = "llama-2-7b-chat"
@@ -766,12 +792,13 @@ var ProviderModels = map[string][]ModelID{
 	"anthropic": {
 		ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus,
 		ModelAnthropicClaude4Opus, ModelAnthropicClaude4Sonnet, ModelAnthropicClaude45Sonnet,
-		ModelAnthropicClaude45Opus, ModelAnthropicClaude46Sonnet, ModelAnthropicClaude46Opus,
+		ModelAnthropicClaude45Haiku, ModelAnthropicClaude45Opus, ModelAnthropicClaude46Sonnet,
+		ModelAnthropicClaude46Opus, ModelAnthropicClaude47Opus,
 	},
 	"google": {
 		ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite,
-		ModelGoogleGemini3ProPreview, ModelGoogleGemini3FlashPreview,
-		ModelGoogleGemini20Flash, ModelGoogleGemini20FlashLite,
+		ModelGoogleGemini31ProPreview, ModelGoogleGemini31ProPreviewTools,
+		ModelGoogleGemini31FlashLitePreview, ModelGoogleGemini3FlashPreview,
 	},
 	"openai": {
 		ModelOpenAIGPT4, ModelOpenAIGPT4Turbo, ModelOpenAIGPT35Turbo, ModelOpenAIGPT4o, ModelOpenAIGPT4oMini,
@@ -781,12 +808,17 @@ var ProviderModels = map[string][]ModelID{
 		ModelOpenAIGPT5, ModelOpenAIGPT5Mini, ModelOpenAIGPT5Nano,
 		ModelOpenAIGPT52, ModelOpenAIGPT52Instant, ModelOpenAIGPT52Thinking,
 		ModelOpenAIGPT52ThinkHigh, ModelOpenAIGPT52Pro, ModelOpenAIGPT52Codex,
+		ModelOpenAIGPT54, ModelOpenAIGPT54Mini, ModelOpenAIGPT54Nano, ModelOpenAIGPT54Pro,
+		ModelOpenAIGPT55, ModelOpenAIGPT55Pro,
 	},
 	"ollama": {
 		ModelOllamaLlama3_8B, ModelOllamaLlama3_70B, ModelOllamaLlama3_1_8B, ModelOllamaLlama3_1_70B,
 		ModelOllamaLlama3_2_3B, ModelOllamaCodeLlama13B, ModelOllamaCodeLlama34B, ModelOllamaMistral7B,
-		ModelOllamaGemma2B, ModelOllamaGemma7B, ModelOllamaQwen2_5_7B, ModelOllamaQwen2_5_14B,
+		ModelOllamaGemma2B, ModelOllamaGemma7B, ModelOllamaGemma3_4B, ModelOllamaGemma3_12B,
+		ModelOllamaGemma3_27B, ModelOllamaQwen2_5_7B, ModelOllamaQwen2_5_14B,
+		ModelOllamaQwen3_8B, ModelOllamaQwen3_14B, ModelOllamaQwen3_32B,
 		ModelOllamaNomicEmbed, ModelOllamaMxbaiEmbed, ModelOllamaAllMiniLM,
+		ModelOllamaQwen3Embedding, ModelOllamaEmbeddingGemma,
 	},
 	"llamacpp":          {},
 	"litellm":           {ModelLiteLLMGPT4, ModelLiteLLMClaude3, ModelLiteLLMLlama2, ModelLiteLLMGemini},

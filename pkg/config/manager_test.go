@@ -132,7 +132,7 @@ func TestManagerReloadWithWatcherFailure(t *testing.T) {
 llm:
   default:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
     generation:
       max_tokens: 4096
 `
@@ -304,7 +304,7 @@ func TestManagerMerge(t *testing.T) {
 		LLM: LLMConfig{
 			Default: LLMProviderConfig{
 				Provider: "google",
-				ModelID:  "gemini-2.0-flash",
+				ModelID:  "gemini-2.5-flash",
 			},
 		},
 	}
@@ -313,7 +313,7 @@ func TestManagerMerge(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "google", manager.Get().LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", manager.Get().LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", manager.Get().LLM.Default.ModelID)
 }
 
 func TestManagerMergeWithNilConfig(t *testing.T) {
@@ -352,7 +352,7 @@ func TestManagerImport(t *testing.T) {
 		"llm": map[string]interface{}{
 			"default": map[string]interface{}{
 				"provider": "google",
-				"model_id": "gemini-2.0-flash",
+				"model_id": "gemini-2.5-flash",
 				"generation": map[string]interface{}{
 					"max_tokens": 4096,
 				},
@@ -373,7 +373,7 @@ func TestManagerImport(t *testing.T) {
 
 	config := manager.Get()
 	assert.Equal(t, "google", config.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", config.LLM.Default.ModelID)
 }
 
 func TestManagerWatch(t *testing.T) {
@@ -446,7 +446,7 @@ func TestReloadGlobalConfig(t *testing.T) {
 llm:
   default:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
 `
 	err = os.WriteFile(configPath, []byte(configYAML), 0644)
 	require.NoError(t, err)

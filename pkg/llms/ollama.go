@@ -1051,6 +1051,8 @@ func supportsOllamaEmbedding(modelName string) bool {
 		"mxbai-embed-large",
 		"snowflake-arctic-embed",
 		"all-minilm",
+		"qwen3-embedding",
+		"embeddinggemma",
 	}
 
 	modelLower := strings.ToLower(modelName)

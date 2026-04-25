@@ -128,7 +128,7 @@ func TestValidateLLMProviderConfig(t *testing.T) {
 			name: "google missing API key",
 			provider: LLMProviderConfig{
 				Provider: "google",
-				ModelID:  "gemini-2.0-flash",
+				ModelID:  "gemini-2.5-flash",
 			},
 			expectError: false, // API key validation removed for security
 		},
@@ -297,7 +297,7 @@ func TestIsValidAnthropicModel(t *testing.T) {
 
 func TestIsValidGoogleModel(t *testing.T) {
 	validModels := []string{
-		"gemini-2.0-flash",
+		"gemini-2.5-flash",
 		"gemini-1.5-pro",
 		"gemma-2b",
 		"palm-bison",
@@ -311,6 +311,9 @@ func TestIsValidGoogleModel(t *testing.T) {
 		"claude-3-sonnet",
 		"gpt-4",
 		"invalid-model",
+		"gemini-3-pro-preview",
+		"gemini-2.0-flash",
+		"gemini-2.0-flash-lite",
 	}
 
 	for _, model := range invalidModels {

@@ -13,7 +13,7 @@ func TestGetDefaultLLMProviderConfig(t *testing.T) {
 	anthropicConfig := GetDefaultLLMProviderConfig("anthropic")
 	require.NotNil(t, anthropicConfig)
 	assert.Equal(t, "anthropic", anthropicConfig.Provider)
-	assert.Equal(t, "claude-3-5-sonnet-20250929", anthropicConfig.ModelID)
+	assert.Equal(t, "claude-sonnet-4-6", anthropicConfig.ModelID)
 	assert.Equal(t, "https://api.anthropic.com", anthropicConfig.Endpoint.BaseURL)
 
 	// Test getting google config
@@ -101,7 +101,7 @@ func TestMergeWithDefaults(t *testing.T) {
 		LLM: LLMConfig{
 			Default: LLMProviderConfig{
 				Provider: "google",
-				ModelID:  "gemini-2.0-flash",
+				ModelID:  "gemini-2.5-flash",
 			},
 		},
 	}
@@ -111,7 +111,7 @@ func TestMergeWithDefaults(t *testing.T) {
 
 	// Should keep the provided values
 	assert.Equal(t, "google", result.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", result.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", result.LLM.Default.ModelID)
 
 	// Should fill in defaults for missing fields
 	assert.Equal(t, "INFO", result.Logging.Level)
@@ -159,7 +159,7 @@ func TestMergeWithDefaultsPreservesNonEmptyValues(t *testing.T) {
 		LLM: LLMConfig{
 			Default: LLMProviderConfig{
 				Provider: "google",
-				ModelID:  "gemini-2.0-flash",
+				ModelID:  "gemini-2.5-flash",
 			},
 			Providers: map[string]LLMProviderConfig{
 				"custom": {
@@ -184,7 +184,7 @@ func TestMergeWithDefaultsPreservesNonEmptyValues(t *testing.T) {
 
 	// Should preserve non-empty values
 	assert.Equal(t, "google", result.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", result.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", result.LLM.Default.ModelID)
 	assert.Len(t, result.LLM.Providers, 1)
 	assert.Equal(t, "custom", result.LLM.Providers["custom"].Provider)
 	assert.Equal(t, 5, result.LLM.GlobalSettings.ConcurrencyLevel)

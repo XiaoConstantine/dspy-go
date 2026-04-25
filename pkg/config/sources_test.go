@@ -201,7 +201,7 @@ func TestEnvironmentSourceSetExecutionValue(t *testing.T) {
 func TestCommandLineSource(t *testing.T) {
 	args := []string{
 		"--config.llm.default.provider=google",
-		"--config-llm-default-model-id", "gemini-2.0-flash",
+		"--config-llm-default-model-id", "gemini-2.5-flash",
 		"-c", "logging.level=DEBUG",
 	}
 
@@ -215,7 +215,7 @@ func TestCommandLineSource(t *testing.T) {
 	// Test parsing config args
 	configArgs := source.parseConfigArgs()
 	assert.Equal(t, "google", configArgs["llm.default.provider"])
-	assert.Equal(t, "gemini-2.0-flash", configArgs["llm.default.model.id"])
+	assert.Equal(t, "gemini-2.5-flash", configArgs["llm.default.model.id"])
 	assert.Equal(t, "DEBUG", configArgs["logging.level"])
 }
 

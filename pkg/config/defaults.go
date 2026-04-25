@@ -45,13 +45,13 @@ func getDefaultLLMConfig() LLMConfig {
 
 	return LLMConfig{
 		Default: LLMProviderConfig{
-			Provider: "anthropic",
-			ModelID:  "claude-3-5-sonnet-20250929",
-			APIKey:   "", // Should be provided via environment or config file
-			Endpoint: defaultEndpoint,
+			Provider:   "anthropic",
+			ModelID:    "claude-sonnet-4-6",
+			APIKey:     "", // Should be provided via environment or config file
+			Endpoint:   defaultEndpoint,
 			Generation: defaultGeneration,
 			Embedding: EmbeddingConfig{
-				Model:     "text-embedding-ada-002",
+				Model:     "text-embedding-3-small",
 				BatchSize: 32,
 				Params:    map[string]interface{}{},
 			},
@@ -62,7 +62,7 @@ func getDefaultLLMConfig() LLMConfig {
 				"streaming",
 			},
 		},
-		Teacher: LLMProviderConfig{}, // Empty - optional
+		Teacher:   LLMProviderConfig{},   // Empty - optional
 		Providers: getDefaultProviders(), // Populate with default providers
 		GlobalSettings: LLMGlobalSettings{
 			ConcurrencyLevel: 1,
@@ -78,7 +78,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 	return map[string]LLMProviderConfig{
 		"anthropic": {
 			Provider: "anthropic",
-			ModelID:  "claude-3-5-sonnet-20250929",
+			ModelID:  "claude-sonnet-4-6",
 			APIKey:   "",
 			Endpoint: EndpointConfig{
 				BaseURL: "https://api.anthropic.com",
@@ -104,7 +104,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 				StopSequences:    []string{},
 			},
 			Embedding: EmbeddingConfig{
-				Model:     "text-embedding-ada-002",
+				Model:     "text-embedding-3-small",
 				BatchSize: 32,
 				Params:    map[string]interface{}{},
 			},
@@ -142,7 +142,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 				StopSequences:    []string{},
 			},
 			Embedding: EmbeddingConfig{
-				Model:     "text-embedding-004",
+				Model:     "gemini-embedding-2",
 				BatchSize: 32,
 				Params:    map[string]interface{}{},
 			},
@@ -407,7 +407,6 @@ func getDefaultOptimizersConfig() OptimizersConfig {
 	}
 }
 
-
 // GetDefaultLLMProviderConfig returns a default LLM provider configuration.
 func GetDefaultLLMProviderConfig(provider string) *LLMProviderConfig {
 	providers := getDefaultProviders()
@@ -667,7 +666,6 @@ func mergeLLMGlobalSettings(partial LLMGlobalSettings, defaults LLMGlobalSetting
 
 	return result
 }
-
 
 // ValidateDefaults validates that the default configuration is valid.
 func ValidateDefaults() error {
@@ -1122,7 +1120,6 @@ func mergeMCPConnectionPoolConfig(partial MCPConnectionPoolConfig, defaults MCPC
 
 	return result
 }
-
 
 // mergeOptimizersConfig performs deep merge of optimizers configuration.
 func mergeOptimizersConfig(partial OptimizersConfig, defaults OptimizersConfig) OptimizersConfig {

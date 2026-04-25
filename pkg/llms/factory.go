@@ -113,33 +113,33 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
 			Models: map[string]core.ModelConfig{
 				string(core.ModelAnthropicHaiku): {
 					ID:           string(core.ModelAnthropicHaiku),
-					Name:         "Claude 3 Haiku",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+					Name:         "Claude Haiku 4.5",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
 				},
 				string(core.ModelAnthropicSonnet): {
 					ID:           string(core.ModelAnthropicSonnet),
-					Name:         "Claude 3.5 Sonnet",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+					Name:         "Claude Sonnet 4.6",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
 				},
 				string(core.ModelAnthropicOpus): {
 					ID:           string(core.ModelAnthropicOpus),
-					Name:         "Claude 3 Opus",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+					Name:         "Claude Opus 4.7",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
 				},
 				string(core.ModelAnthropicClaude45Opus): {
 					ID:           string(core.ModelAnthropicClaude45Opus),
 					Name:         "Claude Opus 4.5",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
 				},
-				string(core.ModelAnthropicClaude46Sonnet): {
-					ID:           string(core.ModelAnthropicClaude46Sonnet),
-					Name:         "Claude Sonnet 4.6",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+				string(core.ModelAnthropicClaude45Sonnet): {
+					ID:           string(core.ModelAnthropicClaude45Sonnet),
+					Name:         "Claude Sonnet 4.5",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
 				},
 				string(core.ModelAnthropicClaude46Opus): {
 					ID:           string(core.ModelAnthropicClaude46Opus),
 					Name:         "Claude Opus 4.6",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling"},
+					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
 				},
 			},
 		},
@@ -148,7 +148,7 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
 			Models: map[string]core.ModelConfig{
 				string(core.ModelGoogleGeminiFlash): {
 					ID:           string(core.ModelGoogleGeminiFlash),
-					Name:         "Gemini 2.0 Flash",
+					Name:         "Gemini 2.5 Flash",
 					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
 				},
 				string(core.ModelGoogleGeminiPro): {
@@ -158,17 +158,27 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
 				},
 				string(core.ModelGoogleGeminiFlashLite): {
 					ID:           string(core.ModelGoogleGeminiFlashLite),
-					Name:         "Gemini 2.0 Flash Lite",
+					Name:         "Gemini 2.5 Flash-Lite",
 					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
 				},
-				string(core.ModelGoogleGemini3ProPreview): {
-					ID:           string(core.ModelGoogleGemini3ProPreview),
-					Name:         "Gemini 3 Pro Preview",
+				string(core.ModelGoogleGemini31ProPreview): {
+					ID:           string(core.ModelGoogleGemini31ProPreview),
+					Name:         "Gemini 3.1 Pro Preview",
+					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
+				},
+				string(core.ModelGoogleGemini31ProPreviewTools): {
+					ID:           string(core.ModelGoogleGemini31ProPreviewTools),
+					Name:         "Gemini 3.1 Pro Preview Custom Tools",
 					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
 				},
 				string(core.ModelGoogleGemini3FlashPreview): {
 					ID:           string(core.ModelGoogleGemini3FlashPreview),
 					Name:         "Gemini 3 Flash Preview",
+					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
+				},
+				string(core.ModelGoogleGemini31FlashLitePreview): {
+					ID:           string(core.ModelGoogleGemini31FlashLitePreview),
+					Name:         "Gemini 3.1 Flash-Lite Preview",
 					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
 				},
 			},
@@ -200,6 +210,36 @@ func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
 					ID:           string(core.ModelOpenAIGPT4oMini),
 					Name:         "GPT-4o Mini",
 					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
+				},
+				string(core.ModelOpenAIGPT54): {
+					ID:           string(core.ModelOpenAIGPT54),
+					Name:         "GPT-5.4",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
+				},
+				string(core.ModelOpenAIGPT54Mini): {
+					ID:           string(core.ModelOpenAIGPT54Mini),
+					Name:         "GPT-5.4 Mini",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
+				},
+				string(core.ModelOpenAIGPT54Nano): {
+					ID:           string(core.ModelOpenAIGPT54Nano),
+					Name:         "GPT-5.4 Nano",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
+				},
+				string(core.ModelOpenAIGPT54Pro): {
+					ID:           string(core.ModelOpenAIGPT54Pro),
+					Name:         "GPT-5.4 Pro",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
+				},
+				string(core.ModelOpenAIGPT55): {
+					ID:           string(core.ModelOpenAIGPT55),
+					Name:         "GPT-5.5",
+					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
+				},
+				string(core.ModelOpenAIGPT55Pro): {
+					ID:           string(core.ModelOpenAIGPT55Pro),
+					Name:         "GPT-5.5 Pro",
+					Capabilities: []string{"completion", "chat", "json", "embedding", "tool-calling"},
 				},
 			},
 		},
@@ -325,12 +365,15 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	switch {
 	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus ||
 		modelID == core.ModelAnthropicClaude45Opus || modelID == core.ModelAnthropicClaude4Opus ||
-		modelID == core.ModelAnthropicClaude4Sonnet || modelID == core.ModelAnthropicClaude45Sonnet ||
-		strings.HasPrefix(modelStr, "claude-") || strings.HasPrefix(modelStr, "opus-") || strings.HasPrefix(modelStr, "sonnet-"):
+		modelID == core.ModelAnthropicClaude4Sonnet || modelID == core.ModelAnthropicClaude45Haiku ||
+		modelID == core.ModelAnthropicClaude45Sonnet || modelID == core.ModelAnthropicClaude47Opus ||
+		strings.HasPrefix(modelStr, "claude-") || strings.HasPrefix(modelStr, "opus-") ||
+		strings.HasPrefix(modelStr, "sonnet-") || strings.HasPrefix(modelStr, "haiku-"):
 		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(modelStr))
 	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro ||
-		modelID == core.ModelGoogleGeminiFlashLite ||
-		modelID == core.ModelGoogleGemini3ProPreview || modelID == core.ModelGoogleGemini3FlashPreview:
+		modelID == core.ModelGoogleGeminiFlashLite || modelID == core.ModelGoogleGemini31ProPreview ||
+		modelID == core.ModelGoogleGemini31ProPreviewTools || modelID == core.ModelGoogleGemini31FlashLitePreview ||
+		modelID == core.ModelGoogleGemini3FlashPreview:
 		llm, err = NewGeminiLLM(apiKey, modelID)
 	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo ||
 		modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini ||
@@ -340,6 +383,8 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 		modelID == core.ModelOpenAIGPT5 || modelID == core.ModelOpenAIGPT5Mini || modelID == core.ModelOpenAIGPT5Nano ||
 		modelID == core.ModelOpenAIGPT52 || modelID == core.ModelOpenAIGPT52Instant || modelID == core.ModelOpenAIGPT52Thinking ||
 		modelID == core.ModelOpenAIGPT52ThinkHigh || modelID == core.ModelOpenAIGPT52Pro || modelID == core.ModelOpenAIGPT52Codex ||
+		modelID == core.ModelOpenAIGPT54 || modelID == core.ModelOpenAIGPT54Mini || modelID == core.ModelOpenAIGPT54Nano ||
+		modelID == core.ModelOpenAIGPT54Pro || modelID == core.ModelOpenAIGPT55 || modelID == core.ModelOpenAIGPT55Pro ||
 		strings.HasPrefix(modelStr, "gpt-") || strings.HasPrefix(modelStr, "o1") || strings.HasPrefix(modelStr, "o3"):
 		llm, err = NewOpenAI(modelID, apiKey)
 	case strings.HasPrefix(string(modelID), "ollama:"):

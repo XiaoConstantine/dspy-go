@@ -208,8 +208,8 @@ func NewGeminiLLM(apiKey string, model core.ModelID) (*GeminiLLM, error) {
 	// Validate model ID
 	switch model {
 	case core.ModelGoogleGeminiPro, core.ModelGoogleGeminiFlash, core.ModelGoogleGeminiFlashLite,
-		core.ModelGoogleGemini3ProPreview, core.ModelGoogleGemini3FlashPreview,
-		core.ModelGoogleGemini20Flash, core.ModelGoogleGemini20FlashLite:
+		core.ModelGoogleGemini31ProPreview, core.ModelGoogleGemini31ProPreviewTools,
+		core.ModelGoogleGemini31FlashLitePreview, core.ModelGoogleGemini3FlashPreview:
 		break
 	default:
 		return nil, errors.WithFields(
@@ -320,12 +320,11 @@ var validGeminiModels = []core.ModelID{
 	core.ModelGoogleGeminiFlash,     // gemini-2.5-flash
 	core.ModelGoogleGeminiPro,       // gemini-2.5-pro
 	core.ModelGoogleGeminiFlashLite, // gemini-2.5-flash-lite
-	// Gemini 3 series (new)
-	core.ModelGoogleGemini3ProPreview,   // gemini-3-pro-preview
-	core.ModelGoogleGemini3FlashPreview, // gemini-3-flash-preview
-	// Gemini 2.0 series (new)
-	core.ModelGoogleGemini20Flash,     // gemini-2.0-flash
-	core.ModelGoogleGemini20FlashLite, // gemini-2.0-flash-lite
+	// Gemini 3.1 and 3 series
+	core.ModelGoogleGemini31ProPreview,       // gemini-3.1-pro-preview
+	core.ModelGoogleGemini31ProPreviewTools,  // gemini-3.1-pro-preview-customtools
+	core.ModelGoogleGemini31FlashLitePreview, // gemini-3.1-flash-lite-preview
+	core.ModelGoogleGemini3FlashPreview,      // gemini-3-flash-preview
 }
 
 // isValidGeminiModel checks if the model is a valid Gemini model.
@@ -970,7 +969,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 		opt(opts)
 	}
 	if opts.Model == "" {
-		opts.Model = "text-embedding-004"
+		opts.Model = string(core.ModelGoogleGeminiEmbedding2)
 	} else if !isValidGeminiEmbeddingModel(opts.Model) {
 		return nil, errors.New(errors.InvalidInput, fmt.Sprintf("invalid Gemini embedding model: %s", opts.Model))
 	}
@@ -1106,6 +1105,11 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = 32
 	}
+	if opts.Model == "" {
+		opts.Model = string(core.ModelGoogleGeminiEmbedding2)
+	} else if !isValidGeminiEmbeddingModel(opts.Model) {
+		return nil, errors.New(errors.InvalidInput, fmt.Sprintf("invalid Gemini embedding model: %s", opts.Model))
+	}
 
 	var allResults []core.EmbeddingResult
 	var firstError error
@@ -1121,7 +1125,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		batch := inputs[i:end]
 		// Prepare batch request
 		reqBody := geminiBatchEmbeddingRequest{
-			Model: "text-embedding-004",
+			Model: fmt.Sprintf("models/%s", opts.Model),
 		}
 
 		// Add each input to the batch request
@@ -1152,7 +1156,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidInput, "failed to marshal batch request"),
 					errors.Fields{
-						"model":      "text-embedding-004",
+						"model":      opts.Model,
 						"batch_size": len(batch),
 					})
 				errorIndex = i
@@ -1160,8 +1164,9 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			continue
 		}
 
-		url := fmt.Sprintf("%s/models/text-embedding-004:batchEmbedContents?key=%s",
+		url := fmt.Sprintf("%s/models/%s:batchEmbedContents?key=%s",
 			g.GetEndpointConfig().BaseURL,
+			opts.Model,
 			g.apiKey)
 
 		// Create request
@@ -1176,7 +1181,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidInput, "failed to create batch request"),
 					errors.Fields{
-						"model": "text-embedding-004",
+						"model": opts.Model,
 					})
 				errorIndex = i
 			}
@@ -1195,7 +1200,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.LLMGenerationFailed, "failed to send batch request"),
 					errors.Fields{
-						"model": "text-embedding-004",
+						"model": opts.Model,
 					})
 				errorIndex = i
 			}
@@ -1210,7 +1215,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.LLMGenerationFailed, "failed to read batch response"),
 					errors.Fields{
-						"model": "text-embedding-004",
+						"model": opts.Model,
 					})
 				errorIndex = i
 			}
@@ -1222,7 +1227,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d: %s", resp.StatusCode, string(body))),
 					errors.Fields{
-						"model":      "text-embedding-004",
+						"model":      opts.Model,
 						"statusCode": resp.StatusCode,
 					})
 				errorIndex = i
@@ -1236,7 +1241,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal batch response"),
 					errors.Fields{
-						"model": "text-embedding-004",
+						"model": opts.Model,
 					})
 				errorIndex = i
 			}
@@ -1249,7 +1254,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 				Vector:     embedding.Embedding.Values,
 				TokenCount: embedding.UsageMetadata.TotalTokenCount,
 				Metadata: map[string]interface{}{
-					"model":            "text-embedding-004",
+					"model":            opts.Model,
 					"prompt_tokens":    embedding.UsageMetadata.PromptTokenCount,
 					"truncated_tokens": embedding.Embedding.Statistics.TruncatedInputTokenCount,
 					"embedding_tokens": embedding.Embedding.Statistics.TokenCount,
@@ -1442,14 +1447,8 @@ func (g *GeminiLLM) StreamGenerate(ctx context.Context, prompt string, options .
 
 func isValidGeminiEmbeddingModel(s string) bool {
 	validModels := []string{
-		"gemini-embedding-exp-03-07",
-		"text-embedding-004",
-		"gemini-embedding-004",
-		"embedding-001",
-		"embedding-latest",
-		"embedding-gecko",
-		"embedding-gecko-001",
-		"text-embedding-gecko-001",
+		"gemini-embedding-2",
+		"gemini-embedding-001",
 	}
 
 	for _, model := range validModels {

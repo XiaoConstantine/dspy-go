@@ -531,6 +531,16 @@ func TestAnthropicLLM_isValidAnthropicModel(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "Valid Claude Opus 4.7 model",
+			model:    string(anthropicModelClaudeOpus47),
+			expected: true,
+		},
+		{
+			name:     "Valid Haiku alias",
+			model:    "haiku-4.5",
+			expected: true,
+		},
+		{
 			name:     "Invalid model",
 			model:    "invalid-model",
 			expected: false,
@@ -554,17 +564,22 @@ func TestAnthropicLLM_ModelNameNormalization(t *testing.T) {
 		{
 			name:      "Old Sonnet model name",
 			oldName:   "claude-3-sonnet-20240229",
-			expectNew: anthropic.ModelClaudeSonnet4_5_20250929,
+			expectNew: anthropic.ModelClaudeSonnet4_6,
 		},
 		{
 			name:      "Old Opus model name",
 			oldName:   "claude-3-opus-20240229",
-			expectNew: anthropic.ModelClaudeOpus4_1_20250805,
+			expectNew: anthropicModelClaudeOpus47,
 		},
 		{
 			name:      "Old Haiku model name",
 			oldName:   "claude-3-haiku-20240307",
-			expectNew: anthropic.ModelClaude_3_Haiku_20240307,
+			expectNew: anthropic.ModelClaudeHaiku4_5_20251001,
+		},
+		{
+			name:      "Haiku 4.5 alias",
+			oldName:   "claude-haiku-4-5",
+			expectNew: anthropic.ModelClaudeHaiku4_5,
 		},
 		{
 			name:      "Already new model name passes through",

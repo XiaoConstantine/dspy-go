@@ -184,11 +184,12 @@ func TestLLMRegistry_IsModelSupported(t *testing.T) {
 	}
 }
 
-func TestLLMRegistry_InferProviderForGemini3PreviewModels(t *testing.T) {
+func TestLLMRegistry_InferProviderForCurrentGeminiPreviewModels(t *testing.T) {
 	registry := NewLLMRegistry()
 
 	testCases := []ModelID{
-		ModelGoogleGemini3ProPreview,
+		ModelGoogleGemini31ProPreview,
+		ModelGoogleGemini31FlashLitePreview,
 		ModelGoogleGemini3FlashPreview,
 	}
 
@@ -209,7 +210,7 @@ func TestLLMRegistry_InferProviderForGemini3PreviewModels(t *testing.T) {
 	}
 }
 
-func TestLLMRegistry_InferProviderForGemini20Models(t *testing.T) {
+func TestLLMRegistry_DoesNotInferProviderForRetiredGemini20Models(t *testing.T) {
 	registry := NewLLMRegistry()
 
 	testCases := []ModelID{
@@ -219,16 +220,12 @@ func TestLLMRegistry_InferProviderForGemini20Models(t *testing.T) {
 
 	for _, modelID := range testCases {
 		t.Run(string(modelID), func(t *testing.T) {
-			if !registry.IsModelSupported(modelID) {
-				t.Fatalf("expected %s to be supported via provider inference", modelID)
+			if registry.IsModelSupported(modelID) {
+				t.Fatalf("expected %s to be retired from supported provider models", modelID)
 			}
 
-			provider, ok := registry.GetModelProvider(modelID)
-			if !ok {
-				t.Fatalf("expected provider inference for %s", modelID)
-			}
-			if provider != "google" {
-				t.Fatalf("expected google provider for %s, got %s", modelID, provider)
+			if provider, ok := registry.GetModelProvider(modelID); ok {
+				t.Fatalf("expected no provider inference for %s, got %s", modelID, provider)
 			}
 		})
 	}

@@ -19,7 +19,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Test LLM configuration
 	assert.Equal(t, "anthropic", config.LLM.Default.Provider)
-	assert.Equal(t, "claude-3-5-sonnet-20250929", config.LLM.Default.ModelID)
+	assert.Equal(t, "claude-sonnet-4-6", config.LLM.Default.ModelID)
 	assert.Equal(t, 8192, config.LLM.Default.Generation.MaxTokens)
 	assert.Equal(t, 0.5, config.LLM.Default.Generation.Temperature)
 
@@ -187,7 +187,7 @@ func TestConfigDiscovery(t *testing.T) {
 func TestEnvironmentSource(t *testing.T) {
 	// Set environment variables
 	os.Setenv("DSPY_LLM_DEFAULT_PROVIDER", "google")
-	os.Setenv("DSPY_LLM_DEFAULT_MODEL_ID", "gemini-2.0-flash")
+	os.Setenv("DSPY_LLM_DEFAULT_MODEL_ID", "gemini-2.5-flash")
 	os.Setenv("DSPY_LLM_GLOBAL_CONCURRENCY_LEVEL", "5")
 	os.Setenv("DSPY_LOGGING_LEVEL", "DEBUG")
 
@@ -206,7 +206,7 @@ func TestEnvironmentSource(t *testing.T) {
 
 	// Check that environment variables were applied
 	assert.Equal(t, "google", config.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", config.LLM.Default.ModelID)
 	assert.Equal(t, 5, config.LLM.GlobalSettings.ConcurrencyLevel)
 	assert.Equal(t, "DEBUG", config.Logging.Level)
 }
@@ -220,7 +220,7 @@ func TestFileSource(t *testing.T) {
 llm:
   default:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
     generation:
       max_tokens: 4096
       temperature: 0.7
@@ -247,7 +247,7 @@ execution:
 
 	// Check that file configuration was applied
 	assert.Equal(t, "google", config.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", config.LLM.Default.ModelID)
 	assert.Equal(t, 4096, config.LLM.Default.Generation.MaxTokens)
 	assert.Equal(t, 0.7, config.LLM.Default.Generation.Temperature)
 	assert.Equal(t, 3, config.LLM.GlobalSettings.ConcurrencyLevel)
@@ -266,7 +266,7 @@ func TestMultiSource(t *testing.T) {
 llm:
   default:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
     generation:
       temperature: 0.7
 
@@ -299,7 +299,7 @@ logging:
 
 	// Environment should override file
 	assert.Equal(t, "anthropic", config.LLM.Default.Provider)       // From env
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.Default.ModelID) // From file
+	assert.Equal(t, "gemini-2.5-flash", config.LLM.Default.ModelID) // From file
 	assert.Equal(t, 0.7, config.LLM.Default.Generation.Temperature) // From file
 	assert.Equal(t, "ERROR", config.Logging.Level)                  // From env
 }
@@ -349,7 +349,7 @@ func TestConfigUpdate(t *testing.T) {
 	// Test updating configuration
 	err = manager.Update(func(config *Config) error {
 		config.LLM.Default.Provider = "google"
-		config.LLM.Default.ModelID = "gemini-2.0-flash"
+		config.LLM.Default.ModelID = "gemini-2.5-flash"
 		config.LLM.GlobalSettings.ConcurrencyLevel = 5
 		return nil
 	})
@@ -357,7 +357,7 @@ func TestConfigUpdate(t *testing.T) {
 
 	config := manager.Get()
 	assert.Equal(t, "google", config.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", config.LLM.Default.ModelID)
 	assert.Equal(t, 5, config.LLM.GlobalSettings.ConcurrencyLevel)
 }
 
@@ -461,7 +461,7 @@ func TestConfigurationSystemIntegration(t *testing.T) {
 llm:
   default:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
     api_key: "test-key-from-file"
     endpoint:
       timeout: "45s"
@@ -481,7 +481,7 @@ llm:
       batch_size: 32
   teacher:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
     api_key: "test-teacher-key"
     endpoint:
       timeout: "60s"
@@ -649,7 +649,7 @@ storage:
 
 	// Verify file configuration was loaded
 	assert.Equal(t, "google", config.LLM.Default.Provider)
-	assert.Equal(t, "gemini-2.0-flash", config.LLM.Default.ModelID)
+	assert.Equal(t, "gemini-2.5-flash", config.LLM.Default.ModelID)
 	assert.Equal(t, 4096, config.LLM.Default.Generation.MaxTokens)
 	assert.Equal(t, 0.7, config.LLM.Default.Generation.Temperature)
 	assert.Equal(t, 45*time.Second, config.LLM.Default.Endpoint.Timeout)

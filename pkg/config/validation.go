@@ -157,7 +157,6 @@ func (v *Validator) validateCustomRules(config *Config) ValidationErrors {
 		errors = append(errors, errs...)
 	}
 
-
 	return errors
 }
 
@@ -318,7 +317,6 @@ func (v *Validator) validateExecutionConfig(config *ExecutionConfig) ValidationE
 	return errors
 }
 
-
 // registerAllValidators registers all custom validators.
 func registerAllValidators(validate *validator.Validate) error {
 	validators := map[string]validator.Func{
@@ -433,8 +431,6 @@ func validateBackendType(fl validator.FieldLevel) bool {
 	return false
 }
 
-
-
 // validateComparisonStrategy validates comparison strategies.
 func validateComparisonStrategy(fl validator.FieldLevel) bool {
 	strategy := fl.Field().String()
@@ -471,7 +467,6 @@ func validateExporterType(fl validator.FieldLevel) bool {
 	return false
 }
 
-
 // Helper functions for model validation.
 // Note: These functions provide basic validation. Full validation is performed
 // by the provider-specific packages during LLM initialization.
@@ -485,6 +480,7 @@ func isValidAnthropicModel(modelID string) bool {
 		"claude-opus",
 		"opus-",
 		"sonnet-",
+		"haiku-",
 	}
 	for _, prefix := range validPrefixes {
 		if strings.HasPrefix(modelID, prefix) {
@@ -495,6 +491,15 @@ func isValidAnthropicModel(modelID string) bool {
 }
 
 func isValidGoogleModel(modelID string) bool {
+	retiredModels := map[string]struct{}{
+		"gemini-3-pro-preview":  {},
+		"gemini-2.0-flash":      {},
+		"gemini-2.0-flash-lite": {},
+	}
+	if _, retired := retiredModels[modelID]; retired {
+		return false
+	}
+
 	// Allow any gemini, gemma, or palm model - full validation happens in the provider
 	validPrefixes := []string{
 		"gemini-",
