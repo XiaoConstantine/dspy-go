@@ -51,7 +51,7 @@ jobs:
           echo "body_path=RELEASE_BODY.md" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.TAG }}
           body_path: ${{ steps.changelog.outputs.body_path }}
