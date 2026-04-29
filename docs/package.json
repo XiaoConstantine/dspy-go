@@ -29,6 +29,9 @@
     "prettier": "^3.6.2",
     "vite": "^7.3.2"
   },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
   "engines": {
     "node": ">=20.11.0"
   },
