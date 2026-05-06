@@ -4,8 +4,8 @@ github.com/XiaoConstantine/mcp-go v0.3.1 h1:5aSrqvvulbKI1hxN7Aj3iSotX0VRSpDShXID
 github.com/XiaoConstantine/mcp-go v0.3.1/go.mod h1:qsY3Gm4CYMREmoLXEMwtf0Hdb5F957kgcpF6huoNHcY=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
-github.com/anthropics/anthropic-sdk-go v1.38.0 h1:bA4DcK+91gorIX+5VTONnynyt9LRU4nnN6rRQ+j/NIg=
-github.com/anthropics/anthropic-sdk-go v1.38.0/go.mod h1:d288C1L+m74OYuYBvc4UFtR1Q8J0gC55oYDh2t+XxdI=
+github.com/anthropics/anthropic-sdk-go v1.41.0 h1:D//vDxQMAmWOcOV3QtgESOneIxJOfWxGIHsmJgGGGp4=
+github.com/anthropics/anthropic-sdk-go v1.41.0/go.mod h1:UgnI27pSnfj2Ux2iE6Dkq9o/3MZn0jdalFdQIdWMS+Q=
 github.com/apache/arrow/go/v13 v13.0.0 h1:kELrvDQuKZo8csdWYqBQfyi431x6Zs/YJTEgUuSVcWk=
 github.com/apache/arrow/go/v13 v13.0.0/go.mod h1:W69eByFNO0ZR30q1/7Sr9d83zcVZmF2MiP3fFYAWJOc=
 github.com/apache/thrift v0.22.0 h1:r7mTJdj51TMDe6RtcmNdQxgn9XcyfGDOzegMDRg47uc=
@@ -80,6 +80,8 @@ github.com/rogpeppe/go-internal v1.9.0 h1:73kH8U+JUqXU8lRuOHeVHaa/SZPifC7BkcraZV
 github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
 github.com/sourcegraph/conc v0.3.0 h1:OQTbbt6P72L20UqAkXXuLOj79LfEanQ+YQFNpLA9ySo=
 github.com/sourcegraph/conc v0.3.0/go.mod h1:Sdozi7LEKbFPqYX2/J+iBAM6HpqSLTASQIKqDmF7Mt0=
+github.com/standard-webhooks/standard-webhooks/libraries v0.0.0-20260427160145-3afa6683f8b2 h1:q/QNlQMqBFYT7z9zt8vjbh0XvbcTXhN4Q+gi7aEBvkY=
+github.com/standard-webhooks/standard-webhooks/libraries v0.0.0-20260427160145-3afa6683f8b2/go.mod h1:L1MQhA6x4dn9r007T033lsaZMv9EmBAdXyU/+EF40fo=
 github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
 github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
