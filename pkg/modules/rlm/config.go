@@ -3,7 +3,10 @@
 // making iterative queries to sub-LLMs until a final answer is reached.
 package rlm
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ContextPolicyPreset controls how structured iteration history is replayed
 // back to the root model on subsequent iterations.
@@ -29,6 +32,10 @@ type Config struct {
 	// IterationInstruction overrides the iteration module instruction.
 	// Empty string uses the compact/full built-in instruction based on config.
 	IterationInstruction string
+
+	// PromptPolicy optionally appends model-specific operating guidance to the
+	// RLM prompts without replacing the base RLM protocol.
+	PromptPolicy *PromptPolicy
 
 	// MaxIterations is the maximum number of iteration loops (default: 30).
 	MaxIterations int
@@ -187,6 +194,24 @@ type AdaptiveIterationConfig struct {
 	ConfidenceDetector func(response string) bool
 }
 
+// PromptPolicy contains model-specific RLM operating guidance.
+type PromptPolicy struct {
+	// Name identifies the policy in prompts.
+	Name string
+
+	// SubLLMContextChars is the recommended maximum context size for one sub-call.
+	SubLLMContextChars int
+
+	// BatchChars is the recommended target size for batched sub-call chunks.
+	BatchChars int
+
+	// MaxSubCalls is an optional soft budget for generated plans.
+	MaxSubCalls int
+
+	// ExtraInstructions contains additional model-specific guidance.
+	ExtraInstructions []string
+}
+
 // IterationProgress tracks progress and confidence during iteration.
 type IterationProgress struct {
 	// CurrentIteration is the current iteration number (1-indexed).
@@ -216,6 +241,7 @@ func DefaultConfig() Config {
 	return Config{
 		OuterInstruction:             "",
 		IterationInstruction:         "",
+		PromptPolicy:                 nil,
 		MaxIterations:                30,
 		MaxTokens:                    0,
 		Verbose:                      false,
@@ -228,6 +254,38 @@ func DefaultConfig() Config {
 		AdaptiveCheckpointThreshold:  5,
 		ContextInfoPreviewChars:      160,
 		MaxFullContextQueryChars:     DefaultMaxFullContextQueryChars,
+	}
+}
+
+// PromptPolicyForModel returns model-specific RLM guidance for known model families.
+func PromptPolicyForModel(model string) (PromptPolicy, bool) {
+	lower := strings.ToLower(model)
+	switch {
+	case strings.Contains(lower, "qwen"):
+		return PromptPolicy{
+			Name:               "qwen-conservative",
+			SubLLMContextChars: 200000,
+			BatchChars:         100000,
+			MaxSubCalls:        100,
+			ExtraInstructions: []string{
+				"Use QueryWith or QueryBatchedRaw over selected slices; avoid full-context Query on large inputs.",
+				"Batch examples before sub-calling; do not recurse per row unless pairwise or multi-step analysis requires it.",
+				"Keep Go code short and verify syntax before launching many recursive calls.",
+			},
+		}, true
+	case strings.Contains(lower, "mini") || strings.Contains(lower, "flash") || strings.Contains(lower, "8b"):
+		return PromptPolicy{
+			Name:               "small-model-conservative",
+			SubLLMContextChars: 200000,
+			BatchChars:         100000,
+			MaxSubCalls:        64,
+			ExtraInstructions: []string{
+				"Prefer deterministic slicing plus batched sub-calls over deep recursion.",
+				"Keep code and FINAL outputs short to preserve output budget.",
+			},
+		}, true
+	default:
+		return PromptPolicy{}, false
 	}
 }
 
@@ -245,6 +303,9 @@ func DefaultAdaptiveIterationConfig() AdaptiveIterationConfig {
 
 func cloneConfig(cfg Config) Config {
 	cloned := cfg
+	if cfg.PromptPolicy != nil {
+		cloned.PromptPolicy = clonePromptPolicy(*cfg.PromptPolicy)
+	}
 	if cfg.HistoryCompression != nil {
 		history := *cfg.HistoryCompression
 		cloned.HistoryCompression = &history
@@ -262,6 +323,14 @@ func cloneConfig(cfg Config) Config {
 		cloned.OutputTruncation = &output
 	}
 	return cloned
+}
+
+func clonePromptPolicy(policy PromptPolicy) *PromptPolicy {
+	cloned := policy
+	if policy.ExtraInstructions != nil {
+		cloned.ExtraInstructions = append([]string(nil), policy.ExtraInstructions...)
+	}
+	return &cloned
 }
 
 // Option configures the RLM.
@@ -321,6 +390,13 @@ func WithIterationDemos(enabled bool) Option {
 func WithCompactIterationInstructions(enabled bool) Option {
 	return func(c *Config) {
 		c.CompactIterationInstructions = enabled
+	}
+}
+
+// WithPromptPolicy appends model-specific RLM operating guidance to prompts.
+func WithPromptPolicy(policy PromptPolicy) Option {
+	return func(c *Config) {
+		c.PromptPolicy = clonePromptPolicy(policy)
 	}
 }
 

@@ -323,6 +323,7 @@ func TestConfig(t *testing.T) {
 	assert.Equal(t, DefaultOutputTruncationConfig(), *cfg.OutputTruncation)
 	assert.Equal(t, 160, cfg.ContextInfoPreviewChars)
 	assert.Equal(t, DefaultMaxFullContextQueryChars, cfg.MaxFullContextQueryChars)
+	assert.Nil(t, cfg.PromptPolicy)
 
 	// Test options
 	cfg = DefaultConfig()
@@ -350,6 +351,14 @@ func TestConfig(t *testing.T) {
 	assert.False(t, cfg.CompactIterationInstructions)
 
 	cfg = DefaultConfig()
+	policy := PromptPolicy{Name: "test-policy", ExtraInstructions: []string{"keep this"}}
+	WithPromptPolicy(policy)(&cfg)
+	require.NotNil(t, cfg.PromptPolicy)
+	assert.Equal(t, "test-policy", cfg.PromptPolicy.Name)
+	policy.ExtraInstructions[0] = "mutated"
+	assert.Equal(t, "keep this", cfg.PromptPolicy.ExtraInstructions[0])
+
+	cfg = DefaultConfig()
 	WithREPLSetup(func(repl *YaegiREPL) error { return nil })(&cfg)
 	assert.NotNil(t, cfg.REPLSetup)
 
@@ -372,6 +381,63 @@ func TestConfig(t *testing.T) {
 	cfg = DefaultConfig()
 	WithMaxFullContextQueryChars(0)(&cfg)
 	assert.Equal(t, 0, cfg.MaxFullContextQueryChars)
+}
+
+func TestPromptPolicyForModel(t *testing.T) {
+	policy, ok := PromptPolicyForModel("Qwen3-Coder-480B-A35B-Instruct")
+	require.True(t, ok)
+	assert.Equal(t, "qwen-conservative", policy.Name)
+	assert.Equal(t, 100, policy.MaxSubCalls)
+	assert.NotEmpty(t, policy.ExtraInstructions)
+
+	policy, ok = PromptPolicyForModel("gemini-2.5-flash")
+	require.True(t, ok)
+	assert.Equal(t, "small-model-conservative", policy.Name)
+	assert.Equal(t, 64, policy.MaxSubCalls)
+
+	_, ok = PromptPolicyForModel("claude-sonnet-4-20250514")
+	assert.False(t, ok)
+}
+
+func TestRLMWithPromptPolicyAppendsToInstructions(t *testing.T) {
+	mockRoot := &mockLLM{}
+	mockSub := &mockSubLLMClient{}
+	policy := PromptPolicy{
+		Name:               "test-profile",
+		SubLLMContextChars: 200000,
+		BatchChars:         100000,
+		MaxSubCalls:        8,
+		ExtraInstructions:  []string{"Prefer batched sub-calls.", " "},
+	}
+
+	rlm := New(mockRoot, mockSub, WithPromptPolicy(policy))
+
+	outerInstruction := rlm.GetSignature().Instruction
+	assert.Contains(t, outerInstruction, DefaultOuterInstruction())
+	assert.Contains(t, outerInstruction, "MODEL-SPECIFIC RLM POLICY")
+	assert.Contains(t, outerInstruction, "test-profile")
+
+	iterationInstruction := rlm.iterationModule.GetSignature().Instruction
+	assert.Contains(t, iterationInstruction, DefaultIterationInstruction(true))
+	assert.Contains(t, iterationInstruction, "Recommended sub-LLM context cap: 200000")
+	assert.Contains(t, iterationInstruction, "Soft sub-call budget: at most 8 sub-calls")
+	assert.Contains(t, iterationInstruction, "Prefer batched sub-calls.")
+}
+
+func TestRLMSetConfigRebuildsPromptPolicy(t *testing.T) {
+	rlm := New(&mockLLM{}, &mockSubLLMClient{})
+	cfg := rlm.Config()
+	cfg.OuterInstruction = "Custom outer."
+	cfg.IterationInstruction = "Custom iteration."
+	cfg.PromptPolicy = &PromptPolicy{Name: "set-config-profile", MaxSubCalls: 3}
+
+	rlm.SetConfig(cfg)
+
+	assert.Contains(t, rlm.GetSignature().Instruction, "Custom outer.")
+	assert.Contains(t, rlm.GetSignature().Instruction, "set-config-profile")
+	require.NotNil(t, rlm.iterationModule)
+	assert.Contains(t, rlm.iterationModule.GetSignature().Instruction, "Custom iteration.")
+	assert.Contains(t, rlm.iterationModule.GetSignature().Instruction, "Soft sub-call budget: at most 3 sub-calls")
 }
 
 // TestRLMNew tests the RLM constructor.

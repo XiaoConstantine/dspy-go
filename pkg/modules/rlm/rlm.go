@@ -340,17 +340,50 @@ func (r *RLM) rebuildIterationModule() {
 }
 
 func resolveOuterInstruction(cfg Config) string {
-	if cfg.OuterInstruction != "" {
-		return cfg.OuterInstruction
+	instruction := cfg.OuterInstruction
+	if instruction == "" {
+		instruction = DefaultOuterInstruction()
 	}
-	return DefaultOuterInstruction()
+	return appendPromptPolicy(instruction, cfg.PromptPolicy)
 }
 
 func resolveIterationInstruction(cfg Config) string {
-	if cfg.IterationInstruction != "" {
-		return cfg.IterationInstruction
+	instruction := cfg.IterationInstruction
+	if instruction == "" {
+		instruction = DefaultIterationInstruction(cfg.CompactIterationInstructions)
 	}
-	return DefaultIterationInstruction(cfg.CompactIterationInstructions)
+	return appendPromptPolicy(instruction, cfg.PromptPolicy)
+}
+
+func appendPromptPolicy(instruction string, policy *PromptPolicy) string {
+	if policy == nil || policy.Name == "" {
+		return instruction
+	}
+
+	var b strings.Builder
+	b.WriteString(instruction)
+	b.WriteString("\n\nMODEL-SPECIFIC RLM POLICY:\n")
+	b.WriteString("- Profile: ")
+	b.WriteString(policy.Name)
+	b.WriteByte('\n')
+	if policy.SubLLMContextChars > 0 {
+		fmt.Fprintf(&b, "- Recommended sub-LLM context cap: %d characters per call.\n", policy.SubLLMContextChars)
+	}
+	if policy.BatchChars > 0 {
+		fmt.Fprintf(&b, "- Recommended batch chunk target: %d characters.\n", policy.BatchChars)
+	}
+	if policy.MaxSubCalls > 0 {
+		fmt.Fprintf(&b, "- Soft sub-call budget: at most %d sub-calls unless the task explicitly requires more.\n", policy.MaxSubCalls)
+	}
+	for _, instruction := range policy.ExtraInstructions {
+		if strings.TrimSpace(instruction) == "" {
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(instruction)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // ProcessWithInterceptors executes the RLM module's logic with interceptor support.
