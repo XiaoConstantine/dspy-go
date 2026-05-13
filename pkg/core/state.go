@@ -89,7 +89,7 @@ func persistedModuleTypeName(module Module) string {
 	if typ == nil {
 		return ""
 	}
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
 	if typ.Name() != "" {

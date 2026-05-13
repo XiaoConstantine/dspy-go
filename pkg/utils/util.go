@@ -120,7 +120,7 @@ func ConvertTypedInputsToLegacy(inputs any) (map[string]any, error) {
 	t := reflect.TypeOf(inputs)
 
 	// Handle pointer types
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return make(map[string]any), nil
 		}
@@ -183,7 +183,7 @@ func ConvertLegacyOutputsToTyped[T any](outputs map[string]any) (T, error) {
 	}
 
 	// Handle pointer to struct types
-	if outputType.Kind() == reflect.Ptr {
+	if outputType.Kind() == reflect.Pointer {
 		elemType := outputType.Elem()
 		if elemType.Kind() != reflect.Struct {
 			return zero, fmt.Errorf("unsupported output type %T: pointers are only supported for struct types, not %s", zero, elemType.Kind())

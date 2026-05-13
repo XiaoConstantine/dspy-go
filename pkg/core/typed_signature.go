@@ -83,7 +83,7 @@ func getReflectTypes[TInput, TOutput any]() (reflect.Type, reflect.Type) {
 // preserving nil and non-pointer types.
 func normalizeReflectType(t reflect.Type) reflect.Type {
 	// Handle pointer types
-	if t != nil && t.Kind() == reflect.Ptr {
+	if t != nil && t.Kind() == reflect.Pointer {
 		return t.Elem()
 	}
 	return t
@@ -285,7 +285,7 @@ func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 // inferFieldType determines DSPy field type from Go type.
 func inferFieldType(t reflect.Type) FieldType {
 	// Handle pointer types
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -306,7 +306,7 @@ func validateStruct(value any, expectedFields []FieldMetadata, fieldType string)
 	v := reflect.ValueOf(value)
 
 	// Handle pointer types
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return fmt.Errorf("%s cannot be nil", fieldType)
 		}
