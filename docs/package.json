@@ -30,7 +30,8 @@
     "vite": "^7.3.2"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.10",
+    "@babel/plugin-transform-modules-systemjs": "^7.29.4"
   },
   "engines": {
     "node": ">=20.11.0"
