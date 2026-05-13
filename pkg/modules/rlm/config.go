@@ -13,6 +13,11 @@ const (
 	ContextPolicyFull         ContextPolicyPreset = "full"
 	ContextPolicyCheckpointed ContextPolicyPreset = "checkpointed"
 	ContextPolicyAdaptive     ContextPolicyPreset = "adaptive"
+
+	// DefaultMaxFullContextQueryChars is the default guardrail for Query,
+	// QueryBatched, QueryAsync, and QueryBatchedAsync calls that would prepend
+	// the entire loaded context.
+	DefaultMaxFullContextQueryChars = 200000
 )
 
 // Config holds RLM configuration.
@@ -84,8 +89,9 @@ type Config struct {
 	// exposed in context_info metadata. Set to 0 to disable raw preview text.
 	ContextInfoPreviewChars int
 
-	// MaxFullContextQueryChars limits Query()/QueryBatched() calls that auto-prepend the
-	// full loaded context. Zero disables the guardrail.
+	// MaxFullContextQueryChars limits Query(), QueryBatched(), QueryAsync(), and
+	// QueryBatchedAsync() calls that auto-prepend the full loaded context. Zero
+	// disables the guardrail.
 	MaxFullContextQueryChars int
 
 	// OnProgress is called at the start of each iteration with progress info.
@@ -221,7 +227,7 @@ func DefaultConfig() Config {
 		ContextPolicy:                ContextPolicyAdaptive,
 		AdaptiveCheckpointThreshold:  5,
 		ContextInfoPreviewChars:      160,
-		MaxFullContextQueryChars:     0,
+		MaxFullContextQueryChars:     DefaultMaxFullContextQueryChars,
 	}
 }
 
@@ -472,8 +478,9 @@ func WithContextInfoPreviewChars(n int) Option {
 	}
 }
 
-// WithMaxFullContextQueryChars limits Query()/QueryBatched() calls that auto-prepend
-// the full loaded context. Use 0 to disable the guardrail.
+// WithMaxFullContextQueryChars limits Query(), QueryBatched(), QueryAsync(), and
+// QueryBatchedAsync() calls that auto-prepend the full loaded context. Use 0 to
+// disable the guardrail.
 func WithMaxFullContextQueryChars(n int) Option {
 	return func(c *Config) {
 		if n < 0 {

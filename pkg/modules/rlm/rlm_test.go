@@ -322,7 +322,7 @@ func TestConfig(t *testing.T) {
 	require.NotNil(t, cfg.OutputTruncation)
 	assert.Equal(t, DefaultOutputTruncationConfig(), *cfg.OutputTruncation)
 	assert.Equal(t, 160, cfg.ContextInfoPreviewChars)
-	assert.Equal(t, 0, cfg.MaxFullContextQueryChars)
+	assert.Equal(t, DefaultMaxFullContextQueryChars, cfg.MaxFullContextQueryChars)
 
 	// Test options
 	cfg = DefaultConfig()
@@ -368,6 +368,10 @@ func TestConfig(t *testing.T) {
 	cfg = DefaultConfig()
 	WithMaxFullContextQueryChars(50000)(&cfg)
 	assert.Equal(t, 50000, cfg.MaxFullContextQueryChars)
+
+	cfg = DefaultConfig()
+	WithMaxFullContextQueryChars(0)(&cfg)
+	assert.Equal(t, 0, cfg.MaxFullContextQueryChars)
 }
 
 // TestRLMNew tests the RLM constructor.
@@ -455,6 +459,46 @@ func TestRLMWithCodeExecution(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", result.Response)
 	assert.Equal(t, 2, result.Iterations)
+}
+
+func TestRLMDefaultBlocksLargeFullContextQuery(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nTry the default full-context query.\n\nAction:\nquery\n\nCode:\nanswer := Query(\"should be blocked\")\nfmt.Println(answer)\n\nAnswer:\n",
+			"Reasoning:\nThe query was blocked, so finish.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ndone",
+		},
+	}
+	mockSub := &promptCapturingMockSubLLMClient{response: "should not be used"}
+
+	rlm := New(mockRoot, mockSub, WithMaxIterations(2))
+	largeContext := strings.Repeat("x", DefaultMaxFullContextQueryChars+1)
+	result, err := rlm.Complete(context.Background(), largeContext, "q")
+	require.NoError(t, err)
+	assert.Equal(t, "done", result.Response)
+	assert.Empty(t, mockSub.getCapturedPrompts())
+}
+
+func TestRLMCanDisableLargeFullContextQueryGuard(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nUse the explicitly allowed full-context query.\n\nAction:\nquery\n\nCode:\nanswer := Query(\"allowed\")\nFINAL(answer)\n\nAnswer:\n",
+		},
+	}
+	mockSub := &promptCapturingMockSubLLMClient{response: "sub response"}
+
+	rlm := New(mockRoot, mockSub,
+		WithMaxIterations(1),
+		WithMaxFullContextQueryChars(0),
+	)
+	largeContext := strings.Repeat("x", DefaultMaxFullContextQueryChars+1)
+	result, err := rlm.Complete(context.Background(), largeContext, "q")
+	require.NoError(t, err)
+	assert.Equal(t, "sub response", result.Response)
+
+	prompts := mockSub.getCapturedPrompts()
+	require.Len(t, prompts, 1)
+	assert.Contains(t, prompts[0], largeContext[:100])
+	assert.Contains(t, prompts[0], "allowed")
 }
 
 // TestRLMMaxIterations tests that max iterations is respected.
