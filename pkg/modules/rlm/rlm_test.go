@@ -1865,7 +1865,7 @@ func TestSubRLMDepthLimit(t *testing.T) {
 
 	// Try to execute sub-RLM at max depth
 	ctx := context.Background()
-	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now(), NewTokenTracker(), NewImmutableHistory())
+	_, err = r.executeSubRLM(ctx, repl, "test query", "parent query", nil, time.Now(), NewTokenTracker(), NewImmutableHistory(), newSubRLMBudgetTracker())
 
 	// Should fail due to depth limit
 	require.Error(t, err)
@@ -2126,17 +2126,90 @@ func TestEnforceSubRLMBudgets(t *testing.T) {
 	history := NewImmutableHistory()
 	history.Append(HistoryEntry{Iteration: 1, Action: "subrlm", Success: true})
 
-	err := r.enforceSubRLMBudgets(history, NewTokenTracker())
+	err := r.enforceSubRLMBudgets(history, newSubRLMBudgetTracker())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "direct child budget")
 
-	tracker := NewTokenTracker()
-	tracker.AddSubRLMCall(SubRLMCall{Query: "one"})
-	tracker.AddSubRLMCall(SubRLMCall{Query: "two"})
+	budget := newSubRLMBudgetTracker()
+	require.NoError(t, budget.reserve(2))
+	require.NoError(t, budget.reserve(2))
 
-	err = r.enforceSubRLMBudgets(NewImmutableHistory(), tracker)
+	err = r.enforceSubRLMBudgets(NewImmutableHistory(), budget)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "total budget")
+}
+
+func TestSubRLMTotalBudgetCountsNestedTree(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDelegate once.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nfirst child\n\nAnswer:\n",
+			"Reasoning:\nTry a nested delegate.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nnested child\n\nAnswer:\n",
+			"Reasoning:\nNested delegate was blocked.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\nchild done",
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\ncomplete",
+		},
+	}
+
+	rlm := New(mockRoot, &mockSubLLMClient{},
+		WithMaxIterations(2),
+		WithSubRLMConfig(SubRLMConfig{
+			MaxDepth:               4,
+			MaxIterationsPerSubRLM: 3,
+			MaxTotalSubRLMCalls:    1,
+		}),
+	)
+
+	result, trace, err := rlm.CompleteWithTrace(context.Background(), "ctx", "q")
+	require.NoError(t, err)
+	require.NotNil(t, trace)
+	assert.Equal(t, "complete", result.Response)
+	assert.Equal(t, 1, trace.SubRLMCallCount)
+	assert.Contains(t, strings.Join(mockRoot.prompts, "\n"), "sub-RLM total budget exceeded")
+}
+
+func TestSubRLMNestedTokenUsageIsNotDoubleCounted(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDelegate once.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nfirst child\n\nAnswer:\n",
+			"Reasoning:\nDelegate again.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nnested child\n\nAnswer:\n",
+			"Reasoning:\nNested answer.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\nnested done",
+			"Reasoning:\nChild answer.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\nchild done",
+			"Reasoning:\nRoot answer.\n\nAction:\nfinal\n\nCode:\n\nSubQuery:\n\nAnswer:\ncomplete",
+		},
+	}
+
+	rlm := New(mockRoot, &mockSubLLMClient{},
+		WithMaxIterations(3),
+		WithSubRLMConfig(SubRLMConfig{
+			MaxDepth:               4,
+			MaxIterationsPerSubRLM: 3,
+			MaxTotalSubRLMCalls:    2,
+		}),
+	)
+
+	result, err := rlm.Complete(context.Background(), "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, "complete", result.Response)
+
+	tracker := rlm.GetTokenTracker()
+	assert.Equal(t, core.TokenUsage{PromptTokens: 500, CompletionTokens: 250, TotalTokens: 750}, tracker.GetTotalUsage())
+	assert.Equal(t, core.TokenUsage{PromptTokens: 300, CompletionTokens: 150, TotalTokens: 450}, tracker.GetSubRLMUsage())
+
+	subRLMCalls := tracker.GetSubRLMCalls()
+	require.Len(t, subRLMCalls, 1)
+	assert.Equal(t, "first child", subRLMCalls[0].Query)
+	assert.Equal(t, 300, subRLMCalls[0].PromptTokens)
+	assert.Equal(t, 150, subRLMCalls[0].CompletionTokens)
+}
+
+func TestChildSubRLMConfigPreservesBudgets(t *testing.T) {
+	cfg := childSubRLMConfig(1, 4, 3, 2, 6)
+
+	require.NotNil(t, cfg)
+	assert.Equal(t, 4, cfg.MaxDepth)
+	assert.Equal(t, 2, cfg.CurrentDepth)
+	assert.Equal(t, 3, cfg.MaxIterationsPerSubRLM)
+	assert.Equal(t, 2, cfg.MaxDirectSubRLMCalls)
+	assert.Equal(t, 6, cfg.MaxTotalSubRLMCalls)
 }
 
 // TestFormatREPLStateRich tests the rich variable formatting.

@@ -59,6 +59,28 @@ type ImmutableHistory struct {
 	entries []HistoryEntry
 }
 
+type subRLMBudgetTracker struct {
+	mu    sync.Mutex
+	count int
+}
+
+func newSubRLMBudgetTracker() *subRLMBudgetTracker {
+	return &subRLMBudgetTracker{}
+}
+
+func (t *subRLMBudgetTracker) reserve(maxCalls int) error {
+	if t == nil || maxCalls <= 0 {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.count >= maxCalls {
+		return fmt.Errorf("sub-RLM total budget exceeded (limit %d)", maxCalls)
+	}
+	t.count++
+	return nil
+}
+
 // NewImmutableHistory creates a new empty history.
 func NewImmutableHistory() *ImmutableHistory {
 	return &ImmutableHistory{
@@ -473,6 +495,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 
 	// Build structured iteration history.
 	history := NewImmutableHistory()
+	subRLMBudget := newSubRLMBudgetTracker()
 
 	// Iteration loop
 	for i := 0; i < maxIterations; i++ {
@@ -552,7 +575,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 
 		// Check for subrlm action (nested RLM loop)
 		if action == "subrlm" {
-			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start, tokenTracker, history)
+			subRLMResult, err := r.executeSubRLM(ctx, replEnv, subquery, query, traceSession, start, tokenTracker, history, subRLMBudget)
 			if err != nil {
 				logger.Warn(ctx, "[RLM] Sub-RLM execution error: %v", err)
 				r.appendHistoryEntry(history, HistoryEntry{
@@ -862,7 +885,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 
 // executeSubRLM spawns a nested RLM loop that shares REPL state with the parent.
 // It respects depth limits to prevent infinite recursion.
-func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time, parentTracker *TokenTracker, history *ImmutableHistory) (*CompletionResult, error) {
+func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, parentQuery string, traceSession *logging.RLMTraceSession, parentStart time.Time, parentTracker *TokenTracker, history *ImmutableHistory, subRLMBudget *subRLMBudgetTracker) (*CompletionResult, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
 
@@ -870,17 +893,17 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 	currentDepth := 0
 	maxDepth := 3
 	maxSubIterations := 10
+	maxDirectSubRLMCalls := 0
+	maxTotalSubRLMCalls := 0
 
 	if r.config.SubRLM != nil {
 		currentDepth = r.config.SubRLM.CurrentDepth
 		maxDepth = r.config.SubRLM.MaxDepth
+		maxDirectSubRLMCalls = r.config.SubRLM.MaxDirectSubRLMCalls
+		maxTotalSubRLMCalls = r.config.SubRLM.MaxTotalSubRLMCalls
 		if r.config.SubRLM.MaxIterationsPerSubRLM > 0 {
 			maxSubIterations = r.config.SubRLM.MaxIterationsPerSubRLM
 		}
-	}
-
-	if err := r.enforceSubRLMBudgets(history, parentTracker); err != nil {
-		return nil, err
 	}
 
 	// Check depth limit
@@ -892,17 +915,20 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 		return nil, fmt.Errorf("sub-RLM requires a subquery")
 	}
 
+	if subRLMBudget == nil {
+		subRLMBudget = newSubRLMBudgetTracker()
+	}
+	if err := r.enforceSubRLMBudgets(history, subRLMBudget); err != nil {
+		return nil, err
+	}
+
 	if r.config.Verbose {
 		logger.Info(ctx, "[RLM] Spawning sub-RLM at depth %d with query: %s", currentDepth+1, utils.TruncateString(subquery, truncateLenShort))
 	}
 
 	// Create sub-RLM config with incremented depth
 	subConfig := r.config
-	subConfig.SubRLM = &SubRLMConfig{
-		MaxDepth:               maxDepth,
-		CurrentDepth:           currentDepth + 1,
-		MaxIterationsPerSubRLM: maxSubIterations,
-	}
+	subConfig.SubRLM = childSubRLMConfig(currentDepth, maxDepth, maxSubIterations, maxDirectSubRLMCalls, maxTotalSubRLMCalls)
 	subConfig.MaxIterations = maxSubIterations
 
 	// Create sub-RLM iteration module using the same prompt/demos policy as the parent config.
@@ -921,7 +947,7 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 
 	// Execute sub-RLM using the SHARED REPL environment
 	subTracker := NewTokenTracker()
-	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery, subTracker)
+	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery, subTracker, subRLMBudget)
 	if err != nil {
 		return nil, fmt.Errorf("sub-RLM execution failed: %w", err)
 	}
@@ -946,9 +972,19 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 	return result, nil
 }
 
+func childSubRLMConfig(currentDepth, maxDepth, maxSubIterations, maxDirectSubRLMCalls, maxTotalSubRLMCalls int) *SubRLMConfig {
+	return &SubRLMConfig{
+		MaxDepth:               maxDepth,
+		CurrentDepth:           currentDepth + 1,
+		MaxIterationsPerSubRLM: maxSubIterations,
+		MaxDirectSubRLMCalls:   maxDirectSubRLMCalls,
+		MaxTotalSubRLMCalls:    maxTotalSubRLMCalls,
+	}
+}
+
 // completeWithSharedREPL runs an RLM completion loop using an existing REPL environment.
 // This allows sub-RLMs to share state with their parent.
-func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *YaegiREPL, query string, tokenTracker *TokenTracker) (*CompletionResult, error) {
+func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *YaegiREPL, query string, tokenTracker *TokenTracker, subRLMBudget *subRLMBudgetTracker) (*CompletionResult, error) {
 	logger := logging.GetLogger()
 	start := time.Now()
 
@@ -1017,7 +1053,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		// Handle nested subrlm action
 		if action == "subrlm" {
-			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start, tokenTracker, history)
+			nestedResult, err := subRLM.executeSubRLM(ctx, replEnv, subquery, query, nil, start, tokenTracker, history, subRLMBudget)
 			if err != nil {
 				logger.Warn(ctx, "[SubRLM] Nested sub-RLM error: %v", err)
 				subRLM.appendHistoryEntry(history, HistoryEntry{
@@ -1438,7 +1474,7 @@ func normalizeContextPolicyPreset(preset ContextPolicyPreset) ContextPolicyPrese
 	}
 }
 
-func (r *RLM) enforceSubRLMBudgets(history *ImmutableHistory, parentTracker *TokenTracker) error {
+func (r *RLM) enforceSubRLMBudgets(history *ImmutableHistory, subRLMBudget *subRLMBudgetTracker) error {
 	if r == nil || r.config.SubRLM == nil {
 		return nil
 	}
@@ -1447,10 +1483,7 @@ func (r *RLM) enforceSubRLMBudgets(history *ImmutableHistory, parentTracker *Tok
 	if cfg.MaxDirectSubRLMCalls > 0 && history != nil && history.CountAction("subrlm") >= cfg.MaxDirectSubRLMCalls {
 		return fmt.Errorf("sub-RLM direct child budget exceeded (limit %d)", cfg.MaxDirectSubRLMCalls)
 	}
-	if cfg.MaxTotalSubRLMCalls > 0 && parentTracker != nil && len(parentTracker.GetSubRLMCalls()) >= cfg.MaxTotalSubRLMCalls {
-		return fmt.Errorf("sub-RLM total budget exceeded (limit %d)", cfg.MaxTotalSubRLMCalls)
-	}
-	return nil
+	return subRLMBudget.reserve(cfg.MaxTotalSubRLMCalls)
 }
 
 func errString(err error) string {
