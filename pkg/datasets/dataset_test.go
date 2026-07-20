@@ -10,8 +10,11 @@ import (
 )
 
 func TestEnsureDataset(t *testing.T) {
-	// Setup
-	homeDir, _ := os.UserHomeDir()
+	// Isolate the dataset cache from the real user home so the test
+	// never deletes or downloads into ~/.dspy-go.
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir) // Windows
 	datasetDir := filepath.Join(homeDir, ".dspy-go", "datasets")
 
 	tests := []struct {

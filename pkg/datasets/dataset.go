@@ -1,11 +1,15 @@
 package datasets
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -42,7 +46,10 @@ func EnsureDataset(datasetName string) (string, error) {
 
 	datasetPath := filepath.Join(datasetDir, datasetName+suffix)
 
-	if _, err := os.Stat(datasetPath); os.IsNotExist(err) {
+	if _, err := os.Stat(datasetPath); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("failed to stat dataset file: %w", err)
+		}
 		fmt.Printf("Dataset %s not found locally. Downloading from Hugging Face...\n", datasetName)
 		if err := downloadDataset(datasetName, datasetPath); err != nil {
 			return "", fmt.Errorf("failed to download dataset: %w", err)
@@ -63,7 +70,13 @@ func downloadDataset(datasetName, datasetPath string) error {
 		return fmt.Errorf("unknown dataset: %s", datasetName)
 	}
 
-	resp, err := http.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create download request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download dataset: %w", err)
 	}
@@ -72,15 +85,27 @@ func downloadDataset(datasetName, datasetPath string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned non-200 status code: %d", resp.StatusCode)
 	}
-	out, err := os.Create(datasetPath)
-	if err != nil {
-		return fmt.Errorf("failed to create dataset file: %w", err)
-	}
-	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
+	// Download to a temporary file and rename into place so an
+	// interrupted download never leaves a partial file that later calls
+	// would treat as a valid cached dataset.
+	tmp, err := os.CreateTemp(filepath.Dir(datasetPath), datasetName+"-*.tmp")
 	if err != nil {
+		return fmt.Errorf("failed to create temporary dataset file: %w", err)
+	}
+	defer func() {
+		tmp.Close()
+		os.Remove(tmp.Name())
+	}()
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		return fmt.Errorf("failed to save dataset: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to finalize dataset file: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), datasetPath); err != nil {
+		return fmt.Errorf("failed to move dataset into place: %w", err)
 	}
 
 	return nil
