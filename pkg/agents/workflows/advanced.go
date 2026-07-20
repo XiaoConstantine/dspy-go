@@ -91,13 +91,7 @@ func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *
 	if err != nil {
 		return nil, err
 	}
-
-	// Convert map[string]any to map[string]interface{}
-	converted := make(map[string]any)
-	for k, v := range result {
-		converted[k] = v
-	}
-	return converted, nil
+	return result, nil
 }
 
 // executeParallelStage executes a parallel stage.
@@ -136,15 +130,9 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 				allErrors = append(allErrors, err)
 				mu.Unlock()
 			} else {
-				// Convert map[string]any to map[string]interface{}
-				converted := make(map[string]any)
-				for k, v := range result {
-					converted[k] = v
-				}
-
 				// Send result without blocking if context is cancelled
 				select {
-				case results <- converted:
+				case results <- result:
 				case <-ctx.Done():
 					return
 				}

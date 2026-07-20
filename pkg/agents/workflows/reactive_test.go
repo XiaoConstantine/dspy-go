@@ -27,17 +27,11 @@ func (m *ReactiveMockModule) Process(ctx context.Context, inputs map[string]any,
 	m.callCount++
 	m.mu.Unlock()
 
-	// Convert map[string]any to map[string]interface{} for our func
-	interfaceInputs := make(map[string]any)
-	for k, v := range inputs {
-		interfaceInputs[k] = v
-	}
-
 	var result map[string]any
 	var err error
 
 	if m.processFunc != nil {
-		result, err = m.processFunc(ctx, interfaceInputs)
+		result, err = m.processFunc(ctx, inputs)
 	} else {
 		result = map[string]any{
 			"processed":   true,

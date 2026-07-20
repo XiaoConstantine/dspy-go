@@ -126,7 +126,7 @@ func main() {
 
 	loggerAdapter := NewLoggerAdapter(logger)
 	// 1. Start MCP servers from configuration
-	var mcpClients []any // Use interface{} until we fix the type issue
+	var mcpClients []any
 	for _, serverCfg := range cfg.Tools.MCP.Servers {
 		logger.Info(ctx, "Starting MCP server: %s", serverCfg.Name)
 
