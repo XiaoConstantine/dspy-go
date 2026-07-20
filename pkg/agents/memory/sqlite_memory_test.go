@@ -165,6 +165,53 @@ func TestSQLiteStore(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("File Persistence Across Reopen", func(t *testing.T) {
+		path := t.TempDir() + "/memory.sqlite"
+
+		first, err := NewSQLiteStore(path)
+		require.NoError(t, err)
+		require.NoError(t, first.Store("persisted", "value"))
+		require.NoError(t, first.Close())
+
+		second, err := NewSQLiteStore(path)
+		require.NoError(t, err)
+		defer second.Close()
+
+		got, err := second.Retrieve("persisted")
+		require.NoError(t, err)
+		assert.Equal(t, "value", got)
+	})
+
+	t.Run("TTL Refresh On Overwrite", func(t *testing.T) {
+		ctx := context.Background()
+		require.NoError(t, store.StoreWithTTL(ctx, "refresh_key", "v1", 50*time.Millisecond))
+		// Overwrite with a longer TTL before the first one expires.
+		require.NoError(t, store.StoreWithTTL(ctx, "refresh_key", "v2", 10*time.Second))
+
+		time.Sleep(100 * time.Millisecond)
+		_, err := store.CleanExpired(ctx)
+		require.NoError(t, err)
+
+		got, err := store.Retrieve("refresh_key")
+		require.NoError(t, err, "entry with refreshed TTL must survive cleanup")
+		assert.Equal(t, "v2", got)
+	})
+
+	t.Run("Store Clears TTL", func(t *testing.T) {
+		ctx := context.Background()
+		require.NoError(t, store.StoreWithTTL(ctx, "clear_ttl_key", "v1", 50*time.Millisecond))
+		// Plain Store overwrites the entry without an expiry.
+		require.NoError(t, store.Store("clear_ttl_key", "v2"))
+
+		time.Sleep(100 * time.Millisecond)
+		_, err := store.CleanExpired(ctx)
+		require.NoError(t, err)
+
+		got, err := store.Retrieve("clear_ttl_key")
+		require.NoError(t, err, "entry rewritten without TTL must not expire")
+		assert.Equal(t, "v2", got)
+	})
+
 	t.Run("Database Connection", func(t *testing.T) {
 		// Test invalid database path
 		_, err := NewSQLiteStore("/root/forbidden/db.sqlite")

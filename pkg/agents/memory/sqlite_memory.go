@@ -26,7 +26,13 @@ type SQLiteStore struct {
 // The path parameter specifies the database file location.
 // If path is ":memory:", the database will be created in-memory.
 func NewSQLiteStore(path string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite3", path+"?cache=shared&mode=memory")
+	dsn := path
+	if path == ":memory:" {
+		// Shared cache keeps the single in-memory database visible to
+		// every connection in the database/sql pool.
+		dsn = ":memory:?cache=shared&mode=memory"
+	}
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.Unknown, "failed to open SQLite database"),
@@ -39,6 +45,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		path: path,
 	}
 	if err := store.ensureInitialized(); err != nil {
+		db.Close()
 		return nil, err
 	}
 	return store, nil
@@ -122,7 +129,8 @@ func (s *SQLiteStore) Store(key string, value any) error {
     VALUES (?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
-        updated_at = CURRENT_TIMESTAMP
+        updated_at = CURRENT_TIMESTAMP,
+        expires_at = NULL
     `
 
 	_, err = tx.Exec(query, key, string(jsonValue))
@@ -298,7 +306,8 @@ func (s *SQLiteStore) StoreWithTTL(ctx context.Context, key string, value any, t
     VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
     ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        expires_at = excluded.expires_at
     `
 
 	expirationTime := time.Now().Add(ttl).UTC().Format(time.RFC3339)
