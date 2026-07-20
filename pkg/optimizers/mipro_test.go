@@ -220,6 +220,14 @@ func TestMIPRO(t *testing.T) {
 					&core.LLMResponse{Content: "Test response"}, nil)
 				mipro.teacherStudent.Teacher = mockTeacher
 			}
+			// Instruction generation must succeed so Compile reaches the
+			// failing search strategy under test.
+			if mipro.instructionGenerator.PromptModel == nil {
+				mockPrompt := new(testutil.MockLLM)
+				mockPrompt.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
+					&core.LLMResponse{Content: "Test instruction"}, nil)
+				mipro.instructionGenerator.PromptModel = mockPrompt
+			}
 
 			// Run the test
 			_, err := mipro.Compile(ctx, program, dataset, nil)
@@ -327,11 +335,18 @@ func TestMIPRO(t *testing.T) {
 			program := createTestProgram()
 			dataset := createTestDataset()
 
+			// Demonstration and instruction generation need working models.
+			mockLLM := new(testutil.MockLLM)
+			mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
+				&core.LLMResponse{Content: "test content"}, nil).Maybe()
+			mipro.teacherStudent.Teacher = mockLLM
+			mipro.instructionGenerator.PromptModel = mockLLM
+
 			// Add Reset expectation for the mock dataset
 			mockDataset := dataset.(*testutil.MockDataset)
 			mockDataset.On("Reset").Return().Times(3)
-			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"input": "tpe_test"}}, true).Maybe()
-			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"input": "tpe_test2"}}, true).Maybe()
+			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"prompt": "tpe_test"}}, true).Maybe()
+			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"prompt": "tpe_test2"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{}, false).Maybe()
 			// Need mock expectations for the module inside the program
 			mockMod := program.Modules["test"].(*MockModule)

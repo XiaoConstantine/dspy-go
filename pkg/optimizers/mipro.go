@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -67,12 +68,19 @@ func (t *TeacherStudentOptimizer) Initialize(ctx context.Context, program core.P
 // GenerateDemonstration creates a high-quality demonstration using the teacher.
 func (t *TeacherStudentOptimizer) GenerateDemonstration(ctx context.Context, input core.Example) (core.Example, error) {
 
+	if t.Teacher == nil {
+		return core.Example{}, fmt.Errorf("teacher generation failed: no teacher model available, configure a default LLM or use WithModels")
+	}
 	promptValue, ok := input.Inputs["prompt"]
 	if !ok || promptValue == nil {
 		return core.Example{}, fmt.Errorf("teacher generation failed, missing prompt")
 	}
+	prompt, ok := promptValue.(string)
+	if !ok {
+		return core.Example{}, fmt.Errorf("teacher generation failed: prompt must be a string, got %T", promptValue)
+	}
 	core.RecordLLMCall(ctx, t.Teacher)
-	response, err := t.Teacher.Generate(ctx, input.Inputs["prompt"].(string))
+	response, err := t.Teacher.Generate(ctx, prompt)
 	if err != nil {
 		return core.Example{}, fmt.Errorf("teacher generation failed: %w", err)
 	}
@@ -126,6 +134,10 @@ func (g *InstructionGenerator) generateSingleCandidate(
 	module core.Module,
 	demos []core.Example,
 ) (string, error) {
+	if g.PromptModel == nil {
+		return "", fmt.Errorf("no prompt model available: configure a default LLM or use WithModels")
+	}
+
 	prompt := fmt.Sprintf("Generate an instruction for the following signature: %s", module.GetSignature())
 
 	core.RecordLLMCall(ctx, g.PromptModel)
@@ -367,13 +379,14 @@ func NewMIPRO(
 // initComponents initializes all required components.
 func (m *MIPRO) initComponents() {
 	if m.promptModel == nil {
-		// Try to get the default LLM
-		defaultLLM := core.GetDefaultLLM()
-		if defaultLLM != nil {
+		// Try to get the default LLM. Even when none is available we keep
+		// initializing the remaining components so the MIPRO struct is
+		// never left half-built; model-dependent calls fail with clear
+		// errors instead of nil-pointer panics.
+		if defaultLLM := core.GetDefaultLLM(); defaultLLM != nil {
 			m.promptModel = defaultLLM
 		} else {
 			m.logger.Error(context.Background(), "Failed to initialize prompt model")
-			return // Cannot continue without a model
 		}
 	}
 
@@ -505,7 +518,9 @@ func (m *MIPRO) runOptimizationLoop(
 	instructions map[int][]string,
 ) (core.Program, error) {
 	var bestProgram core.Program
-	var bestScore float64
+	// Start at -Inf so the first successful trial is always accepted, even
+	// when the metric yields only negative scores.
+	bestScore := math.Inf(-1)
 
 	for iteration := 0; iteration < m.config.NumTrials; iteration++ {
 		// Get next parameter combination to try
@@ -573,9 +588,17 @@ func (m *MIPRO) runOptimizationLoop(
 
 // Helper functions for the teacher-student dynamic.
 func (m *MIPRO) teacherDemonstration(ctx context.Context, example core.Example) (core.Example, error) {
+	if m.teacherStudent.Teacher == nil {
+		return core.Example{}, fmt.Errorf("teacher demonstration failed: no teacher model available, configure a default LLM or use WithModels")
+	}
+	prompt, ok := example.Inputs["prompt"].(string)
+	if !ok {
+		return core.Example{}, fmt.Errorf("teacher demonstration failed: prompt must be a string, got %T", example.Inputs["prompt"])
+	}
+
 	// Get a high-quality demonstration from the teacher model
 	core.RecordLLMCall(ctx, m.teacherStudent.Teacher)
-	teacherResult, err := m.teacherStudent.Teacher.Generate(ctx, example.Inputs["prompt"].(string))
+	teacherResult, err := m.teacherStudent.Teacher.Generate(ctx, prompt)
 	if err != nil {
 		return core.Example{}, fmt.Errorf("teacher demonstration failed: %w", err)
 	}
