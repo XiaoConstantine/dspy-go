@@ -23,6 +23,13 @@ func AnyMatch(expected, actual map[string]any) float64 {
 			return 0.0
 		}
 
+		if actualValue == nil {
+			if expectedValue == nil {
+				continue
+			}
+			return 0.0
+		}
+
 		if reflect.TypeOf(actualValue).Kind() == reflect.Slice {
 			found := false
 			slice := reflect.ValueOf(actualValue)

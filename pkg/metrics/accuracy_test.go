@@ -85,6 +85,18 @@ func TestAnyMatch(t *testing.T) {
 			want:     0.0,
 		},
 		{
+			name:     "Nil actual value does not panic",
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": nil},
+			want:     0.0,
+		},
+		{
+			name:     "Nil expected matches nil actual",
+			expected: map[string]any{"answer": nil},
+			actual:   map[string]any{"answer": nil},
+			want:     1.0,
+		},
+		{
 			name:     "Multiple fields, all match",
 			expected: map[string]any{"answer": "hello", "confidence": 0.9},
 			actual:   map[string]any{"answer": []any{"world", "hello"}, "confidence": 0.9},
