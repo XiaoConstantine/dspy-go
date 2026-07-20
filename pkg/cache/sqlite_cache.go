@@ -19,6 +19,8 @@ type SQLiteCache struct {
 	stats     CacheStats
 	mu        sync.RWMutex
 	closeChan chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 	cleanupWG sync.WaitGroup
 	vacuumWG  sync.WaitGroup
 }
@@ -273,10 +275,13 @@ func (c *SQLiteCache) Close() error {
 	if c == nil {
 		return nil
 	}
-	close(c.closeChan)
-	c.cleanupWG.Wait()
-	c.vacuumWG.Wait()
-	return c.db.Close()
+	c.closeOnce.Do(func() {
+		close(c.closeChan)
+		c.cleanupWG.Wait()
+		c.vacuumWG.Wait()
+		c.closeErr = c.db.Close()
+	})
+	return c.closeErr
 }
 
 func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64) error {

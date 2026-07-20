@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -16,6 +17,7 @@ type MemoryCache struct {
 	lruList   *lruList
 	stats     CacheStats
 	closeChan chan struct{}
+	closeOnce sync.Once
 	cleanupWG sync.WaitGroup
 }
 
@@ -138,7 +140,8 @@ func (c *MemoryCache) Get(ctx context.Context, key string) ([]byte, bool, error)
 	atomic.AddInt64(&c.stats.Hits, 1)
 	c.stats.LastAccess = time.Now() // Safe: protected by c.mu.Lock
 
-	return entry.value, true, nil
+	// Return a copy so callers cannot mutate the cached bytes.
+	return bytes.Clone(entry.value), true, nil
 }
 
 func (c *MemoryCache) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
@@ -148,6 +151,9 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value []byte, ttl tim
 	if c.config.MaxSize > 0 && size > c.config.MaxSize {
 		return fmt.Errorf("value size %d exceeds max cache size %d", size, c.config.MaxSize)
 	}
+
+	// Copy so later caller mutations cannot corrupt the cached bytes.
+	value = bytes.Clone(value)
 
 	var expiresAt time.Time
 	if ttl > 0 {
@@ -161,12 +167,18 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value []byte, ttl tim
 
 	// Check if key already exists
 	if existing, exists := c.entries[key]; exists {
-		// Update existing entry
+		// Update existing entry. Move it to the front first so a growth
+		// eviction below can never evict the entry being updated.
+		c.lruList.moveToFront(existing.element)
+		if delta := size - existing.size; delta > 0 && c.config.MaxSize > 0 {
+			if atomic.LoadInt64(&c.stats.Size)+delta > c.config.MaxSize {
+				c.evictLRU(delta)
+			}
+		}
 		atomic.AddInt64(&c.stats.Size, size-existing.size)
 		existing.value = value
 		existing.size = size
 		existing.expiresAt = expiresAt
-		c.lruList.moveToFront(existing.element)
 	} else {
 		// Evict entries if necessary
 		currentSize := atomic.LoadInt64(&c.stats.Size)
@@ -244,7 +256,9 @@ func (c *MemoryCache) Close() error {
 	if c == nil {
 		return nil
 	}
-	close(c.closeChan)
+	c.closeOnce.Do(func() {
+		close(c.closeChan)
+	})
 	c.cleanupWG.Wait()
 	return nil
 }
@@ -262,10 +276,12 @@ func (c *MemoryCache) evictLRU(neededSpace int64) {
 
 		if entry, exists := c.entries[elem.key]; exists {
 			delete(c.entries, elem.key)
-			c.lruList.removeElement(elem)
 			currentSize -= entry.size
 			atomic.AddInt64(&c.stats.Size, -entry.size)
 		}
+		// Always unlink the element, even if the map entry was missing,
+		// so the loop cannot spin on a dangling list node.
+		c.lruList.removeElement(elem)
 	}
 }
 
@@ -312,20 +328,25 @@ func (c *MemoryCache) cleanupExpired() {
 }
 
 // Export exports cache entries for backup/migration.
+// Values are cloned so the writer cannot mutate cache-owned bytes, and the
+// writer is invoked after the lock is released so it may safely call back
+// into the cache.
 func (c *MemoryCache) Export(ctx context.Context, writer func(entry CacheEntry) error) error {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
+	snapshot := make([]CacheEntry, 0, len(c.entries))
 	for key, entry := range c.entries {
-		cacheEntry := CacheEntry{
+		snapshot = append(snapshot, CacheEntry{
 			Key:        key,
-			Value:      entry.value,
+			Value:      bytes.Clone(entry.value),
 			ExpiresAt:  entry.expiresAt,
 			CreatedAt:  entry.createdAt,
 			AccessedAt: time.Now(), // We don't track this in memory
 			Size:       entry.size,
-		}
+		})
+	}
+	c.mu.RUnlock()
 
+	for _, cacheEntry := range snapshot {
 		if err := writer(cacheEntry); err != nil {
 			return err
 		}
