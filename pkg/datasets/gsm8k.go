@@ -5,8 +5,8 @@ package datasets
 import (
 	"context"
 	"fmt"
-	"log"
 
+	"github.com/apache/arrow/go/v13/arrow"
 	"github.com/apache/arrow/go/v13/arrow/array"
 	"github.com/apache/arrow/go/v13/arrow/memory"
 	"github.com/apache/arrow/go/v13/parquet/file"
@@ -23,61 +23,67 @@ func LoadGSM8K() ([]GSM8KExample, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Open the Parquet file
 	reader, err := file.OpenParquetFile(datasetPath, false)
 	if err != nil {
-		log.Fatalf("Error opening Parquet file: %v", err)
+		return nil, fmt.Errorf("failed to open parquet file %s: %w", datasetPath, err)
 	}
 	defer reader.Close()
+
 	arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create arrow reader: %w", err)
 	}
 
-	// Get the schema
-	schema, _ := arrowReader.Schema()
-	fmt.Println(schema)
-	// Find question and answer fields
-	// Find question and answer field indices
+	schema, err := arrowReader.Schema()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read parquet schema: %w", err)
+	}
 	questionIndices := schema.FieldIndices("question")
 	answerIndices := schema.FieldIndices("answer")
 	if len(questionIndices) == 0 || len(answerIndices) == 0 {
-		log.Fatalf("Required columns 'question' and 'answer' not found in the schema")
+		return nil, fmt.Errorf("required columns 'question' and 'answer' not found in schema")
 	}
-	questionIndex := questionIndices[0]
-	answerIndex := answerIndices[0]
-	fmt.Printf("Question index: %d, Answer index: %d\n", questionIndex, answerIndex)
 
-	// Prepare a slice to hold all examples
-	// Read the entire table
 	table, err := arrowReader.ReadTable(context.Background())
 	if err != nil {
-		log.Fatalf("Error reading table: %v", err)
+		return nil, fmt.Errorf("failed to read parquet table: %w", err)
 	}
 	defer table.Release()
 
-	fmt.Printf("Table number of columns: %d\n", table.NumCols())
-	fmt.Printf("Table number of rows: %d\n", table.NumRows())
-	// Get question and answer columns
-	questionCol := table.Column(questionIndex)
-	answerCol := table.Column(answerIndex)
-
-	// Prepare a slice to hold all examples
-	examples := make([]GSM8KExample, table.NumRows())
-
-	// Create GSM8KExample structs
-	for i := 0; i < int(table.NumRows()); i++ {
-		questionChunk := questionCol.Data().Chunk(0)
-		answerChunk := answerCol.Data().Chunk(0)
-
-		questionValue := questionChunk.(*array.String).Value(i)
-		answerValue := answerChunk.(*array.String).Value(i)
-		examples[i] = GSM8KExample{
-			Question: questionValue,
-			Answer:   answerValue,
-		}
+	questions, err := stringColumnValues(table.Column(questionIndices[0]))
+	if err != nil {
+		return nil, err
+	}
+	answers, err := stringColumnValues(table.Column(answerIndices[0]))
+	if err != nil {
+		return nil, err
+	}
+	if len(questions) != len(answers) {
+		return nil, fmt.Errorf("column length mismatch: %d questions vs %d answers", len(questions), len(answers))
 	}
 
-	fmt.Printf("Total examples read: %d\n", len(examples))
+	examples := make([]GSM8KExample, len(questions))
+	for i := range questions {
+		examples[i] = GSM8KExample{
+			Question: questions[i],
+			Answer:   answers[i],
+		}
+	}
 	return examples, nil
+}
+
+// stringColumnValues flattens a chunked Arrow string column into a []string,
+// handling tables whose columns span multiple chunks.
+func stringColumnValues(col *arrow.Column) ([]string, error) {
+	out := make([]string, 0, col.Len())
+	for _, chunk := range col.Data().Chunks() {
+		strs, ok := chunk.(*array.String)
+		if !ok {
+			return nil, fmt.Errorf("column %q: expected string chunk, got %T", col.Name(), chunk)
+		}
+		for i := 0; i < strs.Len(); i++ {
+			out = append(out, strs.Value(i))
+		}
+	}
+	return out, nil
 }

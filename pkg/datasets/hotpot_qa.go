@@ -5,7 +5,6 @@ package datasets
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 )
 
@@ -24,20 +23,13 @@ func LoadHotpotQA() ([]HotPotQAExample, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.Open(datasetPath)
+	data, err := os.ReadFile(datasetPath)
 	if err != nil {
-		return nil, err
-	}
-	byteValue, err := io.ReadAll(file)
-	if err != nil {
-		fmt.Println("Error reading file:", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to read HotPotQA dataset: %w", err)
 	}
 	var examples []HotPotQAExample
-	err = json.Unmarshal(byteValue, &examples)
-	if err != nil {
-		fmt.Println("Failed to load HotPotQA dataset:", err)
-		return nil, err
+	if err := json.Unmarshal(data, &examples); err != nil {
+		return nil, fmt.Errorf("failed to parse HotPotQA dataset: %w", err)
 	}
 	return examples, nil
 }
