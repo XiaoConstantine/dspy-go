@@ -637,3 +637,64 @@ func TestManagerUpdateConcurrency(t *testing.T) {
 // Export/Import methods don't exist - removed test
 
 // Save method doesn't exist - removed test
+
+// TestManagerWatcherCanCallGetters is a deadlock regression test: watchers
+// used to be notified while the write lock was held, so any watcher calling
+// Get (which takes the read lock) deadlocked.
+func TestManagerWatcherCanCallGetters(t *testing.T) {
+	var notified []string
+	manager := &Manager{config: GetDefaultConfig()}
+	manager.watchers = []ConfigWatcher{
+		func(config *Config) error {
+			// Must not deadlock.
+			_ = manager.Get()
+			_ = manager.GetLLMConfig()
+			notified = append(notified, config.LLM.Default.Provider)
+			return nil
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		err := manager.Update(func(config *Config) error {
+			config.LLM.Default.Provider = "google"
+			return nil
+		})
+		assert.NoError(t, err)
+
+		assert.NoError(t, manager.Merge(GetDefaultConfig()))
+		assert.NoError(t, manager.Reset())
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("watcher calling Get deadlocked against Update/Merge/Reset")
+	}
+
+	require.Len(t, notified, 3)
+	assert.Equal(t, "google", notified[0])
+}
+
+// TestManagerUpdateDeepCopies verifies the updater receives a deep copy, so
+// mutating nested maps cannot race with readers holding the old config.
+func TestManagerUpdateDeepCopies(t *testing.T) {
+	base := GetDefaultConfig()
+	base.LLM.Providers = map[string]LLMProviderConfig{
+		"anthropic": {Provider: "anthropic", ModelID: "claude-3-sonnet-20240229"},
+	}
+	manager := &Manager{config: base}
+
+	old := manager.Get()
+	err := manager.Update(func(config *Config) error {
+		config.LLM.Providers["extra"] = LLMProviderConfig{Provider: "google", ModelID: "gemini-pro"}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// The previously returned config must be untouched.
+	assert.NotContains(t, old.LLM.Providers, "extra")
+	assert.Contains(t, manager.Get().LLM.Providers, "extra")
+}

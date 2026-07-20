@@ -358,32 +358,42 @@ func (m *Manager) SaveToFile(path string) error {
 }
 
 // Update updates the configuration with new values.
+// Watchers are notified after the lock is released, so they may safely call
+// Get and the other accessor methods.
 func (m *Manager) Update(updater func(*Config) error) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.config == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("no configuration loaded")
 	}
 
-	// Create a copy of the current config
-	configCopy := *m.config
+	// Deep-copy the current config so the updater cannot mutate maps and
+	// slices shared with concurrent readers of the old config.
+	configCopy, err := cloneConfig(m.config)
+	if err != nil {
+		m.mu.Unlock()
+		return fmt.Errorf("failed to copy configuration: %w", err)
+	}
 
 	// Apply the update
-	if err := updater(&configCopy); err != nil {
+	if err := updater(configCopy); err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("failed to apply update: %w", err)
 	}
 
 	// Validate the updated configuration
 	if err := configCopy.Validate(); err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("updated configuration validation failed: %w", err)
 	}
 
 	// Update the configuration
-	m.config = &configCopy
+	m.config = configCopy
+	m.mu.Unlock()
 
-	// Notify watchers
-	if err := m.notifyWatchers(m.config); err != nil {
+	// Notify watchers outside the lock
+	if err := m.notifyWatchers(configCopy); err != nil {
 		return fmt.Errorf("failed to notify watchers: %w", err)
 	}
 
@@ -392,18 +402,17 @@ func (m *Manager) Update(updater func(*Config) error) error {
 
 // Reset resets the configuration to defaults.
 func (m *Manager) Reset() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	defaults := GetDefaultConfig()
 	if err := defaults.Validate(); err != nil {
 		return fmt.Errorf("default configuration validation failed: %w", err)
 	}
 
+	m.mu.Lock()
 	m.config = defaults
+	m.mu.Unlock()
 
-	// Notify watchers
-	if err := m.notifyWatchers(m.config); err != nil {
+	// Notify watchers outside the lock
+	if err := m.notifyWatchers(defaults); err != nil {
 		return fmt.Errorf("failed to notify watchers: %w", err)
 	}
 
@@ -433,8 +442,12 @@ func (m *Manager) Clone() (*Config, error) {
 		return nil, fmt.Errorf("no configuration loaded")
 	}
 
-	// Use YAML marshaling for deep copy
-	data, err := yaml.Marshal(m.config)
+	return cloneConfig(m.config)
+}
+
+// cloneConfig deep-copies a Config via a YAML round trip.
+func cloneConfig(config *Config) (*Config, error) {
+	data, err := yaml.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal configuration: %w", err)
 	}
@@ -450,10 +463,10 @@ func (m *Manager) Clone() (*Config, error) {
 // Merge merges another configuration into the current one.
 func (m *Manager) Merge(other *Config) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.config == nil {
 		m.config = other
+		m.mu.Unlock()
 		return nil
 	}
 
@@ -464,33 +477,39 @@ func (m *Manager) Merge(other *Config) error {
 	// Marshal both configs
 	currentData, err := yaml.Marshal(m.config)
 	if err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("failed to marshal current configuration: %w", err)
 	}
 
 	otherData, err := yaml.Marshal(other)
 	if err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("failed to marshal other configuration: %w", err)
 	}
 
 	// Unmarshal other into current (this will override fields)
 	var merged Config
 	if err := yaml.Unmarshal(currentData, &merged); err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("failed to unmarshal current configuration: %w", err)
 	}
 
 	if err := yaml.Unmarshal(otherData, &merged); err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("failed to unmarshal other configuration: %w", err)
 	}
 
 	// Validate merged configuration
 	if err := merged.Validate(); err != nil {
+		m.mu.Unlock()
 		return fmt.Errorf("merged configuration validation failed: %w", err)
 	}
 
 	m.config = &merged
+	m.mu.Unlock()
 
-	// Notify watchers
-	if err := m.notifyWatchers(m.config); err != nil {
+	// Notify watchers outside the lock
+	if err := m.notifyWatchers(&merged); err != nil {
 		return fmt.Errorf("failed to notify watchers: %w", err)
 	}
 
@@ -542,8 +561,9 @@ func (m *Manager) Import(data map[string]any) error {
 	m.config = &config
 	m.mu.Unlock()
 
-	// Notify watchers
-	if err := m.notifyWatchers(m.config); err != nil {
+	// Notify watchers outside the lock with the config we just installed;
+	// re-reading m.config here would race with concurrent writers.
+	if err := m.notifyWatchers(&config); err != nil {
 		return fmt.Errorf("failed to notify watchers: %w", err)
 	}
 
