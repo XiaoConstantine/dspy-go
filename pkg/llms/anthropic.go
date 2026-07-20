@@ -497,12 +497,13 @@ func normalizeRequiredFields(raw any) ([]string, error) {
 }
 
 func (a *AnthropicLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
-	// Anthropic does not provide embedding api directly, use voyage or other providers
-	return nil, nil
+	// Anthropic does not provide an embedding API; use Voyage or another provider.
+	return nil, errs.New(errs.UnsupportedOperation, "embeddings are not supported by Anthropic; use an embedding provider such as Voyage")
 }
 
 func (a *AnthropicLLM) CreateEmbeddings(ctx context.Context, inputs []string, options ...core.EmbeddingOption) (*core.BatchEmbeddingResult, error) {
-	return nil, nil
+	// Anthropic does not provide an embedding API; use Voyage or another provider.
+	return nil, errs.New(errs.UnsupportedOperation, "embeddings are not supported by Anthropic; use an embedding provider such as Voyage")
 }
 
 // StreamGenerate implements streaming text generation using the official SDK's iterator pattern.

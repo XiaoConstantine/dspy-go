@@ -229,21 +229,26 @@ func TestAnthropicLLM_GenerateEdgeCases(t *testing.T) {
 }
 
 func TestAnthropicLLM_Embeddings(t *testing.T) {
-	// Test the embedding methods which are stubs
+	// Anthropic has no embedding API; both methods must fail with
+	// UnsupportedOperation rather than returning nil, nil.
 	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 
-	// Test CreateEmbedding
 	result, err := llm.CreateEmbedding(ctx, "test text")
 	assert.Nil(t, result)
-	assert.Nil(t, err)
+	require.Error(t, err)
+	var embErr *errors.Error
+	require.ErrorAs(t, err, &embErr)
+	assert.Equal(t, errors.UnsupportedOperation, embErr.Code())
 
-	// Test CreateEmbeddings
 	batchResult, err := llm.CreateEmbeddings(ctx, []string{"test1", "test2"})
 	assert.Nil(t, batchResult)
-	assert.Nil(t, err)
+	require.Error(t, err)
+	var batchErr *errors.Error
+	require.ErrorAs(t, err, &batchErr)
+	assert.Equal(t, errors.UnsupportedOperation, batchErr.Code())
 }
 
 func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
