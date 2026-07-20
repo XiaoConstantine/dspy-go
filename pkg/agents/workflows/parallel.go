@@ -16,6 +16,8 @@ type ParallelWorkflow struct {
 	maxConcurrent int
 }
 
+// NewParallelWorkflow creates a workflow that runs its steps concurrently.
+// A non-positive maxConcurrent means no concurrency limit.
 func NewParallelWorkflow(memory agents.Memory, maxConcurrent int) *ParallelWorkflow {
 	return &ParallelWorkflow{
 		BaseWorkflow:  NewBaseWorkflow(memory),
@@ -33,23 +35,25 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 	results := make(chan *StepResult, len(w.steps))
 	errors := make(chan error, len(w.steps))
 
-	// Create semaphore to limit concurrency
-	sem := make(chan struct{}, w.maxConcurrent)
+	// Create semaphore to limit concurrency. A non-positive limit means
+	// unlimited, which a zero- or negative-capacity channel cannot
+	// express (zero never admits work; negative panics).
+	limit := w.maxConcurrent
+	if limit <= 0 {
+		limit = len(w.steps)
+	}
+	sem := make(chan struct{}, limit)
 
 	// Launch goroutine for each step
 	var wg sync.WaitGroup
 	for _, step := range w.steps {
 		wg.Add(1)
 		go func(s *Step) {
+			// Registered first so it runs last: the panic-recovery send
+			// below must complete before wg.Done lets the collector
+			// close the channels.
+			defer wg.Done()
 			defer func() {
-				wg.Done()
-				// Release semaphore on any exit path
-				select {
-				case <-sem:
-				default:
-				}
-
-				// Ensure goroutine cleanup on panic
 				if r := recover(); r != nil {
 					errors <- fmt.Errorf("step %s panicked: %v", s.ID, r)
 				}
@@ -77,10 +81,13 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 				}
 				return
 			}
+			// Release only after a successful acquire; releasing on every
+			// exit path could steal a permit another goroutine holds.
+			defer func() { <-sem }()
 
 			// Prepare inputs for this step
 			stepInputs := make(map[string]any)
-			signature := step.Module.GetSignature()
+			signature := s.Module.GetSignature()
 
 			for _, field := range signature.Inputs {
 				if val, ok := inputs[field.Name]; ok {
