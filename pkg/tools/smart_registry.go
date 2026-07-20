@@ -196,7 +196,7 @@ func (r *SmartToolRegistry) SelectBest(ctx context.Context, intent string) (core
 	bestTool := scores[0].Tool
 
 	// Try fallbacks if the best tool has low reliability
-	if r.performance[bestTool.Name()].ReliabilityScore < 0.3 {
+	if r.reliabilityScore(bestTool.Name()) < 0.3 {
 		if fallbackTool := r.getFallback(intent, bestTool.Name()); fallbackTool != nil {
 			return fallbackTool, nil
 		}
@@ -360,6 +360,19 @@ func (r *SmartToolRegistry) updatePerformanceMetrics(toolName string, latency ti
 	latencyMs := float64(metrics.AverageLatency.Milliseconds())
 	latencyScore := 1.0 / (1.0 + latencyMs/1000.0) // Penalize high latency
 	metrics.ReliabilityScore = (metrics.SuccessRate*0.7 + latencyScore*0.3)
+}
+
+// reliabilityScore returns the tracked reliability for a tool, or the
+// neutral starting score when the tool has no metrics yet.
+func (r *SmartToolRegistry) reliabilityScore(toolName string) float64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	metrics, exists := r.performance[toolName]
+	if !exists {
+		return 0.5
+	}
+	return metrics.ReliabilityScore
 }
 
 func (r *SmartToolRegistry) getFallback(intent string, excludeToolName string) core.Tool {

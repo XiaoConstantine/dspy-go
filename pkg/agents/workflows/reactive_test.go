@@ -570,3 +570,75 @@ func TestReactiveWorkflow_EventTransformation(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+// TestEventBus_ConcurrentAddAndEmit is a race regression test: Emit snapshots
+// filters and transformers under the lock, so it must be safe to call
+// AddFilter/AddTransformer while other goroutines emit. Run with -race.
+func TestEventBus_ConcurrentAddAndEmit(t *testing.T) {
+	config := DefaultEventBusConfig()
+	config.BufferSize = 2048
+	bus := NewEventBus(config)
+
+	const iterations = 200
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for j := 0; j < iterations; j++ {
+			bus.AddFilter(func(event Event) bool { return true })
+			bus.AddTransformer(func(event Event) Event { return event })
+		}
+	}()
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < iterations; j++ {
+				if err := bus.Emit(Event{ID: fmt.Sprintf("e-%d-%d", i, j), Type: "test"}); err != nil {
+					t.Errorf("Emit failed during concurrent AddFilter/AddTransformer: %v", err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+}
+
+// TestEventBus_CallbacksRunOutsideLock proves Emit invokes filters and
+// transformers after releasing the bus lock: a callback that re-enters
+// AddFilter/AddTransformer would deadlock if the lock were still held.
+func TestEventBus_CallbacksRunOutsideLock(t *testing.T) {
+	config := DefaultEventBusConfig()
+	config.BufferSize = 16
+	bus := NewEventBus(config)
+
+	bus.AddTransformer(func(event Event) Event {
+		bus.AddTransformer(func(e Event) Event { return e })
+		return event
+	})
+	bus.AddFilter(func(event Event) bool {
+		bus.AddFilter(func(e Event) bool { return true })
+		return true
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- bus.Emit(Event{ID: "reentrant", Type: "test"})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Emit with re-entrant callbacks failed: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Emit deadlocked: callbacks appear to run while holding the bus lock")
+	}
+}

@@ -3,7 +3,9 @@ package interceptors
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -514,6 +516,63 @@ func TestAuthorizationInterceptor(t *testing.T) {
 			t.Errorf("Expected access denied error, got: %v", err)
 		}
 	})
+}
+
+// TestAuthorizationInterceptorConcurrentSetPolicy is a race regression test:
+// policy reads in running interceptors must be safe against concurrent
+// SetPolicy calls. Run with -race.
+func TestAuthorizationInterceptorConcurrentSetPolicy(t *testing.T) {
+	authInterceptor := NewAuthorizationInterceptor()
+	authInterceptor.SetPolicy("TestModule", AuthorizationPolicy{
+		RequiredRoles: []string{"admin"},
+	})
+
+	interceptor := authInterceptor.ModuleAuthorizationInterceptor()
+	info := core.NewModuleInfo("TestModule", "TestType", core.Signature{})
+	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+		return map[string]any{"result": "success"}, nil
+	}
+	ctx := WithAuthorizationContext(context.Background(), &AuthorizationContext{
+		UserID: "user123",
+		Roles:  []string{"admin"},
+	})
+
+	const iterations = 200
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < iterations; j++ {
+				// Vary the policy value so racing reads see different data,
+				// while every version still authorizes the test user.
+				authInterceptor.SetPolicy("TestModule", AuthorizationPolicy{
+					RequiredRoles:  []string{"admin", "role-" + strconv.Itoa(j)},
+					AllowedModules: []string{"TestModule"},
+				})
+			}
+		}(i)
+	}
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < iterations; j++ {
+				if _, err := interceptor(ctx, map[string]any{"test": "value"}, info, handler); err != nil {
+					t.Errorf("interceptor failed during concurrent SetPolicy: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
 }
 
 func TestSanitizingInterceptors(t *testing.T) {

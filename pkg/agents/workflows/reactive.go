@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -182,13 +183,21 @@ func (eb *EventBus) Unsubscribe(eventType string) {
 
 // Emit publishes an event to the bus.
 func (eb *EventBus) Emit(event Event) error {
+	// Snapshot filters and transformers under the lock so Emit does not
+	// race with AddFilter/AddTransformer, then run user callbacks with
+	// the lock released.
+	eb.mu.RLock()
+	transformers := slices.Clone(eb.transformers)
+	filters := slices.Clone(eb.filters)
+	eb.mu.RUnlock()
+
 	// Apply transformers
-	for _, transformer := range eb.transformers {
+	for _, transformer := range transformers {
 		event = transformer(event)
 	}
 
 	// Apply filters
-	for _, filter := range eb.filters {
+	for _, filter := range filters {
 		if !filter(event) {
 			return nil // Event filtered out
 		}

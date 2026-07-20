@@ -228,7 +228,9 @@ type AuthorizationPolicy struct {
 }
 
 // AuthorizationInterceptor creates authorization interceptors.
+// It is safe to call SetPolicy concurrently with running interceptors.
 type AuthorizationInterceptor struct {
+	mu       sync.RWMutex
 	policies map[string]AuthorizationPolicy // key -> policy mapping
 }
 
@@ -241,7 +243,17 @@ func NewAuthorizationInterceptor() *AuthorizationInterceptor {
 
 // SetPolicy sets an authorization policy for a specific resource.
 func (ai *AuthorizationInterceptor) SetPolicy(resource string, policy AuthorizationPolicy) {
+	ai.mu.Lock()
+	defer ai.mu.Unlock()
 	ai.policies[resource] = policy
+}
+
+// getPolicy returns the policy for a resource, if one is configured.
+func (ai *AuthorizationInterceptor) getPolicy(resource string) (AuthorizationPolicy, bool) {
+	ai.mu.RLock()
+	defer ai.mu.RUnlock()
+	policy, ok := ai.policies[resource]
+	return policy, ok
 }
 
 // ModuleAuthorizationInterceptor creates an interceptor that enforces authorization on modules.
@@ -254,7 +266,7 @@ func (ai *AuthorizationInterceptor) ModuleAuthorizationInterceptor() core.Module
 		}
 
 		// Check policy for this module
-		policy, exists := ai.policies[info.ModuleName]
+		policy, exists := ai.getPolicy(info.ModuleName)
 		if exists {
 			if !ai.checkAuthorization(authCtx, policy, info.ModuleName) {
 				return nil, fmt.Errorf("access denied to module %s for user %s", info.ModuleName, authCtx.UserID)
@@ -275,7 +287,7 @@ func (ai *AuthorizationInterceptor) AgentAuthorizationInterceptor() core.AgentIn
 		}
 
 		// Check policy for this agent
-		policy, exists := ai.policies[info.AgentID]
+		policy, exists := ai.getPolicy(info.AgentID)
 		if exists {
 			if !ai.checkAuthorization(authCtx, policy, info.AgentID) {
 				return nil, fmt.Errorf("access denied to agent %s for user %s", info.AgentID, authCtx.UserID)
@@ -296,7 +308,7 @@ func (ai *AuthorizationInterceptor) ToolAuthorizationInterceptor() core.ToolInte
 		}
 
 		// Check policy for this tool
-		policy, exists := ai.policies[info.Name]
+		policy, exists := ai.getPolicy(info.Name)
 		if exists {
 			if !ai.checkAuthorization(authCtx, policy, info.Name) {
 				return core.ToolResult{}, fmt.Errorf("access denied to tool %s for user %s", info.Name, authCtx.UserID)

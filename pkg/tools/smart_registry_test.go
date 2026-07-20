@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -530,4 +531,54 @@ func BenchmarkSmartToolRegistry_Match(b *testing.B) {
 		matches := registry.Match(intent)
 		_ = matches // Prevent optimization
 	}
+}
+
+// TestSmartToolRegistry_ConcurrentTrackingAndSelection is a race regression
+// test: SelectBest reads reliability metrics that ExecuteWithTracking updates
+// concurrently. Run with -race.
+func TestSmartToolRegistry_ConcurrentTrackingAndSelection(t *testing.T) {
+	config := &SmartToolRegistryConfig{
+		AutoDiscoveryEnabled:       false,
+		PerformanceTrackingEnabled: true,
+		FallbackEnabled:            true,
+	}
+	registry := NewSmartToolRegistry(config)
+	require.NoError(t, registry.Register(newMockTool("search", "Search for information", []string{"search", "query"})))
+	require.NoError(t, registry.Register(newMockTool("create", "Create new resources", []string{"create", "generate"})))
+
+	ctx := context.Background()
+	const iterations = 200
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < iterations; j++ {
+				if _, err := registry.ExecuteWithTracking(ctx, "search", map[string]any{}); err != nil {
+					t.Errorf("ExecuteWithTracking failed: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < iterations; j++ {
+				if _, err := registry.SelectBest(ctx, "search for something"); err != nil {
+					t.Errorf("SelectBest failed: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
 }
