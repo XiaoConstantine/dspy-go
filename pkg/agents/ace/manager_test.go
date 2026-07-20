@@ -498,6 +498,90 @@ func TestManagerEmptyLearningsContext(t *testing.T) {
 	assert.Empty(t, ctx)
 }
 
+func TestManagerCloseIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := DefaultConfig()
+	config.LearningsPath = filepath.Join(tmpDir, "learnings.md")
+	config.AsyncReflection = true
+
+	m, err := NewManager(config, nil)
+	require.NoError(t, err)
+
+	// Repeated sequential closes must not panic.
+	require.NoError(t, m.Close())
+	require.NoError(t, m.Close())
+
+	// Concurrent closes must not panic either.
+	m2, err := NewManager(config, nil)
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			assert.NoError(t, m2.Close())
+		}()
+	}
+	wg.Wait()
+}
+
+func TestManagerEndTrajectoryAfterClose(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := DefaultConfig()
+	config.LearningsPath = filepath.Join(tmpDir, "learnings.md")
+	config.AsyncReflection = true
+
+	m, err := NewManager(config, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.Close())
+
+	// After Close the trajectory must still be processed (synchronously),
+	// not silently dropped into a queue nobody drains.
+	recorder := m.StartTrajectory("agent-1", "test", "Query")
+	recorder.RecordStep("think", "", "Reasoning", nil, nil, nil)
+	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
+
+	assert.Equal(t, int64(1), m.Metrics()["trajectories_processed"])
+}
+
+func TestManagerConcurrentCloseAndEndTrajectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := DefaultConfig()
+	config.LearningsPath = filepath.Join(tmpDir, "learnings.md")
+	config.AsyncReflection = true
+	config.MinConfidence = 0.99 // Avoid file writes dominating the test
+
+	m, err := NewManager(config, nil)
+	require.NoError(t, err)
+
+	const producers = 4
+	const perProducer = 10
+
+	var wg sync.WaitGroup
+	for p := 0; p < producers; p++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perProducer; i++ {
+				recorder := m.StartTrajectory("agent-1", "test", "Query")
+				recorder.RecordStep("think", "", "Reasoning", nil, nil, nil)
+				m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
+			}
+		}()
+	}
+
+	// Close while producers are still running.
+	time.Sleep(time.Millisecond)
+	require.NoError(t, m.Close())
+	wg.Wait()
+
+	// Every trajectory must be processed: either flushed by Close or
+	// handled synchronously by EndTrajectory after Close.
+	assert.Equal(t, int64(producers*perProducer), m.Metrics()["trajectories_processed"])
+	assert.Equal(t, int64(0), m.Metrics()["pending_trajectories"])
+}
+
 func BenchmarkManagerTrajectoryProcessing(b *testing.B) {
 	tmpDir := b.TempDir()
 	config := DefaultConfig()

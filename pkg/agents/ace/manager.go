@@ -23,6 +23,14 @@ type Manager struct {
 	done            chan struct{}
 	wg              sync.WaitGroup
 
+	// Lifecycle. closedMu guards enqueues against Close: EndTrajectory
+	// holds the read lock while sending to trajectoryQueue, and Close takes
+	// the write lock before stopping the worker, so no trajectory can be
+	// queued after the final drain.
+	closeOnce sync.Once
+	closedMu  sync.RWMutex
+	closed    bool
+
 	// Cached learnings for injection
 	learningsCache   []Learning
 	learningsCacheMu sync.RWMutex
@@ -109,16 +117,32 @@ func (m *Manager) EndTrajectory(ctx context.Context, recorder *TrajectoryRecorde
 		return
 	}
 
-	if m.config.AsyncReflection {
-		select {
-		case m.trajectoryQueue <- trajectory:
-			m.pendingCount.Add(1)
-		default:
-			// Queue full, process synchronously with provided context
-			m.processTrajectory(ctx, trajectory)
-		}
-	} else {
-		m.processTrajectory(ctx, trajectory)
+	if m.config.AsyncReflection && m.tryEnqueue(trajectory) {
+		return
+	}
+
+	// Sync mode, queue full, or manager closed: process inline with the
+	// caller's context so no trajectory is silently dropped.
+	m.processTrajectory(ctx, trajectory)
+}
+
+// tryEnqueue attempts to hand a trajectory to the async worker. It returns
+// false if the manager is closed or the queue is full, in which case the
+// caller must process the trajectory itself.
+func (m *Manager) tryEnqueue(trajectory *Trajectory) bool {
+	m.closedMu.RLock()
+	defer m.closedMu.RUnlock()
+
+	if m.closed {
+		return false
+	}
+
+	select {
+	case m.trajectoryQueue <- trajectory:
+		m.pendingCount.Add(1)
+		return true
+	default:
+		return false
 	}
 }
 
@@ -143,12 +167,21 @@ func (m *Manager) Learnings() []Learning {
 	return result
 }
 
-// Close shuts down the manager and flushes pending work.
+// Close shuts down the manager and flushes pending work. It is safe to call
+// multiple times and from multiple goroutines; calls after the first are
+// no-ops. Trajectories ended after Close are processed synchronously by
+// EndTrajectory rather than dropped.
 func (m *Manager) Close() error {
-	if m.config.AsyncReflection {
-		close(m.done)
-		m.wg.Wait()
-	}
+	m.closeOnce.Do(func() {
+		m.closedMu.Lock()
+		m.closed = true
+		m.closedMu.Unlock()
+
+		if m.config.AsyncReflection {
+			close(m.done)
+			m.wg.Wait()
+		}
+	})
 	return nil
 }
 
