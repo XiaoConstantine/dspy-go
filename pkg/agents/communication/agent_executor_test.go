@@ -18,9 +18,9 @@ type mockSimpleAgent struct {
 	response string
 }
 
-func (m *mockSimpleAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (m *mockSimpleAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	question, _ := input["question"].(string)
-	return map[string]interface{}{
+	return map[string]any{
 		"answer": m.response + " (responding to: " + question + ")",
 	}, nil
 }

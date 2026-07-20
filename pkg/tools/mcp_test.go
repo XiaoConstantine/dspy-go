@@ -14,11 +14,11 @@ import (
 // TestMCPTool is a variation of MCPTool that allows us to mock the Call function.
 type TestMCPTool struct {
 	*MCPTool
-	mockCallFunc func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error)
+	mockCallFunc func(ctx context.Context, args map[string]any) (*models.CallToolResult, error)
 }
 
 // Call overrides the MCPTool.Call method for testing.
-func (t *TestMCPTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (t *TestMCPTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	if t.mockCallFunc != nil {
 		return t.mockCallFunc(ctx, args)
 	}
@@ -47,7 +47,7 @@ func (t *TestMCPTool) CanHandle(ctx context.Context, intent string) bool {
 }
 
 // Override the Execute method for testing.
-func (t *TestMCPTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t *TestMCPTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	if t.mockCallFunc != nil {
 		// Use the mock call function to get the result
 		result, err := t.mockCallFunc(ctx, params)
@@ -58,15 +58,15 @@ func (t *TestMCPTool) Execute(ctx context.Context, params map[string]interface{}
 		// Convert to core.ToolResult
 		toolResult := core.ToolResult{
 			Data:        extractContentText(result.Content),
-			Metadata:    map[string]interface{}{"isError": result.IsError},
-			Annotations: map[string]interface{}{},
+			Metadata:    map[string]any{"isError": result.IsError},
+			Annotations: map[string]any{},
 		}
 		return toolResult, nil
 	}
 	return t.MCPTool.Execute(ctx, params)
 }
 
-func (t *TestMCPTool) Validate(params map[string]interface{}) error {
+func (t *TestMCPTool) Validate(params map[string]any) error {
 	return t.MCPTool.Validate(params)
 }
 
@@ -245,7 +245,7 @@ func TestMCPToolCall(t *testing.T) {
 		// Create a mock wrapper
 		tool := &TestMCPTool{
 			MCPTool: baseTool,
-			mockCallFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+			mockCallFunc: func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 				return mockResult, nil
 			},
 		}
@@ -274,7 +274,7 @@ func TestMCPToolCall(t *testing.T) {
 		// Create a mock wrapper
 		tool := &TestMCPTool{
 			MCPTool: baseTool,
-			mockCallFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+			mockCallFunc: func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 				return nil, mockError
 			},
 		}
@@ -318,7 +318,7 @@ func TestMCPToolExecute(t *testing.T) {
 					Description: "Test tool",
 				},
 			},
-			mockCallFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+			mockCallFunc: func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 				return mockResult, nil
 			},
 		}
@@ -357,7 +357,7 @@ func TestMCPToolExecute(t *testing.T) {
 					Description: "Test tool",
 				},
 			},
-			mockCallFunc: func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+			mockCallFunc: func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 				return nil, mockError
 			},
 		}
@@ -392,7 +392,7 @@ func TestMCPToolValidate(t *testing.T) {
 	tool := &MCPTool{schema: schema}
 
 	// Test valid parameters
-	validParams := map[string]interface{}{
+	validParams := map[string]any{
 		"required_param": "value",
 		"optional_param": 42,
 	}
@@ -402,7 +402,7 @@ func TestMCPToolValidate(t *testing.T) {
 	}
 
 	// Test missing required parameter
-	invalidParams := map[string]interface{}{
+	invalidParams := map[string]any{
 		"optional_param": 42,
 	}
 	err = tool.Validate(invalidParams)
@@ -411,7 +411,7 @@ func TestMCPToolValidate(t *testing.T) {
 	}
 
 	// Test with only required parameter
-	requiredOnlyParams := map[string]interface{}{
+	requiredOnlyParams := map[string]any{
 		"required_param": "value",
 	}
 	err = tool.Validate(requiredOnlyParams)
@@ -437,80 +437,80 @@ func TestConvertMCPParams(t *testing.T) {
 	testCases := []struct {
 		name           string
 		schema         models.InputSchema
-		inputParams    map[string]interface{}
-		expectedParams map[string]interface{}
+		inputParams    map[string]any
+		expectedParams map[string]any
 	}{
 		{
 			name: "String to Integer Success",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"count": schemaInt}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"count": "123"},
-			expectedParams: map[string]interface{}{"count": 123},
+			inputParams:    map[string]any{"count": "123"},
+			expectedParams: map[string]any{"count": 123},
 		},
 		{
 			name: "String to Integer Failure (Float String)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"id": schemaInt}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"id": "123.45"},
-			expectedParams: map[string]interface{}{"id": "123.45"}, // Stays string
+			inputParams:    map[string]any{"id": "123.45"},
+			expectedParams: map[string]any{"id": "123.45"}, // Stays string
 		},
 		{
 			name: "String to Integer Failure (Non-numeric)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"id": schemaInt}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"id": "abc"},
-			expectedParams: map[string]interface{}{"id": "abc"}, // Stays string
+			inputParams:    map[string]any{"id": "abc"},
+			expectedParams: map[string]any{"id": "abc"}, // Stays string
 		},
 		{
 			name: "String to Number/Float Success (Integer String)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"value": schemaNum}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"value": "42"},
-			expectedParams: map[string]interface{}{"value": 42.0},
+			inputParams:    map[string]any{"value": "42"},
+			expectedParams: map[string]any{"value": 42.0},
 		},
 		{
 			name: "String to Number/Float Success (Float String)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"price": schemaNum}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"price": "19.99"},
-			expectedParams: map[string]interface{}{"price": 19.99},
+			inputParams:    map[string]any{"price": "19.99"},
+			expectedParams: map[string]any{"price": 19.99},
 		},
 		{
 			name: "String to Number/Float Failure (Non-numeric)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"rating": schemaNum}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"rating": "high"},
-			expectedParams: map[string]interface{}{"rating": "high"}, // Stays string
+			inputParams:    map[string]any{"rating": "high"},
+			expectedParams: map[string]any{"rating": "high"}, // Stays string
 		},
 		{
 			name: "No Conversion Needed (String)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"text": schemaStr}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"text": "hello"},
-			expectedParams: map[string]interface{}{"text": "hello"},
+			inputParams:    map[string]any{"text": "hello"},
+			expectedParams: map[string]any{"text": "hello"},
 		},
 		{
 			name: "No Conversion Needed (Int)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"count": schemaInt}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"count": 100},
-			expectedParams: map[string]interface{}{"count": 100},
+			inputParams:    map[string]any{"count": 100},
+			expectedParams: map[string]any{"count": 100},
 		},
 		{
 			name: "No Conversion Needed (Float)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"amount": schemaNum}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"amount": 99.9},
-			expectedParams: map[string]interface{}{"amount": 99.9},
+			inputParams:    map[string]any{"amount": 99.9},
+			expectedParams: map[string]any{"amount": 99.9},
 		},
 		{
 			name: "Mixed Types Conversion",
@@ -521,12 +521,12 @@ func TestConvertMCPParams(t *testing.T) {
 					"label": schemaStr,
 				},
 			},
-			inputParams: map[string]interface{}{
+			inputParams: map[string]any{
 				"count": "5",
 				"price": "25.50",
 				"label": "widget",
 			},
-			expectedParams: map[string]interface{}{
+			expectedParams: map[string]any{
 				"count": 5,
 				"price": 25.50,
 				"label": "widget",
@@ -537,11 +537,11 @@ func TestConvertMCPParams(t *testing.T) {
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"known": schemaStr}, // Changed type name
 			},
-			inputParams: map[string]interface{}{
+			inputParams: map[string]any{
 				"known":   "yes",
 				"unknown": 123,
 			},
-			expectedParams: map[string]interface{}{
+			expectedParams: map[string]any{
 				"known":   "yes",
 				"unknown": 123, // Should pass through unchanged
 			},
@@ -549,22 +549,22 @@ func TestConvertMCPParams(t *testing.T) {
 		{
 			name:           "Empty Input Params",
 			schema:         models.InputSchema{Properties: map[string]models.ParameterSchema{"a": schemaStr}}, // Changed type name
-			inputParams:    map[string]interface{}{},
-			expectedParams: map[string]interface{}{},
+			inputParams:    map[string]any{},
+			expectedParams: map[string]any{},
 		},
 		{
 			name:           "Empty Schema",
 			schema:         models.InputSchema{Properties: map[string]models.ParameterSchema{}}, // Changed type name
-			inputParams:    map[string]interface{}{"a": "1", "b": 2.0},
-			expectedParams: map[string]interface{}{"a": "1", "b": 2.0}, // Should pass through
+			inputParams:    map[string]any{"a": "1", "b": 2.0},
+			expectedParams: map[string]any{"a": "1", "b": 2.0}, // Should pass through
 		},
 		{
 			name: "Case Sensitivity Check (Lowercase Schema)",
 			schema: models.InputSchema{
 				Properties: map[string]models.ParameterSchema{"numval": {Type: "number"}}, // Changed type name
 			},
-			inputParams:    map[string]interface{}{"numval": "98.6"},
-			expectedParams: map[string]interface{}{"numval": 98.6},
+			inputParams:    map[string]any{"numval": "98.6"},
+			expectedParams: map[string]any{"numval": 98.6},
 		},
 		// Add more tests as needed, e.g., for boolean conversion if implemented
 	}

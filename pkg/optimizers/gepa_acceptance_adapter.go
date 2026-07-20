@@ -29,7 +29,7 @@ func (g *GEPA) acceptCandidateProposal(ctx context.Context, baseline, proposed *
 	return g.acceptCandidateProposalWithAdapter(ctx, baseline, proposed, g.getLatestEvaluationAdapter(), nil)
 }
 
-func (g *GEPA) acceptCandidateProposalWithAdapter(ctx context.Context, baseline, proposed *GEPACandidate, adapter *gepaEvaluationAdapter, extraMetadata map[string]interface{}) *GEPACandidate {
+func (g *GEPA) acceptCandidateProposalWithAdapter(ctx context.Context, baseline, proposed *GEPACandidate, adapter *gepaEvaluationAdapter, extraMetadata map[string]any) *GEPACandidate {
 	if baseline == nil || proposed == nil {
 		if proposed != nil {
 			return proposed
@@ -65,7 +65,7 @@ func (g *GEPA) acceptCandidateProposalWithAdapter(ctx context.Context, baseline,
 	if useLatestAdapterCache && g != nil && g.state != nil {
 		g.state.UpsertCandidateEvaluation(proposed.ID, proposedEvaluation)
 	}
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"proposal_accepted":          true,
 		"proposal_baseline_total":    totalScoreFromEvaluation(baselineEvaluation),
 		"proposal_candidate_total":   totalScoreFromEvaluation(proposedEvaluation),
@@ -105,7 +105,7 @@ func (g *GEPA) acceptMergeProposal(ctx context.Context, baseline, partner, propo
 	if g != nil && g.state != nil {
 		g.state.UpsertCandidateEvaluation(accepted.ID, latestEvaluation)
 	}
-	accepted.Metadata = mergeCandidateMetadata(map[string]interface{}{
+	accepted.Metadata = mergeCandidateMetadata(map[string]any{
 		"merge_post_accept_full_batch_total":   totalScoreFromEvaluation(latestEvaluation),
 		"merge_post_accept_full_batch_average": latestEvaluation.AverageScore,
 	}, accepted.Metadata)
@@ -113,7 +113,7 @@ func (g *GEPA) acceptMergeProposal(ctx context.Context, baseline, partner, propo
 	return accepted
 }
 
-func (g *GEPA) buildStratifiedMergeAcceptanceAdapter(ctx context.Context, baseline, partner *GEPACandidate) (*gepaEvaluationAdapter, map[string]interface{}) {
+func (g *GEPA) buildStratifiedMergeAcceptanceAdapter(ctx context.Context, baseline, partner *GEPACandidate) (*gepaEvaluationAdapter, map[string]any) {
 	adapter := g.getLatestEvaluationAdapter()
 	if adapter == nil || baseline == nil || partner == nil {
 		return adapter, nil
@@ -127,12 +127,12 @@ func (g *GEPA) buildStratifiedMergeAcceptanceAdapter(ctx context.Context, baseli
 
 	caseIndexes, bucketCounts := stratifiedMergeAcceptanceCaseIndexes(baselineEvaluation, partnerEvaluation)
 	if len(caseIndexes) == 0 {
-		return adapter, map[string]interface{}{
+		return adapter, map[string]any{
 			"merge_acceptance_mode": "full_batch",
 		}
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"merge_acceptance_mode":                 "stratified",
 		"merge_acceptance_case_count":           len(caseIndexes),
 		"merge_acceptance_source_better_count":  bucketCounts.sourceBetter,

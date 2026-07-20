@@ -650,7 +650,7 @@ func CreateXMLInterceptorChain(config XMLConfig, additionalInterceptors ...core.
 // ParseXMLAction parses an action string from ReAct module into tool name and arguments.
 // This provides a centralized, robust XML parsing implementation for action strings.
 // It handles security limits, entity escaping, and fallback logic.
-func ParseXMLAction(actionStr string, config XMLConfig) (toolName string, arguments map[string]interface{}, err error) {
+func ParseXMLAction(actionStr string, config XMLConfig) (toolName string, arguments map[string]any, err error) {
 	// Check size limits
 	if len(actionStr) > int(config.MaxSize) {
 		return "", nil, fmt.Errorf("action size (%d bytes) exceeds limit (%d bytes)",
@@ -696,7 +696,7 @@ func ParseXMLAction(actionStr string, config XMLConfig) (toolName string, argume
 			// Check if it's just "finish" or similar
 			actionStr = strings.TrimSpace(actionStr)
 			if strings.ToLower(actionStr) == "finish" {
-				return "finish", make(map[string]interface{}), nil
+				return "finish", make(map[string]any), nil
 			}
 		}
 		return "", nil, fmt.Errorf("XML parsing failed: %w", err)
@@ -711,11 +711,11 @@ func ParseXMLAction(actionStr string, config XMLConfig) (toolName string, argume
 
 	// Handle finish action
 	if strings.ToLower(toolName) == "finish" {
-		return "finish", make(map[string]interface{}), nil
+		return "finish", make(map[string]any), nil
 	}
 
 	// Extract arguments
-	arguments = make(map[string]interface{})
+	arguments = make(map[string]any)
 	for _, arg := range xmlAction.Arguments.Args {
 		if arg.Key != "" {
 			arguments[arg.Key] = arg.Content

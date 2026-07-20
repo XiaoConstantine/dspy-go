@@ -109,7 +109,7 @@ func TestBuildOptimizedContext(t *testing.T) {
 			},
 			validate: func(t *testing.T, response *ContextResponse) {
 				assert.NotEmpty(t, response.Context)
-				assert.LessOrEqual(t, response.CompressionRatio, 1.0)  // Ratio <= 1.0 (less means compression occurred)
+				assert.LessOrEqual(t, response.CompressionRatio, 1.0)    // Ratio <= 1.0 (less means compression occurred)
 				assert.GreaterOrEqual(t, response.CompressionRatio, 0.0) // Ratio >= 0.0 (sanity check)
 				assert.LessOrEqual(t, response.TokenCount, 4096)
 			},
@@ -149,7 +149,7 @@ func TestErrorRecording(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		manager.RecordError(ctx, tc.errorType, tc.message, tc.severity, map[string]interface{}{
+		manager.RecordError(ctx, tc.errorType, tc.message, tc.severity, map[string]any{
 			"test_context": "unit_test",
 		})
 	}
@@ -213,12 +213,12 @@ func TestSuccessRecording(t *testing.T) {
 	ctx := context.Background()
 
 	// Record successes
-	manager.RecordSuccess(ctx, "feature_implementation", "Successfully implemented authentication", map[string]interface{}{
+	manager.RecordSuccess(ctx, "feature_implementation", "Successfully implemented authentication", map[string]any{
 		"duration": "2 hours",
 		"tests":    "all passing",
 	})
 
-	manager.RecordSuccess(ctx, "bug_fix", "Fixed memory leak in cache", map[string]interface{}{
+	manager.RecordSuccess(ctx, "bug_fix", "Fixed memory leak in cache", map[string]any{
 		"impact": "20% performance improvement",
 	})
 
@@ -245,10 +245,10 @@ func TestPerformanceMetrics(t *testing.T) {
 	// Execute several context builds to generate metrics
 	for i := 0; i < 5; i++ {
 		request := ContextRequest{
-			CurrentTask:         "performance test task",
-			PrioritizeCache:     true,
-			IncludeErrors:       true,
-			IncludeTodos:        true,
+			CurrentTask:     "performance test task",
+			PrioritizeCache: true,
+			IncludeErrors:   true,
+			IncludeTodos:    true,
 		}
 
 		_, err := manager.BuildOptimizedContext(ctx, request)
@@ -449,21 +449,21 @@ func TestConfigValidation(t *testing.T) {
 			BaseDir:   "", // Empty base dir
 		},
 		{
-			SessionID:        "test-session",
-			AgentID:          "test-agent",
-			BaseDir:          tempDir,
-			CacheHitTarget:   -0.1, // Invalid cache target
+			SessionID:      "test-session",
+			AgentID:        "test-agent",
+			BaseDir:        tempDir,
+			CacheHitTarget: -0.1, // Invalid cache target
 		},
 		{
-			SessionID:        "test-session",
-			AgentID:          "test-agent",
-			BaseDir:          tempDir,
-			CacheHitTarget:   1.1, // Invalid cache target
+			SessionID:      "test-session",
+			AgentID:        "test-agent",
+			BaseDir:        tempDir,
+			CacheHitTarget: 1.1, // Invalid cache target
 		},
 		{
-			SessionID:        "test-session",
-			AgentID:          "test-agent",
-			BaseDir:          tempDir,
+			SessionID: "test-session",
+			AgentID:   "test-agent",
+			BaseDir:   tempDir,
 			Cache: CacheConfig{
 				TimestampGranularity: "second", // Invalid granularity
 			},
@@ -551,6 +551,7 @@ func BenchmarkTodoManagement(b *testing.B) {
 		}
 	}
 }
+
 // Additional tests for improved coverage
 
 func TestManager_TodoManagement(t *testing.T) {

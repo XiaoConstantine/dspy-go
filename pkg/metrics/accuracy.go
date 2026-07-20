@@ -6,7 +6,7 @@ import (
 )
 
 // ExactMatch checks if the predicted answer exactly matches the expected answer for all fields.
-func ExactMatch(expected, actual map[string]interface{}) float64 {
+func ExactMatch(expected, actual map[string]any) float64 {
 	for key, expectedValue := range expected {
 		if actualValue, ok := actual[key]; !ok || !reflect.DeepEqual(expectedValue, actualValue) {
 			return 0.0
@@ -16,7 +16,7 @@ func ExactMatch(expected, actual map[string]interface{}) float64 {
 }
 
 // AnyMatch checks if any of the predicted answers match the expected answer for all fields.
-func AnyMatch(expected, actual map[string]interface{}) float64 {
+func AnyMatch(expected, actual map[string]any) float64 {
 	for key, expectedValue := range expected {
 		actualValue, ok := actual[key]
 		if !ok {
@@ -43,7 +43,7 @@ func AnyMatch(expected, actual map[string]interface{}) float64 {
 }
 
 // F1Score calculates the F1 score between the expected and actual answers.
-func F1Score(expected, actual map[string]interface{}) float64 {
+func F1Score(expected, actual map[string]any) float64 {
 	var totalF1 float64
 	var count int
 
@@ -115,7 +115,7 @@ func intersection(a, b []string) []string {
 }
 
 // MetricFunc is a type alias for metric functions.
-type MetricFunc func(expected, actual map[string]interface{}) float64
+type MetricFunc func(expected, actual map[string]any) float64
 
 // Accuracy is a struct that can be used to create customizable accuracy metrics.
 type Accuracy struct {
@@ -128,6 +128,6 @@ func NewAccuracy(metricFunc MetricFunc) *Accuracy {
 }
 
 // Evaluate applies the metric function to the expected and actual outputs.
-func (a *Accuracy) Evaluate(expected, actual map[string]interface{}) float64 {
+func (a *Accuracy) Evaluate(expected, actual map[string]any) float64 {
 	return a.MetricFunc(expected, actual)
 }

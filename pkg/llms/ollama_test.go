@@ -113,7 +113,7 @@ func TestOllamaLLM_DualModeGeneration(t *testing.T) {
 		name         string
 		useOpenAI    bool
 		expectedPath string
-		mockResponse interface{}
+		mockResponse any
 		options      []core.GenerateOption
 	}{
 		{
@@ -484,7 +484,7 @@ func TestOllamaLLM_ConfigurationParsing(t *testing.T) {
 		{
 			name: "Explicit native mode",
 			config: core.ProviderConfig{
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"use_openai_api": false,
 				},
 			},
@@ -497,7 +497,7 @@ func TestOllamaLLM_ConfigurationParsing(t *testing.T) {
 			config: core.ProviderConfig{
 				BaseURL: "http://custom:11435",
 				APIKey:  "test-key",
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"use_openai_api": true,
 					"timeout":        120,
 				},
@@ -836,14 +836,14 @@ func TestOllamaLLM_Functions_OpenAICompatibleMode(t *testing.T) {
 	llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(server.URL), WithOpenAIAPI())
 	require.NoError(t, err)
 
-	functions := []map[string]interface{}{
+	functions := []map[string]any{
 		{
 			"name": "get_weather",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"location": map[string]interface{}{"type": "string"},
-					"unit":     map[string]interface{}{"type": "string"},
+				"properties": map[string]any{
+					"location": map[string]any{"type": "string"},
+					"unit":     map[string]any{"type": "string"},
 				},
 				"required": []string{"location"},
 			},
@@ -857,10 +857,10 @@ func TestOllamaLLM_Functions_OpenAICompatibleMode(t *testing.T) {
 	assert.Equal(t, "get_weather", capturedRequest.Tools[0].Function.Name)
 	assert.Equal(t, "auto", capturedRequest.ToolChoice)
 
-	functionCall, ok := result["function_call"].(map[string]interface{})
+	functionCall, ok := result["function_call"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "get_weather", functionCall["name"])
-	args, ok := functionCall["arguments"].(map[string]interface{})
+	args, ok := functionCall["arguments"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "sf", args["location"])
 }
@@ -869,7 +869,7 @@ func TestOllamaLLM_Functions_NativeModeUnsupported(t *testing.T) {
 	llm, err := NewOllamaLLM("llama3:8b", WithNativeAPI())
 	require.NoError(t, err)
 
-	_, err = llm.GenerateWithFunctions(context.Background(), "test", []map[string]interface{}{
+	_, err = llm.GenerateWithFunctions(context.Background(), "test", []map[string]any{
 		{
 			"name": "noop",
 		},
@@ -1006,7 +1006,7 @@ func TestOllamaLLM_CapabilityDetection(t *testing.T) {
 func TestOllamaLLM_ProviderFactory(t *testing.T) {
 	config := core.ProviderConfig{
 		BaseURL: "http://test:11434",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"use_openai_api": true,
 		},
 	}

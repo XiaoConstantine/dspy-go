@@ -192,12 +192,12 @@ func TestAgent_Execute_CompletesWithToolAndFinish(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{
 		name: "write_note",
-		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+		run: func(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{Data: params["content"]}, nil
 		},
 	}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Write a note and finish.",
 		"task_id": "task-1",
 	})
@@ -238,7 +238,7 @@ func TestAgent_Execute_UsesModelTextInTranscriptAndDisplayTextInTrace(t *testing
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{
 		name: "write_note",
-		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+		run: func(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{
 				Data: "raw output",
 				Metadata: map[string]any{
@@ -252,7 +252,7 @@ func TestAgent_Execute_UsesModelTextInTranscriptAndDisplayTextInTrace(t *testing
 		},
 	}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task": "Write a note and finish.",
 	})
 	require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
 	agent, err := NewAgent(llm, Config{MaxTurns: 20})
 	require.NoError(t, err)
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Use a tool before finishing.",
 		"task_id": "task-no-call",
 	})
@@ -335,13 +335,13 @@ func TestAgent_Execute_ProcessesMultipleToolCallsInOneResponse(t *testing.T) {
 	observed := make([]string, 0, 2)
 	require.NoError(t, agent.RegisterTool(simpleTool{
 		name: "write_note",
-		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+		run: func(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 			observed = append(observed, params["content"].(string))
 			return core.ToolResult{Data: params["content"]}, nil
 		},
 	}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Write two notes and finish.",
 		"task_id": "task-multi-call",
 	})
@@ -375,7 +375,7 @@ func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	agent, err := NewAgent(llm, Config{MaxTurns: 1})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{"task": "Finish immediately."})
+	_, err = agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
 	require.NoError(t, err)
 	assert.Len(t, llm.messages, 1)
 	assert.Empty(t, llm.prompts)
@@ -427,12 +427,12 @@ func TestAgent_Execute_PreservesToolCallMetadataAcrossNativeRounds(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{
 		name: "write_note",
-		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+		run: func(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{Data: params["content"]}, nil
 		},
 	}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task": "Write a note and finish.",
 	})
 	require.NoError(t, err)
@@ -493,12 +493,12 @@ func TestAgent_Execute_GroupsMultipleToolCallsFromOneNativeTurn(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{
 		name: "write_note",
-		run: func(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+		run: func(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{Data: params["content"]}, nil
 		},
 	}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task": "Write two notes and finish.",
 	})
 	require.NoError(t, err)
@@ -540,7 +540,7 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 4,
 		ToolInterceptors: []core.ToolInterceptor{
-			func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+			func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 				return core.ToolResult{}, &core.ToolBlockedError{Reason: "approval denied"}
 			},
 		},
@@ -551,7 +551,7 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Write a note and finish.",
 		"task_id": "task-blocked",
 	})
@@ -603,7 +603,7 @@ func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Finish immediately.",
 		"task_id": "task-finish-proposed",
 	})
@@ -662,7 +662,7 @@ func TestAgent_Execute_EnrichesSubagentToolEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(tool))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":       "Investigate auth and finish.",
 		"task_id":    "task-subagent",
 		"session_id": "parent-session",
@@ -708,7 +708,7 @@ func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 4,
 		ToolInterceptors: []core.ToolInterceptor{
-			func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+			func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 				return core.ToolResult{}, &core.ToolBlockedError{Reason: "approval denied"}
 			},
 		},
@@ -731,7 +731,7 @@ func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(tool))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Attempt blocked research and finish.",
 		"task_id": "task-subagent-blocked",
 	})
@@ -768,7 +768,7 @@ func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 4,
 		ToolInterceptors: []core.ToolInterceptor{
-			func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+			func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 				return core.ToolResult{}, fmt.Errorf("approval backend unavailable")
 			},
 		},
@@ -776,7 +776,7 @@ func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task": "Write a note and finish.",
 	})
 	require.NoError(t, err)
@@ -813,7 +813,7 @@ func TestAgent_Execute_EmitsLLMTurnFinishedOnGenerateError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task":    "this will fail",
 		"task_id": "task-generate-error",
 	})
@@ -860,7 +860,7 @@ func TestAgent_Execute_PersistsAndReloadsSessionRecall(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = firstAgent.Execute(context.Background(), map[string]interface{}{
+	_, err = firstAgent.Execute(context.Background(), map[string]any{
 		"task":    "First task",
 		"task_id": "task-1",
 	})
@@ -884,7 +884,7 @@ func TestAgent_Execute_PersistsAndReloadsSessionRecall(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = secondAgent.Execute(context.Background(), map[string]interface{}{
+	_, err = secondAgent.Execute(context.Background(), map[string]any{
 		"task":    "Second task",
 		"task_id": "task-2",
 	})
@@ -928,7 +928,7 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task":    "Eventful task",
 		"task_id": "event-task",
 	})
@@ -987,7 +987,7 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task":    "Persist to both stores",
 		"task_id": "dual-write-task",
 	})
@@ -1105,7 +1105,7 @@ func TestAgent_Execute_LoadsSessionRecallFromSessionEventStore(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(ctx, map[string]interface{}{
+	_, err = agent.Execute(ctx, map[string]any{
 		"task":    "Continue prior work",
 		"task_id": "resume-task",
 	})
@@ -1210,7 +1210,7 @@ func TestAgent_Execute_UsesRequestedSessionBranchForRecallAndPersistence(t *test
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(ctx, map[string]interface{}{
+	_, err = agent.Execute(ctx, map[string]any{
 		"task":              "Continue alternate branch",
 		"session_branch_id": altBranch.ID,
 	})
@@ -1307,7 +1307,7 @@ func TestAgent_Execute_ForksSessionBranchFromRequestedEntry(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(ctx, map[string]interface{}{
+	_, err = agent.Execute(ctx, map[string]any{
 		"task":                       "Investigate forked branch",
 		"session_fork_from_entry_id": mainEntries[1].ID,
 		"session_branch_name":        "explore-fork",
@@ -1391,7 +1391,7 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task":    "Event store should fail only for dual write",
 		"task_id": "dual-write-failure",
 	})
@@ -1497,7 +1497,7 @@ func TestAgent_Execute_PersistsFailedRunsToSessionStore(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{
+	result, err := agent.Execute(context.Background(), map[string]any{
 		"task":    "Fail without tool calls",
 		"task_id": "task-failure",
 	})
@@ -1553,7 +1553,7 @@ func TestAgent_Execute_FallsBackToFunctionsForWrappedFunctionOnlyLLM(t *testing.
 	agent, err := NewAgent(core.NewModelContextDecorator(base), Config{MaxTurns: 1})
 	require.NoError(t, err)
 
-	result, err := agent.Execute(context.Background(), map[string]interface{}{"task": "Finish immediately."})
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
 	assert.Len(t, base.prompts, 1)
@@ -1755,7 +1755,7 @@ func (s nativeErrorSkillStore) Best(context.Context, string) (*skills.Skill, err
 
 type simpleTool struct {
 	name string
-	run  func(context.Context, map[string]interface{}) (core.ToolResult, error)
+	run  func(context.Context, map[string]any) (core.ToolResult, error)
 }
 
 type subagentChildAgent struct {
@@ -1802,13 +1802,13 @@ func (t simpleTool) Metadata() *core.ToolMetadata {
 	return &core.ToolMetadata{Name: t.name, Description: t.name}
 }
 func (t simpleTool) CanHandle(context.Context, string) bool { return false }
-func (t simpleTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t simpleTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	if t.run == nil {
 		return core.ToolResult{}, nil
 	}
 	return t.run(ctx, params)
 }
-func (t simpleTool) Validate(map[string]interface{}) error { return nil }
+func (t simpleTool) Validate(map[string]any) error { return nil }
 func (t simpleTool) InputSchema() models.InputSchema {
 	return models.InputSchema{Type: "object", Properties: map[string]models.ParameterSchema{}}
 }
@@ -1830,10 +1830,10 @@ func (t nonCloneableTool) Metadata() *core.ToolMetadata {
 	return &core.ToolMetadata{Name: t.name, Description: t.name}
 }
 func (t nonCloneableTool) CanHandle(context.Context, string) bool { return false }
-func (t nonCloneableTool) Execute(context.Context, map[string]interface{}) (core.ToolResult, error) {
+func (t nonCloneableTool) Execute(context.Context, map[string]any) (core.ToolResult, error) {
 	return core.ToolResult{}, nil
 }
-func (t nonCloneableTool) Validate(map[string]interface{}) error { return nil }
+func (t nonCloneableTool) Validate(map[string]any) error { return nil }
 func (t nonCloneableTool) InputSchema() models.InputSchema {
 	return models.InputSchema{Type: "object", Properties: map[string]models.ParameterSchema{}}
 }
@@ -1849,11 +1849,11 @@ func (m *stubLLM) Generate(context.Context, string, ...core.GenerateOption) (*co
 	return nil, fmt.Errorf("unexpected Generate call")
 }
 
-func (m *stubLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *stubLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("unexpected GenerateWithJSON call")
 }
 
-func (m *stubLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *stubLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	m.prompts = append(m.prompts, prompt)
 	if m.index >= len(m.results) {
 		return nil, fmt.Errorf("no more stubbed results")

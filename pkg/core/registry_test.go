@@ -28,12 +28,12 @@ func (m *RegistryMockLLM) Generate(ctx context.Context, prompt string, options .
 	return &LLMResponse{Content: "mock response for " + prompt}, nil
 }
 
-func (m *RegistryMockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"mock": "json response"}, nil
+func (m *RegistryMockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]any, error) {
+	return map[string]any{"mock": "json response"}, nil
 }
 
-func (m *RegistryMockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"function": "called"}, nil
+func (m *RegistryMockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...GenerateOption) (map[string]any, error) {
+	return map[string]any{"function": "called"}, nil
 }
 
 func (m *RegistryMockLLM) CreateEmbedding(ctx context.Context, input string, options ...EmbeddingOption) (*EmbeddingResult, error) {
@@ -462,9 +462,9 @@ func TestLLMRegistry_LoadFromConfigClonesProviderConfig(t *testing.T) {
 	source := ProviderConfig{
 		Name: "mock",
 		Models: map[string]ModelConfig{
-			"test-model": {ID: "test-model", Params: map[string]interface{}{"a": "1"}},
+			"test-model": {ID: "test-model", Params: map[string]any{"a": "1"}},
 		},
-		Params: map[string]interface{}{"top_p": "0.9"},
+		Params: map[string]any{"top_p": "0.9"},
 	}
 
 	require.NoError(t, registry.LoadFromConfig(ctx, map[string]ProviderConfig{"mock": source}))
@@ -503,9 +503,9 @@ func TestLLMRegistry_RefreshProviderClonesProviderConfig(t *testing.T) {
 	refreshed := ProviderConfig{
 		Name: "mock",
 		Models: map[string]ModelConfig{
-			"model2": {ID: "model2", Params: map[string]interface{}{"size": "2"}},
+			"model2": {ID: "model2", Params: map[string]any{"size": "2"}},
 		},
-		Params: map[string]interface{}{"mode": "fresh"},
+		Params: map[string]any{"mode": "fresh"},
 	}
 	require.NoError(t, registry.RefreshProvider(ctx, "mock", refreshed))
 

@@ -54,16 +54,16 @@ type BuilderStage struct {
 	Branches    map[string]*BuilderStage // For conditional execution
 	Next        []string                 // IDs of next stages
 	RetryConfig *RetryConfig
-	Metadata    map[string]interface{} // Additional metadata
+	Metadata    map[string]any // Additional metadata
 
 	// Advanced pattern fields
-	LoopCondition     LoopConditionFunc     // For while/until loops
-	IteratorFunc      IteratorFunc          // For forEach loops
-	TemplateParams    TemplateParameterFunc // For templates
-	MaxIterations     int                   // Safety limit for loops
-	LoopBody          *WorkflowBuilder      // Nested workflow for loop body
-	TemplateWorkflow  *WorkflowBuilder      // Template workflow definition
-	TimeoutMs         int64                 // Timeout in milliseconds
+	LoopCondition    LoopConditionFunc     // For while/until loops
+	IteratorFunc     IteratorFunc          // For forEach loops
+	TemplateParams   TemplateParameterFunc // For templates
+	MaxIterations    int                   // Safety limit for loops
+	LoopBody         *WorkflowBuilder      // Nested workflow for loop body
+	TemplateWorkflow *WorkflowBuilder      // Template workflow definition
+	TimeoutMs        int64                 // Timeout in milliseconds
 }
 
 // BuilderStep represents a single step within a stage.
@@ -71,7 +71,7 @@ type BuilderStep struct {
 	ID          string
 	Module      core.Module
 	Description string
-	Metadata    map[string]interface{}
+	Metadata    map[string]any
 }
 
 // StageType defines the execution pattern for a stage.
@@ -89,16 +89,16 @@ const (
 )
 
 // ConditionalFunc defines the signature for conditional execution logic.
-type ConditionalFunc func(ctx context.Context, state map[string]interface{}) (bool, error)
+type ConditionalFunc func(ctx context.Context, state map[string]any) (bool, error)
 
 // LoopConditionFunc defines the signature for loop conditions (while/until).
-type LoopConditionFunc func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error)
+type LoopConditionFunc func(ctx context.Context, state map[string]any, iteration int) (bool, error)
 
 // IteratorFunc defines the signature for forEach iteration logic.
-type IteratorFunc func(ctx context.Context, state map[string]interface{}) ([]interface{}, error)
+type IteratorFunc func(ctx context.Context, state map[string]any) ([]any, error)
 
 // TemplateParameterFunc defines the signature for template parameter resolution.
-type TemplateParameterFunc func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error)
+type TemplateParameterFunc func(ctx context.Context, params map[string]any) (map[string]any, error)
 
 // ConditionResult represents the result of a conditional evaluation.
 type ConditionResult struct {
@@ -145,7 +145,7 @@ func (wb *WorkflowBuilder) Stage(id string, module core.Module) *WorkflowBuilder
 		Steps:    make([]*BuilderStep, 0),
 		Branches: make(map[string]*BuilderStage),
 		Next:     make([]string, 0),
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	wb.stages = append(wb.stages, stage)
@@ -174,7 +174,7 @@ func (wb *WorkflowBuilder) Parallel(id string, steps ...*BuilderStep) *WorkflowB
 		Steps:    steps,
 		Branches: make(map[string]*BuilderStage),
 		Next:     make([]string, 0),
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	wb.stages = append(wb.stages, stage)
@@ -204,7 +204,7 @@ func (wb *WorkflowBuilder) Conditional(id string, condition ConditionalFunc) *Co
 		Condition: condition,
 		Branches:  make(map[string]*BuilderStage),
 		Next:      make([]string, 0),
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 
 	wb.stages = append(wb.stages, stage)
@@ -246,7 +246,7 @@ func (wb *WorkflowBuilder) WithRetry(retryConfig *RetryConfig) *WorkflowBuilder 
 }
 
 // WithMetadata adds metadata to the most recently added stage.
-func (wb *WorkflowBuilder) WithMetadata(key string, value interface{}) *WorkflowBuilder {
+func (wb *WorkflowBuilder) WithMetadata(key string, value any) *WorkflowBuilder {
 	// Don't return early on errors - accumulate all errors for better UX
 	if len(wb.stages) == 0 {
 		wb.addError(fmt.Errorf("cannot use WithMetadata() without any stages"))
@@ -293,13 +293,13 @@ func (wb *WorkflowBuilder) ForEach(id string, iteratorFunc IteratorFunc, bodyBui
 	}
 
 	stage := &BuilderStage{
-		ID:           id,
-		Type:         StageTypeForEach,
-		IteratorFunc: iteratorFunc,
-		LoopBody:     loopBody,
-		Branches:     make(map[string]*BuilderStage),
-		Next:         make([]string, 0),
-		Metadata:     make(map[string]interface{}),
+		ID:            id,
+		Type:          StageTypeForEach,
+		IteratorFunc:  iteratorFunc,
+		LoopBody:      loopBody,
+		Branches:      make(map[string]*BuilderStage),
+		Next:          make([]string, 0),
+		Metadata:      make(map[string]any),
 		MaxIterations: 1000, // Default safety limit
 	}
 
@@ -334,7 +334,7 @@ func (wb *WorkflowBuilder) While(id string, condition LoopConditionFunc, bodyBui
 		LoopBody:      loopBody,
 		Branches:      make(map[string]*BuilderStage),
 		Next:          make([]string, 0),
-		Metadata:      make(map[string]interface{}),
+		Metadata:      make(map[string]any),
 		MaxIterations: 1000, // Default safety limit
 	}
 
@@ -369,7 +369,7 @@ func (wb *WorkflowBuilder) Until(id string, condition LoopConditionFunc, bodyBui
 		LoopBody:      loopBody,
 		Branches:      make(map[string]*BuilderStage),
 		Next:          make([]string, 0),
-		Metadata:      make(map[string]interface{}),
+		Metadata:      make(map[string]any),
 		MaxIterations: 1000, // Default safety limit
 	}
 
@@ -421,7 +421,7 @@ func (wb *WorkflowBuilder) Template(id string, parameterFunc TemplateParameterFu
 		TemplateWorkflow: templateWorkflow,
 		Branches:         make(map[string]*BuilderStage),
 		Next:             make([]string, 0),
-		Metadata:         make(map[string]interface{}),
+		Metadata:         make(map[string]any),
 	}
 
 	wb.stages = append(wb.stages, stage)
@@ -492,7 +492,7 @@ func (cb *ConditionalBuilder) If(module core.Module) *ConditionalBuilder {
 		Steps:    make([]*BuilderStep, 0),
 		Branches: make(map[string]*BuilderStage),
 		Next:     make([]string, 0),
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	return cb
@@ -511,7 +511,7 @@ func (cb *ConditionalBuilder) Else(module core.Module) *ConditionalBuilder {
 		Steps:    make([]*BuilderStep, 0),
 		Branches: make(map[string]*BuilderStage),
 		Next:     make([]string, 0),
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	return cb
@@ -532,7 +532,7 @@ func (cb *ConditionalBuilder) ElseIf(condition ConditionalFunc, module core.Modu
 		Steps:     make([]*BuilderStep, 0),
 		Branches:  make(map[string]*BuilderStage),
 		Next:      make([]string, 0),
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}
 
 	return cb
@@ -549,7 +549,7 @@ func NewStep(id string, module core.Module) *BuilderStep {
 		ID:          id,
 		Module:      module,
 		Description: "",
-		Metadata:    make(map[string]interface{}),
+		Metadata:    make(map[string]any),
 	}
 }
 
@@ -560,7 +560,7 @@ func (bs *BuilderStep) WithDescription(description string) *BuilderStep {
 }
 
 // WithStepMetadata adds metadata to a BuilderStep.
-func (bs *BuilderStep) WithStepMetadata(key string, value interface{}) *BuilderStep {
+func (bs *BuilderStep) WithStepMetadata(key string, value any) *BuilderStep {
 	bs.Metadata[key] = value
 	return bs
 }
@@ -699,7 +699,7 @@ func (wb *WorkflowBuilder) hasCycleDFS(stageID string, visited, recStack map[str
 	stage := wb.stepIndex[stageID]
 	if stage == nil {
 		recStack[stageID] = false // Clean up recursion stack for this path
-		return false // Stage doesn't exist, no cycle from this path
+		return false              // Stage doesn't exist, no cycle from this path
 	}
 	for _, nextID := range stage.Next {
 		if !visited[nextID] {

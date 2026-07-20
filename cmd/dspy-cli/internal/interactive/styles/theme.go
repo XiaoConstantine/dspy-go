@@ -10,31 +10,31 @@ import (
 // Ghost in the Shell + gh-dash Inspired Cyberpunk Theme
 const (
 	// Primary Cyberpunk Palette
-	CyberCyan     = "#00F5FF"  // Neon cyan - primary accent
-	CyberPurple   = "#6B46C1"  // Deep purple - secondary
-	CyberViolet   = "#A855F7"  // Bright violet - highlights
-	CyberPink     = "#FF006E"  // Magenta - warnings/alerts
-	CyberGreen    = "#00FF88"  // Matrix green - success
-	CyberOrange   = "#FF8500"  // Neon orange - warnings
+	CyberCyan   = "#00F5FF" // Neon cyan - primary accent
+	CyberPurple = "#6B46C1" // Deep purple - secondary
+	CyberViolet = "#A855F7" // Bright violet - highlights
+	CyberPink   = "#FF006E" // Magenta - warnings/alerts
+	CyberGreen  = "#00FF88" // Matrix green - success
+	CyberOrange = "#FF8500" // Neon orange - warnings
 
 	// Background & Structure
-	TerminalBlack = "#0F0F0F"  // Deep black background
-	MatrixDark    = "#1A1B26"  // Tokyo Night inspired dark
-	BorderGray    = "#2D3748"  // Subtle borders
-	TextPrimary   = "#E2E8F0"  // High contrast text
-	TextSecondary = "#94A3B8"  // Muted text
-	TextTertiary  = "#64748B"  // Subtle text
+	TerminalBlack = "#0F0F0F" // Deep black background
+	MatrixDark    = "#1A1B26" // Tokyo Night inspired dark
+	BorderGray    = "#2D3748" // Subtle borders
+	TextPrimary   = "#E2E8F0" // High contrast text
+	TextSecondary = "#94A3B8" // Muted text
+	TextTertiary  = "#64748B" // Subtle text
 
 	// Legacy compatibility (mapped to new colors)
-	DSPyBlue       = CyberCyan
-	DSPyGreen      = CyberGreen
-	DSPyOrange     = CyberOrange
-	DSPyRed        = StatusError
-	DSPyPurple     = CyberViolet
-	DarkBlue       = MatrixDark
-	MediumGray     = TextSecondary
-	LightGray      = TextPrimary
-	White          = TextPrimary
+	DSPyBlue   = CyberCyan
+	DSPyGreen  = CyberGreen
+	DSPyOrange = CyberOrange
+	DSPyRed    = StatusError
+	DSPyPurple = CyberViolet
+	DarkBlue   = MatrixDark
+	MediumGray = TextSecondary
+	LightGray  = TextPrimary
+	White      = TextPrimary
 
 	// Additional legacy mappings
 	OptimizedGreen = CyberGreen
@@ -43,11 +43,11 @@ const (
 	ErrorCrimson   = StatusError
 
 	// Status Colors (GitS inspired)
-	StatusSuccess = "#00FF88"  // Bright green
-	StatusError   = "#FF006E"  // Bright magenta
-	StatusWarning = "#FF8500"  // Neon orange
-	StatusInfo    = "#00F5FF"  // Cyber cyan
-	StatusPending = "#A855F7"  // Violet
+	StatusSuccess = "#00FF88" // Bright green
+	StatusError   = "#FF006E" // Bright magenta
+	StatusWarning = "#FF8500" // Neon orange
+	StatusInfo    = "#00F5FF" // Cyber cyan
+	StatusPending = "#A855F7" // Violet
 )
 
 // Cyberpunk Typography Styles
@@ -75,10 +75,10 @@ var (
 	BlurredStyle    = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(BorderGray))
 
 	// New Cyberpunk Specific Styles
-	GlitchStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberPink)).Bold(true).Strikethrough(true)
-	MatrixStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberGreen)).Background(lipgloss.Color(TerminalBlack))
-	NeonStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberCyan)).Bold(true).Underline(true)
-	TerminalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberGreen)).Background(lipgloss.Color(TerminalBlack)).Padding(0, 1)
+	GlitchStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberPink)).Bold(true).Strikethrough(true)
+	MatrixStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberGreen)).Background(lipgloss.Color(TerminalBlack))
+	NeonStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberCyan)).Bold(true).Underline(true)
+	TerminalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(CyberGreen)).Background(lipgloss.Color(TerminalBlack)).Padding(0, 1)
 
 	// Cyberpunk Layout Components
 	BoxStyle = lipgloss.NewStyle().
@@ -133,19 +133,19 @@ var (
 // Cyberpunk Icons and Symbols (Ghost in the Shell inspired)
 const (
 	// Optimizer Icons (Cyberpunk themed)
-	IconBootstrap = "⚡"   // Lightning for speed
-	IconMIPRO     = "🧠"   // Brain for intelligence
-	IconSIMBA     = "🦾"   // Cybernetic arm for strength
-	IconGEPA      = "🧬"   // DNA for evolution
-	IconCOPRO     = "🤖"   // Robot for collaboration
+	IconBootstrap = "⚡" // Lightning for speed
+	IconMIPRO     = "🧠" // Brain for intelligence
+	IconSIMBA     = "🦾" // Cybernetic arm for strength
+	IconGEPA      = "🧬" // DNA for evolution
+	IconCOPRO     = "🤖" // Robot for collaboration
 
 	// Cyberpunk Status Icons
-	IconSuccess  = "▓"     // Block for success
-	IconProgress = "▒"     // Loading block
-	IconWarning  = "⚠"     // Warning triangle
-	IconError    = "✗"     // X mark
-	IconInfo     = "◉"     // Circle dot
-	IconPending  = "○"     // Empty circle
+	IconSuccess  = "▓" // Block for success
+	IconProgress = "▒" // Loading block
+	IconWarning  = "⚠" // Warning triangle
+	IconError    = "✗" // X mark
+	IconInfo     = "◉" // Circle dot
+	IconPending  = "○" // Empty circle
 
 	// Action Icons
 	IconPlay     = "▶️"
@@ -158,15 +158,15 @@ const (
 	IconNext     = "➡️"
 
 	// Cyberpunk UI Elements
-	IconSelected   = "►"     // Solid arrow
-	IconUnselected = "▷"     // Hollow arrow
-	IconCheck      = "◆"     // Diamond
-	IconCross      = "◇"     // Hollow diamond
-	IconDot        = "▪"     // Small block
-	IconArrowRight = "▶"     // Right arrow
-	IconArrowDown  = "▼"     // Down arrow
-	IconWizard     = "◈"     // Special wizard icon
-	IconMatrix     = "▓"     // Matrix block
+	IconSelected   = "►" // Solid arrow
+	IconUnselected = "▷" // Hollow arrow
+	IconCheck      = "◆" // Diamond
+	IconCross      = "◇" // Hollow diamond
+	IconDot        = "▪" // Small block
+	IconArrowRight = "▶" // Right arrow
+	IconArrowDown  = "▼" // Down arrow
+	IconWizard     = "◈" // Special wizard icon
+	IconMatrix     = "▓" // Matrix block
 
 	// Progress Characters
 	ProgressFull  = "█"
@@ -220,7 +220,7 @@ func RenderTitledBox(title, content string, width int) string {
 	titleBar := TitleStyle.Copy().
 		Background(lipgloss.Color(CyberPurple)).
 		Foreground(lipgloss.Color(TextPrimary)).
-		Width(width - 4). // Account for border and padding
+		Width(width-4). // Account for border and padding
 		Padding(0, 1).
 		Render(title)
 
@@ -239,7 +239,7 @@ func RenderTitledBox(title, content string, width int) string {
 // Render a cyberpunk-styled panel (new function)
 func RenderCyberPanel(title, content string, width int) string {
 	titleBar := NeonStyle.Copy().
-		Width(width - 4).
+		Width(width-4).
 		Padding(0, 1).
 		Render(IconMatrix + " " + title)
 

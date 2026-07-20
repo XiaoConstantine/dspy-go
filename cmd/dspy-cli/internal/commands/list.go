@@ -3,8 +3,8 @@ package commands
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/display"
+	"github.com/spf13/cobra"
 )
 
 func NewListCommand() *cobra.Command {

@@ -81,7 +81,7 @@ func TestInMemoryStore(t *testing.T) {
 
 		testCases := []struct {
 			key   string
-			value interface{}
+			value any
 		}{
 			{"string", "test"},
 			{"int", 42},

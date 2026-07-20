@@ -800,7 +800,7 @@ func (c *COPRO) truncateString(s string, maxLen int) string {
 }
 
 // getFieldNames extracts field names from InputField or OutputField slices.
-func getFieldNames(fields interface{}) []string {
+func getFieldNames(fields any) []string {
 	switch f := fields.(type) {
 	case []core.InputField:
 		names := make([]string, len(f))

@@ -280,8 +280,8 @@ type stubOptimizableAgent struct {
 	artifacts optimize.AgentArtifacts
 }
 
-func (s *stubOptimizableAgent) Execute(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+func (s *stubOptimizableAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 
 func (s *stubOptimizableAgent) GetCapabilities() []core.Tool { return nil }

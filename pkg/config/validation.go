@@ -15,7 +15,7 @@ import (
 type ValidationError struct {
 	Field   string
 	Tag     string
-	Value   interface{}
+	Value   any
 	Message string
 }
 

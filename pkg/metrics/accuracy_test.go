@@ -9,38 +9,38 @@ import (
 func TestExactMatch(t *testing.T) {
 	tests := []struct {
 		name     string
-		expected map[string]interface{}
-		actual   map[string]interface{}
+		expected map[string]any
+		actual   map[string]any
 		want     float64
 	}{
 		{
 			name:     "Exact match",
-			expected: map[string]interface{}{"answer": "hello"},
-			actual:   map[string]interface{}{"answer": "hello"},
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": "hello"},
 			want:     1.0,
 		},
 		{
 			name:     "No match",
-			expected: map[string]interface{}{"answer": "hello"},
-			actual:   map[string]interface{}{"answer": "world"},
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": "world"},
 			want:     0.0,
 		},
 		{
 			name:     "Multiple fields match",
-			expected: map[string]interface{}{"answer": "hello", "confidence": 0.9},
-			actual:   map[string]interface{}{"answer": "hello", "confidence": 0.9},
+			expected: map[string]any{"answer": "hello", "confidence": 0.9},
+			actual:   map[string]any{"answer": "hello", "confidence": 0.9},
 			want:     1.0,
 		},
 		{
 			name:     "Multiple fields, partial match",
-			expected: map[string]interface{}{"answer": "hello", "confidence": 0.9},
-			actual:   map[string]interface{}{"answer": "hello", "confidence": 0.8},
+			expected: map[string]any{"answer": "hello", "confidence": 0.9},
+			actual:   map[string]any{"answer": "hello", "confidence": 0.8},
 			want:     0.0,
 		},
 		{
 			name:     "Missing field in actual",
-			expected: map[string]interface{}{"answer": "hello", "confidence": 0.9},
-			actual:   map[string]interface{}{"answer": "hello"},
+			expected: map[string]any{"answer": "hello", "confidence": 0.9},
+			actual:   map[string]any{"answer": "hello"},
 			want:     0.0,
 		},
 	}
@@ -56,44 +56,44 @@ func TestExactMatch(t *testing.T) {
 func TestAnyMatch(t *testing.T) {
 	tests := []struct {
 		name     string
-		expected map[string]interface{}
-		actual   map[string]interface{}
+		expected map[string]any
+		actual   map[string]any
 		want     float64
 	}{
 		{
 			name:     "Single value match",
-			expected: map[string]interface{}{"answer": "hello"},
-			actual:   map[string]interface{}{"answer": "hello"},
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": "hello"},
 			want:     1.0,
 		},
 		{
 			name:     "Single value no match",
-			expected: map[string]interface{}{"answer": "hello"},
-			actual:   map[string]interface{}{"answer": "world"},
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": "world"},
 			want:     0.0,
 		},
 		{
 			name:     "Slice match",
-			expected: map[string]interface{}{"answer": "hello"},
-			actual:   map[string]interface{}{"answer": []interface{}{"world", "hello", "foo"}},
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": []any{"world", "hello", "foo"}},
 			want:     1.0,
 		},
 		{
 			name:     "Slice no match",
-			expected: map[string]interface{}{"answer": "hello"},
-			actual:   map[string]interface{}{"answer": []interface{}{"world", "foo", "bar"}},
+			expected: map[string]any{"answer": "hello"},
+			actual:   map[string]any{"answer": []any{"world", "foo", "bar"}},
 			want:     0.0,
 		},
 		{
 			name:     "Multiple fields, all match",
-			expected: map[string]interface{}{"answer": "hello", "confidence": 0.9},
-			actual:   map[string]interface{}{"answer": []interface{}{"world", "hello"}, "confidence": 0.9},
+			expected: map[string]any{"answer": "hello", "confidence": 0.9},
+			actual:   map[string]any{"answer": []any{"world", "hello"}, "confidence": 0.9},
 			want:     1.0,
 		},
 		{
 			name:     "Multiple fields, partial match",
-			expected: map[string]interface{}{"answer": "hello", "confidence": 0.9},
-			actual:   map[string]interface{}{"answer": []interface{}{"world", "hello"}, "confidence": 0.8},
+			expected: map[string]any{"answer": "hello", "confidence": 0.9},
+			actual:   map[string]any{"answer": []any{"world", "hello"}, "confidence": 0.8},
 			want:     0.0,
 		},
 	}
@@ -109,32 +109,32 @@ func TestAnyMatch(t *testing.T) {
 func TestF1Score(t *testing.T) {
 	tests := []struct {
 		name     string
-		expected map[string]interface{}
-		actual   map[string]interface{}
+		expected map[string]any
+		actual   map[string]any
 		want     float64
 	}{
 		{
 			name:     "Perfect match",
-			expected: map[string]interface{}{"answer": "the quick brown fox"},
-			actual:   map[string]interface{}{"answer": "the quick brown fox"},
+			expected: map[string]any{"answer": "the quick brown fox"},
+			actual:   map[string]any{"answer": "the quick brown fox"},
 			want:     1.0,
 		},
 		{
 			name:     "No match",
-			expected: map[string]interface{}{"answer": "the quick brown fox"},
-			actual:   map[string]interface{}{"answer": "a lazy dog"},
+			expected: map[string]any{"answer": "the quick brown fox"},
+			actual:   map[string]any{"answer": "a lazy dog"},
 			want:     0.0,
 		},
 		{
 			name:     "Partial match",
-			expected: map[string]interface{}{"answer": "the quick brown fox"},
-			actual:   map[string]interface{}{"answer": "the quick fox jumps"},
+			expected: map[string]any{"answer": "the quick brown fox"},
+			actual:   map[string]any{"answer": "the quick fox jumps"},
 			want:     0.75, // (2 * 3/4 * 3/4) / (3/4 + 3/4)
 		},
 		{
 			name:     "Multiple fields",
-			expected: map[string]interface{}{"answer1": "the quick brown fox", "answer2": "jumps over the lazy dog"},
-			actual:   map[string]interface{}{"answer1": "the quick fox", "answer2": "jumps over the dog"},
+			expected: map[string]any{"answer1": "the quick brown fox", "answer2": "jumps over the lazy dog"},
+			actual:   map[string]any{"answer1": "the quick fox", "answer2": "jumps over the dog"},
 			want:     0.8730158730158731, // Average of 0.75 and 0.9960317460317461
 		},
 		// {
@@ -145,20 +145,20 @@ func TestF1Score(t *testing.T) {
 		// },
 		{
 			name:     "Empty string",
-			expected: map[string]interface{}{"answer": ""},
-			actual:   map[string]interface{}{"answer": ""},
+			expected: map[string]any{"answer": ""},
+			actual:   map[string]any{"answer": ""},
 			want:     1.0, // Both empty strings should be considered a perfect match
 		},
 		{
 			name:     "One empty string",
-			expected: map[string]interface{}{"answer": "the quick brown fox"},
-			actual:   map[string]interface{}{"answer": ""},
+			expected: map[string]any{"answer": "the quick brown fox"},
+			actual:   map[string]any{"answer": ""},
 			want:     0.0,
 		},
 		{
 			name:     "All non-string fields",
-			expected: map[string]interface{}{"confidence": 0.9, "score": 5},
-			actual:   map[string]interface{}{"confidence": 0.8, "score": 4},
+			expected: map[string]any{"confidence": 0.9, "score": 5},
+			actual:   map[string]any{"confidence": 0.8, "score": 4},
 			want:     0.0, // No string fields to compare
 		},
 	}
@@ -171,8 +171,8 @@ func TestF1Score(t *testing.T) {
 	}
 }
 func TestAccuracy(t *testing.T) {
-	expected := map[string]interface{}{"answer": "hello world"}
-	actual := map[string]interface{}{"answer": "hello world"}
+	expected := map[string]any{"answer": "hello world"}
+	actual := map[string]any{"answer": "hello world"}
 
 	exactMatchAccuracy := NewAccuracy(ExactMatch)
 	assert.Equal(t, 1.0, exactMatchAccuracy.Evaluate(expected, actual))
@@ -180,7 +180,7 @@ func TestAccuracy(t *testing.T) {
 	f1ScoreAccuracy := NewAccuracy(F1Score)
 	assert.Equal(t, 1.0, f1ScoreAccuracy.Evaluate(expected, actual))
 
-	customMetric := func(expected, actual map[string]interface{}) float64 {
+	customMetric := func(expected, actual map[string]any) float64 {
 		return 0.5 // Always return 0.5 for testing purposes
 	}
 	customAccuracy := NewAccuracy(customMetric)

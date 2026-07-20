@@ -12,7 +12,7 @@ import (
 // mockLLMWithJSON implements core.LLM with JSON output support.
 type mockLLMWithJSON struct {
 	core.BaseLLM
-	generateWithJSONResult map[string]interface{}
+	generateWithJSONResult map[string]any
 	generateWithJSONError  error
 	lastPrompt             string
 }
@@ -30,7 +30,7 @@ func (m *mockLLMWithJSON) Generate(ctx context.Context, prompt string, options .
 	return &core.LLMResponse{Content: "mock response"}, nil
 }
 
-func (m *mockLLMWithJSON) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithJSON) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	m.lastPrompt = prompt
 	if m.generateWithJSONError != nil {
 		return nil, m.generateWithJSONError
@@ -38,7 +38,7 @@ func (m *mockLLMWithJSON) GenerateWithJSON(ctx context.Context, prompt string, o
 	return m.generateWithJSONResult, nil
 }
 
-func (m *mockLLMWithJSON) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithJSON) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -71,11 +71,11 @@ func (m *mockLLMWithoutJSON) Generate(ctx context.Context, prompt string, option
 	return &core.LLMResponse{Content: "mock response"}, nil
 }
 
-func (m *mockLLMWithoutJSON) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithoutJSON) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (m *mockLLMWithoutJSON) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithoutJSON) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -203,14 +203,14 @@ func TestTransformJSONResult(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		result       map[string]interface{}
+		result       map[string]any
 		config       StructuredOutputConfig
 		expectedKeys []string
 		expectError  bool
 	}{
 		{
 			name: "all fields present",
-			result: map[string]interface{}{
+			result: map[string]any{
 				"answer":     "Paris",
 				"confidence": "0.95",
 			},
@@ -220,7 +220,7 @@ func TestTransformJSONResult(t *testing.T) {
 		},
 		{
 			name: "missing field with non-strict mode",
-			result: map[string]interface{}{
+			result: map[string]any{
 				"answer": "Paris",
 			},
 			config:       DefaultStructuredOutputConfig(),
@@ -229,7 +229,7 @@ func TestTransformJSONResult(t *testing.T) {
 		},
 		{
 			name: "missing field with strict mode",
-			result: map[string]interface{}{
+			result: map[string]any{
 				"answer": "Paris",
 			},
 			config: StructuredOutputConfig{
@@ -239,7 +239,7 @@ func TestTransformJSONResult(t *testing.T) {
 		},
 		{
 			name: "extra fields preserved",
-			result: map[string]interface{}{
+			result: map[string]any{
 				"answer":     "Paris",
 				"confidence": "0.9",
 				"extra":      "some extra data",
@@ -270,7 +270,7 @@ func TestTransformJSONResult(t *testing.T) {
 func TestStructuredOutputInterceptor_WithJSONCapableLLM(t *testing.T) {
 	// Setup mock LLM with JSON capability
 	mockLLM := newMockLLMWithJSON()
-	mockLLM.generateWithJSONResult = map[string]interface{}{
+	mockLLM.generateWithJSONResult = map[string]any{
 		"answer":     "Paris",
 		"confidence": "0.95",
 	}
@@ -358,7 +358,7 @@ func TestStructuredOutputInterceptor_FallbackWithoutJSONCapability(t *testing.T)
 func TestStructuredOutputInterceptor_PrefersModuleLocalLLM(t *testing.T) {
 	globalLLM := newMockLLMWithoutJSON()
 	moduleLLM := newMockLLMWithJSON()
-	moduleLLM.generateWithJSONResult = map[string]interface{}{
+	moduleLLM.generateWithJSONResult = map[string]any{
 		"answer": "module-local",
 	}
 
@@ -419,7 +419,7 @@ func TestBuildCoTStructuredPrompt(t *testing.T) {
 func TestChainOfThoughtStructuredInterceptor(t *testing.T) {
 	// Setup mock LLM with JSON capability
 	mockLLM := newMockLLMWithJSON()
-	mockLLM.generateWithJSONResult = map[string]interface{}{
+	mockLLM.generateWithJSONResult = map[string]any{
 		"reasoning": "First, I need to add 2 and 2. 2+2=4.",
 		"answer":    "4",
 	}

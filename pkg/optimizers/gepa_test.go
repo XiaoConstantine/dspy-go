@@ -81,7 +81,7 @@ func containsAny(s string, substrings []string) bool {
 }
 
 // Mock metric for testing.
-func mockMetric(expected, actual map[string]interface{}) float64 {
+func mockMetric(expected, actual map[string]any) float64 {
 	// Simple metric: return 1.0 if both have "output", 0.5 if only actual has it, 0.0 otherwise
 	if _, expectedOk := expected["output"]; expectedOk {
 		if _, actualOk := actual["output"]; actualOk {
@@ -189,11 +189,11 @@ func (c *countingLLM) Generate(context.Context, string, ...core.GenerateOption) 
 	return &core.LLMResponse{Content: "0.5"}, nil
 }
 
-func (c *countingLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (c *countingLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (c *countingLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (c *countingLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -232,9 +232,9 @@ func (c *countingLLM) Capabilities() []core.Capability {
 func newCandidateEvaluationTestProgram(instruction string) core.Program {
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule(instruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{
 				"output": modules["alpha"].GetSignature().Instruction,
 			}, nil
 		}
@@ -245,9 +245,9 @@ func newTwoModuleCandidateEvaluationTestProgram(alphaInstruction, betaInstructio
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule(alphaInstruction),
 		"beta":  newStaticCandidateTestModule(betaInstruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{
 				"output": modules["alpha"].GetSignature().Instruction + "|" + modules["beta"].GetSignature().Instruction,
 			}, nil
 		}
@@ -257,10 +257,10 @@ func newTwoModuleCandidateEvaluationTestProgram(alphaInstruction, betaInstructio
 func newCountingCandidateEvaluationProgram(instruction string, executions *int) core.Program {
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule(instruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
 			*executions = *executions + 1
-			return map[string]interface{}{
+			return map[string]any{
 				"output": modules["alpha"].GetSignature().Instruction,
 			}, nil
 		}
@@ -270,19 +270,19 @@ func newCountingCandidateEvaluationProgram(instruction string, executions *int) 
 func newErrorCandidateEvaluationProgram(instruction string, executions *int, err error) core.Program {
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule(instruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
 			if executions != nil {
 				*executions = *executions + 1
 			}
-			return map[string]interface{}{
+			return map[string]any{
 				"output": modules["alpha"].GetSignature().Instruction,
 			}, err
 		}
 	})
 }
 
-func exactOutputMetric(expected, actual map[string]interface{}) float64 {
+func exactOutputMetric(expected, actual map[string]any) float64 {
 	if expected["output"] == actual["output"] {
 		return 1.0
 	}
@@ -619,9 +619,9 @@ func TestNewEvaluationAdapterSnapshotsBatchOnce(t *testing.T) {
 	gepa.config.EvaluationBatchSize = 2
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "one"}},
-		{Outputs: map[string]interface{}{"output": "two"}},
-		{Outputs: map[string]interface{}{"output": "three"}},
+		{Outputs: map[string]any{"output": "one"}},
+		{Outputs: map[string]any{"output": "two"}},
+		{Outputs: map[string]any{"output": "three"}},
 	})
 
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
@@ -641,8 +641,8 @@ func TestEvaluateCandidateWithAdapterCapturesExampleResults(t *testing.T) {
 	gepa.config.EvaluationBatchSize = 2
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 
@@ -671,18 +671,18 @@ func TestEvaluateCandidateWithAdapterCapturesMetricFeedback(t *testing.T) {
 		state:  NewGEPAState(),
 	}
 	gepa.config.EvaluationBatchSize = 1
-	gepa.config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, expected, actual map[string]interface{}, info *GEPAFeedbackContext) *GEPAFeedback {
+	gepa.config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, expected, actual map[string]any, info *GEPAFeedbackContext) *GEPAFeedback {
 		return &GEPAFeedback{
 			Feedback:        fmt.Sprintf("expected %v but got %v", expected["output"], actual["output"]),
 			TargetComponent: info.Candidate.ModuleName,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"source": "test",
 			},
 		}
 	})
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha expected"}},
+		{Outputs: map[string]any{"output": "alpha expected"}},
 	})
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 
@@ -709,7 +709,7 @@ func TestEvaluateCandidateWithAdapterAddsFormatFailureFeedback(t *testing.T) {
 	gepa.config.AddFormatFailureAsFeedback = true
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(
 		newErrorCandidateEvaluationProgram("alpha base", nil, fmt.Errorf("parse failed: invalid json")),
@@ -737,7 +737,7 @@ func TestEvaluateCandidateWithAdapterCachesEquivalentCandidateContent(t *testing
 		state:  NewGEPAState(),
 	}
 	gepa.config.EvaluationBatchSize = 2
-	gepa.config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, expected, actual map[string]interface{}, _ *GEPAFeedbackContext) *GEPAFeedback {
+	gepa.config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, expected, actual map[string]any, _ *GEPAFeedbackContext) *GEPAFeedback {
 		return &GEPAFeedback{
 			Feedback: fmt.Sprintf("expected %v but got %v", expected["output"], actual["output"]),
 		}
@@ -747,12 +747,12 @@ func TestEvaluateCandidateWithAdapterCachesEquivalentCandidateContent(t *testing
 	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
 	dataset := newCountingDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "one"},
-			Outputs: map[string]interface{}{"output": "alpha tuned"},
+			Inputs:  map[string]any{"input": "one"},
+			Outputs: map[string]any{"output": "alpha tuned"},
 		},
 		{
-			Inputs:  map[string]interface{}{"input": "two"},
-			Outputs: map[string]interface{}{"output": "alpha tuned"},
+			Inputs:  map[string]any{"input": "two"},
+			Outputs: map[string]any{"output": "alpha tuned"},
 		},
 	})
 	adapter := gepa.newEvaluationAdapter(program, dataset, exactOutputMetric)
@@ -791,12 +791,12 @@ func TestEvaluateCandidateWithAdapterReusesCachedCasesAcrossSubsetAdapters(t *te
 	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
 	dataset := newCountingDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "one"},
-			Outputs: map[string]interface{}{"output": "alpha tuned"},
+			Inputs:  map[string]any{"input": "one"},
+			Outputs: map[string]any{"output": "alpha tuned"},
 		},
 		{
-			Inputs:  map[string]interface{}{"input": "two"},
-			Outputs: map[string]interface{}{"output": "alpha tuned"},
+			Inputs:  map[string]any{"input": "two"},
+			Outputs: map[string]any{"output": "alpha tuned"},
 		},
 	})
 	adapter := gepa.newEvaluationAdapter(program, dataset, exactOutputMetric)
@@ -829,12 +829,12 @@ func TestEvaluateCandidateWithAdapterCountsOnlyUncachedMetricCalls(t *testing.T)
 	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
 	dataset := newCountingDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "one"},
-			Outputs: map[string]interface{}{"output": "alpha tuned"},
+			Inputs:  map[string]any{"input": "one"},
+			Outputs: map[string]any{"output": "alpha tuned"},
 		},
 		{
-			Inputs:  map[string]interface{}{"input": "two"},
-			Outputs: map[string]interface{}{"output": "alpha tuned"},
+			Inputs:  map[string]any{"input": "two"},
+			Outputs: map[string]any{"output": "alpha tuned"},
 		},
 	})
 	adapter := gepa.newEvaluationAdapter(program, dataset, exactOutputMetric)
@@ -902,7 +902,7 @@ func TestSelectComponentsForUpdateRoundRobinCyclesModules(t *testing.T) {
 	require.Equal(t, []string{"alpha"}, first.modules)
 	assert.Equal(t, 1, first.nextCursor)
 
-	candidate.Metadata = map[string]interface{}{gepaComponentSelectionCursorMetadataKey: first.nextCursor}
+	candidate.Metadata = map[string]any{gepaComponentSelectionCursorMetadataKey: first.nextCursor}
 	second := gepa.selectComponentsForUpdate(candidate)
 	require.Equal(t, []string{"beta"}, second.modules)
 	assert.Equal(t, 0, second.nextCursor)
@@ -1020,11 +1020,11 @@ func TestPrepareOptimizationDatasetsUsesValidationSplit(t *testing.T) {
 	gepa.config.ValidationSplit = 0.4
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "one"}},
-		{Outputs: map[string]interface{}{"output": "two"}},
-		{Outputs: map[string]interface{}{"output": "three"}},
-		{Outputs: map[string]interface{}{"output": "four"}},
-		{Outputs: map[string]interface{}{"output": "five"}},
+		{Outputs: map[string]any{"output": "one"}},
+		{Outputs: map[string]any{"output": "two"}},
+		{Outputs: map[string]any{"output": "three"}},
+		{Outputs: map[string]any{"output": "four"}},
+		{Outputs: map[string]any{"output": "five"}},
 	})
 
 	trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(dataset)
@@ -1062,8 +1062,8 @@ func TestPrepareOptimizationDatasetsDisabledValidationSplit(t *testing.T) {
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "one"}},
-		{Outputs: map[string]interface{}{"output": "two"}},
+		{Outputs: map[string]any{"output": "one"}},
+		{Outputs: map[string]any{"output": "two"}},
 	})
 
 	trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(dataset)
@@ -1079,13 +1079,13 @@ func TestPrepareOptimizationDatasetsUsesExplicitValidationExamples(t *testing.T)
 	}
 	gepa.config.ValidationSplit = 0.5
 	gepa.config.ValidationExamples = []core.Example{
-		{Outputs: map[string]interface{}{"output": "val-a"}},
-		{Outputs: map[string]interface{}{"output": "val-b"}},
+		{Outputs: map[string]any{"output": "val-a"}},
+		{Outputs: map[string]any{"output": "val-b"}},
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "train-a"}},
-		{Outputs: map[string]interface{}{"output": "train-b"}},
+		{Outputs: map[string]any{"output": "train-a"}},
+		{Outputs: map[string]any{"output": "train-b"}},
 	})
 
 	trainDataset, validationExamples, err := gepa.prepareOptimizationDatasets(dataset)
@@ -1110,7 +1110,7 @@ func TestPrepareOptimizationDatasetsBoundarySizes(t *testing.T) {
 	}{
 		{
 			name:             "single example stays in train",
-			examples:         []core.Example{{Outputs: map[string]interface{}{"output": "one"}}},
+			examples:         []core.Example{{Outputs: map[string]any{"output": "one"}}},
 			validationSplit:  0.5,
 			expectedTrainLen: 1,
 			expectedValLen:   0,
@@ -1118,8 +1118,8 @@ func TestPrepareOptimizationDatasetsBoundarySizes(t *testing.T) {
 		{
 			name: "two examples split one and one",
 			examples: []core.Example{
-				{Outputs: map[string]interface{}{"output": "one"}},
-				{Outputs: map[string]interface{}{"output": "two"}},
+				{Outputs: map[string]any{"output": "one"}},
+				{Outputs: map[string]any{"output": "two"}},
 			},
 			validationSplit:  0.5,
 			expectedTrainLen: 1,
@@ -1163,7 +1163,7 @@ func TestEvaluateCandidateWithAdapterUsesWholeProgramComponentTexts(t *testing.T
 	gepa.config.EvaluationBatchSize = 1
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"), dataset, exactOutputMetric)
 
@@ -1221,7 +1221,7 @@ func TestEvaluateValidationPopulationTracksBestValidationCandidate(t *testing.T)
 	err := gepa.evaluateValidationPopulation(
 		context.Background(),
 		newCandidateEvaluationTestProgram("alpha base"),
-		[]core.Example{{Outputs: map[string]interface{}{"output": "alpha b"}}},
+		[]core.Example{{Outputs: map[string]any{"output": "alpha b"}}},
 		exactOutputMetric,
 	)
 	require.NoError(t, err)
@@ -1272,7 +1272,7 @@ func TestEvaluateValidationPopulationReusesCachedEvaluations(t *testing.T) {
 
 	executions := 0
 	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
-	validationExamples := []core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}}
+	validationExamples := []core.Example{{Outputs: map[string]any{"output": "alpha a"}}}
 
 	err := gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
 	require.NoError(t, err)
@@ -1317,14 +1317,14 @@ func TestEvaluateValidationPopulationHandlesMixedCachedAndUncachedCandidates(t *
 		"candidate-a": {
 			AverageScore: 1.0,
 			Cases: []gepaEvaluationCase{
-				{Outputs: map[string]interface{}{"output": "alpha a"}, Score: 1.0},
+				{Outputs: map[string]any{"output": "alpha a"}, Score: 1.0},
 			},
 		},
 	})
 
 	executions := 0
 	program := newCountingCandidateEvaluationProgram("alpha base", &executions)
-	validationExamples := []core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}}
+	validationExamples := []core.Example{{Outputs: map[string]any{"output": "alpha a"}}}
 
 	err := gepa.evaluateValidationPopulation(context.Background(), program, validationExamples, exactOutputMetric)
 	require.NoError(t, err)
@@ -1341,7 +1341,7 @@ func TestEvaluateValidationPopulationPreservesAllTimeBestValidationCandidate(t *
 	}
 	gepa.config.ConcurrencyLevel = 1
 
-	validationExamples := []core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}}
+	validationExamples := []core.Example{{Outputs: map[string]any{"output": "alpha a"}}}
 	program := newCandidateEvaluationTestProgram("alpha base")
 
 	gepa.state.PopulationHistory = []*Population{{
@@ -1383,25 +1383,25 @@ func TestBuildValidationFrontierTracksCoverage(t *testing.T) {
 	evaluations := map[string]*gepaCandidateEvaluation{
 		"candidate-a": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-0"}}, Score: 1.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-1"}}, Score: 0.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-2"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "a-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "a-1"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "a-2"}}, Score: 0.0},
 			},
 			AverageScore: 1.0 / 3.0,
 		},
 		"candidate-b": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-0"}}, Score: 1.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-1"}}, Score: 1.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-2"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "b-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "b-1"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "b-2"}}, Score: 0.0},
 			},
 			AverageScore: 2.0 / 3.0,
 		},
 		"candidate-c": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-0"}}, Score: 0.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-1"}}, Score: 1.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-2"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "c-0"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "c-1"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "c-2"}}, Score: 1.0},
 			},
 			AverageScore: 2.0 / 3.0,
 		},
@@ -1421,22 +1421,22 @@ func TestBuildValidationFrontierPrunesDominatedTiedWinners(t *testing.T) {
 	evaluations := map[string]*gepaCandidateEvaluation{
 		"candidate-a": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-0"}}, Score: 1.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "a-1"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "a-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "a-1"}}, Score: 0.0},
 			},
 			AverageScore: 0.5,
 		},
 		"candidate-b": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-0"}}, Score: 1.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "b-1"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "b-0"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "b-1"}}, Score: 1.0},
 			},
 			AverageScore: 1.0,
 		},
 		"candidate-c": {
 			Cases: []gepaEvaluationCase{
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-0"}}, Score: 0.0},
-				{Example: core.Example{Outputs: map[string]interface{}{"output": "c-1"}}, Score: 1.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "c-0"}}, Score: 0.0},
+				{Example: core.Example{Outputs: map[string]any{"output": "c-1"}}, Score: 1.0},
 			},
 			AverageScore: 0.5,
 		},
@@ -1477,7 +1477,7 @@ func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
 		context.Background(),
 		newCandidateEvaluationTestProgram("alpha base"),
 		exactOutputMetric,
-		[]core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}},
+		[]core.Example{{Outputs: map[string]any{"output": "alpha a"}}},
 		1,
 	)
 	require.NoError(t, err)
@@ -1488,7 +1488,7 @@ func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
 		context.Background(),
 		newCandidateEvaluationTestProgram("alpha base"),
 		exactOutputMetric,
-		[]core.Example{{Outputs: map[string]interface{}{"output": "alpha a"}}},
+		[]core.Example{{Outputs: map[string]any{"output": "alpha a"}}},
 		2,
 	)
 	require.NoError(t, err)
@@ -1654,9 +1654,9 @@ func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
 	program := newCandidateEvaluationTestProgram("alpha base")
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "match"}},
-		{Outputs: map[string]interface{}{"output": "match"}},
-		{Outputs: map[string]interface{}{"output": "unused"}},
+		{Outputs: map[string]any{"output": "match"}},
+		{Outputs: map[string]any{"output": "match"}},
+		{Outputs: map[string]any{"output": "unused"}},
 	})
 	fitnessMap, err := gepa.evaluatePopulation(context.Background(), program, dataset, exactOutputMetric)
 	require.NoError(t, err)
@@ -1700,8 +1700,8 @@ func TestMutateAcceptsImprovingProposalOnMinibatch(t *testing.T) {
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 	gepa.setLatestEvaluationAdapter(adapter)
@@ -1745,8 +1745,8 @@ func TestMutateRejectsNonImprovingProposalOnMinibatch(t *testing.T) {
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
 	})
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 	gepa.setLatestEvaluationAdapter(adapter)
@@ -1777,14 +1777,14 @@ func TestMutateSkipsAcceptanceForNoOpFallbackMutation(t *testing.T) {
 	executeCalls := 0
 	program := core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule(""),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
 			executeCalls++
-			return map[string]interface{}{"output": modules["alpha"].GetSignature().Instruction}, nil
+			return map[string]any{"output": modules["alpha"].GetSignature().Instruction}, nil
 		}
 	})
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": ""}},
+		{Outputs: map[string]any{"output": ""}},
 	})
 	gepa.setLatestEvaluationAdapter(gepa.newEvaluationAdapter(program, dataset, exactOutputMetric))
 
@@ -1809,16 +1809,16 @@ func TestMutateAcceptsProposalUsingTotalScoreWhenAverageWouldReject(t *testing.T
 
 	program := core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule("fragile"),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(_ context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(_ context.Context, inputs map[string]any) (map[string]any, error) {
 			instruction := modules["alpha"].GetSignature().Instruction
 			if instruction == "fragile" && inputs["case"] == "hard" {
 				return nil, fmt.Errorf("hard-case failure")
 			}
-			return map[string]interface{}{"output": "ok"}, nil
+			return map[string]any{"output": "ok"}, nil
 		}
 	})
-	weightedMetric := func(expected, actual map[string]interface{}) float64 {
+	weightedMetric := func(expected, actual map[string]any) float64 {
 		if expected["output"] != actual["output"] {
 			return 0.0
 		}
@@ -1826,12 +1826,12 @@ func TestMutateAcceptsProposalUsingTotalScoreWhenAverageWouldReject(t *testing.T
 	}
 	dataset := newCountingDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"case": "easy"},
-			Outputs: map[string]interface{}{"output": "ok", "weight": 1.0},
+			Inputs:  map[string]any{"case": "easy"},
+			Outputs: map[string]any{"output": "ok", "weight": 1.0},
 		},
 		{
-			Inputs:  map[string]interface{}{"case": "hard"},
-			Outputs: map[string]interface{}{"output": "ok", "weight": 0.6},
+			Inputs:  map[string]any{"case": "hard"},
+			Outputs: map[string]any{"output": "ok", "weight": 0.6},
 		},
 	})
 	adapter := gepa.newEvaluationAdapter(program, dataset, weightedMetric)
@@ -1879,8 +1879,8 @@ func TestMaterializeEvaluationBatchUsesSingleExampleForNonPositiveBatchSize(t *t
 			gepa.config.EvaluationBatchSize = tt.batchSize
 
 			dataset := newCountingDataset([]core.Example{
-				{Outputs: map[string]interface{}{"output": "first"}},
-				{Outputs: map[string]interface{}{"output": "second"}},
+				{Outputs: map[string]any{"output": "first"}},
+				{Outputs: map[string]any{"output": "second"}},
 			})
 
 			batch := gepa.materializeEvaluationBatch(dataset)
@@ -1910,8 +1910,8 @@ func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
 	require.NoError(t, err)
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
 	})
 
 	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
@@ -1951,7 +1951,7 @@ func TestCompileResumesFromSavedRunState(t *testing.T) {
 	require.NoError(t, err)
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
 	})
 	_, err = firstRun.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 	require.NoError(t, err)
@@ -1994,8 +1994,8 @@ func TestCompileStopsWhenMetricBudgetReached(t *testing.T) {
 	require.NoError(t, err)
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
 	})
 
 	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
@@ -2023,7 +2023,7 @@ func TestCompileStopsWhenScoreThresholdReached(t *testing.T) {
 	require.NoError(t, err)
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
 	})
 
 	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
@@ -2053,7 +2053,7 @@ func TestCompileStopsWithCustomStopper(t *testing.T) {
 			}
 			return &GEPAStopDecision{
 				Reason: "unit_test_stop",
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"metric_calls": gepa.state.MetricCallCount(),
 				},
 			}
@@ -2064,7 +2064,7 @@ func TestCompileStopsWithCustomStopper(t *testing.T) {
 	require.NoError(t, err)
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
 	})
 
 	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
@@ -2185,24 +2185,24 @@ func TestGEPACompileBasic(t *testing.T) {
 		Modules: map[string]core.Module{
 			"test_module": mockModule,
 		},
-		Forward: func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{"output": "test response"}, nil
+		Forward: func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			return map[string]any{"output": "test response"}, nil
 		},
 	}
 
 	// Create test dataset
 	dataset := testutil.NewMockDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "test input 1"},
-			Outputs: map[string]interface{}{"output": "expected output 1"},
+			Inputs:  map[string]any{"input": "test input 1"},
+			Outputs: map[string]any{"output": "expected output 1"},
 		},
 		{
-			Inputs:  map[string]interface{}{"input": "test input 2"},
-			Outputs: map[string]interface{}{"output": "expected output 2"},
+			Inputs:  map[string]any{"input": "test input 2"},
+			Outputs: map[string]any{"output": "expected output 2"},
 		},
 		{
-			Inputs:  map[string]interface{}{"input": "test input 3"},
-			Outputs: map[string]interface{}{"output": "expected output 3"},
+			Inputs:  map[string]any{"input": "test input 3"},
+			Outputs: map[string]any{"output": "expected output 3"},
 		},
 	})
 
@@ -2345,7 +2345,7 @@ func TestMultiObjectiveFitnessSystem(t *testing.T) {
 	// Test fitness calculation
 	testInputs := map[string]any{"input": "test"}
 	testOutputs := map[string]any{"output": "result"}
-	testContext := map[string]interface{}{"duration": 150 * time.Millisecond}
+	testContext := map[string]any{"duration": 150 * time.Millisecond}
 	fitness := gepa.calculateMultiObjectiveFitness(candidate.ID, testInputs, testOutputs, nil, testContext)
 
 	// Verify fitness components
@@ -2380,7 +2380,7 @@ func TestContextAwarePerformanceTracking(t *testing.T) {
 	// Test context-aware efficiency assessment
 	testInputs := map[string]any{"input": "test"}
 	testOutputs := map[string]any{"output": "result"}
-	testContext := map[string]interface{}{"duration": duration}
+	testContext := map[string]any{"duration": duration}
 	efficiency := gepa.assessContextAwareEfficiency(candidate.ID, testInputs, testOutputs, nil, testContext)
 	assert.GreaterOrEqual(t, efficiency, 0.0)
 	assert.LessOrEqual(t, efficiency, 1.0)
@@ -2580,7 +2580,7 @@ func TestReflectionEngine_UsesRichTraceEvidence(t *testing.T) {
 			Success:     false,
 			Duration:    150 * time.Millisecond,
 			Error:       fmt.Errorf("comparison failed"),
-			ContextData: map[string]interface{}{
+			ContextData: map[string]any{
 				"rich_trace_evidence": []string{
 					"termination=max_iterations",
 					"failed_test=output:answer",
@@ -2630,19 +2630,19 @@ func TestBuildReflectionPromptIncludesExampleLevelEvidence(t *testing.T) {
 		Cases: []gepaEvaluationCase{
 			{
 				Example: core.Example{
-					Inputs:  map[string]interface{}{"question": "What is DSPy?"},
-					Outputs: map[string]interface{}{"output": "framework"},
+					Inputs:  map[string]any{"question": "What is DSPy?"},
+					Outputs: map[string]any{"output": "framework"},
 				},
-				Outputs: map[string]interface{}{"output": "wrong"},
+				Outputs: map[string]any{"output": "wrong"},
 				Score:   0.0,
 				Err:     fmt.Errorf("comparison failed"),
 			},
 			{
 				Example: core.Example{
-					Inputs:  map[string]interface{}{"question": "What is GEPA?"},
-					Outputs: map[string]interface{}{"output": "optimizer"},
+					Inputs:  map[string]any{"question": "What is GEPA?"},
+					Outputs: map[string]any{"output": "optimizer"},
 				},
-				Outputs: map[string]interface{}{"output": "optimizer"},
+				Outputs: map[string]any{"output": "optimizer"},
 				Score:   1.0,
 			},
 		},
@@ -2687,10 +2687,10 @@ func TestBuildReflectionPromptIncludesMetricFeedbackEvidence(t *testing.T) {
 		Cases: []gepaEvaluationCase{
 			{
 				Example: core.Example{
-					Inputs:  map[string]interface{}{"question": "What is DSPy?"},
-					Outputs: map[string]interface{}{"output": "framework"},
+					Inputs:  map[string]any{"question": "What is DSPy?"},
+					Outputs: map[string]any{"output": "framework"},
 				},
-				Outputs:        map[string]interface{}{"output": "library"},
+				Outputs:        map[string]any{"output": "library"},
 				Score:          0.0,
 				Feedback:       "Use the framework terminology, not a generic library label.",
 				FeedbackTarget: "alpha",
@@ -2716,10 +2716,10 @@ func TestBuildReflectionInputBoundsWorstCases(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		cases = append(cases, gepaEvaluationCase{
 			Example: core.Example{
-				Inputs:  map[string]interface{}{"question": fmt.Sprintf("q-%d", i)},
-				Outputs: map[string]interface{}{"output": fmt.Sprintf("expected-%d", i)},
+				Inputs:  map[string]any{"question": fmt.Sprintf("q-%d", i)},
+				Outputs: map[string]any{"output": fmt.Sprintf("expected-%d", i)},
 			},
-			Outputs: map[string]interface{}{"output": fmt.Sprintf("actual-%d", i)},
+			Outputs: map[string]any{"output": fmt.Sprintf("actual-%d", i)},
 			Score:   float64(i) / 10.0,
 		})
 	}
@@ -2760,10 +2760,10 @@ func TestPerformReflectionCachesLatestCandidateReflections(t *testing.T) {
 			Cases: []gepaEvaluationCase{
 				{
 					Example: core.Example{
-						Inputs:  map[string]interface{}{"question": "What is GEPA?"},
-						Outputs: map[string]interface{}{"output": "optimizer"},
+						Inputs:  map[string]any{"question": "What is GEPA?"},
+						Outputs: map[string]any{"output": "optimizer"},
 					},
-					Outputs: map[string]interface{}{"output": "wrong"},
+					Outputs: map[string]any{"output": "wrong"},
 					Score:   0.0,
 					Err:     fmt.Errorf("mismatch"),
 				},
@@ -2824,10 +2824,10 @@ func TestMutateUsesReflectionGuidedProposal(t *testing.T) {
 			Cases: []gepaEvaluationCase{
 				{
 					Example: core.Example{
-						Inputs:  map[string]interface{}{"question": "What is GEPA?"},
-						Outputs: map[string]interface{}{"output": "optimizer"},
+						Inputs:  map[string]any{"question": "What is GEPA?"},
+						Outputs: map[string]any{"output": "optimizer"},
 					},
-					Outputs: map[string]interface{}{"output": "plain text"},
+					Outputs: map[string]any{"output": "plain text"},
 					Score:   0.0,
 					Err:     fmt.Errorf("format mismatch"),
 				},
@@ -3064,7 +3064,7 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 			"copy-module": "Original instruction",
 		},
 		Fitness:  0.8,
-		Metadata: map[string]interface{}{"key": "value"},
+		Metadata: map[string]any{"key": "value"},
 	}
 
 	copied := gepa.copyCandidate(original)
@@ -3112,7 +3112,7 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "Improved instruction for the selected candidate."}},
+		{Outputs: map[string]any{"output": "Improved instruction for the selected candidate."}},
 	})
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 	gepa.setLatestEvaluationAdapter(adapter)
@@ -3185,7 +3185,7 @@ func TestProposeNextGenerationCandidateAllSelectionUpdatesBothComponents(t *test
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha improved|beta improved"}},
+		{Outputs: map[string]any{"output": "alpha improved|beta improved"}},
 	})
 	adapter := gepa.newEvaluationAdapter(
 		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
@@ -3244,7 +3244,7 @@ func TestProposeNextGenerationCandidateCarriesRoundRobinCursorForward(t *testing
 			"alpha": "alpha base",
 			"beta":  "beta base",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			gepaComponentSelectionCursorMetadataKey: 0,
 		},
 	}
@@ -3399,7 +3399,7 @@ func newAncestorMergeProposalTestFixture() (*GEPA, *Population, *GEPACandidate, 
 	})
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(
 		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
@@ -3522,19 +3522,19 @@ func TestAcceptMergeProposalReevaluatesAcceptedCandidateOnLatestBatch(t *testing
 			"alpha": "alpha tuned",
 			"beta":  "beta tuned",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"proposal_type": "ancestor_merge",
 		},
 	}
 
 	dataset := datasets.NewSimpleDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]interface{}{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(
 		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
@@ -3639,7 +3639,7 @@ func TestEvolvePopulationPreservesFitnessMapForUpdatedCandidates(t *testing.T) {
 	}
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "Improved instruction for the selected candidate."}},
+		{Outputs: map[string]any{"output": "Improved instruction for the selected candidate."}},
 	})
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 	gepa.setLatestEvaluationAdapter(adapter)

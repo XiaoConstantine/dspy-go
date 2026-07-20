@@ -50,7 +50,7 @@ func (m *instructionModule) Clone() core.Module {
 func TestMIPRO(t *testing.T) {
 	t.Run("Constructor and Configuration", func(t *testing.T) {
 		t.Run("NewMIPRO creates instance with default values", func(t *testing.T) {
-			metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			metric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return 1.0
 			}
 
@@ -63,14 +63,14 @@ func TestMIPRO(t *testing.T) {
 		})
 
 		t.Run("Options properly configure MIPRO", func(t *testing.T) {
-			metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			metric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return 1.0
 			}
 
 			mipro := NewMIPRO(metric,
 				WithMode(LightMode),
 				WithNumTrials(10),
-				WithTeacherSettings(map[string]interface{}{
+				WithTeacherSettings(map[string]any{
 					"temperature": 0.7,
 				}),
 			)
@@ -92,7 +92,7 @@ func TestMIPRO(t *testing.T) {
 			mipro.teacherStudent.Teacher = mockTeacher
 
 			example := core.Example{
-				Inputs: map[string]interface{}{
+				Inputs: map[string]any{
 					"prompt": "Test prompt",
 				},
 			}
@@ -114,7 +114,7 @@ func TestMIPRO(t *testing.T) {
 			mipro.teacherStudent.Teacher = mockTeacher
 
 			example := core.Example{
-				Inputs: map[string]interface{}{
+				Inputs: map[string]any{
 					"prompt": "Test prompt",
 				},
 			}
@@ -139,8 +139,8 @@ func TestMIPRO(t *testing.T) {
 			mockModule := program.Modules["test"].(*MockModule)
 			// Sample example
 			sampleExample := core.Example{
-				Inputs:  map[string]interface{}{"prompt": "sample input"},
-				Outputs: map[string]interface{}{"completion": "expected output"},
+				Inputs:  map[string]any{"prompt": "sample input"},
+				Outputs: map[string]any{"completion": "expected output"},
 			}
 
 			dataset := testutil.NewMockDataset([]core.Example{sampleExample})
@@ -159,16 +159,16 @@ func TestMIPRO(t *testing.T) {
 			}
 
 			// Expectations for Compile flow
-			mockStrategy.On("SuggestParams", mock.Anything).Return(map[string]interface{}{"module_0_instruction": float64(0)}, nil).Once()
+			mockStrategy.On("SuggestParams", mock.Anything).Return(map[string]any{"module_0_instruction": float64(0)}, nil).Once()
 
 			mockStrategy.On("UpdateResults", mock.Anything, mock.AnythingOfType("float64")).Return(nil).Once()
 			mockStrategy.On("GetBestParams").Return(
-				map[string]interface{}{"module_0_instruction": float64(0)}, 0.8).Once()
+				map[string]any{"module_0_instruction": float64(0)}, 0.8).Once()
 			mockModule.On("Clone").Return(mockModule).Maybe()
 			mockModule.On("SetSignature", mock.Anything).Return().Maybe()
 			mockModule.On("SetLLM", mock.Anything).Return().Maybe()
 			mockModule.On("GetSignature").Return(program.Modules["test"].GetSignature()).Maybe()
-			mockModule.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"output": "mocked output"}, nil).Maybe()
+			mockModule.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"output": "mocked output"}, nil).Maybe()
 			dataset.On("Reset").Return()
 			dataset.On("Next").Return(sampleExample, true)
 			dataset.On("Next").Return(core.Example{}, false)
@@ -203,10 +203,10 @@ func TestMIPRO(t *testing.T) {
 
 			// Setup expectations for demonstration generation phase
 			sampleExample := core.Example{
-				Inputs: map[string]interface{}{
+				Inputs: map[string]any{
 					"prompt": "test example", // Include both field names for compatibility
 				},
-				Outputs: map[string]interface{}{"completion": "expected result"},
+				Outputs: map[string]any{"completion": "expected result"},
 			}
 
 			// Expect Next() to be called during demonstration generation
@@ -243,7 +243,7 @@ func TestMIPRO(t *testing.T) {
 			mockMod := program.Modules["test"].(*MockModule)
 			mockDataset := dataset.(*testutil.MockDataset)
 
-			sampleExample := core.Example{Inputs: map[string]interface{}{"prompt": "converge_test"}}
+			sampleExample := core.Example{Inputs: map[string]any{"prompt": "converge_test"}}
 			mockTeacher := new(testutil.MockLLM)
 			mockTeacher.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
 				&core.LLMResponse{Content: "Test response"}, nil).Times(2)
@@ -254,17 +254,17 @@ func TestMIPRO(t *testing.T) {
 			mipro.instructionGenerator.PromptModel = mockLLM
 
 			// Mock setup for convergence test
-			mockStrategy.On("SuggestParams", ctx).Return(map[string]interface{}{"module_0_instruction": float64(0)}, nil).Once()
+			mockStrategy.On("SuggestParams", ctx).Return(map[string]any{"module_0_instruction": float64(0)}, nil).Once()
 
 			mockStrategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Maybe()
-			mockStrategy.On("GetBestParams").Return(map[string]interface{}{"module_0_instruction": float64(0)}, 0.8).Once()
+			mockStrategy.On("GetBestParams").Return(map[string]any{"module_0_instruction": float64(0)}, 0.8).Once()
 
 			mockMod.On("Clone").Return(mockMod).Maybe()
 			mockMod.On("Clone").Return(mockMod).Maybe()
 			mockMod.On("SetSignature", mock.Anything).Return().Maybe()
 			mockMod.On("SetLLM", mock.Anything).Return().Maybe()
 			mockMod.On("GetSignature").Return(program.Modules["test"].GetSignature()).Maybe()
-			mockMod.On("Process", mock.Anything, mock.Anything).Return(map[string]interface{}{"output": "test"}, nil).Maybe()
+			mockMod.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"output": "test"}, nil).Maybe()
 			mockDataset.On("Reset").Return().Once()
 			mockDataset.On("Next").Return(sampleExample, true).Once()   // 1st example
 			mockDataset.On("Next").Return(sampleExample, true).Once()   // 2nd example
@@ -308,7 +308,7 @@ func TestMIPRO(t *testing.T) {
 			testProg := createTestProgram()
 
 			mipro.updateOptimizationState(
-				map[string]interface{}{"param": "test"},
+				map[string]any{"param": "test"},
 				0.9,
 				testProg,
 			)
@@ -330,8 +330,8 @@ func TestMIPRO(t *testing.T) {
 			// Add Reset expectation for the mock dataset
 			mockDataset := dataset.(*testutil.MockDataset)
 			mockDataset.On("Reset").Return().Times(3)
-			mockDataset.On("Next").Return(core.Example{Inputs: map[string]interface{}{"input": "tpe_test"}}, true).Maybe()
-			mockDataset.On("Next").Return(core.Example{Inputs: map[string]interface{}{"input": "tpe_test2"}}, true).Maybe()
+			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"input": "tpe_test"}}, true).Maybe()
+			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"input": "tpe_test2"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{}, false).Maybe()
 			// Need mock expectations for the module inside the program
 			mockMod := program.Modules["test"].(*MockModule)
@@ -360,7 +360,7 @@ func createTestMIPRO(t *testing.T) *MIPRO {
 	mipro := NewMIPRO(metric,
 		WithMode(LightMode),
 		WithNumTrials(1),
-		WithTeacherSettings(map[string]interface{}{
+		WithTeacherSettings(map[string]any{
 			"temperature": 0.5,
 		}),
 	)
@@ -369,7 +369,7 @@ func createTestMIPRO(t *testing.T) *MIPRO {
 	mipro.searchStrategy = NewMockTPEOptimizer(0.25, 42)
 	err := mipro.searchStrategy.Initialize(SearchConfig{
 		MaxTrials: 5,
-		ParamSpace: map[string][]interface{}{
+		ParamSpace: map[string][]any{
 			"module_0_instruction": {0, 1, 2}, // Assuming we have 3 instruction candidates
 		},
 	})
@@ -392,8 +392,8 @@ func createTestProgram() core.Program {
 
 	return core.NewProgramWithForwardFactory(
 		map[string]core.Module{"test": mockModule},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				modInstance, ok := modules["test"]
 				if !ok {
 					return nil, fmt.Errorf("module 'test' not found in program")
@@ -407,12 +407,12 @@ func createTestProgram() core.Program {
 func createTestDataset() core.Dataset {
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"prompt": "test1"},
-			Outputs: map[string]interface{}{"completion": "result1"},
+			Inputs:  map[string]any{"prompt": "test1"},
+			Outputs: map[string]any{"completion": "result1"},
 		},
 		{
-			Inputs:  map[string]interface{}{"prompt": "test2"},
-			Outputs: map[string]interface{}{"completion": "result2"},
+			Inputs:  map[string]any{"prompt": "test2"},
+			Outputs: map[string]any{"completion": "result2"},
 		},
 	}
 
@@ -422,7 +422,7 @@ func createTestDataset() core.Dataset {
 // Test options
 
 func TestMIPROOptions(t *testing.T) {
-	metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+	metric := func(example, prediction map[string]any, ctx context.Context) float64 {
 		return 1.0
 	}
 
@@ -442,16 +442,16 @@ func TestMIPROCreateCandidateProgram_UsesDeterministicModuleOrder(t *testing.T) 
 			"beta":  newInstructionModule("beta", "beta base"),
 			"alpha": newInstructionModule("alpha", "alpha base"),
 		},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-				return map[string]interface{}{"output": "ok"}, nil
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return map[string]any{"output": "ok"}, nil
 			}
 		},
 	)
 
 	candidate := mipro.createCandidateProgram(
 		baseProgram,
-		map[string]interface{}{
+		map[string]any{
 			"module_0_instruction": float64(0),
 			"module_1_instruction": float64(0),
 		},
@@ -483,19 +483,19 @@ func NewMockTPEOptimizer(gamma float64, seed int64) SearchStrategy {
 	}
 }
 
-func (t *MockTPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
+func (t *MockTPEOptimizer) SuggestParams(ctx context.Context) (map[string]any, error) {
 	// Simplified implementation for testing
-	return map[string]interface{}{
+	return map[string]any{
 		"module_0_instruction": float64(0), // Return float64 as expected by the code
 	}, nil
 }
 
-func (t *MockTPEOptimizer) UpdateResults(params map[string]interface{}, score float64) error {
+func (t *MockTPEOptimizer) UpdateResults(params map[string]any, score float64) error {
 	return nil
 }
 
-func (t *MockTPEOptimizer) GetBestParams() (map[string]interface{}, float64) {
-	return map[string]interface{}{"module_0_instruction": float64(0)}, 1.0
+func (t *MockTPEOptimizer) GetBestParams() (map[string]any, float64) {
+	return map[string]any{"module_0_instruction": float64(0)}, 1.0
 }
 
 func (t *MockTPEOptimizer) Initialize(config SearchConfig) error {
@@ -507,23 +507,23 @@ type MockSearchStrategy struct {
 	mock.Mock
 }
 
-func (m *MockSearchStrategy) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
+func (m *MockSearchStrategy) SuggestParams(ctx context.Context) (map[string]any, error) {
 	args := m.Called(ctx)
 	result := args.Get(0)
 	if result == nil {
 		return nil, args.Error(1)
 	}
-	return result.(map[string]interface{}), args.Error(1)
+	return result.(map[string]any), args.Error(1)
 }
 
-func (m *MockSearchStrategy) UpdateResults(params map[string]interface{}, score float64) error {
+func (m *MockSearchStrategy) UpdateResults(params map[string]any, score float64) error {
 	args := m.Called(params, score)
 	return args.Error(0)
 }
 
-func (m *MockSearchStrategy) GetBestParams() (map[string]interface{}, float64) {
+func (m *MockSearchStrategy) GetBestParams() (map[string]any, float64) {
 	args := m.Called()
-	return args.Get(0).(map[string]interface{}), args.Get(1).(float64)
+	return args.Get(0).(map[string]any), args.Get(1).(float64)
 }
 
 func (m *MockSearchStrategy) Initialize(config SearchConfig) error {
@@ -565,7 +565,7 @@ func BenchmarkMIPRO(b *testing.B) {
 
 			// Create MIPRO optimizer with config
 			// Convert testutil.BenchmarkAccuracyMetric to MIPRO metric signature
-			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			miproMetric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return testutil.BenchmarkAccuracyMetric(example, prediction)
 			}
 
@@ -610,7 +610,7 @@ func BenchmarkMIPRODatasetScaling(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			miproMetric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return testutil.BenchmarkAccuracyMetric(example, prediction)
 			}
 
@@ -666,7 +666,7 @@ func BenchmarkMIPROParameterTuning(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			miproMetric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return testutil.BenchmarkAccuracyMetric(example, prediction)
 			}
 
@@ -717,7 +717,7 @@ func BenchmarkMIPROMode(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			miproMetric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return testutil.BenchmarkAccuracyMetric(example, prediction)
 			}
 
@@ -770,7 +770,7 @@ func BenchmarkMIPROTrials(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			miproMetric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+			miproMetric := func(example, prediction map[string]any, ctx context.Context) float64 {
 				return testutil.BenchmarkAccuracyMetric(example, prediction)
 			}
 

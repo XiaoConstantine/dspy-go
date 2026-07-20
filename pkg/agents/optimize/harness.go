@@ -89,7 +89,7 @@ func evaluationFailureResult(err error) *EvalResult {
 	return &EvalResult{
 		Score: 0,
 		SideInfo: &SideInfo{
-			Diagnostics: map[string]interface{}{
+			Diagnostics: map[string]any{
 				"evaluation_error": err.Error(),
 			},
 			Scores: map[string]float64{

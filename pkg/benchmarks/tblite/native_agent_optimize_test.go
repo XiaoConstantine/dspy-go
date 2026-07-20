@@ -87,7 +87,7 @@ func TestNativeAgent_ArtifactsCloneAndTrace(t *testing.T) {
 }
 
 func TestTerminalTaskRequestFromInput_PreservesAgentTimeout(t *testing.T) {
-	req, err := terminalTaskRequestFromInput(map[string]interface{}{
+	req, err := terminalTaskRequestFromInput(map[string]any{
 		"task_id":           "timeout-task",
 		"instruction":       "do work",
 		"task_dir":          "/tmp/task",
@@ -105,7 +105,7 @@ func TestTerminalTaskRequestFromInput_PreservesAgentTimeout(t *testing.T) {
 }
 
 func TestTerminalTaskRequestFromInput_InterpretsPlainNumbersAsSeconds(t *testing.T) {
-	req, err := terminalTaskRequestFromInput(map[string]interface{}{
+	req, err := terminalTaskRequestFromInput(map[string]any{
 		"task_id":           "timeout-task",
 		"instruction":       "do work",
 		"task_dir":          "/tmp/task",

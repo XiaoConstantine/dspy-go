@@ -26,7 +26,7 @@ func RunChainExample(ctx context.Context, logger *logging.Logger) {
 	}
 
 	report := `Q3 Performance Summary:Our customer satisfaction score rose to 92 points this quarter.Revenue grew by 45% compared to last year.Market share is now at 23% in our primary market.Customer churn decreased to 5% from 8%.New user acquisition cost is $43 per user.Product adoption rate increased to 78%.Employee satisfaction is at 87 points.Operating margin improved to 34%.`
-	result, err := dataWorkflow.Execute(ctx, map[string]interface{}{
+	result, err := dataWorkflow.Execute(ctx, map[string]any{
 		"raw_text": report,
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func RunRouteExample(ctx context.Context, logger *logging.Logger) {
 		logger.Info(ctx, "\nResponse:")
 		logger.Info(ctx, "%s", strings.Repeat("-", 40))
 
-		response, err := router.Execute(ctx, map[string]interface{}{"input": ticket})
+		response, err := router.Execute(ctx, map[string]any{"input": ticket})
 		if err != nil {
 			logger.Info(ctx, "Error processing ticket %d: %v", i+1, err)
 			continue
@@ -205,13 +205,13 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
 	// Create program that uses predict module
 	program := core.NewProgram(
 		map[string]core.Module{"predict": predict},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return predict.Process(ctx, inputs)
 		},
 	)
 
 	// Create evaluation metric that matches Python implementation
-	metric := func(ctx context.Context, result map[string]interface{}) (bool, string) {
+	metric := func(ctx context.Context, result map[string]any) (bool, string) {
 		solution, ok := result["solution"].(string)
 		if !ok {
 			return false, "No solution provided"
@@ -256,7 +256,7 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
 	}
 
 	// Test the optimized program
-	result, err := optimizedProgram.Execute(ctx, map[string]interface{}{
+	result, err := optimizedProgram.Execute(ctx, map[string]any{
 		"task": "Implement MinStack with O(1) operations for push, pop, and getMin",
 	})
 	if err != nil {
@@ -320,13 +320,13 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 		PlanCreator: planner,
 		// Add your custom processors
 		CustomProcessors: map[string]agents.TaskProcessor{
-			"general":      &ExampleProcessor{},
-			"file_reader":  &ExampleProcessor{},
-			"data_cleaner": &ExampleProcessor{},
+			"general":       &ExampleProcessor{},
+			"file_reader":   &ExampleProcessor{},
+			"data_cleaner":  &ExampleProcessor{},
 			"data_analyzer": &ExampleProcessor{},
-			"file_writer":  &ExampleProcessor{},
-			"human":        &ExampleProcessor{},
-			"example":      &ExampleProcessor{},
+			"file_writer":   &ExampleProcessor{},
+			"human":         &ExampleProcessor{},
+			"example":       &ExampleProcessor{},
 		},
 		AnalyzerConfig: agents.AnalyzerConfig{
 			FormatInstructions: xmlFormat,
@@ -351,7 +351,7 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 
 	// The analyzer will return tasks in XML format that our parser understands
 	task := "Your high-level task description"
-	context := map[string]interface{}{
+	context := map[string]any{
 		"key": "value",
 	}
 
@@ -377,12 +377,6 @@ func RunOrchestratorExample(ctx context.Context, logger *logging.Logger) {
 	logger.Info(ctx, "Orchestration completed with %d successful tasks and %d failures\n",
 		len(result.CompletedTasks), len(result.FailedTasks))
 }
-
-
-
-
-
-
 
 func main() {
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))

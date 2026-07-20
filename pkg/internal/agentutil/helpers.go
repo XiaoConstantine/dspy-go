@@ -12,7 +12,7 @@ import (
 )
 
 // StringValue extracts a string from loosely typed map inputs.
-func StringValue(value interface{}) string {
+func StringValue(value any) string {
 	if str, ok := value.(string); ok {
 		return str
 	}
@@ -20,7 +20,7 @@ func StringValue(value interface{}) string {
 }
 
 // IntValue extracts an integer from loosely typed map inputs.
-func IntValue(value interface{}) int {
+func IntValue(value any) int {
 	switch typed := value.(type) {
 	case int:
 		return typed
@@ -45,7 +45,7 @@ func IntValue(value interface{}) int {
 // - time.Duration and int64 are treated as already-normalized durations.
 // - int/int32/float/json.Number/string numeric values are treated as seconds.
 // - duration strings like "30s" use time.ParseDuration.
-func DurationValue(value interface{}) time.Duration {
+func DurationValue(value any) time.Duration {
 	switch typed := value.(type) {
 	case time.Duration:
 		return typed

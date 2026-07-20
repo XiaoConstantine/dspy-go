@@ -41,8 +41,8 @@ func (a *fakeOptimizableTaskAgent) RunTask(ctx context.Context, req TerminalTask
 	}, nil
 }
 
-func (a *fakeOptimizableTaskAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+func (a *fakeOptimizableTaskAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 func (a *fakeOptimizableTaskAgent) GetCapabilities() []core.Tool { return nil }
 func (a *fakeOptimizableTaskAgent) GetMemory() agents.Memory     { return agents.NewInMemoryStore() }

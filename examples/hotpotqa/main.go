@@ -50,7 +50,7 @@ func computeF1(prediction, ground_truth string) float64 {
 }
 
 // Helper function to get map keys for debugging.
-func keys(m map[string]interface{}) []string {
+func keys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -95,7 +95,7 @@ func evaluateModel(ctx context.Context, program core.Program, examples []dataset
 			goroutineMonitor.TrackGoroutine()
 
 			defer goroutineMonitor.ReleaseGoroutine()
-			result, err := program.Execute(context.Background(), map[string]interface{}{"question": ex.Question})
+			result, err := program.Execute(context.Background(), map[string]any{"question": ex.Question})
 			if err != nil {
 				logger.Error(ctx, "Error executing program: %v", err)
 				return
@@ -187,12 +187,12 @@ func RunHotPotQAExample(apiKey string) {
 	// Use native JSON structured output for more reliable parsing
 	cot := modules.NewChainOfThought(signature).WithStructuredOutput()
 
-	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		// Process() now automatically uses interceptors when XML mode is enabled
 		return cot.Process(ctx, inputs)
 	})
 
-	metric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+	metric := func(example, prediction map[string]any, ctx context.Context) bool {
 		return computeF1(prediction["answer"].(string), example["answer"].(string)) > 0.5
 	}
 
@@ -202,10 +202,10 @@ func RunHotPotQAExample(apiKey string) {
 	trainCoreExamples := make([]core.Example, len(trainExamples))
 	for i, ex := range trainExamples {
 		trainCoreExamples[i] = core.Example{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question": ex.Question,
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": ex.Answer,
 			},
 		}
@@ -215,7 +215,7 @@ func RunHotPotQAExample(apiKey string) {
 	trainDataset := datasets.NewSimpleDataset(trainCoreExamples)
 
 	// Define metric function
-	metricFunc := func(expected, actual map[string]interface{}) float64 {
+	metricFunc := func(expected, actual map[string]any) float64 {
 		return computeF1(actual["answer"].(string), expected["answer"].(string))
 	}
 
@@ -232,7 +232,7 @@ func RunHotPotQAExample(apiKey string) {
 
 	// Example predictions
 	for _, ex := range testExamples[:5] {
-		result, err := compiledProgram.Execute(ctx, map[string]interface{}{"question": ex.Question})
+		result, err := compiledProgram.Execute(ctx, map[string]any{"question": ex.Question})
 		if err != nil {
 			logger.Error(ctx, "Error executing program: %v", err)
 			continue

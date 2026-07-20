@@ -8,7 +8,7 @@ import (
 
 type Agent interface {
 	// Execute runs the agent's task with given input and returns output
-	Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error)
+	Execute(ctx context.Context, input map[string]any) (map[string]any, error)
 
 	// GetCapabilities returns the tools/capabilities available to this agent
 	GetCapabilities() []core.Tool
@@ -23,7 +23,7 @@ type InterceptableAgent interface {
 	Agent
 
 	// ExecuteWithInterceptors runs the agent's task with interceptor support
-	ExecuteWithInterceptors(ctx context.Context, input map[string]interface{}, interceptors []core.AgentInterceptor) (map[string]interface{}, error)
+	ExecuteWithInterceptors(ctx context.Context, input map[string]any, interceptors []core.AgentInterceptor) (map[string]any, error)
 
 	// SetInterceptors sets the default interceptors for this agent instance
 	SetInterceptors(interceptors []core.AgentInterceptor)
@@ -61,7 +61,7 @@ func NewInterceptorAgentAdapter(agent Agent, agentID, agentType string) *Interce
 }
 
 // Execute implements the basic Agent interface by calling the wrapped agent.
-func (iaa *InterceptorAgentAdapter) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (iaa *InterceptorAgentAdapter) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	return iaa.agent.Execute(ctx, input)
 }
 
@@ -76,7 +76,7 @@ func (iaa *InterceptorAgentAdapter) GetMemory() Memory {
 }
 
 // ExecuteWithInterceptors runs the agent's task with interceptor support.
-func (iaa *InterceptorAgentAdapter) ExecuteWithInterceptors(ctx context.Context, input map[string]interface{}, interceptors []core.AgentInterceptor) (map[string]interface{}, error) {
+func (iaa *InterceptorAgentAdapter) ExecuteWithInterceptors(ctx context.Context, input map[string]any, interceptors []core.AgentInterceptor) (map[string]any, error) {
 	// Use provided interceptors, or fall back to adapter's default interceptors
 	if interceptors == nil {
 		interceptors = iaa.interceptors
@@ -86,7 +86,7 @@ func (iaa *InterceptorAgentAdapter) ExecuteWithInterceptors(ctx context.Context,
 	info := core.NewAgentInfo(iaa.agentID, iaa.agentType, iaa.agent.GetCapabilities())
 
 	// Create the base handler that calls the wrapped agent's Execute method
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		return iaa.agent.Execute(ctx, input)
 	}
 

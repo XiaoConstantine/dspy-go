@@ -90,7 +90,7 @@ func newListFilesTool(resolver toolPathResolver, outputLimit int) core.Tool {
 	}
 
 	return toolspkg.NewFuncTool("list_files", "List files and directories within the benchmark workspace.", schema,
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			_ = ctx
 
 			targetPath, err := resolver.resolveSecurePath(stringArg(args, "path", "."))
@@ -121,7 +121,7 @@ func newReadFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 	}
 
 	return toolspkg.NewFuncTool("read_file", "Read a UTF-8 text file from the benchmark workspace.", schema,
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			_ = ctx
 
 			targetPath, err := resolver.resolveSecurePath(requiredStringArg(args, "path"))
@@ -156,7 +156,7 @@ func newWriteFileTool(resolver toolPathResolver, outputLimit int) core.Tool {
 	}
 
 	return toolspkg.NewFuncTool("write_file", "Write a UTF-8 text file inside the benchmark workspace.", schema,
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			_ = ctx
 
 			targetPath, err := resolver.resolveSecurePath(requiredStringArg(args, "path"))
@@ -198,7 +198,7 @@ func newRunCommandTool(resolver toolPathResolver, outputLimit int, commandTimeou
 	}
 
 	return toolspkg.NewFuncTool("run_command", "Execute a shell command within the benchmark workspace.", schema,
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			command := requiredStringArg(args, "command")
 			if strings.TrimSpace(command) == "" {
 				return textToolResult("run_command requires a non-empty command", true), nil

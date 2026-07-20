@@ -20,10 +20,10 @@ func TestSQLiteCache_BasicOperations(t *testing.T) {
 		MaxSize:    1024,
 		DefaultTTL: time.Hour,
 		SQLiteConfig: SQLiteConfig{
-			Path:              dbPath,
-			EnableWAL:         true,
-			VacuumInterval:    time.Hour,
-			MaxConnections:    5,
+			Path:           dbPath,
+			EnableWAL:      true,
+			VacuumInterval: time.Hour,
+			MaxConnections: 5,
 		},
 	}
 
@@ -504,7 +504,7 @@ func TestSQLiteCache_Configuration(t *testing.T) {
 			MaxSize: 1024,
 			SQLiteConfig: SQLiteConfig{
 				Path:           dbPath,
-				EnableWAL:     true,
+				EnableWAL:      true,
 				MaxConnections: 10,
 			},
 		}

@@ -15,21 +15,21 @@ import (
 // mutation can reuse these records to construct failure-focused minibatches.
 type gepaEvaluationCase struct {
 	Example          core.Example
-	Outputs          map[string]interface{}
+	Outputs          map[string]any
 	Score            float64
 	Err              error
 	Feedback         string
 	FeedbackTarget   string
-	FeedbackMetadata map[string]interface{}
+	FeedbackMetadata map[string]any
 }
 
 type gepaCachedEvaluationCase struct {
-	Outputs          map[string]interface{}
+	Outputs          map[string]any
 	Score            float64
 	Err              error
 	Feedback         string
 	FeedbackTarget   string
-	FeedbackMetadata map[string]interface{}
+	FeedbackMetadata map[string]any
 }
 
 // gepaCandidateEvaluation captures a candidate evaluation against a stable
@@ -298,19 +298,19 @@ func evaluationCaseCacheKey(candidate *GEPACandidate, example core.Example) stri
 }
 
 func candidateComponentCacheKey(candidate *GEPACandidate) string {
-	return stableHashStringAnyMap(map[string]interface{}{
+	return stableHashStringAnyMap(map[string]any{
 		"component_texts": cloneCandidateComponentTexts(candidate),
 	})
 }
 
 func exampleCacheKey(example core.Example) string {
-	return stableHashStringAnyMap(map[string]interface{}{
+	return stableHashStringAnyMap(map[string]any{
 		"inputs":  example.Inputs,
 		"outputs": example.Outputs,
 	})
 }
 
-func stableHashStringAnyMap(value map[string]interface{}) string {
+func stableHashStringAnyMap(value map[string]any) string {
 	// json.Marshal currently emits deterministic map-key ordering for string
 	// keys, which is the stability guarantee this cache key depends on.
 	rendered, err := json.Marshal(value)
@@ -371,12 +371,12 @@ func cloneEvaluationExample(example core.Example) core.Example {
 	}
 }
 
-func cloneStringAnyMap(values map[string]interface{}) map[string]interface{} {
+func cloneStringAnyMap(values map[string]any) map[string]any {
 	if len(values) == 0 {
 		return nil
 	}
 
-	cloned := make(map[string]interface{}, len(values))
+	cloned := make(map[string]any, len(values))
 	for key, value := range values {
 		// This is intentionally a shallow value copy. Evaluation examples and
 		// outputs currently hold scalar/string-like values, and reflection only

@@ -46,7 +46,7 @@ func (c *CreateTool) CanHandle(ctx context.Context, intent string) bool {
 	return false
 }
 
-func (c *CreateTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (c *CreateTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	itemType, ok := params["type"].(string)
 	if !ok {
 		itemType = "document"
@@ -61,22 +61,22 @@ func (c *CreateTool) Execute(ctx context.Context, params map[string]interface{})
 	time.Sleep(100 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"created_item": map[string]interface{}{
+		Data: map[string]any{
+			"created_item": map[string]any{
 				"id":     fmt.Sprintf("item_%d", time.Now().Unix()),
 				"name":   name,
 				"type":   itemType,
 				"status": "created",
 			},
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"execution_time_ms": 100,
 			"created_at":        time.Now().Format(time.RFC3339),
 		},
 	}, nil
 }
 
-func (c *CreateTool) Validate(params map[string]interface{}) error {
+func (c *CreateTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -128,7 +128,7 @@ func (a *AnalyzeTool) CanHandle(ctx context.Context, intent string) bool {
 	return false
 }
 
-func (a *AnalyzeTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (a *AnalyzeTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	data, ok := params["data"].(string)
 	if !ok {
 		data = "sample data"
@@ -138,22 +138,22 @@ func (a *AnalyzeTool) Execute(ctx context.Context, params map[string]interface{}
 	time.Sleep(200 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"analysis": map[string]interface{}{
+		Data: map[string]any{
+			"analysis": map[string]any{
 				"summary":    "Analysis complete for: " + data,
 				"confidence": 0.94,
 				"insights":   []string{"Pattern A detected", "Trend B identified", "Anomaly C found"},
 				"score":      87.5,
 			},
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"execution_time_ms": 200,
 			"model_version":     "v3.0.1",
 		},
 	}, nil
 }
 
-func (a *AnalyzeTool) Validate(params map[string]interface{}) error {
+func (a *AnalyzeTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -332,7 +332,7 @@ func main() {
 	logger.Info(ctx, "     • Retry: Automatic retry on failures with exponential backoff")
 
 	for i := 0; i < 3; i++ {
-		params := map[string]interface{}{
+		params := map[string]any{
 			"query": fmt.Sprintf("sample query %d", i+1),
 			"limit": 5,
 		}
@@ -345,7 +345,7 @@ func main() {
 		}
 
 		logger.Info(ctx, "   ✅ Search execution %d completed successfully", i+1)
-		if data, ok := result.Data.(map[string]interface{}); ok {
+		if data, ok := result.Data.(map[string]any); ok {
 			if count, ok := data["count"].(int); ok {
 				logger.Info(ctx, "      → Found %d results", count)
 			}
@@ -354,7 +354,7 @@ func main() {
 
 	// Execute create tool with interceptors
 	logger.Info(ctx, "\n📝 Executing create operation with tool interceptors...")
-	params := map[string]interface{}{
+	params := map[string]any{
 		"type": "report",
 		"name": "Q4 Analysis Report",
 	}
@@ -364,8 +364,8 @@ func main() {
 		logger.Error(ctx, "Execution error: %v", err)
 	} else {
 		logger.Info(ctx, "   ✅ Creation completed with interceptor protection")
-		if data, ok := result.Data.(map[string]interface{}); ok {
-			if item, ok := data["created_item"].(map[string]interface{}); ok {
+		if data, ok := result.Data.(map[string]any); ok {
+			if item, ok := data["created_item"].(map[string]any); ok {
 				logger.Info(ctx, "      → Created: %s (ID: %s)", item["name"], item["id"])
 			}
 		}
@@ -373,7 +373,7 @@ func main() {
 
 	// Execute analyze tool with interceptors
 	logger.Info(ctx, "\n🔍 Executing analysis operation with tool interceptors...")
-	params = map[string]interface{}{
+	params = map[string]any{
 		"data": "performance metrics dataset",
 	}
 
@@ -382,8 +382,8 @@ func main() {
 		logger.Error(ctx, "Execution error: %v", err)
 	} else {
 		logger.Info(ctx, "   ✅ Analysis completed with security validation")
-		if data, ok := result.Data.(map[string]interface{}); ok {
-			if analysis, ok := data["analysis"].(map[string]interface{}); ok {
+		if data, ok := result.Data.(map[string]any); ok {
+			if analysis, ok := data["analysis"].(map[string]any); ok {
 				logger.Info(ctx, "      → Score: %.1f, Confidence: %.2f",
 					analysis["score"], analysis["confidence"])
 			}
@@ -478,7 +478,7 @@ func main() {
 	logger.Info(ctx, "   → These examples show how interceptors protect against attacks:")
 
 	// Test XSS protection
-	maliciousInputs := []map[string]interface{}{
+	maliciousInputs := []map[string]any{
 		{
 			"query": "<script>alert('XSS')</script>search term",
 			"limit": 5,
@@ -511,7 +511,7 @@ func main() {
 			logger.Info(ctx, "      ✅ %s blocked by security interceptors: %v", testCases[i], err)
 		} else {
 			logger.Info(ctx, "      ✅ %s sanitized and processed safely", testCases[i])
-			if data, ok := result.Data.(map[string]interface{}); ok {
+			if data, ok := result.Data.(map[string]any); ok {
 				if toolName == "advanced_search" {
 					if count, ok := data["count"].(int); ok {
 						logger.Info(ctx, "         → Sanitized query processed, found %d results", count)

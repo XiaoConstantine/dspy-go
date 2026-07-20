@@ -114,7 +114,7 @@ func (o *GEPAAgentOptimizer) buildOptimizationDataset(examples []AgentExample) c
 
 		inputs := maps.Clone(example.Inputs)
 		if inputs == nil {
-			inputs = make(map[string]interface{}, 1)
+			inputs = make(map[string]any, 1)
 		}
 		inputs[gepaProgramInputExampleIDKey] = exampleID
 
@@ -128,7 +128,7 @@ func (o *GEPAAgentOptimizer) buildOptimizationDataset(examples []AgentExample) c
 }
 
 func (o *GEPAAgentOptimizer) buildOptimizationMetric() core.Metric {
-	return func(expected, actual map[string]interface{}) float64 {
+	return func(expected, actual map[string]any) float64 {
 		if actual == nil {
 			return 0
 		}
@@ -172,8 +172,8 @@ func (o *GEPAAgentOptimizer) buildArtifactProgramSpecs(seed AgentArtifacts) ([]a
 }
 
 func (a *artifactProgramAdapter) forwardFactory() core.ForwardFactory {
-	return func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	return func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			artifacts, err := a.artifactsFromModules(modules)
 			if err != nil {
 				return nil, err
@@ -216,7 +216,7 @@ func (a *artifactProgramAdapter) artifactsFromModules(modules map[string]core.Mo
 	return artifacts, nil
 }
 
-func (a *artifactProgramAdapter) lookupExample(inputs map[string]interface{}) (AgentExample, error) {
+func (a *artifactProgramAdapter) lookupExample(inputs map[string]any) (AgentExample, error) {
 	if inputs == nil {
 		return AgentExample{}, fmt.Errorf("optimize: missing GEPA program inputs")
 	}
@@ -244,7 +244,7 @@ func (a *artifactProgramAdapter) candidateForArtifacts(ctx context.Context, arti
 		primary = a.optimizer.config.PrimaryArtifact
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		gepaMetadataArtifactsKey:       serializeArtifacts(artifacts),
 		gepaMetadataArtifactKeysKey:    serializeArtifactKeys(a.optimizer.config.resolveArtifactKeys(artifacts)),
 		gepaMetadataIntArtifactKeysKey: sortedIntArtifactKeys(a.optimizer.config.normalizedIntMutationPlans()),
@@ -297,8 +297,8 @@ func (o *GEPAAgentOptimizer) evaluateArtifactsOnExample(ctx context.Context, art
 	return result
 }
 
-func buildProgramOutputs(result *EvalResult) map[string]interface{} {
-	outputs := map[string]interface{}{
+func buildProgramOutputs(result *EvalResult) map[string]any {
+	outputs := map[string]any{
 		gepaProgramOutputScoreKey: 0.0,
 	}
 	if result == nil {
@@ -474,7 +474,7 @@ func optimizersCandidateCaseObservation(result *EvalResult, passThreshold float6
 	return observation
 }
 
-func diagnosticString(diagnostics map[string]interface{}, keys ...string) string {
+func diagnosticString(diagnostics map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := diagnostics[key].(string); ok && strings.TrimSpace(value) != "" {
 			return value
@@ -483,7 +483,7 @@ func diagnosticString(diagnostics map[string]interface{}, keys ...string) string
 	return ""
 }
 
-func metricScoreValue(raw interface{}) (float64, error) {
+func metricScoreValue(raw any) (float64, error) {
 	switch value := raw.(type) {
 	case float64:
 		return value, nil

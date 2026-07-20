@@ -114,7 +114,7 @@ func (c *CachedLLM) Generate(ctx context.Context, prompt string, options ...core
 }
 
 // GenerateWithJSON implements core.LLM with caching for JSON responses.
-func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	if !c.enabled || c.cache == nil {
 		return c.LLM.GenerateWithJSON(ctx, prompt, options...)
 	}
@@ -123,7 +123,7 @@ func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 
 	// Try cache first
 	if cached, found, err := c.cache.Get(ctx, key); found && err == nil {
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(cached, &result); err == nil {
 			return result, nil
 		}
@@ -144,7 +144,7 @@ func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 }
 
 // GenerateWithFunctions implements core.LLM with caching for function calls.
-func (c *CachedLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (c *CachedLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	if !c.enabled || c.cache == nil {
 		return c.LLM.GenerateWithFunctions(ctx, prompt, functions, options...)
 	}
@@ -154,7 +154,7 @@ func (c *CachedLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 
 	// Try cache first
 	if cached, found, err := c.cache.Get(ctx, key); found && err == nil {
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(cached, &result); err == nil {
 			return result, nil
 		}
@@ -232,7 +232,7 @@ func (c *CachedLLM) withCache(ctx context.Context, key string, fn func() (*core.
 		if err := json.Unmarshal(cached, &response); err == nil {
 			// Mark as cache hit
 			if response.Metadata == nil {
-				response.Metadata = make(map[string]interface{})
+				response.Metadata = make(map[string]any)
 			}
 			response.Metadata["cache_hit"] = true
 			return &response, nil
@@ -248,7 +248,7 @@ func (c *CachedLLM) withCache(ctx context.Context, key string, fn func() (*core.
 	// Cache successful response
 	if response != nil {
 		// Create a copy of metadata to avoid race conditions
-		metadata := make(map[string]interface{})
+		metadata := make(map[string]any)
 		if response.Metadata != nil {
 			for k, v := range response.Metadata {
 				metadata[k] = v

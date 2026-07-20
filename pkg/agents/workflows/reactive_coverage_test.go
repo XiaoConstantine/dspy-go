@@ -364,13 +364,13 @@ func TestReactiveWorkflow_WithEventBus(t *testing.T) {
 	var receivedEvents []Event
 	var mu sync.Mutex
 
-	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		if event, ok := inputs["event"].(Event); ok {
 			mu.Lock()
 			receivedEvents = append(receivedEvents, event)
 			mu.Unlock()
 		}
-		return map[string]interface{}{"processed": true}, nil
+		return map[string]any{"processed": true}, nil
 	})
 
 	reactive.OnModule("custom_test", mockModule)
@@ -419,13 +419,13 @@ func TestReactiveWorkflow_WithConfig(t *testing.T) {
 	var receivedEvents []Event
 	var mu sync.Mutex
 
-	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		if event, ok := inputs["event"].(Event); ok {
 			mu.Lock()
 			receivedEvents = append(receivedEvents, event)
 			mu.Unlock()
 		}
-		return map[string]interface{}{"processed": true}, nil
+		return map[string]any{"processed": true}, nil
 	})
 
 	reactive.OnModule("config_test", mockModule)
@@ -591,13 +591,13 @@ func TestNewReactiveWorkflow_NilMemory(t *testing.T) {
 	var receivedEvents []Event
 	var mu sync.Mutex
 
-	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		if event, ok := inputs["event"].(Event); ok {
 			mu.Lock()
 			receivedEvents = append(receivedEvents, event)
 			mu.Unlock()
 		}
-		return map[string]interface{}{"processed": true}, nil
+		return map[string]any{"processed": true}, nil
 	})
 
 	reactive.OnModule("nil_memory_test", mockModule)

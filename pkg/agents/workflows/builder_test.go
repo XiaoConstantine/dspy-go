@@ -202,7 +202,7 @@ func TestWorkflowBuilder_Parallel(t *testing.T) {
 }
 
 func TestWorkflowBuilder_Conditional(t *testing.T) {
-	conditionFunc := func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	conditionFunc := func(ctx context.Context, state map[string]any) (bool, error) {
 		return true, nil
 	}
 
@@ -252,7 +252,7 @@ func TestWorkflowBuilder_Conditional(t *testing.T) {
 
 func TestConditionalBuilder_IfElse(t *testing.T) {
 	builder := NewBuilder(nil)
-	condition := func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	condition := func(ctx context.Context, state map[string]any) (bool, error) {
 		return true, nil
 	}
 
@@ -428,10 +428,10 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 	// Test a complex workflow with multiple patterns
 	builder := NewBuilder(nil)
 
-	condition := func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	condition := func(ctx context.Context, state map[string]any) (bool, error) {
 		// Simple condition based on previous results
 		if result, ok := state["analysis_result"]; ok {
-			if confidence, ok := result.(map[string]interface{})["confidence"]; ok {
+			if confidence, ok := result.(map[string]any)["confidence"]; ok {
 				if confValue, ok := confidence.(float64); ok {
 					return confValue > 0.8, nil
 				}
@@ -470,9 +470,9 @@ func TestWorkflowBuilder_ComplexWorkflow(t *testing.T) {
 
 	// The router workflow should handle conditional routing
 	// We can test its basic functionality by executing it
-	result, err := workflow.Execute(context.Background(), map[string]interface{}{
+	result, err := workflow.Execute(context.Background(), map[string]any{
 		"input": "test_input",
-		"analysis_result": map[string]interface{}{
+		"analysis_result": map[string]any{
 			"confidence": 0.9, // High confidence should route to "true" branch
 		},
 	})
@@ -544,7 +544,7 @@ func BenchmarkWorkflowBuilder_SimpleChain(b *testing.B) {
 }
 
 func BenchmarkWorkflowBuilder_ComplexWorkflow(b *testing.B) {
-	condition := func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	condition := func(ctx context.Context, state map[string]any) (bool, error) {
 		return true, nil
 	}
 

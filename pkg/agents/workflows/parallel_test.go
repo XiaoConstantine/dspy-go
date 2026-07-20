@@ -60,7 +60,7 @@ func TestParallelWorkflow(t *testing.T) {
 
 		// Execute workflow
 		ctx := context.Background()
-		result, err := workflow.Execute(ctx, map[string]interface{}{
+		result, err := workflow.Execute(ctx, map[string]any{
 			"input": "value",
 		})
 
@@ -90,7 +90,7 @@ func TestParallelWorkflow(t *testing.T) {
 		require.NoError(t, err, "Failed to add step1")
 
 		ctx := context.Background()
-		_, err = workflow.Execute(ctx, map[string]interface{}{
+		_, err = workflow.Execute(ctx, map[string]any{
 			"input": "value",
 		})
 

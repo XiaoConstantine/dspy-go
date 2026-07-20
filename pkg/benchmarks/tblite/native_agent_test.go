@@ -352,11 +352,11 @@ func (m *toolCallingStubLLM) Generate(ctx context.Context, prompt string, option
 	return nil, fmt.Errorf("unexpected Generate call")
 }
 
-func (m *toolCallingStubLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *toolCallingStubLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("unexpected GenerateWithJSON call")
 }
 
-func (m *toolCallingStubLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *toolCallingStubLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	m.prompts = append(m.prompts, prompt)
 	opts := core.NewGenerateOptions()
 	for _, option := range options {

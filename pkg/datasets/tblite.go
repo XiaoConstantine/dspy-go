@@ -53,9 +53,9 @@ func (t *TBLiteTask) UnmarshalJSON(data []byte) error {
 	type taskAlias TBLiteTask
 	var raw struct {
 		taskAlias
-		Tags            interface{} `json:"tags"`
-		AgentTimeoutSec interface{} `json:"agent_timeout_sec"`
-		TestTimeoutSec  interface{} `json:"test_timeout_sec"`
+		Tags            any `json:"tags"`
+		AgentTimeoutSec any `json:"agent_timeout_sec"`
+		TestTimeoutSec  any `json:"test_timeout_sec"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -404,7 +404,7 @@ func validateTBLiteTaskNames(taskNames []string) error {
 	return nil
 }
 
-func parseTBLiteTags(value interface{}) ([]string, error) {
+func parseTBLiteTags(value any) ([]string, error) {
 	switch typed := value.(type) {
 	case nil:
 		return nil, nil
@@ -423,7 +423,7 @@ func parseTBLiteTags(value interface{}) ([]string, error) {
 		}
 
 		return []string{trimmed}, nil
-	case []interface{}:
+	case []any:
 		tags := make([]string, 0, len(typed))
 		for _, item := range typed {
 			if item == nil {
@@ -441,7 +441,7 @@ func parseTBLiteTags(value interface{}) ([]string, error) {
 	}
 }
 
-func parseTBLiteInt(value interface{}) (int, error) {
+func parseTBLiteInt(value any) (int, error) {
 	switch typed := value.(type) {
 	case nil:
 		return 0, nil

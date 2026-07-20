@@ -17,11 +17,11 @@ import (
 // Part represents a piece of content in a message.
 // Parts can be text, files, or structured data.
 type Part struct {
-	Type     string                 `json:"type"` // "text", "file", or "data"
-	Text     string                 `json:"text,omitempty"`
-	File     *FilePart              `json:"file,omitempty"`
-	Data     map[string]interface{} `json:"data,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Type     string         `json:"type"` // "text", "file", or "data"
+	Text     string         `json:"text,omitempty"`
+	File     *FilePart      `json:"file,omitempty"`
+	Data     map[string]any `json:"data,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // FilePart represents a file attachment.
@@ -41,7 +41,7 @@ func NewTextPart(text string) Part {
 }
 
 // NewTextPartWithMetadata creates a text part with metadata.
-func NewTextPartWithMetadata(text string, metadata map[string]interface{}) Part {
+func NewTextPartWithMetadata(text string, metadata map[string]any) Part {
 	return Part{
 		Type:     "text",
 		Text:     text,
@@ -72,7 +72,7 @@ func NewFilePartFromBytes(bytes, mimeType string) Part {
 }
 
 // NewDataPart creates a structured data part.
-func NewDataPart(data map[string]interface{}) Part {
+func NewDataPart(data map[string]any) Part {
 	return Part{
 		Type: "data",
 		Data: data,
@@ -94,11 +94,11 @@ const (
 // Message represents a message in the a2a protocol.
 // Messages contain one or more parts and can maintain context across multiple exchanges.
 type Message struct {
-	MessageID string                 `json:"messageId"`
-	Role      Role                   `json:"role"`
-	Parts     []Part                 `json:"parts"`
-	ContextID string                 `json:"contextId,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	MessageID string         `json:"messageId"`
+	Role      Role           `json:"role"`
+	Parts     []Part         `json:"parts"`
+	ContextID string         `json:"contextId,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // NewMessage creates a new message with the given role and parts.
@@ -184,13 +184,13 @@ func (ts TaskStatus) WithMessage(msg *Message) TaskStatus {
 
 // Task represents a running or completed task.
 type Task struct {
-	ID        string                 `json:"id"`
-	ContextID string                 `json:"contextId,omitempty"`
-	Status    TaskStatus             `json:"status"`
-	History   []Message              `json:"history,omitempty"`
-	Artifacts []Artifact             `json:"artifacts,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	mu        sync.RWMutex           `json:"-"` // Protects concurrent access
+	ID        string         `json:"id"`
+	ContextID string         `json:"contextId,omitempty"`
+	Status    TaskStatus     `json:"status"`
+	History   []Message      `json:"history,omitempty"`
+	Artifacts []Artifact     `json:"artifacts,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	mu        sync.RWMutex   `json:"-"` // Protects concurrent access
 }
 
 // NewTask creates a new task with submitted status.
@@ -235,9 +235,9 @@ func (t *Task) GetArtifacts() []Artifact {
 
 // Artifact represents output from a task.
 type Artifact struct {
-	ArtifactID string                 `json:"artifactId"`
-	Parts      []Part                 `json:"parts"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	ArtifactID string         `json:"artifactId"`
+	Parts      []Part         `json:"parts"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // NewArtifact creates a new artifact with the given parts.
@@ -249,7 +249,7 @@ func NewArtifact(parts ...Part) Artifact {
 }
 
 // NewArtifactWithMetadata creates a new artifact with parts and metadata.
-func NewArtifactWithMetadata(metadata map[string]interface{}, parts ...Part) Artifact {
+func NewArtifactWithMetadata(metadata map[string]any, parts ...Part) Artifact {
 	return Artifact{
 		ArtifactID: generateID(),
 		Parts:      parts,
@@ -263,11 +263,11 @@ func NewArtifactWithMetadata(metadata map[string]interface{}, parts ...Part) Art
 
 // TaskStatusUpdateEvent is sent when a task's status changes.
 type TaskStatusUpdateEvent struct {
-	TaskID    string                 `json:"taskId"`
-	Status    TaskStatus             `json:"status"`
-	ContextID string                 `json:"contextId,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Final     bool                   `json:"final"` // true if this is the final status update
+	TaskID    string         `json:"taskId"`
+	Status    TaskStatus     `json:"status"`
+	ContextID string         `json:"contextId,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	Final     bool           `json:"final"` // true if this is the final status update
 }
 
 // NewTaskStatusUpdateEvent creates a status update event.
@@ -281,12 +281,12 @@ func NewTaskStatusUpdateEvent(taskID string, status TaskStatus, final bool) *Tas
 
 // TaskArtifactUpdateEvent is sent when a task produces an artifact.
 type TaskArtifactUpdateEvent struct {
-	TaskID    string                 `json:"taskId"`
-	Artifact  Artifact               `json:"artifact"`
-	ContextID string                 `json:"contextId,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	LastChunk bool                   `json:"lastChunk"` // true if this is the last artifact chunk
-	Append    bool                   `json:"append"`    // true if this should be appended to previous artifact
+	TaskID    string         `json:"taskId"`
+	Artifact  Artifact       `json:"artifact"`
+	ContextID string         `json:"contextId,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	LastChunk bool           `json:"lastChunk"` // true if this is the last artifact chunk
+	Append    bool           `json:"append"`    // true if this should be appended to previous artifact
 }
 
 // NewTaskArtifactUpdateEvent creates an artifact update event.
@@ -305,20 +305,20 @@ func NewTaskArtifactUpdateEvent(taskID string, artifact Artifact, lastChunk bool
 // AgentCard describes an agent's capabilities and endpoint.
 // This is served at /.well-known/agent.json for discovery.
 type AgentCard struct {
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description"`
-	URL          string                 `json:"url"` // RPC endpoint URL
-	Version      string                 `json:"version"`
-	Capabilities []Capability           `json:"capabilities,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	URL          string         `json:"url"` // RPC endpoint URL
+	Version      string         `json:"version"`
+	Capabilities []Capability   `json:"capabilities,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // Capability describes a specific capability of an agent.
 type Capability struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Type        string                 `json:"type"` // "function", "tool", "service"
-	Schema      map[string]interface{} `json:"schema,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Type        string         `json:"type"` // "function", "tool", "service"
+	Schema      map[string]any `json:"schema,omitempty"`
 }
 
 // NewCapability creates a new capability.
@@ -331,7 +331,7 @@ func NewCapability(name, description, capType string) Capability {
 }
 
 // WithSchema adds a schema to the capability.
-func (c Capability) WithSchema(schema map[string]interface{}) Capability {
+func (c Capability) WithSchema(schema map[string]any) Capability {
 	c.Schema = schema
 	return c
 }
@@ -342,14 +342,14 @@ func (c Capability) WithSchema(schema map[string]interface{}) Capability {
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.
 type JSONRPCRequest struct {
-	JSONRPC string                 `json:"jsonrpc"` // Must be "2.0"
-	Method  string                 `json:"method"`
-	Params  map[string]interface{} `json:"params,omitempty"`
-	ID      interface{}            `json:"id"` // string, number, or null
+	JSONRPC string         `json:"jsonrpc"` // Must be "2.0"
+	Method  string         `json:"method"`
+	Params  map[string]any `json:"params,omitempty"`
+	ID      any            `json:"id"` // string, number, or null
 }
 
 // NewJSONRPCRequest creates a new JSON-RPC request.
-func NewJSONRPCRequest(method string, params map[string]interface{}) *JSONRPCRequest {
+func NewJSONRPCRequest(method string, params map[string]any) *JSONRPCRequest {
 	return &JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -360,14 +360,14 @@ func NewJSONRPCRequest(method string, params map[string]interface{}) *JSONRPCReq
 
 // JSONRPCResponse represents a JSON-RPC 2.0 response.
 type JSONRPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"` // Must be "2.0"
-	Result  interface{} `json:"result,omitempty"`
-	Error   *RPCError   `json:"error,omitempty"`
-	ID      interface{} `json:"id"`
+	JSONRPC string    `json:"jsonrpc"` // Must be "2.0"
+	Result  any       `json:"result,omitempty"`
+	Error   *RPCError `json:"error,omitempty"`
+	ID      any       `json:"id"`
 }
 
 // NewJSONRPCResponse creates a successful JSON-RPC response.
-func NewJSONRPCResponse(id interface{}, result interface{}) *JSONRPCResponse {
+func NewJSONRPCResponse(id any, result any) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		Result:  result,
@@ -376,7 +376,7 @@ func NewJSONRPCResponse(id interface{}, result interface{}) *JSONRPCResponse {
 }
 
 // NewJSONRPCError creates an error JSON-RPC response.
-func NewJSONRPCError(id interface{}, code int, message string) *JSONRPCResponse {
+func NewJSONRPCError(id any, code int, message string) *JSONRPCResponse {
 	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		Error: &RPCError{
@@ -389,9 +389,9 @@ func NewJSONRPCError(id interface{}, code int, message string) *JSONRPCResponse 
 
 // RPCError represents a JSON-RPC error.
 type RPCError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // Standard JSON-RPC error codes.
@@ -412,7 +412,7 @@ func NewRPCError(code int, message string) *RPCError {
 }
 
 // WithData adds data to the RPC error.
-func (e *RPCError) WithData(data interface{}) *RPCError {
+func (e *RPCError) WithData(data any) *RPCError {
 	e.Data = data
 	return e
 }

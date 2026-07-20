@@ -109,7 +109,7 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 	// Create the program to be optimized
 	program := core.NewProgram(
 		map[string]core.Module{"reasoner": module},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return module.Process(ctx, inputs)
 		},
 	)
@@ -185,8 +185,8 @@ func loadDataset(datasetName string) ([]core.Example, error) {
 		examples := make([]core.Example, len(gsm8kExamples))
 		for i, ex := range gsm8kExamples {
 			examples[i] = core.Example{
-				Inputs:  map[string]interface{}{"question": ex.Question},
-				Outputs: map[string]interface{}{"answer": ex.Answer},
+				Inputs:  map[string]any{"question": ex.Question},
+				Outputs: map[string]any{"answer": ex.Answer},
 			}
 		}
 		return examples, nil
@@ -199,8 +199,8 @@ func loadDataset(datasetName string) ([]core.Example, error) {
 		examples := make([]core.Example, len(hotpotExamples))
 		for i, ex := range hotpotExamples {
 			examples[i] = core.Example{
-				Inputs:  map[string]interface{}{"question": ex.Question},
-				Outputs: map[string]interface{}{"answer": ex.Answer},
+				Inputs:  map[string]any{"question": ex.Question},
+				Outputs: map[string]any{"answer": ex.Answer},
 			}
 		}
 		return examples, nil
@@ -209,7 +209,7 @@ func loadDataset(datasetName string) ([]core.Example, error) {
 	}
 }
 
-func createTaskSignature(datasetName string) (*core.Signature, func(map[string]interface{}, map[string]interface{}) float64) {
+func createTaskSignature(datasetName string) (*core.Signature, func(map[string]any, map[string]any) float64) {
 	switch datasetName {
 	case "gsm8k":
 		// Math reasoning signature
@@ -224,7 +224,7 @@ func createTaskSignature(datasetName string) (*core.Signature, func(map[string]i
 		).WithInstruction("Solve the math problem step by step, showing your reasoning clearly.")
 
 		// Math-specific metric
-		metricFunc := func(expected, actual map[string]interface{}) float64 {
+		metricFunc := func(expected, actual map[string]any) float64 {
 			expectedAns := extractNumber(fmt.Sprintf("%v", expected["answer"]))
 			actualAns := extractNumber(fmt.Sprintf("%v", actual["answer"]))
 
@@ -249,7 +249,7 @@ func createTaskSignature(datasetName string) (*core.Signature, func(map[string]i
 		).WithInstruction("Answer the question with clear reasoning.")
 
 		// String similarity metric
-		metricFunc := func(expected, actual map[string]interface{}) float64 {
+		metricFunc := func(expected, actual map[string]any) float64 {
 			expectedAns := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", expected["answer"])))
 			actualAns := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", actual["answer"])))
 
@@ -316,7 +316,7 @@ func displayOptimizationResults(ctx context.Context, logger *logging.Logger, gep
 	logger.Info(ctx, "")
 }
 
-func testOptimizedProgram(ctx context.Context, logger *logging.Logger, program core.Program, examples []core.Example, datasetName string, metricFunc func(map[string]interface{}, map[string]interface{}) float64) {
+func testOptimizedProgram(ctx context.Context, logger *logging.Logger, program core.Program, examples []core.Example, datasetName string, metricFunc func(map[string]any, map[string]any) float64) {
 	logger.Info(ctx, "🧪 Testing Optimized Program:")
 	logger.Info(ctx, "%s", "-"+strings.Repeat("-", 30))
 

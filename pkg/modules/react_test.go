@@ -34,7 +34,7 @@ func TestReAct(t *testing.T) {
 		},
 	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	expectedArgs := map[string]interface{}{"question": "What is the meaning of life?"}
+	expectedArgs := map[string]any{"question": "What is the meaning of life?"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
 		core.ToolResult{Data: "Tool execution result"}, nil,
 	)
@@ -109,7 +109,7 @@ func TestReAct_ProcessWithTrace(t *testing.T) {
 		},
 	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	expectedArgs := map[string]interface{}{"question": "What is the meaning of life?"}
+	expectedArgs := map[string]any{"question": "What is the meaning of life?"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(core.ToolResult{Data: "Tool execution result"}, nil)
 
 	resp1 := &core.LLMResponse{Content: `
@@ -202,7 +202,7 @@ func TestReAct_WithErroredTool(t *testing.T) {
 		},
 	})
 	mockWeatherTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	expectedArgs := map[string]interface{}{"location": "nearby"}
+	expectedArgs := map[string]any{"location": "nearby"}
 	mockWeatherTool.On("Execute", mock.Anything, expectedArgs).Return(core.ToolResult{}, errors.New(errors.LLMGenerationFailed,
 		"weather service down"))
 
@@ -280,7 +280,7 @@ func TestReAct_MaxIterations(t *testing.T) {
 		},
 	})
 	dbTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	dbExpectedArgs := map[string]interface{}{"query": "SELECT * FROM\ndata"}
+	dbExpectedArgs := map[string]any{"query": "SELECT * FROM\ndata"}
 	dbTool.On("Execute", mock.Anything, dbExpectedArgs).Return(core.ToolResult{Data: "Database results"}, nil)
 
 	profileTool := testutil.NewMockTool("user_profile")
@@ -297,7 +297,7 @@ func TestReAct_MaxIterations(t *testing.T) {
 		},
 	})
 	profileTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	profileExpectedArgs := map[string]interface{}{"user_id": "123"}
+	profileExpectedArgs := map[string]any{"user_id": "123"}
 	profileTool.On("Execute", mock.Anything, profileExpectedArgs).Return(core.ToolResult{Data: "User profile data"}, nil)
 
 	// Create registry and add mock tools
@@ -485,7 +485,7 @@ func TestReAct_ToolValidationError(t *testing.T) {
 
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
-	inputs := map[string]interface{}{"data": "What is the weather like?"}
+	inputs := map[string]any{"data": "What is the weather like?"}
 	outputs, err := react.Process(ctx, inputs)
 
 	assert.NoError(t, err)
@@ -596,7 +596,7 @@ func TestReAct_WithXMLInterceptors(t *testing.T) {
 		},
 	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	expectedArgs := map[string]interface{}{"location": "New York"}
+	expectedArgs := map[string]any{"location": "New York"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
 		core.ToolResult{Data: "Sunny, 75°F"}, nil,
 	)
@@ -778,7 +778,7 @@ func TestReAct_BackwardCompatibility(t *testing.T) {
 		},
 	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	expectedArgs := map[string]interface{}{"query": "test query"}
+	expectedArgs := map[string]any{"query": "test query"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
 		core.ToolResult{Data: "Backward compatibility works"}, nil,
 	)
@@ -883,7 +883,7 @@ My next step would be to provide a detailed explanation...
 		},
 	})
 	searchTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	searchTool.On("Execute", mock.Anything, map[string]interface{}{"query": "dspy-go optimization"}).Return(
+	searchTool.On("Execute", mock.Anything, map[string]any{"query": "dspy-go optimization"}).Return(
 		core.ToolResult{Data: "Found: COPRO optimizer documentation..."}, nil,
 	)
 
@@ -946,7 +946,7 @@ action:
 		},
 	})
 	testTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	testTool.On("Execute", mock.Anything, map[string]interface{}{"input": "test"}).Return(
+	testTool.On("Execute", mock.Anything, map[string]any{"input": "test"}).Return(
 		core.ToolResult{Data: "Test result"}, nil,
 	)
 
@@ -1117,7 +1117,7 @@ func TestReAct_MultiActionSimulation(t *testing.T) {
 		},
 	})
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil)
-	mockTool.On("Execute", mock.Anything, map[string]interface{}{"query": "main function"}).Return(
+	mockTool.On("Execute", mock.Anything, map[string]any{"query": "main function"}).Return(
 		core.ToolResult{Data: "Found: cmd/main.go"}, nil,
 	)
 

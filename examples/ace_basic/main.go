@@ -139,8 +139,8 @@ func simulateSuccessfulTask(ctx context.Context, manager *ace.Manager) {
 
 	// Step 1: Search for weather
 	recorder.RecordStep(
-		"search",                       // action
-		"web_search",                   // tool
+		"search",     // action
+		"web_search", // tool
 		"I need to search for current weather data for New York City", // reasoning
 		map[string]any{"query": "NYC weather today"},                  // input
 		map[string]any{"result": "Sunny, 72F"},                        // output
@@ -149,8 +149,8 @@ func simulateSuccessfulTask(ctx context.Context, manager *ace.Manager) {
 
 	// Step 2: Format response
 	recorder.RecordStep(
-		"respond",   // action
-		"",          // tool (no tool for final response)
+		"respond", // action
+		"",        // tool (no tool for final response)
 		"The search returned clear weather data, I can now respond", // reasoning
 		nil, // input
 		map[string]any{"answer": "The weather in NYC is sunny, 72F"}, // output
@@ -169,8 +169,8 @@ func simulateFailedTask(ctx context.Context, manager *ace.Manager) {
 
 	// Step 1: Attempt database query (fails)
 	recorder.RecordStep(
-		"query",                          // action
-		"database",                       // tool
+		"query",                           // action
+		"database",                        // tool
 		"I need to query the users table", // reasoning
 		map[string]any{"sql": "SELECT COUNT(*) FROM users"}, // input
 		nil, // output (none due to error)
@@ -192,8 +192,8 @@ func simulateTaskWithCitation(ctx context.Context, manager *ace.Manager) {
 		"search",     // action
 		"web_search", // tool
 		"Using [L001] efficient search strategy, I'll search for Tokyo population", // reasoning (cites L001!)
-		map[string]any{"query": "Tokyo population 2024"}, // input
-		map[string]any{"result": "13.96 million"},        // output
+		map[string]any{"query": "Tokyo population 2024"},                           // input
+		map[string]any{"result": "13.96 million"},                                  // output
 		nil, // error
 	)
 

@@ -24,7 +24,7 @@ func TestNewRefine(t *testing.T) {
 	mockModule := NewPredict(signature)
 
 	// Simple reward function
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		answer, ok := outputs["answer"].(string)
 		if !ok || answer == "" {
 			return 0.0
@@ -54,7 +54,7 @@ func TestNewRefineDefaults(t *testing.T) {
 	)
 	mockModule := NewPredict(signature)
 
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		return 0.5
 	}
 
@@ -94,7 +94,7 @@ func TestRefineProcess(t *testing.T) {
 	predict.SetLLM(mockLLM)
 
 	// Reward function that prefers "creative" answers
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		answer, ok := outputs["answer"].(string)
 		if !ok {
 			return 0.0
@@ -118,7 +118,7 @@ func TestRefineProcess(t *testing.T) {
 	refine := NewRefine(predict, config)
 
 	// Test inputs
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question": "What is the best approach?",
 	}
 
@@ -156,7 +156,7 @@ func TestRefineEarlyTermination(t *testing.T) {
 	predict.SetLLM(mockLLM)
 
 	// Reward function that always returns high score
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		return 1.0 // Always perfect score
 	}
 
@@ -168,7 +168,7 @@ func TestRefineEarlyTermination(t *testing.T) {
 
 	refine := NewRefine(predict, config)
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"input": "test",
 	}
 
@@ -198,7 +198,7 @@ func TestRefineAllAttemptsFail(t *testing.T) {
 	predict := NewPredict(signature)
 	predict.SetLLM(mockLLM)
 
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		return 0.5
 	}
 
@@ -210,7 +210,7 @@ func TestRefineAllAttemptsFail(t *testing.T) {
 
 	refine := NewRefine(predict, config)
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"input": "test",
 	}
 
@@ -237,7 +237,7 @@ func TestRefineZeroAttemptsReturnsStepExecutionFailed(t *testing.T) {
 	predict := NewPredict(signature)
 	refine := NewRefine(predict, RefineConfig{
 		N: 1,
-		RewardFn: func(inputs, outputs map[string]interface{}) float64 {
+		RewardFn: func(inputs, outputs map[string]any) float64 {
 			return 0.5
 		},
 		Threshold: 0.8,
@@ -245,13 +245,13 @@ func TestRefineZeroAttemptsReturnsStepExecutionFailed(t *testing.T) {
 
 	refine.UpdateConfig(RefineConfig{
 		N: 0,
-		RewardFn: func(inputs, outputs map[string]interface{}) float64 {
+		RewardFn: func(inputs, outputs map[string]any) float64 {
 			return 0.5
 		},
 		Threshold: 0.8,
 	})
 
-	outputs, err := refine.Process(ctx, map[string]interface{}{"input": "test"})
+	outputs, err := refine.Process(ctx, map[string]any{"input": "test"})
 
 	assert.Error(t, err)
 	assert.Nil(t, outputs)
@@ -269,7 +269,7 @@ func TestGenerateTemperatureSequence(t *testing.T) {
 	)
 	mockModule := NewPredict(signature)
 
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		return 0.5
 	}
 
@@ -318,7 +318,7 @@ func TestRefineClone(t *testing.T) {
 	)
 	mockModule := NewPredict(signature)
 
-	rewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn := func(inputs, outputs map[string]any) float64 {
 		return 0.5
 	}
 
@@ -348,11 +348,11 @@ func TestRefineUpdateConfig(t *testing.T) {
 	)
 	mockModule := NewPredict(signature)
 
-	rewardFn1 := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn1 := func(inputs, outputs map[string]any) float64 {
 		return 0.5
 	}
 
-	rewardFn2 := func(inputs, outputs map[string]interface{}) float64 {
+	rewardFn2 := func(inputs, outputs map[string]any) float64 {
 		return 0.8
 	}
 
@@ -420,7 +420,7 @@ func TestOfferFeedbackProcess(t *testing.T) {
 	feedback := NewOfferFeedback()
 	feedback.SetLLM(mockLLM)
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"program_inputs":   "test input",
 		"program_outputs":  "weak output",
 		"reward_value":     "0.3",
@@ -477,7 +477,7 @@ func TestRefineBackwardsCompatibility(t *testing.T) {
 	qa.SetLLM(mockLLM)
 
 	// Create reward function (equivalent to Python's 'reward_fn=check_answer')
-	checkAnswer := func(inputs, outputs map[string]interface{}) float64 {
+	checkAnswer := func(inputs, outputs map[string]any) float64 {
 		answer, ok := outputs["answer"].(string)
 		if !ok {
 			return 0.0
@@ -505,7 +505,7 @@ func TestRefineBackwardsCompatibility(t *testing.T) {
 	refine := NewRefine(qa, config) // module=qa
 
 	// Execute (equivalent to Python's refine(question="..."))
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question": "What is the capital of France?",
 	}
 

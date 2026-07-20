@@ -12,7 +12,7 @@ import (
 
 func TestGEPAAgentOptimizer_BuildEngineConfig_PropagatesAdvancedControls(t *testing.T) {
 	agent := newTargetAwareMockAgent()
-	customFeedback := optimizers.GEPAFeedbackEvaluatorFunc(func(_ context.Context, _, _ map[string]interface{}, _ *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
+	customFeedback := optimizers.GEPAFeedbackEvaluatorFunc(func(_ context.Context, _, _ map[string]any, _ *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
 		return &optimizers.GEPAFeedback{
 			Feedback:        "custom feedback",
 			TargetComponent: "root.system",
@@ -71,7 +71,7 @@ func TestGEPAAgentOptimizer_DefaultTraceFeedbackUsesStableTargetIDs(t *testing.T
 	engineConfig := optimizer.buildEngineConfig(agent.GetArtifacts(), 1)
 	require.NotNil(t, engineConfig.FeedbackEvaluator)
 
-	feedback := engineConfig.FeedbackEvaluator.EvaluateFeedback(context.Background(), nil, map[string]interface{}{
+	feedback := engineConfig.FeedbackEvaluator.EvaluateFeedback(context.Background(), nil, map[string]any{
 		"score":          0.25,
 		"error":          "loop exhausted the budget",
 		"trace_status":   "failed",

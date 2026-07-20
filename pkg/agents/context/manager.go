@@ -27,15 +27,15 @@ type Manager struct {
 	diversifier *ContextDiversifier
 
 	// Manager state
-	sessionID   string
-	agentID     string
-	config      Config
-	isEnabled   bool
+	sessionID string
+	agentID   string
+	config    Config
+	isEnabled bool
 
 	// Performance metrics
 	totalRequests      int64
 	compressionSavings int64
-	errorsPrevented   int64
+	errorsPrevented    int64
 	diversityRotations int64
 
 	// Context building state
@@ -46,55 +46,55 @@ type Manager struct {
 
 // CachedContext represents a processed context ready for agent consumption.
 type CachedContext struct {
-	Content         string                 `json:"content"`
-	Checksum        string                 `json:"checksum"`
-	Timestamp       time.Time              `json:"timestamp"`
-	CacheOptimized  bool                   `json:"cache_optimized"`
-	Compressed      bool                   `json:"compressed"`
-	Diversified     bool                   `json:"diversified"`
-	TokenCount      int                    `json:"token_count"`
-	ProcessingTime  time.Duration          `json:"processing_time"`
-	Metadata        map[string]interface{} `json:"metadata"`
+	Content        string         `json:"content"`
+	Checksum       string         `json:"checksum"`
+	Timestamp      time.Time      `json:"timestamp"`
+	CacheOptimized bool           `json:"cache_optimized"`
+	Compressed     bool           `json:"compressed"`
+	Diversified    bool           `json:"diversified"`
+	TokenCount     int            `json:"token_count"`
+	ProcessingTime time.Duration  `json:"processing_time"`
+	Metadata       map[string]any `json:"metadata"`
 }
 
 // ContextRequest specifies how context should be built and optimized.
 type ContextRequest struct {
 	// Content inputs
-	Observations    []string               `json:"observations"`
-	CurrentTask     string                 `json:"current_task"`
-	AdditionalData  map[string]interface{} `json:"additional_data"`
+	Observations   []string       `json:"observations"`
+	CurrentTask    string         `json:"current_task"`
+	AdditionalData map[string]any `json:"additional_data"`
 
 	// Optimization preferences
-	PrioritizeCache     bool                `json:"prioritize_cache"`
-	CompressionPriority CompressionPriority `json:"compression_priority"`
-	AllowDiversification bool               `json:"allow_diversification"`
-	IncludeErrors       bool                `json:"include_errors"`
-	IncludeTodos        bool                `json:"include_todos"`
+	PrioritizeCache      bool                `json:"prioritize_cache"`
+	CompressionPriority  CompressionPriority `json:"compression_priority"`
+	AllowDiversification bool                `json:"allow_diversification"`
+	IncludeErrors        bool                `json:"include_errors"`
+	IncludeTodos         bool                `json:"include_todos"`
 
 	// Context constraints
-	MaxTokens       int     `json:"max_tokens"`
+	MaxTokens          int     `json:"max_tokens"`
 	MinCacheEfficiency float64 `json:"min_cache_efficiency"`
 }
 
 // ContextResponse provides the optimized context plus detailed metrics.
 type ContextResponse struct {
 	// Optimized context ready for agent
-	Context         string                 `json:"context"`
+	Context string `json:"context"`
 
 	// Performance metrics
-	ProcessingTime  time.Duration          `json:"processing_time"`
-	TokenCount      int                    `json:"token_count"`
-	CacheHitRate    float64                `json:"cache_hit_rate"`
-	CompressionRatio float64               `json:"compression_ratio"`
-	DiversityScore  float64                `json:"diversity_score"`
+	ProcessingTime   time.Duration `json:"processing_time"`
+	TokenCount       int           `json:"token_count"`
+	CacheHitRate     float64       `json:"cache_hit_rate"`
+	CompressionRatio float64       `json:"compression_ratio"`
+	DiversityScore   float64       `json:"diversity_score"`
 
 	// Applied optimizations
-	OptimizationsApplied []string           `json:"optimizations_applied"`
-	CostSavings         float64            `json:"cost_savings"`
+	OptimizationsApplied []string `json:"optimizations_applied"`
+	CostSavings          float64  `json:"cost_savings"`
 
 	// Metadata
-	ContextVersion      int64              `json:"context_version"`
-	Metadata            map[string]interface{} `json:"metadata"`
+	ContextVersion int64          `json:"context_version"`
+	Metadata       map[string]any `json:"metadata"`
 }
 
 // NewManager creates a new context manager with all Manus patterns enabled.
@@ -125,16 +125,16 @@ func NewManager(sessionID, agentID, baseDir string, config Config) (*Manager, er
 	diversifier := NewContextDiversifier(memory, config)
 
 	manager := &Manager{
-		memory:      memory,
-		cacheOpt:    cacheOpt,
-		todoMgr:     todoMgr,
-		errorRetain: errorRetain,
-		compressor:  compressor,
-		diversifier: diversifier,
-		sessionID:   sessionID,
-		agentID:     agentID,
-		config:      config,
-		isEnabled:   true,
+		memory:       memory,
+		cacheOpt:     cacheOpt,
+		todoMgr:      todoMgr,
+		errorRetain:  errorRetain,
+		compressor:   compressor,
+		diversifier:  diversifier,
+		sessionID:    sessionID,
+		agentID:      agentID,
+		config:       config,
+		isEnabled:    true,
 		contextCache: make(map[string]CachedContext),
 	}
 
@@ -256,12 +256,12 @@ func (m *Manager) BuildOptimizedContext(ctx context.Context, request ContextRequ
 		OptimizationsApplied: m.buildOptimizationsList(request, compressionResult, diversificationResult),
 		CostSavings:          m.calculateCostSavings(),
 		ContextVersion:       m.contextVersion,
-		Metadata: map[string]interface{}{
-			"session_id":           m.sessionID,
-			"agent_id":             m.agentID,
-			"compression_method":   compressionResult.Method,
-			"diversity_transform":  diversificationResult.Transformation,
-			"cache_optimized":      request.PrioritizeCache,
+		Metadata: map[string]any{
+			"session_id":          m.sessionID,
+			"agent_id":            m.agentID,
+			"compression_method":  compressionResult.Method,
+			"diversity_transform": diversificationResult.Transformation,
+			"cache_optimized":     request.PrioritizeCache,
 		},
 	}
 
@@ -272,7 +272,7 @@ func (m *Manager) BuildOptimizedContext(ctx context.Context, request ContextRequ
 }
 
 // RecordError integrates error recording with the error retention system.
-func (m *Manager) RecordError(ctx context.Context, errorType, message string, severity ErrorSeverity, errorCtx map[string]interface{}) {
+func (m *Manager) RecordError(ctx context.Context, errorType, message string, severity ErrorSeverity, errorCtx map[string]any) {
 	if !m.config.EnableErrorRetention {
 		return
 	}
@@ -292,7 +292,7 @@ func (m *Manager) RecordError(ctx context.Context, errorType, message string, se
 }
 
 // RecordSuccess records successful operations for pattern reinforcement.
-func (m *Manager) RecordSuccess(ctx context.Context, successType, description string, successCtx map[string]interface{}) {
+func (m *Manager) RecordSuccess(ctx context.Context, successType, description string, successCtx map[string]any) {
 	if !m.config.EnableErrorRetention {
 		return
 	}
@@ -343,7 +343,7 @@ func (m *Manager) CompleteTodo(ctx context.Context, todoID string) error {
 }
 
 // GetPerformanceMetrics returns comprehensive performance and cost metrics.
-func (m *Manager) GetPerformanceMetrics() map[string]interface{} {
+func (m *Manager) GetPerformanceMetrics() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -353,23 +353,23 @@ func (m *Manager) GetPerformanceMetrics() map[string]interface{} {
 	compressionStats := m.compressor.GetCompressionStats()
 	todoMetrics := m.todoMgr.GetMetrics()
 
-	return map[string]interface{}{
+	return map[string]any{
 		// Overall manager metrics
-		"total_requests":       m.totalRequests,
-		"context_version":      m.contextVersion,
-		"last_context_update":  m.lastContextUpdate,
-		"enabled":              m.isEnabled,
+		"total_requests":      m.totalRequests,
+		"context_version":     m.contextVersion,
+		"last_context_update": m.lastContextUpdate,
+		"enabled":             m.isEnabled,
 
 		// Cost savings metrics
-		"cache_hit_rate":       cacheMetrics.HitRate,
-		"cache_cost_savings":   cacheMetrics.CostSavings,
-		"compression_savings":  m.compressionSavings,
-		"total_cost_savings":   m.calculateCostSavings(),
+		"cache_hit_rate":      cacheMetrics.HitRate,
+		"cache_cost_savings":  cacheMetrics.CostSavings,
+		"compression_savings": m.compressionSavings,
+		"total_cost_savings":  m.calculateCostSavings(),
 
 		// Performance metrics
-		"errors_prevented":     m.errorsPrevented,
-		"diversity_rotations":  m.diversityRotations,
-		"compression_ratio":    compressionStats["average_compression_ratio"],
+		"errors_prevented":    m.errorsPrevented,
+		"diversity_rotations": m.diversityRotations,
+		"compression_ratio":   compressionStats["average_compression_ratio"],
 
 		// Component-specific metrics
 		"cache":       cacheMetrics,
@@ -381,13 +381,13 @@ func (m *Manager) GetPerformanceMetrics() map[string]interface{} {
 }
 
 // GetHealthStatus returns overall health of the context management system.
-func (m *Manager) GetHealthStatus() map[string]interface{} {
+func (m *Manager) GetHealthStatus() map[string]any {
 	metrics := m.GetPerformanceMetrics()
 
-	health := map[string]interface{}{
-		"overall_status": "healthy",
-		"components":     make(map[string]string),
-		"warnings":       make([]string, 0),
+	health := map[string]any{
+		"overall_status":  "healthy",
+		"components":      make(map[string]string),
+		"warnings":        make([]string, 0),
 		"recommendations": make([]string, 0),
 	}
 
@@ -412,7 +412,7 @@ func (m *Manager) GetHealthStatus() map[string]interface{} {
 	}
 
 	// Check error learning
-	learningRate := metrics["errors"].(map[string]interface{})["learning_rate"].(float64)
+	learningRate := metrics["errors"].(map[string]any)["learning_rate"].(float64)
 	if learningRate >= 0.5 {
 		health["components"].(map[string]string)["error_learning"] = "effective"
 	} else {
@@ -445,9 +445,9 @@ func (m *Manager) buildBaseContext(ctx context.Context, request ContextRequest) 
 		for i, obs := range request.Observations {
 			// Store large observations in filesystem and use references
 			if m.config.EnableFileSystemMemory && len(obs) > int(m.config.CompressionThreshold) {
-				ref, err := m.memory.StoreLargeObservation(ctx, fmt.Sprintf("obs_%d_%d", i, time.Now().UnixNano()), []byte(obs), map[string]interface{}{
+				ref, err := m.memory.StoreLargeObservation(ctx, fmt.Sprintf("obs_%d_%d", i, time.Now().UnixNano()), []byte(obs), map[string]any{
 					"observation_index": i,
-					"size": len(obs),
+					"size":              len(obs),
 				})
 				if err != nil {
 					// Fallback to direct inclusion if storage fails
@@ -489,7 +489,7 @@ func (m *Manager) buildBasicContext(ctx context.Context, request ContextRequest)
 		OptimizationsApplied: []string{"none"},
 		CostSavings:          0.0,
 		ContextVersion:       m.contextVersion,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"context_management_enabled": false,
 		},
 	}, nil
@@ -537,7 +537,7 @@ func (m *Manager) calculateCostSavings() float64 {
 
 func (m *Manager) generateCacheKey(request ContextRequest) string {
 	// Generate a cache key based on request parameters
-	keyData := map[string]interface{}{
+	keyData := map[string]any{
 		"task":         request.CurrentTask,
 		"observations": len(request.Observations),
 		"cache":        request.PrioritizeCache,

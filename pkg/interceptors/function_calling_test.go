@@ -33,23 +33,23 @@ func (m *mockTool) Metadata() *core.ToolMetadata {
 func (m *mockTool) CanHandle(ctx context.Context, intent string) bool {
 	return true
 }
-func (m *mockTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *mockTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	return core.ToolResult{
 		Data: "mock result",
 	}, nil
 }
-func (m *mockTool) Validate(params map[string]interface{}) error {
+func (m *mockTool) Validate(params map[string]any) error {
 	return nil
 }
 
 // mockLLMWithFunctionCalling implements core.LLM with function calling support.
 type mockLLMWithFunctionCalling struct {
 	core.BaseLLM
-	generateWithFunctionsResult map[string]interface{}
+	generateWithFunctionsResult map[string]any
 	generateWithFunctionsError  error
-	generateWithToolsResult     map[string]interface{}
+	generateWithToolsResult     map[string]any
 	generateWithToolsError      error
-	lastFunctions               []map[string]interface{}
+	lastFunctions               []map[string]any
 	lastPrompt                  string
 	lastMessages                []core.ChatMessage
 }
@@ -67,11 +67,11 @@ func (m *mockLLMWithFunctionCalling) Generate(ctx context.Context, prompt string
 	return &core.LLMResponse{Content: "mock response"}, nil
 }
 
-func (m *mockLLMWithFunctionCalling) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"result": "mock"}, nil
+func (m *mockLLMWithFunctionCalling) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
+	return map[string]any{"result": "mock"}, nil
 }
 
-func (m *mockLLMWithFunctionCalling) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithFunctionCalling) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	m.lastPrompt = prompt
 	m.lastFunctions = functions
 	if m.generateWithFunctionsError != nil {
@@ -80,7 +80,7 @@ func (m *mockLLMWithFunctionCalling) GenerateWithFunctions(ctx context.Context, 
 	return m.generateWithFunctionsResult, nil
 }
 
-func (m *mockLLMWithFunctionCalling) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithFunctionCalling) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	m.lastMessages = append([]core.ChatMessage{}, messages...)
 	m.lastFunctions = tools
 	if m.generateWithToolsError != nil {
@@ -118,11 +118,11 @@ func (m *mockLLMWithoutFunctionCalling) Generate(ctx context.Context, prompt str
 	return &core.LLMResponse{Content: "mock response"}, nil
 }
 
-func (m *mockLLMWithoutFunctionCalling) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"result": "mock"}, nil
+func (m *mockLLMWithoutFunctionCalling) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
+	return map[string]any{"result": "mock"}, nil
 }
 
-func (m *mockLLMWithoutFunctionCalling) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLMWithoutFunctionCalling) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -184,8 +184,8 @@ func TestBuildFunctionSchemas(t *testing.T) {
 	assert.Len(t, functions, 2)
 
 	// Find the search tool
-	var searchFunc map[string]interface{}
-	var finishFunc map[string]interface{}
+	var searchFunc map[string]any
+	var finishFunc map[string]any
 	for _, f := range functions {
 		if f["name"] == "search" {
 			searchFunc = f
@@ -202,7 +202,7 @@ func TestBuildFunctionSchemas(t *testing.T) {
 	assert.Equal(t, "search", searchFunc["name"])
 	assert.Equal(t, "Search for information", searchFunc["description"])
 
-	params := searchFunc["parameters"].(map[string]interface{})
+	params := searchFunc["parameters"].(map[string]any)
 	assert.Equal(t, "object", params["type"])
 
 	required := params["required"].([]string)
@@ -210,7 +210,7 @@ func TestBuildFunctionSchemas(t *testing.T) {
 
 	// Verify Finish function
 	assert.Equal(t, "Finish", finishFunc["name"])
-	finishParams := finishFunc["parameters"].(map[string]interface{})
+	finishParams := finishFunc["parameters"].(map[string]any)
 	finishRequired := finishParams["required"].([]string)
 	assert.Contains(t, finishRequired, "answer")
 }
@@ -312,35 +312,35 @@ func TestBuildPromptFromInputs(t *testing.T) {
 func TestTransformFunctionCallResult(t *testing.T) {
 	tests := []struct {
 		name           string
-		result         map[string]interface{}
+		result         map[string]any
 		originalInputs map[string]any
-		expectedAction map[string]interface{}
+		expectedAction map[string]any
 		expectedAnswer string
 	}{
 		{
 			name: "function call with arguments",
-			result: map[string]interface{}{
-				"function_call": map[string]interface{}{
+			result: map[string]any{
+				"function_call": map[string]any{
 					"name": "search",
-					"arguments": map[string]interface{}{
+					"arguments": map[string]any{
 						"query": "weather in Paris",
 					},
 				},
 			},
 			originalInputs: map[string]any{"task": "find weather"},
-			expectedAction: map[string]interface{}{
+			expectedAction: map[string]any{
 				"tool_name": "search",
-				"arguments": map[string]interface{}{
+				"arguments": map[string]any{
 					"query": "weather in Paris",
 				},
 			},
 		},
 		{
 			name: "Finish function call",
-			result: map[string]interface{}{
-				"function_call": map[string]interface{}{
+			result: map[string]any{
+				"function_call": map[string]any{
 					"name": "Finish",
-					"arguments": map[string]interface{}{
+					"arguments": map[string]any{
 						"answer":    "Paris is the capital of France",
 						"reasoning": "Based on the search results",
 					},
@@ -351,14 +351,14 @@ func TestTransformFunctionCallResult(t *testing.T) {
 		},
 		{
 			name: "text response (no function call)",
-			result: map[string]interface{}{
+			result: map[string]any{
 				"content": "I already know the answer is 42",
 			},
 			originalInputs: map[string]any{},
 			// When LLM responds with text (no function call), we wrap it as a Finish action
-			expectedAction: map[string]interface{}{
+			expectedAction: map[string]any{
 				"tool_name": "Finish",
-				"arguments": map[string]interface{}{
+				"arguments": map[string]any{
 					"answer": "I already know the answer is 42",
 				},
 			},
@@ -371,12 +371,12 @@ func TestTransformFunctionCallResult(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.expectedAction != nil {
-				action := output["action"].(map[string]interface{})
+				action := output["action"].(map[string]any)
 				assert.Equal(t, tt.expectedAction["tool_name"], action["tool_name"])
 
 				// Also verify arguments if expected
-				if expectedArgs, ok := tt.expectedAction["arguments"].(map[string]interface{}); ok {
-					actualArgs := action["arguments"].(map[string]interface{})
+				if expectedArgs, ok := tt.expectedAction["arguments"].(map[string]any); ok {
+					actualArgs := action["arguments"].(map[string]any)
 					for key, expectedVal := range expectedArgs {
 						assert.Equal(t, expectedVal, actualArgs[key], "argument %s mismatch", key)
 					}
@@ -419,12 +419,12 @@ func TestSupportsToolCalling(t *testing.T) {
 func TestNativeFunctionCallingInterceptor_WithToolCallingLLM(t *testing.T) {
 	// Setup mock LLM with function calling
 	mockLLM := newMockLLMWithFunctionCalling()
-	mockLLM.generateWithToolsResult = map[string]interface{}{
+	mockLLM.generateWithToolsResult = map[string]any{
 		"tool_calls": []core.ToolCall{
 			{
 				ID:   "call-1",
 				Name: "search",
-				Arguments: map[string]interface{}{
+				Arguments: map[string]any{
 					"query": "test query",
 				},
 			},
@@ -476,7 +476,7 @@ func TestNativeFunctionCallingInterceptor_WithToolCallingLLM(t *testing.T) {
 	assert.False(t, handlerCalled, "Handler should not be called when LLM supports function calling")
 
 	// Result should contain the action from the function call
-	action, ok := result["action"].(map[string]interface{})
+	action, ok := result["action"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "search", action["tool_name"])
 	assert.NotNil(t, result[nativeToolHistoryKey])
@@ -489,7 +489,7 @@ func TestNativeFunctionCallingInterceptor_WithToolCallingLLM(t *testing.T) {
 
 func TestNativeFunctionCallingInterceptor_WithChatHistoryAppendsToolResult(t *testing.T) {
 	mockLLM := newMockLLMWithFunctionCalling()
-	mockLLM.generateWithToolsResult = map[string]interface{}{
+	mockLLM.generateWithToolsResult = map[string]any{
 		"content": "done",
 		"tool_calls": []core.ToolCall{
 			{
@@ -581,7 +581,7 @@ func TestNativeFunctionCallingInterceptor_FallbackWithoutToolCalling(t *testing.
 func TestNativeFunctionCallingInterceptor_PrefersModuleLocalLLM(t *testing.T) {
 	globalLLM := newMockLLMWithoutFunctionCalling()
 	moduleLLM := newMockLLMWithFunctionCalling()
-	moduleLLM.generateWithToolsResult = map[string]interface{}{
+	moduleLLM.generateWithToolsResult = map[string]any{
 		"tool_calls": []core.ToolCall{
 			{
 				ID:        "call-module",

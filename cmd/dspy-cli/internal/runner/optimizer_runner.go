@@ -24,8 +24,8 @@ type OptimizerConfig struct {
 	BaseURL       string
 	MaxExamples   int
 	Verbose       bool
-	SuppressLogs  bool                   // Suppress console output for TUI mode
-	Parameters    map[string]interface{} // Optimizer-specific parameters
+	SuppressLogs  bool           // Suppress console output for TUI mode
+	Parameters    map[string]any // Optimizer-specific parameters
 }
 
 // RunResult holds the results of an optimizer run
@@ -130,8 +130,8 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 				"cot":       module,
 				"extractor": extractor,
 			},
-			func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-				return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 					cot := modules["cot"]
 					extractor := modules["extractor"]
 
@@ -140,7 +140,7 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 						return nil, fmt.Errorf("chain of thought failed: %w", err)
 					}
 
-					extractorInput := map[string]interface{}{
+					extractorInput := map[string]any{
 						"prompt": cotResult["completion"],
 					}
 
@@ -153,8 +153,8 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 			map[string]core.Module{
 				"main": module,
 			},
-			func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-				return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 					return modules["main"].Process(ctx, inputs)
 				}
 			},
@@ -296,14 +296,14 @@ func createSignatureForMIPRO() core.Signature {
 func createOptimizer(name string) (core.Optimizer, error) {
 	switch name {
 	case "bootstrap":
-		metricFunc := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+		metricFunc := func(example, prediction map[string]any, ctx context.Context) bool {
 			expected, ok1 := example["answer"].(string)
 			predicted, ok2 := prediction["answer"].(string)
 			return ok1 && ok2 && predicted == expected
 		}
 		return optimizers.NewBootstrapFewShot(metricFunc, 3), nil
 	case "mipro":
-		metricFunc := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+		metricFunc := func(example, prediction map[string]any, ctx context.Context) float64 {
 			expected, ok1 := example["completion"].(string)
 			predicted, ok2 := prediction["completion"].(string)
 			if !ok1 || !ok2 {
@@ -340,7 +340,7 @@ func createOptimizer(name string) (core.Optimizer, error) {
 		}
 		return optimizers.NewGEPA(config)
 	case "copro":
-		metricFunc := func(expected, actual map[string]interface{}) float64 {
+		metricFunc := func(expected, actual map[string]any) float64 {
 			expectedAnswer, ok1 := expected["answer"].(string)
 			actualAnswer, ok2 := actual["answer"].(string)
 			if !ok1 || !ok2 {
@@ -358,7 +358,7 @@ func createOptimizer(name string) (core.Optimizer, error) {
 }
 
 func createMetric() core.Metric {
-	return func(expected, actual map[string]interface{}) float64 {
+	return func(expected, actual map[string]any) float64 {
 		expectedAnswer, ok1 := expected["answer"].(string)
 		actualAnswer, ok2 := actual["answer"].(string)
 		if !ok1 || !ok2 {

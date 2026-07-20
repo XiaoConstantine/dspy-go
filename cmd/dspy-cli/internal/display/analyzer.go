@@ -259,16 +259,16 @@ func FormatSignatureDetails(sig Signature) string {
 // getComponentColor returns the color code for each component type
 func getComponentColor(componentType string) string {
 	colorMap := map[string]string{
-		"Task Context":         ColorBlue,    // Blue for identity/role
-		"Tone Context":         ColorPurple,  // Purple for style/tone
-		"Background Data":      ColorCyan,    // Cyan for information/data
-		"Task Rules":          ColorRed,      // Red for rules/constraints
-		"Examples":            ColorGreen,    // Green for demonstrations
-		"Conversation History": ColorYellow,  // Yellow for context/history
-		"User Request":        ColorPurple,  // Purple for user input
-		"Thinking Steps":      ColorCyan,    // Cyan for reasoning
-		"Output Format":       ColorBlue,     // Blue for structure
-		"Prefilled Response":  ColorGreen,    // Green for output starters
+		"Task Context":         ColorBlue,   // Blue for identity/role
+		"Tone Context":         ColorPurple, // Purple for style/tone
+		"Background Data":      ColorCyan,   // Cyan for information/data
+		"Task Rules":           ColorRed,    // Red for rules/constraints
+		"Examples":             ColorGreen,  // Green for demonstrations
+		"Conversation History": ColorYellow, // Yellow for context/history
+		"User Request":         ColorPurple, // Purple for user input
+		"Thinking Steps":       ColorCyan,   // Cyan for reasoning
+		"Output Format":        ColorBlue,   // Blue for structure
+		"Prefilled Response":   ColorGreen,  // Green for output starters
 	}
 
 	if color, exists := colorMap[componentType]; exists {

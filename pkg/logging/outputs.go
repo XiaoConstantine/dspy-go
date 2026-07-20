@@ -97,7 +97,7 @@ type JSONFormatter struct{}
 // Format formats a LogEntry as JSON.
 func (f *JSONFormatter) Format(e LogEntry) string {
 	// Convert LogEntry to a map
-	logMap := map[string]interface{}{
+	logMap := map[string]any{
 		"timestamp": time.Unix(0, e.Time).Format(time.RFC3339),
 		"level":     e.Severity.String(),
 		"message":   e.Message,
@@ -118,7 +118,7 @@ func (f *JSONFormatter) Format(e LogEntry) string {
 
 	// Add token info if present
 	if e.TokenInfo != nil {
-		logMap["tokenInfo"] = map[string]interface{}{
+		logMap["tokenInfo"] = map[string]any{
 			"promptTokens":     e.TokenInfo.PromptTokens,
 			"completionTokens": e.TokenInfo.CompletionTokens,
 			"totalTokens":      e.TokenInfo.TotalTokens,
@@ -395,7 +395,7 @@ const (
 	blueArrow  = "\033[34m↓\033[0m" // Down arrow in blue
 )
 
-func formatFields(fields map[string]interface{}) string {
+func formatFields(fields map[string]any) string {
 	if len(fields) == 0 {
 		return ""
 	}
@@ -658,7 +658,7 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 	spanInfo := fmt.Sprintf("%s%s %s", prefix, marker, span.Operation)
 
 	// Add module context information if available
-	if moduleInfo, ok := span.Annotations["module"].(map[string]interface{}); ok {
+	if moduleInfo, ok := span.Annotations["module"].(map[string]any); ok {
 		// Module context was already included in span.Operation by StartSpanWithContext
 		// but we can add additional type information if helpful
 		if moduleType, ok := moduleInfo["type"].(string); ok && moduleType != "" {
@@ -666,7 +666,7 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 		}
 	}
 
-	if chainInfo, ok := span.Annotations["chain_step"].(map[string]interface{}); ok {
+	if chainInfo, ok := span.Annotations["chain_step"].(map[string]any); ok {
 		if stepName, ok := chainInfo["name"].(string); ok {
 			spanInfo += fmt.Sprintf(" (step=%s)", stepName)
 		}
@@ -675,7 +675,7 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 		}
 	}
 
-	if taskInfo, ok := span.Annotations["task"].(map[string]interface{}); ok {
+	if taskInfo, ok := span.Annotations["task"].(map[string]any); ok {
 		// Add processor type and task ID for better context
 		if processor, ok := taskInfo["processor"].(string); ok {
 			spanInfo += fmt.Sprintf(" [%s]", processor)
@@ -749,8 +749,8 @@ func formatSpanTree(b *strings.Builder, span *core.Span, spanMap map[string]*cor
 }
 
 // Only include relevant annotations that provide useful context.
-func filterRelevantAnnotations(annotations map[string]interface{}) map[string]interface{} {
-	relevant := make(map[string]interface{})
+func filterRelevantAnnotations(annotations map[string]any) map[string]any {
+	relevant := make(map[string]any)
 
 	// Define which annotations are meaningful for logging
 	relevantKeys := map[string]bool{
@@ -771,7 +771,7 @@ func filterRelevantAnnotations(annotations map[string]interface{}) map[string]in
 	return relevant
 }
 
-func formatAnnotations(annotations map[string]interface{}) string {
+func formatAnnotations(annotations map[string]any) string {
 	if len(annotations) == 0 {
 		return ""
 	}
@@ -798,7 +798,7 @@ func formatAnnotations(annotations map[string]interface{}) string {
 // formatAnnotationValue handles different types of annotation values and formats
 // them appropriately. It includes special handling for common value types and
 // prevents overly verbose output.
-func formatAnnotationValue(key string, value interface{}) string {
+func formatAnnotationValue(key string, value any) string {
 	switch v := value.(type) {
 	case nil:
 		return ""
@@ -826,7 +826,7 @@ func formatAnnotationValue(key string, value interface{}) string {
 	case time.Duration:
 		return fmt.Sprintf("%s=%s", key, formatDuration(v))
 
-	case []interface{}:
+	case []any:
 		// Handle arrays, limiting the number of items shown
 		if len(v) == 0 {
 			return ""
@@ -840,7 +840,7 @@ func formatAnnotationValue(key string, value interface{}) string {
 		}
 		return fmt.Sprintf("%s=[%s]", key, strings.Join(items, ","))
 
-	case map[string]interface{}:
+	case map[string]any:
 		// Handle nested maps, showing only the number of keys
 		if len(v) == 0 {
 			return ""

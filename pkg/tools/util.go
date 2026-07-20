@@ -19,7 +19,7 @@ import (
 type MCPClientInterface interface {
 	ListTools(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error)
 	// Add CallTool if the wrapper's Execute needs it indirectly via the interface
-	CallTool(ctx context.Context, name string, args map[string]interface{}) (*models.CallToolResult, error)
+	CallTool(ctx context.Context, name string, args map[string]any) (*models.CallToolResult, error)
 }
 
 // --- Dynamic MCP Tool Wrapper ---
@@ -56,13 +56,13 @@ func (t *mcpCoreToolWrapper) CanHandle(ctx context.Context, intent string) bool 
 	return intent == t.name
 }
 
-func (t *mcpCoreToolWrapper) Validate(params map[string]interface{}) error {
+func (t *mcpCoreToolWrapper) Validate(params map[string]any) error {
 	// Basic validation - could potentially delegate to MCP server or use schema
 	// For now, assume valid if Execute can handle it.
 	return nil
 }
 
-func (t *mcpCoreToolWrapper) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t *mcpCoreToolWrapper) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	if t.mcpClient == nil {
 		return core.ToolResult{}, pkgErrors.New(pkgErrors.InvalidWorkflowState, "MCP client is not set for tool wrapper")
 	}
@@ -77,7 +77,7 @@ func (t *mcpCoreToolWrapper) Execute(ctx context.Context, params map[string]inte
 	// Convert MCP result to core.ToolResult
 	// Simple conversion: extract text content. Could be more sophisticated.
 	resultData := extractContentText(mcpResult.Content)
-	resultAnnotations := make(map[string]interface{})
+	resultAnnotations := make(map[string]any)
 	if mcpResult.IsError {
 		resultAnnotations["mcp_error"] = true
 	}

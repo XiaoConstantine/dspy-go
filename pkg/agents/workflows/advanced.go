@@ -31,8 +31,8 @@ func (cw *CompositeWorkflow) AddBuilderStage(stage *BuilderStage) {
 }
 
 // Execute runs the composite workflow with support for advanced patterns.
-func (cw *CompositeWorkflow) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	state := make(map[string]interface{})
+func (cw *CompositeWorkflow) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+	state := make(map[string]any)
 	for k, v := range inputs {
 		state[k] = v
 	}
@@ -53,7 +53,7 @@ func (cw *CompositeWorkflow) Execute(ctx context.Context, inputs map[string]inte
 }
 
 // executeStage executes a single stage based on its type.
-func (cw *CompositeWorkflow) executeStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	// Apply timeout if specified
 	if stage.TimeoutMs > 0 {
 		var cancel context.CancelFunc
@@ -82,7 +82,7 @@ func (cw *CompositeWorkflow) executeStage(ctx context.Context, stage *BuilderSta
 }
 
 // executeSequentialStage executes a sequential stage.
-func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	if stage.Module == nil {
 		return nil, fmt.Errorf("sequential stage must have a module")
 	}
@@ -93,7 +93,7 @@ func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *
 	}
 
 	// Convert map[string]any to map[string]interface{}
-	converted := make(map[string]interface{})
+	converted := make(map[string]any)
 	for k, v := range result {
 		converted[k] = v
 	}
@@ -101,9 +101,9 @@ func (cw *CompositeWorkflow) executeSequentialStage(ctx context.Context, stage *
 }
 
 // executeParallelStage executes a parallel stage.
-func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	var wg sync.WaitGroup
-	results := make(chan map[string]interface{}, len(stage.Steps))
+	results := make(chan map[string]any, len(stage.Steps))
 	var allErrors []error
 	var mu sync.Mutex
 
@@ -137,7 +137,7 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 				mu.Unlock()
 			} else {
 				// Convert map[string]any to map[string]interface{}
-				converted := make(map[string]interface{})
+				converted := make(map[string]any)
 				for k, v := range result {
 					converted[k] = v
 				}
@@ -160,7 +160,7 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 	}
 
 	// Collect results
-	finalResult := make(map[string]interface{})
+	finalResult := make(map[string]any)
 	for result := range results {
 		for k, v := range result {
 			finalResult[k] = v
@@ -171,7 +171,7 @@ func (cw *CompositeWorkflow) executeParallelStage(ctx context.Context, stage *Bu
 }
 
 // executeConditionalStage executes a conditional stage.
-func (cw *CompositeWorkflow) executeConditionalStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeConditionalStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	shouldExecute, err := stage.Condition(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("condition evaluation failed: %w", err)
@@ -191,14 +191,14 @@ func (cw *CompositeWorkflow) executeConditionalStage(ctx context.Context, stage 
 }
 
 // executeForEachStage executes a forEach loop.
-func (cw *CompositeWorkflow) executeForEachStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeForEachStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	items, err := stage.IteratorFunc(ctx, state)
 	if err != nil {
 		return nil, fmt.Errorf("iterator function failed: %w", err)
 	}
 
-	results := make([]map[string]interface{}, 0, len(items))
-	currentState := make(map[string]interface{})
+	results := make([]map[string]any, 0, len(items))
+	currentState := make(map[string]any)
 	for k, v := range state {
 		currentState[k] = v
 	}
@@ -232,9 +232,9 @@ func (cw *CompositeWorkflow) executeForEachStage(ctx context.Context, stage *Bui
 }
 
 // executeWhileStage executes a while loop.
-func (cw *CompositeWorkflow) executeWhileStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeWhileStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	iteration := 0
-	currentState := make(map[string]interface{})
+	currentState := make(map[string]any)
 	for k, v := range state {
 		currentState[k] = v
 	}
@@ -268,9 +268,9 @@ func (cw *CompositeWorkflow) executeWhileStage(ctx context.Context, stage *Build
 }
 
 // executeUntilStage executes an until loop.
-func (cw *CompositeWorkflow) executeUntilStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeUntilStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	iteration := 0
-	currentState := make(map[string]interface{})
+	currentState := make(map[string]any)
 	for k, v := range state {
 		currentState[k] = v
 	}
@@ -304,7 +304,7 @@ func (cw *CompositeWorkflow) executeUntilStage(ctx context.Context, stage *Build
 }
 
 // executeTemplateStage executes a template with parameters.
-func (cw *CompositeWorkflow) executeTemplateStage(ctx context.Context, stage *BuilderStage, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeTemplateStage(ctx context.Context, stage *BuilderStage, state map[string]any) (map[string]any, error) {
 	// Resolve template parameters
 	params, err := stage.TemplateParams(ctx, state)
 	if err != nil {
@@ -312,7 +312,7 @@ func (cw *CompositeWorkflow) executeTemplateStage(ctx context.Context, stage *Bu
 	}
 
 	// Merge parameters with current state
-	templateState := make(map[string]interface{})
+	templateState := make(map[string]any)
 	for k, v := range state {
 		templateState[k] = v
 	}
@@ -325,7 +325,7 @@ func (cw *CompositeWorkflow) executeTemplateStage(ctx context.Context, stage *Bu
 }
 
 // executeNestedWorkflow executes a nested WorkflowBuilder.
-func (cw *CompositeWorkflow) executeNestedWorkflow(ctx context.Context, nestedBuilder *WorkflowBuilder, state map[string]interface{}) (map[string]interface{}, error) {
+func (cw *CompositeWorkflow) executeNestedWorkflow(ctx context.Context, nestedBuilder *WorkflowBuilder, state map[string]any) (map[string]any, error) {
 	if nestedBuilder == nil {
 		return state, nil
 	}
@@ -370,7 +370,7 @@ func (crw *ConditionalRouterWorkflow) SetDefaultRoute(step *Step) {
 }
 
 // Execute runs the router workflow.
-func (crw *ConditionalRouterWorkflow) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+func (crw *ConditionalRouterWorkflow) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 	// First classify the input
 	classification, err := crw.classifier.Process(ctx, inputs)
 	if err != nil {
@@ -415,7 +415,7 @@ type conditionalClassifierModule struct {
 }
 
 func (ccm *conditionalClassifierModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
-	state := make(map[string]interface{}, len(inputs))
+	state := make(map[string]any, len(inputs))
 	for k, v := range inputs {
 		state[k] = v
 	}

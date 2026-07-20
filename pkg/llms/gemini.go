@@ -49,9 +49,9 @@ type geminiFunctionCallingConfig struct {
 }
 
 type geminiFunctionDeclaration struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters"`
 }
 type geminiContent struct {
 	Parts []geminiPart `json:"parts"`
@@ -69,9 +69,9 @@ type geminiPart struct {
 }
 
 type geminiFunctionResponsePart struct {
-	ID       string                 `json:"id,omitempty"`
-	Name     string                 `json:"name"`
-	Response map[string]interface{} `json:"response"`
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name"`
+	Response map[string]any `json:"response"`
 }
 
 // geminiInlineData represents inline binary data (base64 encoded).
@@ -129,9 +129,9 @@ type geminiFunctionCallResponse struct {
 	PromptFeedback map[string]any `json:"promptFeedback,omitempty"`
 }
 type geminiFunctionCall struct {
-	ID        string                 `json:"id,omitempty"`
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"args"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"args"`
 }
 
 // Request and response structures for Gemini embeddings.
@@ -145,8 +145,8 @@ type geminiEmbeddingRequest struct {
 	// Task type helps the model generate appropriate embeddings
 	TaskType string `json:"taskType,omitempty"`
 	// Additional configuration
-	Title      string                 `json:"title,omitempty"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
+	Title      string         `json:"title,omitempty"`
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 type geminiBatchEmbeddingRequest struct {
@@ -158,8 +158,8 @@ type geminiBatchEmbeddingRequest struct {
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"requests"`
-	TaskType   string                 `json:"taskType,omitempty"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
+	TaskType   string         `json:"taskType,omitempty"`
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 type geminiEmbeddingResponse struct {
@@ -634,7 +634,7 @@ func contentBlocksToText(blocks []core.ContentBlock) string {
 	return strings.Join(parts, "\n")
 }
 
-func toolSchemasToDeclarations(tools []map[string]interface{}) ([]geminiFunctionDeclaration, error) {
+func toolSchemasToDeclarations(tools []map[string]any) ([]geminiFunctionDeclaration, error) {
 	functionDeclarations := make([]geminiFunctionDeclaration, 0, len(tools))
 	for _, tool := range tools {
 		name, ok := tool["name"].(string)
@@ -645,7 +645,7 @@ func toolSchemasToDeclarations(tools []map[string]interface{}) ([]geminiFunction
 			)
 		}
 		description, _ := tool["description"].(string)
-		parameters, ok := tool["parameters"].(map[string]interface{})
+		parameters, ok := tool["parameters"].(map[string]any)
 		if !ok {
 			return nil, errors.WithFields(
 				errors.New(errors.InvalidInput, "tool schema missing 'parameters' field"),
@@ -720,7 +720,7 @@ func (g *GeminiLLM) Generate(ctx context.Context, prompt string, options ...core
 }
 
 // GenerateWithJSON implements the core.LLM interface.
-func (g *GeminiLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (g *GeminiLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	response, err := g.Generate(ctx, prompt, options...)
 	if err != nil {
 		return nil, err
@@ -730,7 +730,7 @@ func (g *GeminiLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 }
 
 // Implement the GenerateWithFunctions method for GeminiLLM.
-func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	logger := logging.GetLogger()
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
@@ -786,7 +786,7 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	usage := geminiUsageToTokenInfo(geminiResp.UsageMetadata)
 
 	// Process the response to extract function call if present
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 
 	// Check if there are any parts in the response
 	if len(geminiResp.Candidates[0].Content.Parts) > 0 {
@@ -804,13 +804,13 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 		if len(toolCalls) > 0 {
 			result["tool_calls"] = toolCalls
 			call := toolCalls[0]
-			result["function_call"] = map[string]interface{}{
+			result["function_call"] = map[string]any{
 				"id":        call.ID,
 				"name":      call.Name,
 				"arguments": call.Arguments,
 			}
 			if len(call.Metadata) > 0 {
-				result["function_call"].(map[string]interface{})["metadata"] = call.Metadata
+				result["function_call"].(map[string]any)["metadata"] = call.Metadata
 			}
 		}
 
@@ -840,7 +840,7 @@ func (g *GeminiLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 }
 
 // GenerateWithTools implements native multi-turn tool calling for Gemini.
-func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (g *GeminiLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	logger := logging.GetLogger()
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
@@ -1081,7 +1081,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	result := &core.EmbeddingResult{
 		Vector:     geminiResp.Embedding.Values,
 		TokenCount: geminiResp.UsageMetadata.TotalTokenCount,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 
 			"model":            opts.Model,
 			"prompt_tokens":    geminiResp.UsageMetadata.PromptTokenCount,
@@ -1253,7 +1253,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			result := core.EmbeddingResult{
 				Vector:     embedding.Embedding.Values,
 				TokenCount: embedding.UsageMetadata.TotalTokenCount,
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"model":            opts.Model,
 					"prompt_tokens":    embedding.UsageMetadata.PromptTokenCount,
 					"truncated_tokens": embedding.Embedding.Statistics.TruncatedInputTokenCount,
@@ -1277,7 +1277,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 }
 
 // streamRequest handles the common streaming logic for both StreamGenerate and StreamGenerateWithContent.
-func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody interface{}) (*core.StreamResponse, error) {
+func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.StreamResponse, error) {
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, errors.WithFields(

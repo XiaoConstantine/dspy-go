@@ -25,7 +25,7 @@ func TestParallelWithSynctest(t *testing.T) {
 			mockModule := NewMockModule(false, 100*time.Millisecond)
 			parallel := NewParallel(mockModule, WithMaxWorkers(4))
 
-			batchInputs := []map[string]interface{}{
+			batchInputs := []map[string]any{
 				{"input": "a"},
 				{"input": "b"},
 				{"input": "c"},
@@ -35,7 +35,7 @@ func TestParallelWithSynctest(t *testing.T) {
 			ctx := context.Background()
 			start := time.Now()
 
-			result, err := parallel.Process(ctx, map[string]interface{}{
+			result, err := parallel.Process(ctx, map[string]any{
 				"batch_inputs": batchInputs,
 			})
 
@@ -49,7 +49,7 @@ func TestParallelWithSynctest(t *testing.T) {
 			// In synctest, we can make deterministic assertions about timing
 			t.Logf("Virtual elapsed time: %v", elapsed)
 
-			results := result["results"].([]map[string]interface{})
+			results := result["results"].([]map[string]any)
 			assert.Len(t, results, 4)
 		})
 	})
@@ -69,13 +69,13 @@ func TestParallelWithSynctest(t *testing.T) {
 
 			parallel := NewParallel(mockModule, WithMaxWorkers(2))
 
-			batchInputs := []map[string]interface{}{
+			batchInputs := []map[string]any{
 				{"input": "first", "delay": 50},
 				{"input": "second", "delay": 10},
 			}
 
 			ctx := context.Background()
-			result, err := parallel.Process(ctx, map[string]interface{}{
+			result, err := parallel.Process(ctx, map[string]any{
 				"batch_inputs": batchInputs,
 			})
 
@@ -87,7 +87,7 @@ func TestParallelWithSynctest(t *testing.T) {
 			assert.NotNil(t, result)
 
 			// Results should be in original order regardless of completion order
-			results := result["results"].([]map[string]interface{})
+			results := result["results"].([]map[string]any)
 			assert.Len(t, results, 2)
 		})
 	})
@@ -98,7 +98,7 @@ func TestParallelWithSynctest(t *testing.T) {
 			mockModule := NewMockModule(false, 1*time.Second)
 			parallel := NewParallel(mockModule, WithMaxWorkers(2), WithStopOnFirstError(false))
 
-			batchInputs := []map[string]interface{}{
+			batchInputs := []map[string]any{
 				{"input": "a"},
 				{"input": "b"},
 			}
@@ -107,7 +107,7 @@ func TestParallelWithSynctest(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			result, err := parallel.Process(ctx, map[string]interface{}{
+			result, err := parallel.Process(ctx, map[string]any{
 				"batch_inputs": batchInputs,
 			})
 
@@ -132,7 +132,7 @@ type orderTrackingModule struct {
 	mu              *sync.Mutex
 }
 
-func (m *orderTrackingModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (m *orderTrackingModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	// Simulate variable processing time based on input
 	delay := 10 * time.Millisecond
 	if d, ok := inputs["delay"].(int); ok {
@@ -147,7 +147,7 @@ func (m *orderTrackingModule) Process(ctx context.Context, inputs map[string]int
 	m.mu.Unlock()
 
 	input, _ := inputs["input"].(string)
-	return map[string]interface{}{
+	return map[string]any{
 		"output": "processed_" + input,
 	}, nil
 }

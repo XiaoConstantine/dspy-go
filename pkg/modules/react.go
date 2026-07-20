@@ -154,7 +154,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 	}
 
 	// Create working state that we'll update through iterations
-	state := make(map[string]interface{})
+	state := make(map[string]any)
 	for k, v := range inputs {
 		state[k] = v
 	}
@@ -213,7 +213,7 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 
 		// Process action based on type - handle both structured and string formats
 		var parsedToolName string
-		var parsedArgsMap map[string]interface{}
+		var parsedArgsMap map[string]any
 		step.ActionRaw = stringifyActionField(actionField)
 
 		// With XML-by-default, action field can be structured or string
@@ -325,7 +325,7 @@ func (r *ReAct) extractFromTrajectory(ctx context.Context, originalInputs map[st
 
 // executeToolByName finds a tool by its name and executes it.
 // Accepts arguments as map[string]interface{} for broad compatibility.
-func (r *ReAct) executeToolByName(ctx context.Context, toolName string, arguments map[string]interface{}) (core.ToolResult, error) {
+func (r *ReAct) executeToolByName(ctx context.Context, toolName string, arguments map[string]any) (core.ToolResult, error) {
 	ctx, span := core.StartSpan(ctx, "executeToolByName")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
@@ -347,7 +347,7 @@ func (r *ReAct) executeToolByName(ctx context.Context, toolName string, argument
 	// Ensure arguments map is not nil for validation/execution
 	argsForExec := arguments
 	if argsForExec == nil {
-		argsForExec = make(map[string]interface{})
+		argsForExec = make(map[string]any)
 		logger.Debug(ctx, "Arguments map was nil, initialized to empty map for execution.")
 	} else {
 		// Log args only if not nil initially and potentially filter/truncate sensitive values
@@ -418,7 +418,7 @@ func (r *ReAct) SetSignature(signature core.Signature) {
 	r.Predict.SetSignature(signature)
 }
 
-func stringifyPredictionField(prediction map[string]interface{}, key string) string {
+func stringifyPredictionField(prediction map[string]any, key string) string {
 	if prediction == nil {
 		return ""
 	}
@@ -429,11 +429,11 @@ func stringifyPredictionField(prediction map[string]interface{}, key string) str
 	return fmt.Sprint(value)
 }
 
-func stringifyActionField(actionField interface{}) string {
+func stringifyActionField(actionField any) string {
 	switch action := actionField.(type) {
 	case string:
 		return strings.TrimSpace(action)
-	case map[string]interface{}:
+	case map[string]any:
 		if data, err := json.Marshal(action); err == nil {
 			return string(data)
 		}
@@ -441,7 +441,7 @@ func stringifyActionField(actionField interface{}) string {
 	return fmt.Sprint(actionField)
 }
 
-func carryForwardNativeState(state map[string]interface{}, prediction map[string]interface{}) {
+func carryForwardNativeState(state map[string]any, prediction map[string]any) {
 	if state == nil || prediction == nil {
 		return
 	}
@@ -566,7 +566,7 @@ func formatToolResult(result core.ToolResult) string {
 		switch v := result.Data.(type) {
 		case []byte:
 			// Attempt to unmarshal if it looks like JSON, otherwise return as string
-			var jsonData interface{}
+			var jsonData any
 			if json.Unmarshal(v, &jsonData) == nil {
 				prettyJSON, err := json.MarshalIndent(jsonData, "", "  ")
 				if err == nil {
@@ -614,14 +614,14 @@ func formatToolResult(result core.ToolResult) string {
 
 // parseActionField handles action parsing for both structured XML data and string data.
 // This supports XML-by-default parsing where the action field might be structured.
-func (r *ReAct) parseActionField(ctx context.Context, actionField interface{}) (string, map[string]interface{}, error) {
+func (r *ReAct) parseActionField(ctx context.Context, actionField any) (string, map[string]any, error) {
 	// Handle different action field types based on XML parsing results
 	switch action := actionField.(type) {
 	case string:
 		// String format - parse as XML string (legacy format)
 		return r.parseActionString(ctx, action)
 
-	case map[string]interface{}:
+	case map[string]any:
 		// Structured format from XML parsing - extract tool info directly
 		// Note: This case is currently not reached in default usage since ReAct uses WithTextOutput().
 		// It's preserved for future extensibility when users might enable XML output after initialization.
@@ -633,11 +633,11 @@ func (r *ReAct) parseActionField(ctx context.Context, actionField interface{}) (
 }
 
 // parseActionString handles string-based action parsing (legacy format).
-func (r *ReAct) parseActionString(ctx context.Context, actionStr string) (string, map[string]interface{}, error) {
+func (r *ReAct) parseActionString(ctx context.Context, actionStr string) (string, map[string]any, error) {
 	// Check for simple finish command first (XML-by-default case)
 	actionStr = strings.TrimSpace(actionStr)
 	if strings.ToLower(actionStr) == "finish" {
-		return "finish", make(map[string]interface{}), nil
+		return "finish", make(map[string]any), nil
 	}
 
 	// Extract only the first action block to handle LLM "simulation" behavior
@@ -667,10 +667,10 @@ func (r *ReAct) parseActionString(ctx context.Context, actionStr string) (string
 }
 
 // parseActionStruct handles structured action parsing from XML-by-default parsing.
-func (r *ReAct) parseActionStruct(ctx context.Context, actionStruct map[string]interface{}) (string, map[string]interface{}, error) {
+func (r *ReAct) parseActionStruct(ctx context.Context, actionStruct map[string]any) (string, map[string]any, error) {
 	// Check for simple finish action first (early return)
 	if isFinishAction(actionStruct) {
-		return "finish", make(map[string]interface{}), nil
+		return "finish", make(map[string]any), nil
 	}
 
 	// Look for tool_name field in the structured data
@@ -689,7 +689,7 @@ func (r *ReAct) parseActionStruct(ctx context.Context, actionStruct map[string]i
 }
 
 // isFinishAction checks if the action struct represents a finish action.
-func isFinishAction(actionStruct map[string]interface{}) bool {
+func isFinishAction(actionStruct map[string]any) bool {
 	content, hasContent := actionStruct["content"]
 	if !hasContent {
 		return false
@@ -704,15 +704,15 @@ func isFinishAction(actionStruct map[string]interface{}) bool {
 }
 
 // extractArguments extracts arguments from the action struct.
-func extractArguments(actionStruct map[string]interface{}) map[string]interface{} {
+func extractArguments(actionStruct map[string]any) map[string]any {
 	argsRaw, hasArgs := actionStruct["arguments"]
 	if !hasArgs {
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 
-	argsStruct, ok := argsRaw.(map[string]interface{})
+	argsStruct, ok := argsRaw.(map[string]any)
 	if !ok {
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 
 	// Check for nested "arg" structure
@@ -724,18 +724,18 @@ func extractArguments(actionStruct map[string]interface{}) map[string]interface{
 
 	// Handle nested argument structure
 	switch args := argsList.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return extractSingleArg(args)
-	case []interface{}:
+	case []any:
 		return extractArgsFromList(args)
 	default:
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 }
 
 // extractSingleArg extracts a single argument from a map with "key" and "content" fields.
-func extractSingleArg(args map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func extractSingleArg(args map[string]any) map[string]any {
+	result := make(map[string]any)
 
 	key, hasKey := args["key"]
 	if !hasKey {
@@ -755,11 +755,11 @@ func extractSingleArg(args map[string]interface{}) map[string]interface{} {
 }
 
 // extractArgsFromList extracts multiple arguments from a list of arg maps.
-func extractArgsFromList(args []interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func extractArgsFromList(args []any) map[string]any {
+	result := make(map[string]any)
 
 	for _, argItem := range args {
-		argMap, ok := argItem.(map[string]interface{})
+		argMap, ok := argItem.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -785,7 +785,7 @@ func extractArgsFromList(args []interface{}) map[string]interface{} {
 // parseActionWithInterceptors uses the centralized XML parser to parse action strings.
 // This provides enhanced error handling, validation, security features, and consistency
 // with the main XML interceptor implementation.
-func (r *ReAct) parseActionWithInterceptors(ctx context.Context, actionStr string) (string, map[string]interface{}, error) {
+func (r *ReAct) parseActionWithInterceptors(ctx context.Context, actionStr string) (string, map[string]any, error) {
 	// Use the centralized ParseXMLAction function from the interceptors package
 	// This ensures consistency with the main XML parsing logic and avoids duplication
 	return interceptors.ParseXMLAction(actionStr, *r.XMLConfig)

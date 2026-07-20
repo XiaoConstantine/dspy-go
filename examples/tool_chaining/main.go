@@ -29,10 +29,10 @@ func (d *DataExtractorTool) Metadata() *core.ToolMetadata {
 	}
 }
 func (d *DataExtractorTool) CanHandle(ctx context.Context, intent string) bool { return true }
-func (d *DataExtractorTool) Validate(params map[string]interface{}) error      { return nil }
+func (d *DataExtractorTool) Validate(params map[string]any) error              { return nil }
 func (d *DataExtractorTool) InputSchema() models.InputSchema                   { return models.InputSchema{} }
 
-func (d *DataExtractorTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (d *DataExtractorTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	rawData, ok := params["raw_data"].(string)
 	if !ok {
 		rawData = "sample data"
@@ -42,11 +42,11 @@ func (d *DataExtractorTool) Execute(ctx context.Context, params map[string]inter
 	time.Sleep(50 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"extracted_fields": map[string]interface{}{
+		Data: map[string]any{
+			"extracted_fields": map[string]any{
 				"title":   "Extracted Title",
 				"content": rawData,
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"source":    "data_extractor",
 					"timestamp": time.Now().Unix(),
 				},
@@ -54,7 +54,7 @@ func (d *DataExtractorTool) Execute(ctx context.Context, params map[string]inter
 			"confidence": 0.95,
 			"status":     "extracted",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"processing_time_ms": 50,
 			"tool":               "data_extractor",
 		},
@@ -75,10 +75,10 @@ func (d *DataValidatorTool) Metadata() *core.ToolMetadata {
 	}
 }
 func (d *DataValidatorTool) CanHandle(ctx context.Context, intent string) bool { return true }
-func (d *DataValidatorTool) Validate(params map[string]interface{}) error      { return nil }
+func (d *DataValidatorTool) Validate(params map[string]any) error              { return nil }
 func (d *DataValidatorTool) InputSchema() models.InputSchema                   { return models.InputSchema{} }
 
-func (d *DataValidatorTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (d *DataValidatorTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	confidence, _ := params["confidence"].(float64)
 
 	// Simulate validation process
@@ -87,8 +87,8 @@ func (d *DataValidatorTool) Execute(ctx context.Context, params map[string]inter
 	isValid := confidence > 0.8
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"validation_result": map[string]interface{}{
+		Data: map[string]any{
+			"validation_result": map[string]any{
 				"is_valid":      isValid,
 				"quality_score": confidence * 100,
 				"issues":        []string{},
@@ -97,7 +97,7 @@ func (d *DataValidatorTool) Execute(ctx context.Context, params map[string]inter
 			"validation_timestamp": time.Now().Unix(),
 			"status":               "validated",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"processing_time_ms": 30,
 			"tool":               "data_validator",
 		},
@@ -120,17 +120,17 @@ func (d *DataEnricherTool) Metadata() *core.ToolMetadata {
 	}
 }
 func (d *DataEnricherTool) CanHandle(ctx context.Context, intent string) bool { return true }
-func (d *DataEnricherTool) Validate(params map[string]interface{}) error      { return nil }
+func (d *DataEnricherTool) Validate(params map[string]any) error              { return nil }
 func (d *DataEnricherTool) InputSchema() models.InputSchema                   { return models.InputSchema{} }
 
-func (d *DataEnricherTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (d *DataEnricherTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	// Simulate enrichment process
 	time.Sleep(40 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"enriched_data": params,
-			"additional_context": map[string]interface{}{
+			"additional_context": map[string]any{
 				"tags":             []string{"processed", "validated", "enriched"},
 				"category":         "enriched_content",
 				"enrichment_level": "standard",
@@ -140,7 +140,7 @@ func (d *DataEnricherTool) Execute(ctx context.Context, params map[string]interf
 			},
 			"status": "enriched",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"processing_time_ms": 40,
 			"tool":               "data_enricher",
 		},
@@ -163,29 +163,29 @@ func (d *DataTransformerTool) Metadata() *core.ToolMetadata {
 	}
 }
 func (d *DataTransformerTool) CanHandle(ctx context.Context, intent string) bool { return true }
-func (d *DataTransformerTool) Validate(params map[string]interface{}) error      { return nil }
+func (d *DataTransformerTool) Validate(params map[string]any) error              { return nil }
 func (d *DataTransformerTool) InputSchema() models.InputSchema                   { return models.InputSchema{} }
 
-func (d *DataTransformerTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (d *DataTransformerTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	// Simulate transformation process
 	time.Sleep(25 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"final_output": map[string]interface{}{
+		Data: map[string]any{
+			"final_output": map[string]any{
 				"processed_data": params,
 				"format":         "final",
 				"version":        "1.0",
 				"generated_at":   time.Now().Format(time.RFC3339),
 			},
-			"transformation_summary": map[string]interface{}{
+			"transformation_summary": map[string]any{
 				"steps_completed":       4,
 				"total_processing_time": "~145ms",
 				"final_quality":         "high",
 			},
 			"status": "completed",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"processing_time_ms": 25,
 			"tool":               "data_transformer",
 		},
@@ -231,7 +231,7 @@ func demonstrateBasicPipeline(registry core.ToolRegistry) {
 	}
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"raw_data": "Sample input data for processing pipeline",
 	}
 
@@ -252,7 +252,7 @@ func demonstrateBasicPipeline(registry core.ToolRegistry) {
 	// Show final result
 	if len(result.Results) > 0 {
 		finalResult := result.Results[len(result.Results)-1]
-		if data, ok := finalResult.Data.(map[string]interface{}); ok {
+		if data, ok := finalResult.Data.(map[string]any); ok {
 			if status, ok := data["status"].(string); ok {
 				fmt.Printf("🎯 Final status: %s\n", status)
 			}
@@ -268,7 +268,7 @@ func demonstrateDataTransformations(registry core.ToolRegistry) {
 	validationTransformer := tools.TransformExtractField("validation_result")
 
 	// Create transformer that adds processing metadata
-	enrichmentTransformer := tools.TransformAddConstant(map[string]interface{}{
+	enrichmentTransformer := tools.TransformAddConstant(map[string]any{
 		"pipeline_id":      "demo_pipeline_001",
 		"processing_stage": "enrichment",
 	})
@@ -293,7 +293,7 @@ func demonstrateDataTransformations(registry core.ToolRegistry) {
 	}
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"raw_data": "Data for transformation demonstration",
 	}
 
@@ -310,7 +310,7 @@ func demonstrateDataTransformations(registry core.ToolRegistry) {
 	// Show transformation effects
 	for i, stepResult := range result.Results {
 		fmt.Printf("  Step %d result keys: ", i+1)
-		if data, ok := stepResult.Data.(map[string]interface{}); ok {
+		if data, ok := stepResult.Data.(map[string]any); ok {
 			keys := make([]string, 0, len(data))
 			for k := range data {
 				keys = append(keys, k)
@@ -339,7 +339,7 @@ func demonstrateConditionalExecution(registry core.ToolRegistry) {
 	}
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"raw_data": "Data for conditional execution test",
 	}
 
@@ -427,7 +427,7 @@ func demonstrateDependencyResolution(registry core.ToolRegistry) {
 	}
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"raw_data": "Data for dependency resolution test",
 	}
 
@@ -458,7 +458,7 @@ func demonstrateParallelExecution(registry core.ToolRegistry) {
 		{
 			ID:         "extract_task",
 			ToolName:   "data_extractor",
-			Input:      map[string]interface{}{"raw_data": "Dataset 1"},
+			Input:      map[string]any{"raw_data": "Dataset 1"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -466,7 +466,7 @@ func demonstrateParallelExecution(registry core.ToolRegistry) {
 		{
 			ID:         "validate_task",
 			ToolName:   "data_validator",
-			Input:      map[string]interface{}{"confidence": 0.9},
+			Input:      map[string]any{"confidence": 0.9},
 			Priority:   2,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -474,7 +474,7 @@ func demonstrateParallelExecution(registry core.ToolRegistry) {
 		{
 			ID:         "enrich_task",
 			ToolName:   "data_enricher",
-			Input:      map[string]interface{}{"status": "ready"},
+			Input:      map[string]any{"status": "ready"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -482,7 +482,7 @@ func demonstrateParallelExecution(registry core.ToolRegistry) {
 		{
 			ID:         "transform_task",
 			ToolName:   "data_transformer",
-			Input:      map[string]interface{}{"status": "processed"},
+			Input:      map[string]any{"status": "processed"},
 			Priority:   3,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -532,27 +532,27 @@ func demonstrateBatchExecution(registry core.ToolRegistry) {
 	// Create batch of tool calls
 	calls := []tools.ToolCall{
 		{
-			ToolCall: core.ToolCall{Name: "data_extractor", Arguments: map[string]interface{}{"raw_data": "Batch item 1"}},
+			ToolCall: core.ToolCall{Name: "data_extractor", Arguments: map[string]any{"raw_data": "Batch item 1"}},
 			Priority: 1,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "data_extractor", Arguments: map[string]interface{}{"raw_data": "Batch item 2"}},
+			ToolCall: core.ToolCall{Name: "data_extractor", Arguments: map[string]any{"raw_data": "Batch item 2"}},
 			Priority: 1,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "data_validator", Arguments: map[string]interface{}{"confidence": 0.85}},
+			ToolCall: core.ToolCall{Name: "data_validator", Arguments: map[string]any{"confidence": 0.85}},
 			Priority: 2,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "data_enricher", Arguments: map[string]interface{}{"status": "ready"}},
+			ToolCall: core.ToolCall{Name: "data_enricher", Arguments: map[string]any{"status": "ready"}},
 			Priority: 1,
 			Timeout:  5 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "data_transformer", Arguments: map[string]interface{}{"status": "enriched"}},
+			ToolCall: core.ToolCall{Name: "data_transformer", Arguments: map[string]any{"status": "enriched"}},
 			Priority: 3,
 			Timeout:  5 * time.Second,
 		},

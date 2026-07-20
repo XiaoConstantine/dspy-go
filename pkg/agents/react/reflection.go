@@ -52,7 +52,7 @@ type Pattern struct {
 	Occurrences int
 	SuccessRate float64
 	LastSeen    time.Time
-	Context     map[string]interface{}
+	Context     map[string]any
 }
 
 // PerformanceMetrics tracks agent performance over time.

@@ -56,7 +56,7 @@ func NewAgent(id string, module *modrlm.RLM) *Agent {
 }
 
 // Execute runs the wrapped RLM module and records the most recent execution trace.
-func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	if a == nil {
 		err := fmt.Errorf("rlm agent is not initialized")
 		return nil, err
@@ -82,7 +82,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 
 	result, trace, err := a.module.CompleteWithTrace(ctx, contextPayload, query)
 
-	output := map[string]interface{}{}
+	output := map[string]any{}
 	if result != nil {
 		output["answer"] = result.Response
 	}
@@ -282,7 +282,7 @@ func (a *Agent) storeTrace(trace *agents.ExecutionTrace) {
 	a.lastTrace = trace
 }
 
-func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[string]interface{}, err error, trace *modrlm.RLMTrace) *agents.ExecutionTrace {
+func (a *Agent) buildExecutionTrace(input map[string]any, output map[string]any, err error, trace *modrlm.RLMTrace) *agents.ExecutionTrace {
 	if trace == nil {
 		return buildMinimalFailureTrace(a.id, input, err)
 	}
@@ -327,7 +327,7 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 	if a.module != nil {
 		cfg = a.module.Config()
 	}
-	contextMetadata := map[string]interface{}{
+	contextMetadata := map[string]any{
 		modrlm.TraceMetadataIterations:                   trace.Iterations,
 		modrlm.TraceMetadataTerminationCause:             trace.TerminationCause,
 		modrlm.TraceMetadataAdaptiveIterationEnabled:     a.artifacts.Bool[ArtifactAdaptiveIterationEnabled],
@@ -376,19 +376,19 @@ func (a *Agent) buildExecutionTrace(input map[string]interface{}, output map[str
 	return executionTrace
 }
 
-func buildMinimalFailureTrace(agentID string, input map[string]interface{}, err error) *agents.ExecutionTrace {
+func buildMinimalFailureTrace(agentID string, input map[string]any, err error) *agents.ExecutionTrace {
 	trace := &agents.ExecutionTrace{
 		AgentID:          agentID,
 		AgentType:        agentTypeRLM,
 		Task:             inputString(input, "query"),
 		Input:            maps.Clone(input),
-		Output:           map[string]interface{}{},
+		Output:           map[string]any{},
 		Status:           agents.TraceStatusFailure,
 		StartedAt:        time.Now(),
 		CompletedAt:      time.Now(),
 		ProcessingTime:   0,
 		ToolUsageCount:   map[string]int{},
-		ContextMetadata:  map[string]interface{}{},
+		ContextMetadata:  map[string]any{},
 		TerminationCause: "error",
 	}
 	if err != nil {
@@ -397,7 +397,7 @@ func buildMinimalFailureTrace(agentID string, input map[string]interface{}, err 
 	return trace
 }
 
-func inputString(input map[string]interface{}, key string) string {
+func inputString(input map[string]any, key string) string {
 	if input == nil {
 		return ""
 	}

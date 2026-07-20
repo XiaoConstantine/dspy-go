@@ -24,8 +24,8 @@ type Logger struct {
 	mu         sync.Mutex
 	severity   Severity
 	outputs    []Output
-	sampleRate uint32                 // For high-frequency event sampling
-	fields     map[string]interface{} // Default fields for all logs
+	sampleRate uint32         // For high-frequency event sampling
+	fields     map[string]any // Default fields for all logs
 }
 
 // Output interface allows for different logging destinations.
@@ -40,7 +40,7 @@ type Config struct {
 	Severity      Severity
 	Outputs       []Output
 	SampleRate    uint32
-	DefaultFields map[string]interface{}
+	DefaultFields map[string]any
 }
 
 // NewLogger creates a new logger with the given configuration.
@@ -54,7 +54,7 @@ func NewLogger(cfg Config) *Logger {
 }
 
 // logf is the core logging function that handles all severity levels.
-func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...interface{}) {
+func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...any) {
 	// Early severity check for performance
 	if s < l.severity {
 		return
@@ -72,7 +72,7 @@ func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...in
 		File:     filepath.Base(file),
 		Line:     line,
 		Function: filepath.Base(fn),
-		Fields:   make(map[string]interface{}),
+		Fields:   make(map[string]any),
 	}
 
 	// Add context values if present
@@ -129,19 +129,19 @@ func (l *Logger) PromptCompletion(ctx context.Context, prompt, completion string
 }
 
 // Regular severity-based logging methods.
-func (l *Logger) Debug(ctx context.Context, format string, args ...interface{}) {
+func (l *Logger) Debug(ctx context.Context, format string, args ...any) {
 	l.logf(ctx, DEBUG, format, args...)
 }
 
-func (l *Logger) Info(ctx context.Context, format string, args ...interface{}) {
+func (l *Logger) Info(ctx context.Context, format string, args ...any) {
 	l.logf(ctx, INFO, format, args...)
 }
 
-func (l *Logger) Warn(ctx context.Context, format string, args ...interface{}) {
+func (l *Logger) Warn(ctx context.Context, format string, args ...any) {
 	l.logf(ctx, WARN, format, args...)
 }
 
-func (l *Logger) Error(ctx context.Context, format string, args ...interface{}) {
+func (l *Logger) Error(ctx context.Context, format string, args ...any) {
 	l.logf(ctx, ERROR, format, args...)
 }
 
@@ -158,7 +158,7 @@ func (l *Logger) Fatal(ctx context.Context, msg string) {
 	osExit(1)
 }
 
-func (l *Logger) Fatalf(ctx context.Context, format string, args ...interface{}) {
+func (l *Logger) Fatalf(ctx context.Context, format string, args ...any) {
 	l.logf(ctx, FATAL, format, args...)
 
 	// Ensure all logs are written

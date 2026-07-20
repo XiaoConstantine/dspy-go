@@ -40,19 +40,19 @@ type Config struct {
 
 // CacheConfig controls KV-cache optimization patterns.
 type CacheConfig struct {
-	StablePrefix       string `json:"stable_prefix"`        // Stable prompt prefix for cache hits
-	MaxPrefixSize      int    `json:"max_prefix_size"`      // Maximum size of stable prefix
-	BreakpointInterval int    `json:"breakpoint_interval"`  // Token interval for cache breakpoints
-	EnableMetrics      bool   `json:"enable_metrics"`       // Track cache hit/miss metrics
+	StablePrefix         string `json:"stable_prefix"`         // Stable prompt prefix for cache hits
+	MaxPrefixSize        int    `json:"max_prefix_size"`       // Maximum size of stable prefix
+	BreakpointInterval   int    `json:"breakpoint_interval"`   // Token interval for cache breakpoints
+	EnableMetrics        bool   `json:"enable_metrics"`        // Track cache hit/miss metrics
 	TimestampGranularity string `json:"timestamp_granularity"` // "day", "hour", "minute" - NEVER "second"
 }
 
 // MemoryConfig controls filesystem-based memory patterns.
 type MemoryConfig struct {
-	MaxFileSize      int64             `json:"max_file_size"`      // Maximum size per memory file
-	RetentionPeriod  time.Duration     `json:"retention_period"`   // How long to keep memory files
-	CompressionLevel int               `json:"compression_level"`  // 0=none, 1=fast, 9=best
-	FilePatterns     map[string]string `json:"file_patterns"`      // Naming patterns for different content types
+	MaxFileSize      int64             `json:"max_file_size"`     // Maximum size per memory file
+	RetentionPeriod  time.Duration     `json:"retention_period"`  // How long to keep memory files
+	CompressionLevel int               `json:"compression_level"` // 0=none, 1=fast, 9=best
+	FilePatterns     map[string]string `json:"file_patterns"`     // Naming patterns for different content types
 }
 
 // TodoConfig controls todo.md attention manipulation patterns.
@@ -81,10 +81,10 @@ func DefaultConfig() Config {
 		EnableDiversification:   true,
 
 		// Performance settings optimized for cost reduction
-		CompressionThreshold: 50000,  // 50KB threshold
+		CompressionThreshold: 50000,   // 50KB threshold
 		MaxMemorySize:        1 << 30, // 1GB default
-		CacheHitTarget:       0.90,   // 90% cache hit target
-		MaxErrorRetention:    10,     // Keep last 10 errors
+		CacheHitTarget:       0.90,    // 90% cache hit target
+		MaxErrorRetention:    10,      // Keep last 10 errors
 
 		Cache: CacheConfig{
 			StablePrefix:         "You are a helpful AI assistant.",
@@ -123,11 +123,11 @@ func DevelopmentConfig() Config {
 	config := DefaultConfig()
 
 	// Reduce thresholds for easier testing
-	config.CompressionThreshold = 1000 // 1KB for testing
-	config.MaxMemorySize = 100 * 1024 * 1024 // 100MB for development
-	config.Cache.MaxPrefixSize = 1024 // 1K tokens for testing
+	config.CompressionThreshold = 1000            // 1KB for testing
+	config.MaxMemorySize = 100 * 1024 * 1024      // 100MB for development
+	config.Cache.MaxPrefixSize = 1024             // 1K tokens for testing
 	config.Memory.RetentionPeriod = 1 * time.Hour // 1 hour retention
-	config.Todo.UpdateInterval = 1 * time.Second // Faster updates for testing
+	config.Todo.UpdateInterval = 1 * time.Second  // Faster updates for testing
 
 	return config
 }
@@ -139,8 +139,8 @@ func ProductionConfig() Config {
 	// Optimize for maximum cost reduction
 	config.CacheHitTarget = 0.95 // 95% cache hit target
 	config.Cache.StablePrefix = "You are a production AI assistant. Today's date: "
-	config.Cache.MaxPrefixSize = 16384 // 16K tokens for large stable prefix
-	config.Memory.CompressionLevel = 9 // Maximum compression
+	config.Cache.MaxPrefixSize = 16384            // 16K tokens for large stable prefix
+	config.Memory.CompressionLevel = 9            // Maximum compression
 	config.Todo.UpdateInterval = 10 * time.Second // Less frequent updates
 
 	return config

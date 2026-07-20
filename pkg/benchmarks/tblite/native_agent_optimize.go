@@ -13,7 +13,7 @@ import (
 var _ optimize.OptimizableAgent = (*NativeAgent)(nil)
 
 // Execute adapts the benchmark task contract to the generic agents.Agent API.
-func (a *NativeAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (a *NativeAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	req, err := terminalTaskRequestFromInput(input)
 	if err != nil {
 		return nil, err
@@ -24,10 +24,10 @@ func (a *NativeAgent) Execute(ctx context.Context, input map[string]interface{})
 		return nil, err
 	}
 	if result == nil {
-		return map[string]interface{}{"completed": false, "error": "native agent returned nil result"}, nil
+		return map[string]any{"completed": false, "error": "native agent returned nil result"}, nil
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"completed":    result.Completed,
 		"final_answer": result.FinalAnswer,
 		"error":        result.Error,
@@ -98,7 +98,7 @@ func (a *NativeAgent) LastExecutionTrace() *agents.ExecutionTrace {
 	return a.lastTrace.Clone()
 }
 
-func terminalTaskRequestFromInput(input map[string]interface{}) (TerminalTaskRequest, error) {
+func terminalTaskRequestFromInput(input map[string]any) (TerminalTaskRequest, error) {
 	if input == nil {
 		return TerminalTaskRequest{}, fmt.Errorf("native agent input is required")
 	}
@@ -123,7 +123,7 @@ func terminalTaskRequestFromInput(input map[string]interface{}) (TerminalTaskReq
 	}
 	if rawEnv, ok := input["container_env"].([]string); ok {
 		req.ContainerEnv = append([]string(nil), rawEnv...)
-	} else if rawEnvAny, ok := input["container_env"].([]interface{}); ok {
+	} else if rawEnvAny, ok := input["container_env"].([]any); ok {
 		req.ContainerEnv = make([]string, 0, len(rawEnvAny))
 		for _, item := range rawEnvAny {
 			req.ContainerEnv = append(req.ContainerEnv, agentutil.StringValue(item))

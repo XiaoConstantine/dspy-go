@@ -116,10 +116,10 @@ func TestGEPAAgentOptimizer_SeedCandidateAllowsDeclaredEmptyPrimaryArtifact(t *t
 
 func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
-	baseAgent.outputs["first"] = map[string]interface{}{
+	baseAgent.outputs["first"] = map[string]any{
 		"answer": "42",
 	}
-	baseAgent.outputs["second"] = map[string]interface{}{
+	baseAgent.outputs["second"] = map[string]any{
 		"answer": "wrong",
 	}
 
@@ -138,19 +138,19 @@ func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T
 	evaluation, err := optimizer.EvaluateCandidate(context.Background(), candidate, []AgentExample{
 		{
 			ID: "first",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "first",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": "42",
 			},
 		},
 		{
 			ID: "second",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "second",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": "expected",
 			},
 		},
@@ -185,7 +185,7 @@ func TestGEPAAgentOptimizer_EvaluateCandidateBuildsFitnessAndTraces(t *testing.T
 
 func TestGEPAAgentOptimizer_EvaluateCandidate_UsesWholeProgramIntArtifacts(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
-	baseAgent.outputs["turn-budget"] = map[string]interface{}{
+	baseAgent.outputs["turn-budget"] = map[string]any{
 		"answer": "ok",
 	}
 
@@ -210,10 +210,10 @@ func TestGEPAAgentOptimizer_EvaluateCandidate_UsesWholeProgramIntArtifacts(t *te
 
 	examples := []AgentExample{{
 		ID: "turn-budget",
-		Inputs: map[string]interface{}{
+		Inputs: map[string]any{
 			"id": "turn-budget",
 		},
-		Outputs: map[string]interface{}{
+		Outputs: map[string]any{
 			"answer": "ok",
 		},
 	}}
@@ -301,10 +301,10 @@ func TestBuildGEPATrace_PreservesExpectedOutputsSeparately(t *testing.T) {
 		},
 		AgentExample{
 			ID: "example-1",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question": "What is 6 * 7?",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": "42",
 			},
 		},
@@ -318,7 +318,7 @@ func TestBuildGEPATrace_PreservesExpectedOutputsSeparately(t *testing.T) {
 	)
 
 	assert.Nil(t, trace.Outputs)
-	assert.Equal(t, map[string]interface{}{"answer": "42"}, trace.ContextData["expected_outputs"])
+	assert.Equal(t, map[string]any{"answer": "42"}, trace.ContextData["expected_outputs"])
 	assert.Equal(t, 25*time.Millisecond, trace.Duration)
 }
 
@@ -326,7 +326,7 @@ func TestBuildRichTraceEvidence_IncludesRLMContextMetadata(t *testing.T) {
 	evidence := buildRichTraceEvidence(&agents.ExecutionTrace{
 		Status:           agents.TraceStatusPartial,
 		TerminationCause: "early_termination",
-		ContextMetadata: map[string]interface{}{
+		ContextMetadata: map[string]any{
 			modrlm.TraceMetadataAdaptiveIterationEnabled:    true,
 			modrlm.TraceMetadataSubLLMCallCount:             3,
 			modrlm.TraceMetadataSubRLMCallCount:             1,
@@ -353,7 +353,7 @@ func TestBuildRichTraceEvidence_IncludesRLMContextMetadata(t *testing.T) {
 
 func TestBuildRichTraceEvidence_PreservesZeroValuedRLMMetadata(t *testing.T) {
 	evidence := buildRichTraceEvidence(&agents.ExecutionTrace{
-		ContextMetadata: map[string]interface{}{
+		ContextMetadata: map[string]any{
 			modrlm.TraceMetadataSubLLMCallCount:      0,
 			modrlm.TraceMetadataSubRLMCallCount:      0,
 			modrlm.TraceMetadataConfidenceSignals:    0,
@@ -371,7 +371,7 @@ func TestBuildRichTraceEvidence_PreservesZeroValuedRLMMetadata(t *testing.T) {
 	assert.Contains(t, evidence, "root_prompt_max_tokens=0")
 
 	summary := summarizeAgentTrace(&agents.ExecutionTrace{
-		ContextMetadata: map[string]interface{}{
+		ContextMetadata: map[string]any{
 			modrlm.TraceMetadataSubLLMCallCount:     0,
 			modrlm.TraceMetadataSubRLMCallCount:     0,
 			modrlm.TraceMetadataConfidenceSignals:   0,

@@ -49,8 +49,8 @@ func NewMockProgram() *MockProgram {
 	}
 }
 
-func (m *MockProgram) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{
+func (m *MockProgram) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+	return map[string]any{
 		"result": "mock_result",
 	}, nil
 }
@@ -125,11 +125,11 @@ func TestPatternCollectorAddInteraction(t *testing.T) {
 		Timestamp: time.Now(),
 		Context:   "test context 1",
 		ToolName:  "test_tool",
-		Parameters: map[string]interface{}{
+		Parameters: map[string]any{
 			"param1": "value1",
 		},
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	err := pc.AddInteraction(ctx, interaction1)
@@ -142,11 +142,11 @@ func TestPatternCollectorAddInteraction(t *testing.T) {
 		Timestamp: time.Now(),
 		Context:   "test context 2",
 		ToolName:  "test_tool2",
-		Parameters: map[string]interface{}{
+		Parameters: map[string]any{
 			"param2": "value2",
 		},
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	err = pc.AddInteraction(ctx, interaction2)
@@ -159,11 +159,11 @@ func TestPatternCollectorAddInteraction(t *testing.T) {
 		Timestamp: time.Now(),
 		Context:   "test context 3",
 		ToolName:  "test_tool3",
-		Parameters: map[string]interface{}{
+		Parameters: map[string]any{
 			"param3": "value3",
 		},
 		Success:  false,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	err = pc.AddInteraction(ctx, interaction3)
@@ -176,11 +176,11 @@ func TestPatternCollectorAddInteraction(t *testing.T) {
 		Timestamp: time.Now(),
 		Context:   "test context 4",
 		ToolName:  "test_tool4",
-		Parameters: map[string]interface{}{
+		Parameters: map[string]any{
 			"param4": "value4",
 		},
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	err = pc.AddInteraction(ctx, interaction4)
@@ -208,7 +208,7 @@ func TestPatternCollectorGetSimilarPatterns(t *testing.T) {
 		Context:  "test context",
 		ToolName: "git_log",
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	failedInteraction := MCPInteraction{
@@ -216,7 +216,7 @@ func TestPatternCollectorGetSimilarPatterns(t *testing.T) {
 		Context:  "test context",
 		ToolName: "git_log",
 		Success:  false,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	err := pc.AddInteraction(ctx, successfulInteraction)
@@ -253,7 +253,7 @@ func TestPatternCollectorGetPatternsByTool(t *testing.T) {
 		Context:  "git context",
 		ToolName: "git_log",
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	fileInteraction := MCPInteraction{
@@ -261,7 +261,7 @@ func TestPatternCollectorGetPatternsByTool(t *testing.T) {
 		Context:  "file context",
 		ToolName: "file_read",
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	err := pc.AddInteraction(ctx, gitInteraction)
@@ -375,25 +375,25 @@ func TestExampleSelectorSelectOptimalExamples(t *testing.T) {
 	// Create test candidates with different success rates
 	candidates := []MCPInteraction{
 		{
-			ID:        "candidate1",
-			ToolName:  "test_tool",
-			Parameters: map[string]interface{}{"param": "value1"},
-			Success:   true,
-			Timestamp: time.Now(),
+			ID:         "candidate1",
+			ToolName:   "test_tool",
+			Parameters: map[string]any{"param": "value1"},
+			Success:    true,
+			Timestamp:  time.Now(),
 		},
 		{
-			ID:        "candidate2",
-			ToolName:  "test_tool",
-			Parameters: map[string]interface{}{"param": "value2"},
-			Success:   false,
-			Timestamp: time.Now().Add(-time.Hour), // Older timestamp
+			ID:         "candidate2",
+			ToolName:   "test_tool",
+			Parameters: map[string]any{"param": "value2"},
+			Success:    false,
+			Timestamp:  time.Now().Add(-time.Hour), // Older timestamp
 		},
 		{
-			ID:        "candidate3",
-			ToolName:  "test_tool",
-			Parameters: map[string]interface{}{"param": "value3"},
-			Success:   true,
-			Timestamp: time.Now().Add(-30 * time.Minute), // Medium age
+			ID:         "candidate3",
+			ToolName:   "test_tool",
+			Parameters: map[string]any{"param": "value3"},
+			Success:    true,
+			Timestamp:  time.Now().Add(-30 * time.Minute), // Medium age
 		},
 	}
 
@@ -427,7 +427,7 @@ func TestExampleSelectorRecordSuccess(t *testing.T) {
 
 	interaction := MCPInteraction{
 		ToolName:   "test_tool",
-		Parameters: map[string]interface{}{"param": "value"},
+		Parameters: map[string]any{"param": "value"},
 	}
 
 	// Record multiple successes
@@ -436,7 +436,7 @@ func TestExampleSelectorRecordSuccess(t *testing.T) {
 	selector.RecordSuccess(interaction, true)
 
 	// Generate expected pattern key using the same logic as the implementation
-	hashParameters := func(params map[string]interface{}) string {
+	hashParameters := func(params map[string]any) string {
 		data, _ := json.Marshal(params)
 		return fmt.Sprintf("params_%d", len(data))
 	}
@@ -524,12 +524,12 @@ func TestToolOrchestrator(t *testing.T) {
 		Steps: []WorkflowStep{
 			{
 				ToolName:   "git_status",
-				Parameters: map[string]interface{}{"path": "/repo"},
+				Parameters: map[string]any{"path": "/repo"},
 				Order:      0,
 			},
 			{
 				ToolName:   "git_log",
-				Parameters: map[string]interface{}{"count": 5},
+				Parameters: map[string]any{"count": 5},
 				Order:      1,
 			},
 		},
@@ -560,14 +560,14 @@ func TestMCPOptimizerCompile(t *testing.T) {
 	// Create mock dataset
 	examples := []core.Example{
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"query": "show git log",
 			},
-			Outputs: map[string]interface{}{
-				"tool_calls": []interface{}{
-					map[string]interface{}{
+			Outputs: map[string]any{
+				"tool_calls": []any{
+					map[string]any{
 						"tool_name": "git_log",
-						"parameters": map[string]interface{}{
+						"parameters": map[string]any{
 							"count": 5,
 						},
 					},
@@ -582,7 +582,7 @@ func TestMCPOptimizerCompile(t *testing.T) {
 	program := NewMockProgram().Clone()
 
 	// Test compile
-	optimizedProgram, err := optimizer.Compile(ctx, program, dataset, func(expected, actual map[string]interface{}) float64 {
+	optimizedProgram, err := optimizer.Compile(ctx, program, dataset, func(expected, actual map[string]any) float64 {
 		return 1.0 // Mock metric always returns 1.0
 	})
 
@@ -601,13 +601,13 @@ func TestMCPOptimizerOptimizeInteraction(t *testing.T) {
 
 	// Add some patterns first
 	interaction := MCPInteraction{
-		ID:        "test_interaction",
-		Context:   "show git log",
-		ToolName:  "git_log",
-		Parameters: map[string]interface{}{"count": 5},
-		Success:   true,
-		Timestamp: time.Now(),
-		Metadata:  make(map[string]interface{}),
+		ID:         "test_interaction",
+		Context:    "show git log",
+		ToolName:   "git_log",
+		Parameters: map[string]any{"count": 5},
+		Success:    true,
+		Timestamp:  time.Now(),
+		Metadata:   make(map[string]any),
 	}
 
 	err := optimizer.PatternCollector.AddInteraction(ctx, interaction)
@@ -630,11 +630,11 @@ func TestMCPOptimizerLearnFromInteraction(t *testing.T) {
 		ID:            "learn_test",
 		Context:       "test learning",
 		ToolName:      "test_tool",
-		Parameters:    map[string]interface{}{"param": "value"},
+		Parameters:    map[string]any{"param": "value"},
 		Success:       true,
 		ExecutionTime: 100 * time.Millisecond,
 		Timestamp:     time.Now(),
-		Metadata:      make(map[string]interface{}),
+		Metadata:      make(map[string]any),
 	}
 
 	// Test learning
@@ -682,7 +682,7 @@ func TestMCPOptimizerLearningDisabled(t *testing.T) {
 		Context:  "test",
 		ToolName: "test_tool",
 		Success:  true,
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	// Learning should be skipped

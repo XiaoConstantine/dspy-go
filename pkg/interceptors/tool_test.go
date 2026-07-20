@@ -17,7 +17,7 @@ func TestApprovalToolInterceptor_BlocksDeniedCalls(t *testing.T) {
 	})
 
 	handlerCalled := false
-	_, err := interceptor(context.Background(), map[string]interface{}{"cmd": "rm"}, core.NewToolInfo("bash", "bash", "", models.InputSchema{}), func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	_, err := interceptor(context.Background(), map[string]any{"cmd": "rm"}, core.NewToolInfo("bash", "bash", "", models.InputSchema{}), func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		handlerCalled = true
 		return core.ToolResult{}, nil
 	})
@@ -32,7 +32,7 @@ func TestApprovalToolInterceptor_AllowsApprovedCalls(t *testing.T) {
 	})
 
 	handlerCalled := false
-	result, err := interceptor(context.Background(), map[string]interface{}{"path": "a.txt"}, core.NewToolInfo("write", "write", "", models.InputSchema{}), func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	result, err := interceptor(context.Background(), map[string]any{"path": "a.txt"}, core.NewToolInfo("write", "write", "", models.InputSchema{}), func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		handlerCalled = true
 		return core.ToolResult{Data: "ok"}, nil
 	})
@@ -46,14 +46,14 @@ func TestRedactionToolInterceptor_RedactsTextAndDetails(t *testing.T) {
 		return strings.ReplaceAll(input, "secret", "[REDACTED]")
 	})
 
-	result, err := interceptor(context.Background(), nil, core.NewToolInfo("read", "read", "", models.InputSchema{}), func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	result, err := interceptor(context.Background(), nil, core.NewToolInfo("read", "read", "", models.InputSchema{}), func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		return core.ToolResult{
 			Data: "raw secret payload",
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				core.ToolResultModelTextMeta:   "model secret text",
 				core.ToolResultDisplayTextMeta: "display secret text",
 			},
-			Annotations: map[string]interface{}{
+			Annotations: map[string]any{
 				core.ToolResultDetailsAnnotation: map[string]any{
 					"stdout": "secret line",
 				},
@@ -72,10 +72,10 @@ func TestRedactionToolInterceptor_RedactsTextAndDetails(t *testing.T) {
 func TestTruncationToolInterceptor_TrimsModelAndDisplayText(t *testing.T) {
 	interceptor := TruncationToolInterceptor(12, 18)
 
-	result, err := interceptor(context.Background(), nil, core.NewToolInfo("read", "read", "", models.InputSchema{}), func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	result, err := interceptor(context.Background(), nil, core.NewToolInfo("read", "read", "", models.InputSchema{}), func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		return core.ToolResult{
 			Data: "raw payload that is much longer than the limits",
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				core.ToolResultModelTextMeta:   "model payload that is much longer than the limit",
 				core.ToolResultDisplayTextMeta: "display payload that is much longer than the limit",
 			},

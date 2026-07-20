@@ -59,7 +59,7 @@ func (st *SearchTool) InputSchema() models.InputSchema {
 	}
 }
 
-func (st *SearchTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (st *SearchTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	query, ok := args["query"].(string)
 	if !ok {
 		return nil, fmt.Errorf("query parameter is required")
@@ -79,7 +79,7 @@ func (st *SearchTool) Call(ctx context.Context, args map[string]interface{}) (*m
 	}, nil
 }
 
-func (st *SearchTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (st *SearchTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	result, err := st.Call(ctx, params)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -87,7 +87,7 @@ func (st *SearchTool) Execute(ctx context.Context, params map[string]interface{}
 	return core.ToolResult{Data: result}, nil
 }
 
-func (st *SearchTool) Validate(params map[string]interface{}) error {
+func (st *SearchTool) Validate(params map[string]any) error {
 	if _, ok := params["query"]; !ok {
 		return fmt.Errorf("query parameter is required")
 	}
@@ -128,7 +128,7 @@ func (ct *CalculatorTool) InputSchema() models.InputSchema {
 	}
 }
 
-func (ct *CalculatorTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (ct *CalculatorTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	expression, ok := args["expression"].(string)
 	if !ok {
 		return nil, fmt.Errorf("expression parameter is required")
@@ -148,7 +148,7 @@ func (ct *CalculatorTool) Call(ctx context.Context, args map[string]interface{})
 	}, nil
 }
 
-func (ct *CalculatorTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (ct *CalculatorTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	result, err := ct.Call(ctx, params)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -156,7 +156,7 @@ func (ct *CalculatorTool) Execute(ctx context.Context, params map[string]interfa
 	return core.ToolResult{Data: result}, nil
 }
 
-func (ct *CalculatorTool) Validate(params map[string]interface{}) error {
+func (ct *CalculatorTool) Validate(params map[string]any) error {
 	if _, ok := params["expression"]; !ok {
 		return fmt.Errorf("expression parameter is required")
 	}
@@ -197,7 +197,7 @@ func (st *SummarizerTool) InputSchema() models.InputSchema {
 	}
 }
 
-func (st *SummarizerTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (st *SummarizerTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	text, ok := args["text"].(string)
 	if !ok {
 		return nil, fmt.Errorf("text parameter is required")
@@ -217,7 +217,7 @@ func (st *SummarizerTool) Call(ctx context.Context, args map[string]interface{})
 	}, nil
 }
 
-func (st *SummarizerTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (st *SummarizerTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	result, err := st.Call(ctx, params)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -225,7 +225,7 @@ func (st *SummarizerTool) Execute(ctx context.Context, params map[string]interfa
 	return core.ToolResult{Data: result}, nil
 }
 
-func (st *SummarizerTool) Validate(params map[string]interface{}) error {
+func (st *SummarizerTool) Validate(params map[string]any) error {
 	if _, ok := params["text"]; !ok {
 		return fmt.Errorf("text parameter is required")
 	}
@@ -325,21 +325,21 @@ Always use the exact tool names as specified above. Use XML format for actions: 
 	searchToolInstance := NewSearchTool()
 	searchTool := tools.NewFuncTool("search", "Search for information",
 		searchToolInstance.InputSchema(),
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			return searchToolInstance.Call(ctx, args)
 		})
 
 	calculatorToolInstance := NewCalculatorTool()
 	calculatorTool := tools.NewFuncTool("calculator", "Perform calculations",
 		calculatorToolInstance.InputSchema(),
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			return calculatorToolInstance.Call(ctx, args)
 		})
 
 	summarizerToolInstance := NewSummarizerTool()
 	summarizerTool := tools.NewFuncTool("summarize", "Summarize text",
 		summarizerToolInstance.InputSchema(),
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			return summarizerToolInstance.Call(ctx, args)
 		})
 
@@ -373,7 +373,7 @@ Always use the exact tool names as specified above. Use XML format for actions: 
 		fmt.Printf("📋 Task %d: %s\n", i+1, task)
 		fmt.Printf("----------------------------------------\n")
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"task": task,
 		}
 

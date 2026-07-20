@@ -37,14 +37,14 @@ func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...core.G
 	return args.Get(0).(*core.LLMResponse), args.Error(1)
 }
 
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	args := m.Called(ctx, prompt, options)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
-func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	args := m.Called(ctx, prompt, functions, options)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
 func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
@@ -87,9 +87,9 @@ type MockModule struct {
 	mock.Mock
 }
 
-func (m *MockModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	args := m.Called(ctx, inputs)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
 func (m *MockModule) GetSignature() core.Signature {
@@ -127,7 +127,7 @@ func TestNewCOPRO(t *testing.T) {
 	}{
 		{
 			name:    "Default options",
-			metric:  func(expected, actual map[string]interface{}) float64 { return 1.0 },
+			metric:  func(expected, actual map[string]any) float64 { return 1.0 },
 			options: nil,
 			expected: &COPRO{
 				Breadth:         5,   // Updated to match Python DSPy default
@@ -138,7 +138,7 @@ func TestNewCOPRO(t *testing.T) {
 		},
 		{
 			name:   "Custom options",
-			metric: func(expected, actual map[string]interface{}) float64 { return 0.5 },
+			metric: func(expected, actual map[string]any) float64 { return 0.5 },
 			options: []COPROOption{
 				WithBreadth(5),
 				WithDepth(2),
@@ -205,8 +205,8 @@ func createCOPROTestProgram() core.Program {
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return modules["predictor"].Process(ctx, inputs)
 			}
 		},
@@ -216,12 +216,12 @@ func createCOPROTestProgram() core.Program {
 func createCOPROTestDataset() *datasets.SimpleDataset {
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-			Outputs: map[string]interface{}{"answer": "4"},
+			Inputs:  map[string]any{"question": "What is 2+2?"},
+			Outputs: map[string]any{"answer": "4"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "What is 3+3?"},
-			Outputs: map[string]interface{}{"answer": "6"},
+			Inputs:  map[string]any{"question": "What is 3+3?"},
+			Outputs: map[string]any{"answer": "6"},
 		},
 	}
 	return datasets.NewSimpleDataset(examples)
@@ -233,7 +233,7 @@ func TestCOPROCompile_Success(t *testing.T) {
 	dataset := createCOPROTestDataset()
 
 	// Create metric
-	metric := func(expected, actual map[string]interface{}) float64 {
+	metric := func(expected, actual map[string]any) float64 {
 		return 1.0 // Always return success for this test
 	}
 
@@ -277,13 +277,13 @@ func TestCOPROCompile_NoPredictModules(t *testing.T) {
 	// Create program without Predict modules
 	program := core.NewProgram(
 		map[string]core.Module{},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return inputs, nil
 		},
 	)
 	dataset := createCOPROTestDataset()
 
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric)
 	ctx := core.WithExecutionState(context.Background())
 
@@ -298,7 +298,7 @@ func TestCOPROCompile_EmptyDataset(t *testing.T) {
 	program := createCOPROTestProgram()
 	emptyDataset := datasets.NewSimpleDataset([]core.Example{})
 
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric, WithBreadth(2), WithDepth(1))
 
 	mockLLM := &MockLLM{}
@@ -314,7 +314,7 @@ func TestCOPROCompile_EmptyDataset(t *testing.T) {
 }
 
 func TestExtractPredictors(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 
 	// Test with Predict module
 	predictModule := modules.NewPredict(core.Signature{})
@@ -335,7 +335,7 @@ func TestExtractPredictors(t *testing.T) {
 
 func TestGenerateInitialCandidates(t *testing.T) {
 	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 }, WithBreadth(3))
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 }, WithBreadth(3))
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
 
@@ -350,7 +350,7 @@ func TestGenerateInitialCandidates(t *testing.T) {
 
 func TestRefineCandidates(t *testing.T) {
 	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 }, WithBreadth(4))
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 }, WithBreadth(4))
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
 
@@ -371,7 +371,7 @@ func TestRefineCandidates(t *testing.T) {
 func TestRefineCandidates_DeterministicFallbackStillGeneratesCandidates(t *testing.T) {
 	setupTestMockLLM(t)
 	copro := NewCOPRO(
-		func(expected, actual map[string]interface{}) float64 { return 1.0 },
+		func(expected, actual map[string]any) float64 { return 1.0 },
 		WithBreadth(4),
 		WithInitTemperature(0),
 	)
@@ -394,7 +394,7 @@ func TestRefineCandidates_DeterministicFallbackStillGeneratesCandidates(t *testi
 }
 
 func TestEvaluateCandidate(t *testing.T) {
-	metric := func(expected, actual map[string]interface{}) float64 {
+	metric := func(expected, actual map[string]any) float64 {
 		if expected["answer"] == actual["answer"] {
 			return 1.0
 		}
@@ -423,8 +423,8 @@ func TestEvaluateCandidate(t *testing.T) {
 
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-			Outputs: map[string]interface{}{"answer": "4"},
+			Inputs:  map[string]any{"question": "What is 2+2?"},
+			Outputs: map[string]any{"answer": "4"},
 		},
 	}
 
@@ -436,7 +436,7 @@ func TestEvaluateCandidate(t *testing.T) {
 }
 
 func TestEvaluateCandidate_LLMError(t *testing.T) {
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric)
 
 	signature := core.NewSignature(
@@ -454,8 +454,8 @@ func TestEvaluateCandidate_LLMError(t *testing.T) {
 
 	candidate := PromptCandidate{Instruction: "Test", Score: 0.0, Generation: 1}
 	examples := []core.Example{{
-		Inputs:  map[string]interface{}{"question": "test"},
-		Outputs: map[string]interface{}{"answer": "test"},
+		Inputs:  map[string]any{"question": "test"},
+		Outputs: map[string]any{"answer": "test"},
 	}}
 
 	ctx := context.Background()
@@ -465,7 +465,7 @@ func TestEvaluateCandidate_LLMError(t *testing.T) {
 }
 
 func TestEvaluateCandidatesParallel(t *testing.T) {
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric)
 
 	signature := core.NewSignature(
@@ -488,8 +488,8 @@ func TestEvaluateCandidatesParallel(t *testing.T) {
 
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-			Outputs: map[string]interface{}{"answer": "4"},
+			Inputs:  map[string]any{"question": "What is 2+2?"},
+			Outputs: map[string]any{"answer": "4"},
 		},
 	}
 
@@ -513,7 +513,7 @@ func TestDatasetToExamples(t *testing.T) {
 }
 
 func TestGetEnhancedInstructionTemplates(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 	signature := core.Signature{}
 
 	templates := copro.getEnhancedInstructionTemplates(signature, "test task")
@@ -525,7 +525,7 @@ func TestGetEnhancedInstructionTemplates(t *testing.T) {
 }
 
 func TestRefineInstruction(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 
 	tests := []struct {
 		name        string
@@ -553,7 +553,7 @@ func TestRefineInstruction(t *testing.T) {
 }
 
 func TestApplyPromptToPredictor(t *testing.T) {
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 
 	originalSignature := core.NewSignature(
 		[]core.InputField{{Field: core.NewField("question")}},
@@ -592,7 +592,7 @@ func TestCOPROWithExecutionState(t *testing.T) {
 	program := createCOPROTestProgram()
 	dataset := createCOPROTestDataset()
 
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric, WithBreadth(1), WithDepth(1))
 
 	mockLLM := &MockLLM{}
@@ -765,7 +765,7 @@ func BenchmarkCOPROParameterTuning(b *testing.B) {
 
 // BenchmarkCOPROConcurrency tests parallel evaluation performance.
 func BenchmarkCOPROConcurrency(b *testing.B) {
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric)
 
 	signature := core.NewSignature(
@@ -804,8 +804,8 @@ func BenchmarkCOPROConcurrency(b *testing.B) {
 			examples := make([]core.Example, ct.numExamples)
 			for i := range examples {
 				examples[i] = core.Example{
-					Inputs:  map[string]interface{}{"question": fmt.Sprintf("What is %d+%d?", i, i)},
-					Outputs: map[string]interface{}{"answer": fmt.Sprintf("%d", i*2)},
+					Inputs:  map[string]any{"question": fmt.Sprintf("What is %d+%d?", i, i)},
+					Outputs: map[string]any{"answer": fmt.Sprintf("%d", i*2)},
 				}
 			}
 
@@ -828,7 +828,7 @@ func BenchmarkCOPROCompile(b *testing.B) {
 	program := createCOPROTestProgram()
 	dataset := createCOPROTestDataset()
 
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric, WithBreadth(2), WithDepth(1))
 
 	mockLLM := &MockLLM{}
@@ -861,15 +861,15 @@ func TestCOPROCompile_EmptyInstruction(t *testing.T) {
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return modules["predictor"].Process(ctx, inputs)
 			}
 		},
 	)
 
 	dataset := createCOPROTestDataset()
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric, WithBreadth(2), WithDepth(1))
 
 	mockLLM := &MockLLM{}
@@ -888,7 +888,7 @@ func TestCOPROCompile_EmptyInstruction(t *testing.T) {
 func TestGenerateInitialCandidates_MoreThanTemplates(t *testing.T) {
 	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
 	// Test when breadth > number of templates to cover missing branch
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 }, WithBreadth(20)) // Large breadth
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 }, WithBreadth(20)) // Large breadth
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
 
@@ -906,7 +906,7 @@ func TestGenerateInitialCandidates_MoreThanTemplates(t *testing.T) {
 func TestOptimizePredictor_EmptyDataset(t *testing.T) {
 	setupTestMockLLM(t) // Must be called before NewPredict to ensure it gets the mock LLM
 	// Test direct call to optimizePredictor with empty dataset
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 1.0 })
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 	predictor := modules.NewPredict(core.Signature{})
 	emptyDataset := datasets.NewSimpleDataset([]core.Example{})
 
@@ -919,7 +919,7 @@ func TestOptimizePredictor_EmptyDataset(t *testing.T) {
 
 func TestOptimizePredictor_WithCurrentInstruction(t *testing.T) {
 	// Test optimizePredictor with current instruction to test baseline branch
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 0.9 })
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 0.9 })
 
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.NewField("question")}},
@@ -944,7 +944,7 @@ func TestOptimizePredictor_WithCurrentInstruction(t *testing.T) {
 
 func TestOptimizePredictor_NoCurrentInstruction(t *testing.T) {
 	// Test optimizePredictor without current instruction to test empty instruction branch
-	copro := NewCOPRO(func(expected, actual map[string]interface{}) float64 { return 0.9 }, WithBreadth(2), WithDepth(1))
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 0.9 }, WithBreadth(2), WithDepth(1))
 
 	signature := core.NewSignature(
 		[]core.InputField{{Field: core.NewField("question")}},
@@ -968,7 +968,7 @@ func TestOptimizePredictor_NoCurrentInstruction(t *testing.T) {
 }
 
 func BenchmarkEvaluateCandidatesParallel(b *testing.B) {
-	metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric)
 
 	signature := core.NewSignature(
@@ -994,8 +994,8 @@ func BenchmarkEvaluateCandidatesParallel(b *testing.B) {
 
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-			Outputs: map[string]interface{}{"answer": "4"},
+			Inputs:  map[string]any{"question": "What is 2+2?"},
+			Outputs: map[string]any{"answer": "4"},
 		},
 	}
 

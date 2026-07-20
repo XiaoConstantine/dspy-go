@@ -41,17 +41,17 @@ type MCPOptimizerConfig struct {
 
 // MCPInteraction represents a single MCP tool interaction with all relevant context.
 type MCPInteraction struct {
-	ID            string                 `json:"id"`
-	Timestamp     time.Time              `json:"timestamp"`
-	Context       string                 `json:"context"`                  // The user query or context that triggered this interaction
-	ToolName      string                 `json:"tool_name"`                // Name of the MCP tool used
-	Parameters    map[string]interface{} `json:"parameters"`               // Parameters passed to the tool
-	Result        core.ToolResult        `json:"result"`                   // Result returned by the tool
-	Success       bool                   `json:"success"`                  // Whether the interaction was successful
-	ExecutionTime time.Duration          `json:"execution_time"`           // Time taken to execute
-	ErrorMessage  string                 `json:"error_message,omitempty"`  // Error message if failed
-	ContextVector []float64              `json:"context_vector,omitempty"` // Embedding vector for the context
-	Metadata      map[string]interface{} `json:"metadata"`                 // Additional metadata
+	ID            string          `json:"id"`
+	Timestamp     time.Time       `json:"timestamp"`
+	Context       string          `json:"context"`                  // The user query or context that triggered this interaction
+	ToolName      string          `json:"tool_name"`                // Name of the MCP tool used
+	Parameters    map[string]any  `json:"parameters"`               // Parameters passed to the tool
+	Result        core.ToolResult `json:"result"`                   // Result returned by the tool
+	Success       bool            `json:"success"`                  // Whether the interaction was successful
+	ExecutionTime time.Duration   `json:"execution_time"`           // Time taken to execute
+	ErrorMessage  string          `json:"error_message,omitempty"`  // Error message if failed
+	ContextVector []float64       `json:"context_vector,omitempty"` // Embedding vector for the context
+	Metadata      map[string]any  `json:"metadata"`                 // Additional metadata
 }
 
 // PatternCollector logs and stores successful MCP tool interactions with context.
@@ -103,21 +103,21 @@ type MCPMetrics struct {
 
 // ToolWorkflow represents a sequence of tool calls that achieved a successful outcome.
 type ToolWorkflow struct {
-	ID        string                 `json:"id"`
-	Steps     []WorkflowStep         `json:"steps"`
-	Context   string                 `json:"context"`
-	Success   bool                   `json:"success"`
-	Timestamp time.Time              `json:"timestamp"`
-	Metadata  map[string]interface{} `json:"metadata"`
+	ID        string         `json:"id"`
+	Steps     []WorkflowStep `json:"steps"`
+	Context   string         `json:"context"`
+	Success   bool           `json:"success"`
+	Timestamp time.Time      `json:"timestamp"`
+	Metadata  map[string]any `json:"metadata"`
 }
 
 // WorkflowStep represents a single step in a tool workflow.
 type WorkflowStep struct {
-	ToolName   string                 `json:"tool_name"`
-	Parameters map[string]interface{} `json:"parameters"`
-	Result     core.ToolResult        `json:"result"`
-	Order      int                    `json:"order"`
-	Duration   time.Duration          `json:"duration"`
+	ToolName   string          `json:"tool_name"`
+	Parameters map[string]any  `json:"parameters"`
+	Result     core.ToolResult `json:"result"`
+	Order      int             `json:"order"`
+	Duration   time.Duration   `json:"duration"`
 }
 
 // EmbeddingService defines the interface for generating context embeddings.
@@ -244,22 +244,22 @@ func (m *MCPOptimizer) extractMCPInteractions(ctx context.Context, example core.
 	// Look for MCP tool calls in the example data
 	// This is a simplified implementation - in practice, you'd parse execution traces
 	if toolCalls, exists := example.Outputs["tool_calls"]; exists {
-		if callsArray, ok := toolCalls.([]interface{}); ok {
+		if callsArray, ok := toolCalls.([]any); ok {
 			for i, call := range callsArray {
-				if callMap, ok := call.(map[string]interface{}); ok {
+				if callMap, ok := call.(map[string]any); ok {
 					interaction := MCPInteraction{
 						ID:        fmt.Sprintf("example_%d_call_%d", len(interactions), i),
 						Timestamp: time.Now(),
 						Context:   fmt.Sprintf("%v", example.Inputs),
 						ToolName:  fmt.Sprintf("%v", callMap["tool_name"]),
-						Parameters: func() map[string]interface{} {
-							if params, ok := callMap["parameters"].(map[string]interface{}); ok {
+						Parameters: func() map[string]any {
+							if params, ok := callMap["parameters"].(map[string]any); ok {
 								return params
 							}
-							return make(map[string]interface{})
+							return make(map[string]any)
 						}(),
 						Success:  true, // Assume success if in training data
-						Metadata: make(map[string]interface{}),
+						Metadata: make(map[string]any),
 					}
 					interactions = append(interactions, interaction)
 				}
@@ -631,7 +631,7 @@ func (es *ExampleSelector) calculateWeight(interaction MCPInteraction) float64 {
 }
 
 // hashParameters creates a simple hash of parameters for tracking success patterns.
-func (es *ExampleSelector) hashParameters(params map[string]interface{}) string {
+func (es *ExampleSelector) hashParameters(params map[string]any) string {
 	// Simple hash - in production, use proper JSON marshaling and hashing
 	data, _ := json.Marshal(params)
 	return fmt.Sprintf("params_%d", len(data))
@@ -1045,11 +1045,11 @@ func (m *MCPOptimizer) LearnFromInteraction(ctx context.Context, interaction MCP
 }
 
 // GetOptimizationStats returns current optimization statistics.
-func (m *MCPOptimizer) GetOptimizationStats() map[string]interface{} {
+func (m *MCPOptimizer) GetOptimizationStats() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_patterns":       m.PatternCollector.GetPatternCount(),
 		"total_workflows":      m.ToolOrchestrator.GetWorkflowCount(),
 		"latest_metrics":       m.MetricsEvaluator.GetLatestMetrics(),

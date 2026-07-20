@@ -15,21 +15,21 @@ import (
 type ComparisonResult struct {
 	Score       float64
 	Scores      map[string]float64
-	Diagnostics map[string]interface{}
+	Diagnostics map[string]any
 	PassedTests []string
 	FailedTests []string
 }
 
 // OutputComparator compares an agent execution result against an example's expectations.
 type OutputComparator interface {
-	Compare(ex AgentExample, actual map[string]interface{}) (*ComparisonResult, error)
+	Compare(ex AgentExample, actual map[string]any) (*ComparisonResult, error)
 }
 
 // OutputComparatorFunc adapts a function to the OutputComparator interface.
-type OutputComparatorFunc func(ex AgentExample, actual map[string]interface{}) (*ComparisonResult, error)
+type OutputComparatorFunc func(ex AgentExample, actual map[string]any) (*ComparisonResult, error)
 
 // Compare implements OutputComparator.
-func (f OutputComparatorFunc) Compare(ex AgentExample, actual map[string]interface{}) (*ComparisonResult, error) {
+func (f OutputComparatorFunc) Compare(ex AgentExample, actual map[string]any) (*ComparisonResult, error) {
 	return f(ex, actual)
 }
 
@@ -80,7 +80,7 @@ func (e *DeterministicEvaluator) Evaluate(ctx context.Context, agent Optimizable
 
 	sideInfo := &SideInfo{
 		Trace:       trace,
-		Diagnostics: make(map[string]interface{}),
+		Diagnostics: make(map[string]any),
 		Scores:      make(map[string]float64),
 		LatencyMS:   float64(latency) / float64(time.Millisecond),
 	}
@@ -143,7 +143,7 @@ func mergeFloatScores(dst map[string]float64, src map[string]float64) {
 	}
 }
 
-func mergeDiagnostics(dst map[string]interface{}, src map[string]interface{}) {
+func mergeDiagnostics(dst map[string]any, src map[string]any) {
 	for key, value := range src {
 		dst[key] = value
 	}
@@ -157,7 +157,7 @@ func mergeDiagnostics(dst map[string]interface{}, src map[string]interface{}) {
 type ExactMatchComparator struct{}
 
 // Compare implements OutputComparator.
-func (ExactMatchComparator) Compare(ex AgentExample, actual map[string]interface{}) (*ComparisonResult, error) {
+func (ExactMatchComparator) Compare(ex AgentExample, actual map[string]any) (*ComparisonResult, error) {
 	if len(ex.Outputs) == 0 {
 		return &ComparisonResult{
 			Score:  1,
@@ -175,7 +175,7 @@ func (ExactMatchComparator) Compare(ex AgentExample, actual map[string]interface
 	scores := make(map[string]float64, len(keys)+1)
 	passed := make([]string, 0, len(keys))
 	failed := make([]string, 0, len(keys))
-	mismatches := make(map[string]interface{})
+	mismatches := make(map[string]any)
 
 	for _, key := range keys {
 		expected := ex.Outputs[key]
@@ -191,7 +191,7 @@ func (ExactMatchComparator) Compare(ex AgentExample, actual map[string]interface
 
 		failed = append(failed, testName)
 		scores[testName] = 0
-		mismatch := map[string]interface{}{
+		mismatch := map[string]any{
 			"expected": expected,
 		}
 		if ok {
@@ -205,7 +205,7 @@ func (ExactMatchComparator) Compare(ex AgentExample, actual map[string]interface
 	score := float64(matched) / float64(len(keys))
 	scores["output_match"] = score
 
-	diagnostics := make(map[string]interface{})
+	diagnostics := make(map[string]any)
 	if len(mismatches) > 0 {
 		diagnostics["mismatches"] = mismatches
 	}

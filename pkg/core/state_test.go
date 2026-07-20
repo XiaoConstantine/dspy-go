@@ -20,7 +20,7 @@ type StateTestMockModule struct {
 	Sig              Signature // Added field
 	CurrentLLM       LLM       // Added field
 	MyDemos          []Example
-	MyParams         map[string]interface{}
+	MyParams         map[string]any
 	MyLMIdentifier   map[string]string
 	ReturnParamError bool // Flag to make SetTunedParameters return an error
 }
@@ -34,7 +34,7 @@ func NewStateTestMockModule(name string) *StateTestMockModule {
 		),
 		// CurrentLLM can be left nil for many state tests, or set if needed for LM identifier tests
 		MyDemos:        []Example{},
-		MyParams:       make(map[string]interface{}),
+		MyParams:       make(map[string]any),
 		MyLMIdentifier: llmIdentifier,
 	}
 }
@@ -92,8 +92,8 @@ func (m *StateTestMockModule) GetLLMIdentifier() map[string]string {
 }
 
 // GetTunedParameters implements ParameterProvider.
-func (m *StateTestMockModule) GetTunedParameters() map[string]interface{} {
-	p := make(map[string]interface{})
+func (m *StateTestMockModule) GetTunedParameters() map[string]any {
+	p := make(map[string]any)
 	for k, v := range m.MyParams {
 		p[k] = v
 	}
@@ -101,7 +101,7 @@ func (m *StateTestMockModule) GetTunedParameters() map[string]interface{} {
 }
 
 // SetTunedParameters implements ParameterConsumer.
-func (m *StateTestMockModule) SetTunedParameters(params map[string]interface{}) error {
+func (m *StateTestMockModule) SetTunedParameters(params map[string]any) error {
 	if m.ReturnParamError {
 		return fmt.Errorf("mock parameter validation error")
 	}
@@ -203,14 +203,14 @@ func TestSaveLoadProgram_Success(t *testing.T) {
 	mockModuleB := NewStateTestMockModule("moduleB")
 
 	originalDemosA := []Example{
-		{Inputs: map[string]interface{}{"a_in": "q1"}, Outputs: map[string]interface{}{"a_out": "a1"}},
-		{Inputs: map[string]interface{}{"a_in": "q2"}, Outputs: map[string]interface{}{"a_out": "a2"}},
+		{Inputs: map[string]any{"a_in": "q1"}, Outputs: map[string]any{"a_out": "a1"}},
+		{Inputs: map[string]any{"a_in": "q2"}, Outputs: map[string]any{"a_out": "a2"}},
 	}
 	originalDemosB := []Example{
-		{Inputs: map[string]interface{}{"b_in": "q3"}, Outputs: map[string]interface{}{"b_out": "a3"}},
+		{Inputs: map[string]any{"b_in": "q3"}, Outputs: map[string]any{"b_out": "a3"}},
 	}
-	originalParamsA := map[string]interface{}{"k": 5, "temp": 0.7}
-	originalParamsB := map[string]interface{}{"threshold": 0.5}
+	originalParamsA := map[string]any{"k": 5, "temp": 0.7}
+	originalParamsB := map[string]any{"threshold": 0.5}
 	// LM Identifiers are set by default in NewStateTestMockModule
 
 	mockModuleA.SetDemos(originalDemosA)
@@ -379,7 +379,7 @@ func TestLoadProgramWithOptions_CapturesWarnings(t *testing.T) {
 func TestLoadProgram_ModuleTypeMismatch(t *testing.T) {
 	// --- Setup Saved State for StateTestMockModule ---
 	originalDemos := []SavedExample{
-		{Inputs: map[string]interface{}{"a_in": "q1"}, Outputs: map[string]interface{}{"a_out": "a1"}},
+		{Inputs: map[string]any{"a_in": "q1"}, Outputs: map[string]any{"a_out": "a1"}},
 	}
 	savedState := SavedProgramState{
 		Modules: map[string]SavedModuleState{
@@ -415,7 +415,7 @@ func TestLoadProgram_ModuleTypeMismatch(t *testing.T) {
 func TestLoadProgram_MissingModuleInProgram(t *testing.T) {
 	// --- Setup Saved State for modules A and B ---
 	demosA := []SavedExample{
-		{Inputs: map[string]interface{}{"a_in": "q1"}, Outputs: map[string]interface{}{"a_out": "a1"}},
+		{Inputs: map[string]any{"a_in": "q1"}, Outputs: map[string]any{"a_out": "a1"}},
 	}
 	savedState := SavedProgramState{
 		Modules: map[string]SavedModuleState{
@@ -458,7 +458,7 @@ func TestLoadProgram_MissingModuleInProgram(t *testing.T) {
 func TestLoadProgram_MissingModuleInState(t *testing.T) {
 	// --- Setup Saved State for ONLY module A ---
 	demosA := []SavedExample{
-		{Inputs: map[string]interface{}{"a_in": "q1"}, Outputs: map[string]interface{}{"a_out": "a1"}},
+		{Inputs: map[string]any{"a_in": "q1"}, Outputs: map[string]any{"a_out": "a1"}},
 	}
 	savedState := SavedProgramState{
 		Modules: map[string]SavedModuleState{
@@ -501,7 +501,7 @@ func TestLoadProgram_MissingModuleInState(t *testing.T) {
 func TestLoadProgram_NoDemoConsumer(t *testing.T) {
 	// --- Setup Saved State with demos for a module ---
 	demosA := []SavedExample{
-		{Inputs: map[string]interface{}{"a_in": "q1"}, Outputs: map[string]interface{}{"a_out": "a1"}},
+		{Inputs: map[string]any{"a_in": "q1"}, Outputs: map[string]any{"a_out": "a1"}},
 	}
 	savedState := SavedProgramState{
 		Modules: map[string]SavedModuleState{
@@ -537,7 +537,7 @@ func TestLoadProgram_NoDemoConsumer(t *testing.T) {
 
 func TestLoadProgram_NoParameterConsumer(t *testing.T) {
 	// --- Setup Saved State with parameters ---
-	paramsA := map[string]interface{}{"k": 10}
+	paramsA := map[string]any{"k": 10}
 	savedState := SavedProgramState{
 		Modules: map[string]SavedModuleState{
 			"modA": {
@@ -616,7 +616,7 @@ func TestLoadProgram_JsonError(t *testing.T) {
 
 func TestLoadProgram_ParameterConsumerError(t *testing.T) {
 	// --- Setup Saved State with some parameters ---
-	paramsA := map[string]interface{}{"k": 5}
+	paramsA := map[string]any{"k": 5}
 	savedState := SavedProgramState{
 		Modules: map[string]SavedModuleState{
 			"modA": {

@@ -19,7 +19,7 @@ var (
 	ErrCyclicDependency = errors.New(errors.WorkflowExecutionFailed, "cyclic dependency detected in workflow")
 )
 
-func WrapWorkflowError(err error, fields map[string]interface{}) error {
+func WrapWorkflowError(err error, fields map[string]any) error {
 	if err == nil {
 		return nil
 	}

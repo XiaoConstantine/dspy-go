@@ -66,13 +66,13 @@ func TestLoggingAgentInterceptor(t *testing.T) {
 	interceptor := LoggingAgentInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
 	handlerCalled := false
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		handlerCalled = true
-		return map[string]interface{}{"result": "success"}, nil
+		return map[string]any{"result": "success"}, nil
 	}
 
 	result, err := interceptor(ctx, input, info, handler)
@@ -92,11 +92,11 @@ func TestLoggingToolInterceptor(t *testing.T) {
 	interceptor := LoggingToolInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 	handlerCalled := false
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		handlerCalled = true
 		return core.ToolResult{Data: "success"}, nil
 	}
@@ -184,13 +184,13 @@ func TestTracingAgentInterceptor(t *testing.T) {
 	interceptor := TracingAgentInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
 	handlerCalled := false
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		handlerCalled = true
-		return map[string]interface{}{"result": "success"}, nil
+		return map[string]any{"result": "success"}, nil
 	}
 
 	_, err := interceptor(ctx, input, info, handler)
@@ -213,11 +213,11 @@ func TestTracingToolInterceptor(t *testing.T) {
 	interceptor := TracingToolInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 	handlerCalled := false
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		handlerCalled = true
 		return core.ToolResult{Data: "success"}, nil
 	}
@@ -269,14 +269,14 @@ func TestMetricsAgentInterceptor(t *testing.T) {
 	interceptor := MetricsAgentInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
 	handlerCalled := false
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		handlerCalled = true
 		time.Sleep(5 * time.Millisecond)
-		return map[string]interface{}{"result": "success"}, nil
+		return map[string]any{"result": "success"}, nil
 	}
 
 	_, err := interceptor(ctx, input, info, handler)
@@ -293,11 +293,11 @@ func TestMetricsToolInterceptor(t *testing.T) {
 	interceptor := MetricsToolInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 	handlerCalled := false
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		handlerCalled = true
 		time.Sleep(5 * time.Millisecond)
 		return core.ToolResult{Data: "success"}, nil
@@ -331,7 +331,7 @@ func TestStandardHelperFunctions(t *testing.T) {
 	}
 
 	// Test getMapKeys
-	m := map[string]interface{}{"key1": "value1", "key2": "value2"}
+	m := map[string]any{"key1": "value1", "key2": "value2"}
 	keys := getMapKeys(m)
 
 	if len(keys) != 2 {

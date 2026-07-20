@@ -273,7 +273,7 @@ func TestMiddleware_GenerateJSONCacheKey(t *testing.T) {
 	mockCache := &MockCache{}
 	middleware := NewMiddleware(mockCache, time.Hour)
 
-	schema := map[string]interface{}{"type": "object"}
+	schema := map[string]any{"type": "object"}
 	key := middleware.GenerateJSONCacheKey("gpt-4", "test prompt", schema, nil)
 	assert.NotEmpty(t, key)
 	assert.Contains(t, key, "json_gpt-4")
@@ -478,7 +478,7 @@ func TestMiddleware_WithCacheResponseMetadata(t *testing.T) {
 		fn := func() (*core.LLMResponse, error) {
 			return &core.LLMResponse{
 				Content: "fresh response",
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"existing": "value",
 				},
 			}, nil

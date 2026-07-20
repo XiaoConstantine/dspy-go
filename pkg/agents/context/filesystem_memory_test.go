@@ -40,13 +40,13 @@ func TestStoreLargeObservation(t *testing.T) {
 		name     string
 		id       string
 		content  []byte
-		metadata map[string]interface{}
+		metadata map[string]any
 	}{
 		{
 			name:    "simple observation",
 			id:      "obs-1",
 			content: []byte("This is a simple observation for testing."),
-			metadata: map[string]interface{}{
+			metadata: map[string]any{
 				"timestamp": time.Now().Unix(),
 				"source":    "test",
 			},
@@ -55,7 +55,7 @@ func TestStoreLargeObservation(t *testing.T) {
 			name:    "large observation",
 			id:      "obs-2",
 			content: []byte(generateLargeString(10000)),
-			metadata: map[string]interface{}{
+			metadata: map[string]any{
 				"size": 10000,
 				"type": "large",
 			},
@@ -92,10 +92,10 @@ func TestStoreContext(t *testing.T) {
 
 	ctx := context.Background()
 
-	contextData := map[string]interface{}{
-		"task":        "test_task",
+	contextData := map[string]any{
+		"task":         "test_task",
 		"observations": []string{"obs1", "obs2", "obs3"},
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"timestamp": time.Now().Unix(),
 			"version":   1,
 		},
@@ -123,7 +123,7 @@ func TestRetrieveObservation(t *testing.T) {
 
 	// Store an observation first
 	originalContent := []byte("Test observation content for retrieval")
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"test": "data",
 	}
 
@@ -188,7 +188,7 @@ func TestStoreFile(t *testing.T) {
 		contentType      string
 		id               string
 		content          []byte
-		metadata         map[string]interface{}
+		metadata         map[string]any
 		expectedFilename string // empty means don't check specific filename
 	}{
 		{
@@ -196,28 +196,28 @@ func TestStoreFile(t *testing.T) {
 			contentType: "cache",
 			id:          "cache-1",
 			content:     []byte("cached data"),
-			metadata:    map[string]interface{}{"ttl": 3600},
+			metadata:    map[string]any{"ttl": 3600},
 		},
 		{
 			name:        "memory file",
 			contentType: "memory",
 			id:          "session-1",
 			content:     []byte("memory data"),
-			metadata:    map[string]interface{}{"type": "context"},
+			metadata:    map[string]any{"type": "context"},
 		},
 		{
 			name:        "observation file",
 			contentType: "test_obs",
 			id:          "obs-1",
 			content:     []byte("observation data"),
-			metadata:    map[string]interface{}{"source": "test"},
+			metadata:    map[string]any{"source": "test"},
 		},
 		{
 			name:             "singleton todo file (no format specifier)",
 			contentType:      "todo",
 			id:               "current",
 			content:          []byte("# Todo\n- [ ] Task 1"),
-			metadata:         map[string]interface{}{"priority": 1},
+			metadata:         map[string]any{"priority": 1},
 			expectedFilename: "todo.md", // Should NOT include id
 		},
 		{

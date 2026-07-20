@@ -70,11 +70,11 @@ func (f *compatFixtureLLM) Generate(_ context.Context, prompt string, _ ...core.
 	}
 }
 
-func (f *compatFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (f *compatFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -133,11 +133,11 @@ CONFIDENCE: 0.9`,
 	}
 }
 
-func (f *compatFeedbackFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatFeedbackFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (f *compatFeedbackFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatFeedbackFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -200,11 +200,11 @@ CONFIDENCE: 0.9`,
 	}
 }
 
-func (f *compatFormatFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatFormatFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (f *compatFormatFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatFormatFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -251,11 +251,11 @@ func (f *compatResumeFixtureLLM) Generate(_ context.Context, prompt string, _ ..
 	}
 }
 
-func (f *compatResumeFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatResumeFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (f *compatResumeFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatResumeFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -296,11 +296,11 @@ func (f *compatSingleInstructionLLM) Generate(_ context.Context, _ string, _ ...
 	return &core.LLMResponse{Content: f.proposal}, nil
 }
 
-func (f *compatSingleInstructionLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatSingleInstructionLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (f *compatSingleInstructionLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *compatSingleInstructionLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -428,11 +428,11 @@ func newCompatFixtureProgram(classifierInstruction, generatorInstruction string)
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"classifier": newCompatFixtureModule(classifierInstruction),
 		"generator":  newCompatFixtureModule(generatorInstruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
 			classifierInstruction := modules["classifier"].GetSignature().Instruction
 			generatorInstruction := modules["generator"].GetSignature().Instruction
-			return map[string]interface{}{
+			return map[string]any{
 				"output":                 classifierInstruction + "|" + generatorInstruction,
 				"classifier_instruction": classifierInstruction,
 				"generator_instruction":  generatorInstruction,
@@ -444,9 +444,9 @@ func newCompatFixtureProgram(classifierInstruction, generatorInstruction string)
 func newCompatFeedbackFixtureProgram(classifierInstruction string) core.Program {
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"classifier": newCompatFixtureModule(classifierInstruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{
 				"output": modules["classifier"].GetSignature().Instruction,
 			}, nil
 		}
@@ -456,18 +456,18 @@ func newCompatFeedbackFixtureProgram(classifierInstruction string) core.Program 
 func newCompatFormatFixtureProgram(classifierInstruction string) core.Program {
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"classifier": newCompatFixtureModule(classifierInstruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
 			instruction := modules["classifier"].GetSignature().Instruction
 			if strings.Contains(instruction, "format tuned classifier instruction") {
-				return map[string]interface{}{"output": "format tuned classifier instruction"}, nil
+				return map[string]any{"output": "format tuned classifier instruction"}, nil
 			}
-			return map[string]interface{}{"output": "not json at all"}, fmt.Errorf("couldn't parse category output")
+			return map[string]any{"output": "not json at all"}, fmt.Errorf("couldn't parse category output")
 		}
 	})
 }
 
-func compatInstructionProgressMetric(_ map[string]interface{}, actual map[string]interface{}) float64 {
+func compatInstructionProgressMetric(_ map[string]any, actual map[string]any) float64 {
 	output, _ := actual["output"].(string)
 	score := 0.0
 	for _, part := range strings.Split(output, "|") {
@@ -478,7 +478,7 @@ func compatInstructionProgressMetric(_ map[string]interface{}, actual map[string
 	return score
 }
 
-func compatFrontierProgressMetric(expected, actual map[string]interface{}) float64 {
+func compatFrontierProgressMetric(expected, actual map[string]any) float64 {
 	kind, _ := expected["kind"].(string)
 	classifierInstruction, _ := actual["classifier_instruction"].(string)
 	generatorInstruction, _ := actual["generator_instruction"].(string)
@@ -516,7 +516,7 @@ func compatBoolToFloat(value bool) float64 {
 	return 0.0
 }
 
-func compatResumeProgressMetric(_ map[string]interface{}, actual map[string]interface{}) float64 {
+func compatResumeProgressMetric(_ map[string]any, actual map[string]any) float64 {
 	output, _ := actual["output"].(string)
 	lowered := strings.ToLower(output)
 	switch {
@@ -616,7 +616,7 @@ func runCompatSelectorScenario(t *testing.T, ctx context.Context, selector strin
 		"generator":  "generator base",
 	}
 	program := newCompatFixtureProgram(originalInstructions["classifier"], originalInstructions["generator"])
-	dataset := datasets.NewSimpleDataset([]core.Example{{Outputs: map[string]interface{}{"output": "fixture"}}})
+	dataset := datasets.NewSimpleDataset([]core.Example{{Outputs: map[string]any{"output": "fixture"}}})
 
 	optimizedProgram, err := gepa.Compile(ctx, program, dataset, compatInstructionProgressMetric)
 	if err != nil {
@@ -674,11 +674,11 @@ func runCompatValidationFrontierScenario(t *testing.T, ctx context.Context) comp
 	}
 	program := newCompatFixtureProgram(originalInstructions["classifier"], originalInstructions["generator"])
 	dataset := datasets.NewSimpleDataset([]core.Example{
-		{Inputs: map[string]interface{}{"input": "train"}, Outputs: map[string]interface{}{"kind": "train"}},
-		{Inputs: map[string]interface{}{"input": "alpha-1"}, Outputs: map[string]interface{}{"kind": "alpha"}},
-		{Inputs: map[string]interface{}{"input": "alpha-2"}, Outputs: map[string]interface{}{"kind": "alpha"}},
-		{Inputs: map[string]interface{}{"input": "beta-1"}, Outputs: map[string]interface{}{"kind": "beta"}},
-		{Inputs: map[string]interface{}{"input": "beta-2"}, Outputs: map[string]interface{}{"kind": "beta"}},
+		{Inputs: map[string]any{"input": "train"}, Outputs: map[string]any{"kind": "train"}},
+		{Inputs: map[string]any{"input": "alpha-1"}, Outputs: map[string]any{"kind": "alpha"}},
+		{Inputs: map[string]any{"input": "alpha-2"}, Outputs: map[string]any{"kind": "alpha"}},
+		{Inputs: map[string]any{"input": "beta-1"}, Outputs: map[string]any{"kind": "beta"}},
+		{Inputs: map[string]any{"input": "beta-2"}, Outputs: map[string]any{"kind": "beta"}},
 	})
 
 	if _, err := gepa.Compile(ctx, program, dataset, compatFrontierProgressMetric); err != nil {
@@ -738,9 +738,9 @@ func newCompatMergeFixtureProgram(classifierInstruction, generatorInstruction st
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"classifier": newStaticCandidateTestModule(classifierInstruction),
 		"generator":  newStaticCandidateTestModule(generatorInstruction),
-	}, func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-		return func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return map[string]interface{}{
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(context.Context, map[string]any) (map[string]any, error) {
+			return map[string]any{
 				"output": modules["classifier"].GetSignature().Instruction + "|" + modules["generator"].GetSignature().Instruction,
 			}, nil
 		}
@@ -801,7 +801,7 @@ func runCompatMergeScenario(t *testing.T, ctx context.Context) compatMergeResult
 	})
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]interface{}{"output": "classifier improved|generator improved"}},
+		{Outputs: map[string]any{"output": "classifier improved|generator improved"}},
 	})
 	adapter := gepa.newEvaluationAdapter(
 		newCompatMergeFixtureProgram("classifier base", "generator base"),
@@ -863,7 +863,7 @@ func runCompatFeedbackScenario(t *testing.T, ctx context.Context) compatFeedback
 	config.ConcurrencyLevel = 1
 	config.EvaluationBatchSize = 1
 	config.RandomSeed = 7
-	config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, _, _ map[string]interface{}, info *GEPAFeedbackContext) *GEPAFeedback {
+	config.FeedbackEvaluator = GEPAFeedbackEvaluatorFunc(func(_ context.Context, _, _ map[string]any, info *GEPAFeedbackContext) *GEPAFeedback {
 		return &GEPAFeedback{
 			Feedback:        "Use classifier terminology exactly",
 			TargetComponent: info.Candidate.ModuleName,
@@ -879,8 +879,8 @@ func runCompatFeedbackScenario(t *testing.T, ctx context.Context) compatFeedback
 	program := newCompatFeedbackFixtureProgram(originalInstruction)
 	dataset := datasets.NewSimpleDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "feedback fixture input"},
-			Outputs: map[string]interface{}{"output": "feedback tuned classifier instruction"},
+			Inputs:  map[string]any{"input": "feedback fixture input"},
+			Outputs: map[string]any{"output": "feedback tuned classifier instruction"},
 		},
 	})
 
@@ -935,8 +935,8 @@ func runCompatFormatFailureScenario(t *testing.T, ctx context.Context) compatFee
 	program := newCompatFormatFixtureProgram(originalInstruction)
 	dataset := datasets.NewSimpleDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "format fixture input"},
-			Outputs: map[string]interface{}{"output": "format tuned classifier instruction"},
+			Inputs:  map[string]any{"input": "format fixture input"},
+			Outputs: map[string]any{"output": "format tuned classifier instruction"},
 		},
 	})
 
@@ -988,9 +988,9 @@ func runCompatMinibatchScenario(t *testing.T, ctx context.Context, proposal, dat
 	}
 
 	dataset := datasets.NewSimpleDataset([]core.Example{
-		{Inputs: map[string]interface{}{"input": "mini-1"}, Outputs: map[string]interface{}{"output": datasetOutput}},
-		{Inputs: map[string]interface{}{"input": "mini-2"}, Outputs: map[string]interface{}{"output": datasetOutput}},
-		{Inputs: map[string]interface{}{"input": "mini-3"}, Outputs: map[string]interface{}{"output": datasetOutput}},
+		{Inputs: map[string]any{"input": "mini-1"}, Outputs: map[string]any{"output": datasetOutput}},
+		{Inputs: map[string]any{"input": "mini-2"}, Outputs: map[string]any{"output": datasetOutput}},
+		{Inputs: map[string]any{"input": "mini-3"}, Outputs: map[string]any{"output": datasetOutput}},
 	})
 
 	optimizedProgram, err := gepa.Compile(ctx, newCompatFeedbackFixtureProgram("alpha base"), dataset, exactOutputMetric)
@@ -1050,8 +1050,8 @@ func runCompatEarlyStopScenario(t *testing.T, ctx context.Context, stoppedConfig
 
 	dataset := datasets.NewSimpleDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "early stop fixture input"},
-			Outputs: map[string]interface{}{"output": "classifier best"},
+			Inputs:  map[string]any{"input": "early stop fixture input"},
+			Outputs: map[string]any{"output": "classifier best"},
 		},
 	})
 
@@ -1166,8 +1166,8 @@ func runCompatResumeScenario(t *testing.T, ctx context.Context) compatResumeResu
 
 	dataset := datasets.NewSimpleDataset([]core.Example{
 		{
-			Inputs:  map[string]interface{}{"input": "resume fixture input"},
-			Outputs: map[string]interface{}{"output": "classifier best"},
+			Inputs:  map[string]any{"input": "resume fixture input"},
+			Outputs: map[string]any{"output": "classifier best"},
 		},
 	})
 

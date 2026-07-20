@@ -11,14 +11,14 @@ func TestXMLTaskParser(t *testing.T) {
 	// Initialize test cases to cover different aspects of XML parsing
 	tests := []struct {
 		name           string
-		analyzerOutput map[string]interface{}
+		analyzerOutput map[string]any
 		expected       []Task
 		expectError    bool
 		errorMessage   string
 	}{
 		{
 			name: "Valid XML with single task",
-			analyzerOutput: map[string]interface{}{
+			analyzerOutput: map[string]any{
 				"tasks": `<tasks>
                     <task id="task1" type="test" processor="proc1" priority="1">
                         <description>Test task</description>
@@ -38,14 +38,14 @@ func TestXMLTaskParser(t *testing.T) {
 					ProcessorType: "proc1",
 					Priority:      1,
 					Dependencies:  []string{"dep1"},
-					Metadata:      map[string]interface{}{"key1": "value1"},
+					Metadata:      map[string]any{"key1": "value1"},
 				},
 			},
 			expectError: false,
 		},
 		{
 			name: "Invalid tasks format",
-			analyzerOutput: map[string]interface{}{
+			analyzerOutput: map[string]any{
 				"tasks": 123, // Wrong type
 			},
 			expectError:  true,
@@ -53,7 +53,7 @@ func TestXMLTaskParser(t *testing.T) {
 		},
 		{
 			name: "Invalid XML format",
-			analyzerOutput: map[string]interface{}{
+			analyzerOutput: map[string]any{
 				"tasks": "not xml",
 			},
 			expectError:  true,
@@ -61,7 +61,7 @@ func TestXMLTaskParser(t *testing.T) {
 		},
 		{
 			name: "Missing required fields",
-			analyzerOutput: map[string]interface{}{
+			analyzerOutput: map[string]any{
 				"tasks": `<tasks><task></task></tasks>`,
 			},
 			expectError:  true,

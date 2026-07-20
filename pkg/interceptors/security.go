@@ -123,7 +123,7 @@ func DefaultValidationConfig() ValidationConfig {
 func RateLimitingAgentInterceptor(limit int, window time.Duration) core.AgentInterceptor {
 	limiter := NewRateLimiter(limit, window)
 
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		// Use agent ID as the rate limiting key
 		key := fmt.Sprintf("agent:%s", info.AgentID)
 
@@ -141,7 +141,7 @@ func RateLimitingAgentInterceptor(limit int, window time.Duration) core.AgentInt
 func RateLimitingToolInterceptor(limit int, window time.Duration) core.ToolInterceptor {
 	limiter := NewRateLimiter(limit, window)
 
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		// Use tool name as the rate limiting key
 		key := fmt.Sprintf("tool:%s", info.Name)
 
@@ -179,7 +179,7 @@ func ValidationAgentInterceptor(config ValidationConfig) core.AgentInterceptor {
 		compiledPatterns[i] = regexp.MustCompile(pattern)
 	}
 
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		// Validate inputs
 		if err := validateInputsGeneric(input, config, compiledPatterns); err != nil {
 			return nil, fmt.Errorf("agent input validation failed for %s: %w", info.AgentID, err)
@@ -196,7 +196,7 @@ func ValidationToolInterceptor(config ValidationConfig) core.ToolInterceptor {
 		compiledPatterns[i] = regexp.MustCompile(pattern)
 	}
 
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		// Validate arguments
 		if err := validateInputsGeneric(args, config, compiledPatterns); err != nil {
 			return core.ToolResult{}, fmt.Errorf("tool argument validation failed for %s: %w", info.Name, err)
@@ -267,7 +267,7 @@ func (ai *AuthorizationInterceptor) ModuleAuthorizationInterceptor() core.Module
 
 // AgentAuthorizationInterceptor creates an interceptor that enforces authorization on agents.
 func (ai *AuthorizationInterceptor) AgentAuthorizationInterceptor() core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		// Get authorization context from request context
 		authCtx := getAuthorizationContext(ctx)
 		if authCtx == nil {
@@ -288,7 +288,7 @@ func (ai *AuthorizationInterceptor) AgentAuthorizationInterceptor() core.AgentIn
 
 // ToolAuthorizationInterceptor creates an interceptor that enforces authorization on tools.
 func (ai *AuthorizationInterceptor) ToolAuthorizationInterceptor() core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		// Get authorization context from request context
 		authCtx := getAuthorizationContext(ctx)
 		if authCtx == nil {
@@ -319,7 +319,7 @@ func SanitizingModuleInterceptor() core.ModuleInterceptor {
 
 // SanitizingAgentInterceptor creates an interceptor that sanitizes agent inputs.
 func SanitizingAgentInterceptor() core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		sanitizedInput := sanitizeInputsGeneric(input)
 		return handler(ctx, sanitizedInput)
 	}
@@ -327,7 +327,7 @@ func SanitizingAgentInterceptor() core.AgentInterceptor {
 
 // SanitizingToolInterceptor creates an interceptor that sanitizes tool arguments.
 func SanitizingToolInterceptor() core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		sanitizedArgs := sanitizeInputsGeneric(args)
 		return handler(ctx, sanitizedArgs)
 	}
@@ -338,7 +338,7 @@ func SanitizingToolInterceptor() core.ToolInterceptor {
 // validateInputs validates module inputs against the configuration.
 func validateInputs(inputs map[string]any, config ValidationConfig, patterns []*regexp.Regexp) error {
 	// Convert to generic map for validation
-	genericInputs := make(map[string]interface{})
+	genericInputs := make(map[string]any)
 	for k, v := range inputs {
 		genericInputs[k] = v
 	}
@@ -346,7 +346,7 @@ func validateInputs(inputs map[string]any, config ValidationConfig, patterns []*
 }
 
 // validateInputsGeneric validates generic inputs against the configuration.
-func validateInputsGeneric(inputs map[string]interface{}, config ValidationConfig, patterns []*regexp.Regexp) error {
+func validateInputsGeneric(inputs map[string]any, config ValidationConfig, patterns []*regexp.Regexp) error {
 	// Calculate total input size
 	totalSize := calculateMapSize(inputs)
 	if totalSize > config.MaxInputSize {
@@ -365,7 +365,7 @@ func validateInputsGeneric(inputs map[string]interface{}, config ValidationConfi
 }
 
 // validateValue validates a single value recursively.
-func validateValue(value interface{}, config ValidationConfig, patterns []*regexp.Regexp) error {
+func validateValue(value any, config ValidationConfig, patterns []*regexp.Regexp) error {
 	switch v := value.(type) {
 	case string:
 		if len(v) > config.MaxStringLength {
@@ -384,14 +384,14 @@ func validateValue(value interface{}, config ValidationConfig, patterns []*regex
 			return fmt.Errorf("HTML content not allowed in input")
 		}
 
-	case map[string]interface{}:
+	case map[string]any:
 		for _, subValue := range v {
 			if err := validateValue(subValue, config, patterns); err != nil {
 				return err
 			}
 		}
 
-	case []interface{}:
+	case []any:
 		for _, subValue := range v {
 			if err := validateValue(subValue, config, patterns); err != nil {
 				return err
@@ -412,8 +412,8 @@ func sanitizeInputs(inputs map[string]any) map[string]any {
 }
 
 // sanitizeInputsGeneric sanitizes generic inputs.
-func sanitizeInputsGeneric(inputs map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func sanitizeInputsGeneric(inputs map[string]any) map[string]any {
+	result := make(map[string]any)
 	for k, v := range inputs {
 		result[k] = sanitizeValue(v)
 	}
@@ -421,7 +421,7 @@ func sanitizeInputsGeneric(inputs map[string]interface{}) map[string]interface{}
 }
 
 // sanitizeValue sanitizes a single value recursively.
-func sanitizeValue(value interface{}) interface{} {
+func sanitizeValue(value any) any {
 	switch v := value.(type) {
 	case string:
 		// Multi-layered sanitization for strings
@@ -443,8 +443,8 @@ func sanitizeValue(value interface{}) interface{} {
 
 		return sanitized
 
-	case map[string]interface{}:
-		result := make(map[string]interface{})
+	case map[string]any:
+		result := make(map[string]any)
 		for k, subValue := range v {
 			// Sanitize both key and value
 			sanitizedKey := html.EscapeString(k)
@@ -455,14 +455,14 @@ func sanitizeValue(value interface{}) interface{} {
 		}
 		return result
 
-	case []interface{}:
+	case []any:
 		// Limit array size to prevent DoS
 		maxSize := 1000
 		if len(v) > maxSize {
 			v = v[:maxSize]
 		}
 
-		result := make([]interface{}, len(v))
+		result := make([]any, len(v))
 		for i, subValue := range v {
 			result[i] = sanitizeValue(subValue)
 		}
@@ -474,7 +474,7 @@ func sanitizeValue(value interface{}) interface{} {
 }
 
 // calculateMapSize estimates the size of a map in bytes.
-func calculateMapSize(m map[string]interface{}) int {
+func calculateMapSize(m map[string]any) int {
 	size := 0
 	for k, v := range m {
 		size += len(k)
@@ -484,13 +484,13 @@ func calculateMapSize(m map[string]interface{}) int {
 }
 
 // calculateValueSize estimates the size of a value in bytes.
-func calculateValueSize(value interface{}) int {
+func calculateValueSize(value any) int {
 	switch v := value.(type) {
 	case string:
 		return len(v)
-	case map[string]interface{}:
+	case map[string]any:
 		return calculateMapSize(v)
-	case []interface{}:
+	case []any:
 		size := 0
 		for _, item := range v {
 			size += calculateValueSize(item)

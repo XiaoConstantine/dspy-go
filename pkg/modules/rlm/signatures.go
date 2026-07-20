@@ -301,13 +301,13 @@ func SynthesisSignature() core.Signature {
 func IterationDemos() []core.Example {
 	return []core.Example{
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 150000 chars",
 				"query":        "What is the secret code?",
 				"history":      "",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "This is a large context (150K chars). I should first explore its structure before diving into analysis.",
 				"action":    "explore",
 				"code":      "fmt.Println(\"Length:\", len(context))\nfmt.Println(\"Preview:\", context[:500])",
@@ -316,13 +316,13 @@ func IterationDemos() []core.Example {
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 150000 chars",
 				"query":        "What is the secret code?",
 				"history":      "Explored: Length=150000, Preview shows JSON array of messages",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "Context is too large to process at once. I'll chunk it and use QueryBatchedRaw so each prompt carries only its own slice.",
 				"action":    "query",
 				"code": `chunkSize := len(context) / 5
@@ -339,13 +339,13 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 150000 chars",
 				"query":        "What is the secret code?",
 				"history":      "Chunk 0: none\nChunk 1: ALPHA-7892\nChunk 2: none\nChunk 3: none\nChunk 4: none",
 				"repl_state":   "context: <loaded>, results: [none, ALPHA-7892, none, none, none]",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "Found the secret code in chunk 1: ALPHA-7892. This is the answer.",
 				"action":    "final",
 				"code":      "",
@@ -355,13 +355,13 @@ for i, r := range results { fmt.Printf("Chunk %d: %s\n", i, r) }`,
 		},
 		// Example demonstrating FINAL() called immediately after Query()
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 5000 chars",
 				"query":        "What is the label: correct or incorrect?",
 				"history":      "Explored: Length=5000, Preview shows labeled data",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "Small context that fits in one Query call. I'll ask the sub-LLM to determine the label and IMMEDIATELY call FINAL with the result.",
 				"action":    "query",
 				"code": `answer := Query("What is the label in this text? Return ONLY 'correct' or 'incorrect'.")
@@ -371,13 +371,13 @@ FINAL(answer)`,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 800000 chars",
 				"query":        "Count all error messages in the logs",
 				"history":      "",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "Context is 800K chars. Sub-LLMs handle ~500K, so I'll use regex to filter first, then batch ~200K per query for efficiency.",
 				"action":    "explore",
 				"code": `errorRe := regexp.MustCompile("(?i)error|exception|failed")
@@ -389,13 +389,13 @@ fmt.Println("Sample:", context[:1000])`,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 1200000 chars",
 				"query":        "Summarize the main themes in this document collection",
 				"history":      "Explored: 1.2M chars, appears to be multiple documents separated by ---",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "At 1.2M chars, I MUST use QueryWith or QueryRaw - Query() would overflow! I'll split by document separator and use QueryWith for each batch.",
 				"action":    "query",
 				"code": `docs := strings.Split(context, "---")
@@ -423,13 +423,13 @@ for i, r := range results { fmt.Printf("Batch %d: %s\n", i, r) }`,
 		},
 		// Example using FindRelevant for semantic search on large context
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 800000 chars",
 				"query":        "Find all authentication-related code",
 				"history":      "Explored: 800K chars of Go source code, too large for single Query",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "At 800K chars, I cannot use Query() as it would overflow. I'll use FindRelevant() to get semantically relevant chunks, then QueryWith() to analyze each.",
 				"action":    "query",
 				"code": `// Find chunks most relevant to authentication
@@ -452,13 +452,13 @@ for _, code := range authCode { fmt.Println(code) }`,
 		},
 		// Example showing synthesis with QueryRaw
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 800000 chars",
 				"query":        "Find all authentication-related code",
 				"history":      "Found auth code in 4 chunks: JWT token validation, password hashing, session middleware, OAuth handler",
 				"repl_state":   "context: <loaded>, authCode: [4 code snippets]",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "I have 4 authentication code snippets. Now I'll synthesize them using QueryRaw (no context needed) and immediately FINAL the answer.",
 				"action":    "query",
 				"code": `summary := strings.Join(authCode, "\n\n---\n\n")
@@ -471,13 +471,13 @@ FINAL(answer)`,
 		},
 		// Example using subrlm action for complex multi-step analysis
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 800000 chars",
 				"query":        "Analyze the authentication system and identify security issues",
 				"history":      "Explored: 800K chars of source code, complex authentication system with multiple components",
 				"repl_state":   "context: <loaded>",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "This is a complex analysis requiring multiple steps. I'll spawn a sub-RLM to first find all authentication-related code, then analyze it for vulnerabilities in a follow-up.",
 				"action":    "subrlm",
 				"code":      "",
@@ -487,13 +487,13 @@ FINAL(answer)`,
 		},
 		// Example using subrlm result in subsequent iteration
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context_info": "string, 800000 chars",
 				"query":        "Analyze the authentication system and identify security issues",
 				"history":      "Sub-RLM completed: Found JWT token handling, password hashing with bcrypt, session cookies, OAuth2 integration",
 				"repl_state":   "context: <loaded>, subrlm_result: 'JWT tokens use HS256, passwords hashed with bcrypt cost 10, sessions stored in Redis'",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"reasoning": "The sub-RLM found the authentication components. Now I have the details in subrlm_result. I can spawn another sub-RLM to analyze these specific areas for vulnerabilities.",
 				"action":    "subrlm",
 				"code":      "",
@@ -508,18 +508,18 @@ FINAL(answer)`,
 func SubQueryDemos() []core.Example {
 	return []core.Example{
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"prompt": "Find any email addresses in this text: Contact us at support@example.com or sales@example.com",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"response": "support@example.com, sales@example.com",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"prompt": "What is the main topic of this text? Return one word: The quick brown fox jumps over the lazy dog.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"response": "animals",
 			},
 		},

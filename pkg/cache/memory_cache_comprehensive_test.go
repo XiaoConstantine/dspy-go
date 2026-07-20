@@ -447,18 +447,18 @@ func TestMemoryCache_ExportImport(t *testing.T) {
 		// Prepare import data
 		importData := []CacheEntry{
 			{
-				Key:        "import1",
-				Value:      []byte("import-value1"),
-				ExpiresAt:  time.Now().Add(time.Hour),
-				CreatedAt:  time.Now(),
-				Size:       int64(len([]byte("import-value1"))),
+				Key:       "import1",
+				Value:     []byte("import-value1"),
+				ExpiresAt: time.Now().Add(time.Hour),
+				CreatedAt: time.Now(),
+				Size:      int64(len([]byte("import-value1"))),
 			},
 			{
-				Key:        "import2",
-				Value:      []byte("import-value2"),
-				ExpiresAt:  time.Now().Add(time.Hour),
-				CreatedAt:  time.Now(),
-				Size:       int64(len([]byte("import-value2"))),
+				Key:       "import2",
+				Value:     []byte("import-value2"),
+				ExpiresAt: time.Now().Add(time.Hour),
+				CreatedAt: time.Now(),
+				Size:      int64(len([]byte("import-value2"))),
 			},
 			{
 				Key:       "expired",

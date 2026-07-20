@@ -206,7 +206,7 @@ func (r *SmartToolRegistry) SelectBest(ctx context.Context, intent string) (core
 }
 
 // ExecuteWithTracking executes a tool and tracks performance metrics.
-func (r *SmartToolRegistry) ExecuteWithTracking(ctx context.Context, toolName string, params map[string]interface{}) (core.ToolResult, error) {
+func (r *SmartToolRegistry) ExecuteWithTracking(ctx context.Context, toolName string, params map[string]any) (core.ToolResult, error) {
 	tool, err := r.Get(toolName)
 	if err != nil {
 		return core.ToolResult{}, err

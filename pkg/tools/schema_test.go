@@ -26,11 +26,11 @@ func (m *schemaTestTool) Metadata() *core.ToolMetadata {
 	}
 }
 func (m *schemaTestTool) CanHandle(ctx context.Context, intent string) bool { return true }
-func (m *schemaTestTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *schemaTestTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	return core.ToolResult{Data: "ok"}, nil
 }
-func (m *schemaTestTool) Validate(params map[string]interface{}) error { return nil }
-func (m *schemaTestTool) InputSchema() models.InputSchema              { return m.schema }
+func (m *schemaTestTool) Validate(params map[string]any) error { return nil }
+func (m *schemaTestTool) InputSchema() models.InputSchema      { return m.schema }
 
 func TestBuildFunctionSchemas(t *testing.T) {
 	registry := NewInMemoryToolRegistry()
@@ -63,7 +63,7 @@ func TestBuildFunctionSchemas(t *testing.T) {
 	assert.Equal(t, "search", f["name"])
 	assert.Equal(t, "Search for information", f["description"])
 
-	parameters, ok := f["parameters"].(map[string]interface{})
+	parameters, ok := f["parameters"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "object", parameters["type"])
 
@@ -71,7 +71,7 @@ func TestBuildFunctionSchemas(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []string{"query"}, required)
 
-	properties, ok := parameters["properties"].(map[string]interface{})
+	properties, ok := parameters["properties"].(map[string]any)
 	require.True(t, ok)
 	_, hasQuery := properties["query"]
 	_, hasLimit := properties["limit"]
@@ -97,7 +97,7 @@ func TestBuildFunctionSchemas_DefaultsAndNilRegistry(t *testing.T) {
 	functions, err = BuildFunctionSchemas(registry)
 	require.NoError(t, err)
 	require.Len(t, functions, 1)
-	params := functions[0]["parameters"].(map[string]interface{})
+	params := functions[0]["parameters"].(map[string]any)
 	assert.Equal(t, "object", params["type"])
 }
 

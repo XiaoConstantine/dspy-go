@@ -22,9 +22,9 @@ func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...core.G
 	return args.Get(0).(*core.LLMResponse), args.Error(1)
 }
 
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	args := m.Called(ctx, prompt, options)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
 func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
@@ -47,9 +47,9 @@ func (m *MockLLM) GenerateWithContent(ctx context.Context, content []core.Conten
 	return args.Get(0).(*core.LLMResponse), args.Error(1)
 }
 
-func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	args := m.Called(ctx, prompt, functions, options)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
 func (m *MockLLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
@@ -259,7 +259,7 @@ func TestCachedLLM_GenerateWithTools(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, expected, response)
-	_, ok := interface{}(cachedLLM).(core.ToolCallingChatLLM)
+	_, ok := any(cachedLLM).(core.ToolCallingChatLLM)
 	assert.True(t, ok)
 	mockLLM.AssertExpectations(t)
 }
@@ -298,7 +298,7 @@ func TestCachedLLM_GenerateWithJSON(t *testing.T) {
 		mockLLM := &MockLLM{}
 		mockLLM.On("ModelID").Return("gpt-4")
 		mockLLM.On("GenerateWithJSON", ctx, prompt, mock.AnythingOfType("[]core.GenerateOption")).Return(
-			map[string]interface{}{"result": "fresh json"}, nil)
+			map[string]any{"result": "fresh json"}, nil)
 		mockCache := &MockCache{}
 
 		cachedLLM := &CachedLLM{

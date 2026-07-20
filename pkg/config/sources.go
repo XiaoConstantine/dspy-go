@@ -341,7 +341,6 @@ func (es *EnvironmentSource) setExecutionValue(execution *ExecutionConfig, key, 
 	return nil
 }
 
-
 // setModulesValue sets modules configuration values.
 func (es *EnvironmentSource) setModulesValue(modules *ModulesConfig, key, value string) error {
 	switch {

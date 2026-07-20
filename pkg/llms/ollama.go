@@ -299,7 +299,7 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 			CompletionTokens: openaiResp.Usage.CompletionTokens,
 			TotalTokens:      openaiResp.Usage.TotalTokens,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"model": openaiResp.Model,
 			"mode":  "openai",
 		},
@@ -378,7 +378,7 @@ func (o *OllamaLLM) generateNative(ctx context.Context, prompt string, options .
 
 	return &core.LLMResponse{
 		Content: ollamaResp.Response,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"model": ollamaResp.Model,
 			"mode":  "native",
 		},
@@ -617,7 +617,7 @@ func (o *OllamaLLM) createEmbeddingOpenAI(ctx context.Context, input string, opt
 	return &core.EmbeddingResult{
 		Vector:     embedding32,
 		TokenCount: embeddingResp.Usage.TotalTokens,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"model": embeddingResp.Model,
 			"mode":  "openai",
 		},
@@ -675,7 +675,7 @@ func (o *OllamaLLM) createEmbeddingNative(ctx context.Context, input string, opt
 	return &core.EmbeddingResult{
 		Vector:     ollamaResp.Embedding,
 		TokenCount: ollamaResp.Usage.Tokens,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"model":          o.ModelID(),
 			"embedding_size": ollamaResp.Size,
 			"mode":           "native",
@@ -684,7 +684,7 @@ func (o *OllamaLLM) createEmbeddingNative(ctx context.Context, input string, opt
 }
 
 // GenerateWithJSON implements JSON mode generation.
-func (o *OllamaLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (o *OllamaLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	response, err := o.Generate(ctx, prompt, options...)
 	if err != nil {
 		return nil, err
@@ -693,7 +693,7 @@ func (o *OllamaLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 	return utils.ParseJSONResponse(response.Content)
 }
 
-func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	if !o.config.UseOpenAIAPI {
 		return nil, errors.WithFields(
 			errors.New(errors.UnsupportedOperation, "function calling requires OpenAI-compatible API mode for Ollama"),
@@ -789,7 +789,7 @@ func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	}
 
 	choice := openAIResp.Choices[0]
-	result := map[string]interface{}{}
+	result := map[string]any{}
 
 	if content := strings.TrimSpace(choice.Message.Content); content != "" {
 		result["content"] = content
@@ -807,7 +807,7 @@ func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 				},
 			)
 		}
-		result["function_call"] = map[string]interface{}{
+		result["function_call"] = map[string]any{
 			"name":      call.Function.Name,
 			"arguments": arguments,
 		}
@@ -822,7 +822,7 @@ func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 				},
 			)
 		}
-		result["function_call"] = map[string]interface{}{
+		result["function_call"] = map[string]any{
 			"name":      choice.Message.FunctionCall.Name,
 			"arguments": arguments,
 		}
@@ -957,7 +957,7 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 			results[i] = core.EmbeddingResult{
 				Vector:     embedding32,
 				TokenCount: tokenCount,
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"model":       embeddingResp.Model,
 					"mode":        "openai",
 					"batch_index": i,
@@ -987,7 +987,7 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		}
 
 		if result.Metadata == nil {
-			result.Metadata = make(map[string]interface{})
+			result.Metadata = make(map[string]any)
 		}
 		result.Metadata["batch_index"] = i
 
@@ -1100,9 +1100,9 @@ type ollamaResponse struct {
 }
 
 type ollamaEmbeddingRequest struct {
-	Model   string                 `json:"model"`
-	Prompt  string                 `json:"prompt"`
-	Options map[string]interface{} `json:"options"`
+	Model   string         `json:"model"`
+	Prompt  string         `json:"prompt"`
+	Options map[string]any `json:"options"`
 }
 
 type ollamaEmbeddingResponse struct {
@@ -1118,9 +1118,9 @@ type ollamaEmbeddingResponse struct {
 //
 //nolint:unused // Reserved for future use
 type ollamaBatchEmbeddingRequest struct {
-	Model   string                 `json:"model"`
-	Prompts []string               `json:"prompts"`
-	Options map[string]interface{} `json:"options"`
+	Model   string         `json:"model"`
+	Prompts []string       `json:"prompts"`
+	Options map[string]any `json:"options"`
 }
 
 // ollamaBatchEmbeddingResponse is reserved for future native batch embedding support.

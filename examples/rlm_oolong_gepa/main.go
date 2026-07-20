@@ -341,14 +341,14 @@ func toAgentExamples(tasks []datasets.OolongTask) []optimize.AgentExample {
 		task = task.Normalize()
 		examples = append(examples, optimize.AgentExample{
 			ID: task.ID,
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"context": task.ContextWindowText,
 				"query":   task.Question,
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": task.Answer,
 			},
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"answer_type": task.AnswerType,
 				"task_group":  task.TaskGroup,
 				"context_len": task.ContextLen,
@@ -411,7 +411,7 @@ func (oolongEvaluator) Evaluate(ctx context.Context, agent optimize.OptimizableA
 
 	sideInfo := &optimize.SideInfo{
 		Trace:       trace,
-		Diagnostics: map[string]interface{}{},
+		Diagnostics: map[string]any{},
 		Scores:      map[string]float64{},
 		LatencyMS:   float64(latency) / float64(time.Millisecond),
 	}
@@ -494,7 +494,7 @@ func hasUsefulContextInteraction(trace *agents.ExecutionTrace) bool {
 		intMetric(trace.ContextMetadata, modrlm.TraceMetadataSubRLMCallCount) > 0
 }
 
-func intMetric(metadata map[string]interface{}, key string) int {
+func intMetric(metadata map[string]any, key string) int {
 	if metadata == nil {
 		return 0
 	}

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 )
 
 // WelcomeModel represents the welcome screen state
@@ -31,8 +31,8 @@ type TaskOption struct {
 func NewWelcomeModel() WelcomeModel {
 	return WelcomeModel{
 		selectedOption: 0,
-		width:          80,  // Default width to prevent loading screen
-		height:         24,  // Default height to prevent loading screen
+		width:          80, // Default width to prevent loading screen
+		height:         24, // Default height to prevent loading screen
 		options: []TaskOption{
 			{
 				Icon:        "🧮",

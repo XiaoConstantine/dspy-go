@@ -26,7 +26,7 @@ type PlanStep struct {
 	ID          string
 	Description string
 	Tool        string
-	Arguments   map[string]interface{}
+	Arguments   map[string]any
 	Expected    string   // expected outcome
 	Critical    bool     // if true, failure stops execution
 	Parallel    bool     // can be executed in parallel
@@ -61,7 +61,7 @@ type PlanTemplate struct {
 type PlanStepTemplate struct {
 	Description   string
 	ToolType      string
-	ArgumentsFunc func(map[string]interface{}) map[string]interface{}
+	ArgumentsFunc func(map[string]any) map[string]any
 	Critical      bool
 }
 
@@ -207,7 +207,7 @@ func NewTaskDecomposer(maxDepth int) *TaskDecomposer {
 }
 
 // CreatePlan creates an execution plan for a task.
-func (tp *TaskPlanner) CreatePlan(ctx context.Context, input map[string]interface{}, tools []core.Tool) (*Plan, error) {
+func (tp *TaskPlanner) CreatePlan(ctx context.Context, input map[string]any, tools []core.Tool) (*Plan, error) {
 	logger := logging.GetLogger()
 	logger.Info(ctx, "Creating plan with strategy: %v", tp.strategy)
 
@@ -250,7 +250,7 @@ func (tp *TaskPlanner) CreatePlan(ctx context.Context, input map[string]interfac
 }
 
 // createDecompositionPlan creates a plan by decomposing the task upfront.
-func (tp *TaskPlanner) createDecompositionPlan(ctx context.Context, task string, input map[string]interface{}, tools []core.Tool) (*Plan, error) {
+func (tp *TaskPlanner) createDecompositionPlan(ctx context.Context, task string, input map[string]any, tools []core.Tool) (*Plan, error) {
 	logger := logging.GetLogger()
 
 	// First, check if we have a template
@@ -292,7 +292,7 @@ func (tp *TaskPlanner) createDecompositionPlan(ctx context.Context, task string,
 }
 
 // createInterleavedPlan creates an adaptive plan.
-func (tp *TaskPlanner) createInterleavedPlan(ctx context.Context, task string, input map[string]interface{}, tools []core.Tool) (*Plan, error) {
+func (tp *TaskPlanner) createInterleavedPlan(ctx context.Context, task string, input map[string]any, tools []core.Tool) (*Plan, error) {
 	logger := logging.GetLogger()
 	logger.Debug(ctx, "Creating interleaved plan for task: %s", task)
 
@@ -311,7 +311,7 @@ func (tp *TaskPlanner) createInterleavedPlan(ctx context.Context, task string, i
 		ID:          "step_0",
 		Description: "Explore task requirements",
 		Tool:        tp.selectBestTool("explore", tools),
-		Arguments:   map[string]interface{}{"task": task},
+		Arguments:   map[string]any{"task": task},
 		Expected:    "Understanding of task requirements",
 		Critical:    true,
 		Parallel:    false,
@@ -324,7 +324,7 @@ func (tp *TaskPlanner) createInterleavedPlan(ctx context.Context, task string, i
 		ID:          "step_adaptive",
 		Description: "Adaptive execution based on initial results",
 		Tool:        "adaptive",
-		Arguments:   map[string]interface{}{"mode": "interleaved"},
+		Arguments:   map[string]any{"mode": "interleaved"},
 		Expected:    "Task completion",
 		Critical:    true,
 		Parallel:    false,
@@ -339,7 +339,7 @@ func (tp *TaskPlanner) createInterleavedPlan(ctx context.Context, task string, i
 }
 
 // createPlanFromTemplate creates a plan from a template.
-func (tp *TaskPlanner) createPlanFromTemplate(ctx context.Context, task string, template *PlanTemplate, input map[string]interface{}, tools []core.Tool) (*Plan, error) {
+func (tp *TaskPlanner) createPlanFromTemplate(ctx context.Context, task string, template *PlanTemplate, input map[string]any, tools []core.Tool) (*Plan, error) {
 	plan := &Plan{
 		ID:           fmt.Sprintf("plan_%d", time.Now().UnixNano()),
 		Goal:         task,
@@ -390,7 +390,7 @@ func (tp *TaskPlanner) createStep(id, subtask string, tools []core.Tool) PlanSte
 		ID:          id,
 		Description: subtask,
 		Tool:        tool,
-		Arguments:   map[string]interface{}{"subtask": subtask},
+		Arguments:   map[string]any{"subtask": subtask},
 		Expected:    fmt.Sprintf("Completion of: %s", subtask),
 		Critical:    tp.isStepCritical(subtask),
 		Parallel:    tp.canParallelize(subtask),
@@ -831,7 +831,7 @@ func (tp *TaskPlanner) hasCircularDependencies(plan *Plan) bool {
 }
 
 // GetPlanMetrics returns metrics about a plan.
-func (tp *TaskPlanner) GetPlanMetrics(plan *Plan) map[string]interface{} {
+func (tp *TaskPlanner) GetPlanMetrics(plan *Plan) map[string]any {
 	parallelSteps := 0
 	criticalSteps := 0
 	toolUsage := make(map[string]int)
@@ -849,7 +849,7 @@ func (tp *TaskPlanner) GetPlanMetrics(plan *Plan) map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_steps":     len(plan.Steps),
 		"parallel_steps":  parallelSteps,
 		"critical_steps":  criticalSteps,

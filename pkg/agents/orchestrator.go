@@ -17,7 +17,7 @@ import (
 // TaskParser defines how to parse tasks from analyzer output.
 type TaskParser interface {
 	// Parse converts analyzer output into a slice of tasks
-	Parse(analyzerOutput map[string]interface{}) ([]Task, error)
+	Parse(analyzerOutput map[string]any) ([]Task, error)
 }
 
 // PlanCreator defines how to create an execution plan from tasks.
@@ -29,7 +29,7 @@ type PlanCreator interface {
 // DefaultTaskParser provides a simple implementation for testing.
 type DefaultTaskParser struct{}
 
-func (p *DefaultTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, error) {
+func (p *DefaultTaskParser) Parse(analyzerOutput map[string]any) ([]Task, error) {
 	return nil, errors.New(errors.InvalidInput,
 		"default parser is a placeholder - please provide a custom implementation")
 }
@@ -45,7 +45,7 @@ func (p *DefaultPlanCreator) CreatePlan(tasks []Task) ([][]Task, error) {
 // TaskProcessor defines how to process individual tasks.
 type TaskProcessor interface {
 	// Process handles a single task execution
-	Process(ctx context.Context, task Task, taskContext map[string]interface{}) (interface{}, error)
+	Process(ctx context.Context, task Task, taskContext map[string]any) (any, error)
 }
 
 // Task represents a unit of work identified by the orchestrator.
@@ -57,7 +57,7 @@ type Task struct {
 	Type string
 
 	// Metadata holds task-specific information
-	Metadata map[string]interface{}
+	Metadata map[string]any
 
 	// Dependencies lists task IDs that must complete before this task
 	Dependencies []string
@@ -108,7 +108,7 @@ type RetryConfig struct {
 // OrchestratorResult contains orchestration outputs.
 type OrchestratorResult struct {
 	// CompletedTasks holds results from successful tasks
-	CompletedTasks map[string]interface{}
+	CompletedTasks map[string]any
 
 	// FailedTasks contains tasks that could not be completed
 	FailedTasks map[string]error
@@ -117,7 +117,7 @@ type OrchestratorResult struct {
 	Analysis string
 
 	// Metadata holds additional orchestration information
-	Metadata map[string]interface{}
+	Metadata map[string]any
 	mu       sync.RWMutex
 }
 
@@ -221,7 +221,7 @@ func getProcessorTypes(processors map[string]TaskProcessor) []string {
 }
 
 // Process handles complete orchestration workflow.
-func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context map[string]interface{}) (*OrchestratorResult, error) {
+func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context map[string]any) (*OrchestratorResult, error) {
 	ctx, span := core.StartSpan(ctx, "FlexibleOrchestrator.Process")
 	defer core.EndSpan(ctx)
 
@@ -275,10 +275,10 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 	}
 	// Execute tasks according to plan
 	result := &OrchestratorResult{
-		CompletedTasks: make(map[string]interface{}),
+		CompletedTasks: make(map[string]any),
 		FailedTasks:    make(map[string]error),
 		Analysis:       analysis,
-		Metadata:       make(map[string]interface{}),
+		Metadata:       make(map[string]any),
 	}
 
 	// Execute tasks with controlled concurrency
@@ -296,7 +296,7 @@ func (f *FlexibleOrchestrator) Process(ctx context.Context, task string, context
 }
 
 // analyzeTasks breaks down the high-level task into subtasks.
-func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, context map[string]interface{}) ([]Task, string, error) {
+func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, context map[string]any) ([]Task, string, error) {
 	ctx, span := core.StartSpan(ctx, "AnalyzeTasks")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
@@ -316,7 +316,7 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 			return nil, "", errors.Wrap(err, errors.Canceled, "context canceled during analysis")
 		}
 		// Get task breakdown from analyzer
-		result, err := f.analyzer.Process(attemptCtx, map[string]interface{}{
+		result, err := f.analyzer.Process(attemptCtx, map[string]any{
 			"task":    task,
 			"context": context,
 		}, f.config.Options)
@@ -387,7 +387,7 @@ func (f *FlexibleOrchestrator) createExecutionPlan(tasks []Task) ([][]Task, erro
 	return f.planner.CreatePlan(tasks)
 }
 
-func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
+func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, taskContext map[string]any, result *OrchestratorResult) error {
 	for phaseIdx, phase := range plan {
 		if err := func(phaseIdx int, phase []Task) error {
 			phaseCtx, span := core.StartSpan(ctx, fmt.Sprintf("Phase_%d", phaseIdx))
@@ -430,13 +430,13 @@ func (f *FlexibleOrchestrator) executePlan(ctx context.Context, plan [][]Task, t
 }
 
 // executeTask handles single task execution with retries.
-func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskContext map[string]interface{}, result *OrchestratorResult) error {
+func (f *FlexibleOrchestrator) executeTask(ctx context.Context, task Task, taskContext map[string]any, result *OrchestratorResult) error {
 	logger := logging.GetLogger()
 	ctx, span := core.StartSpan(ctx, fmt.Sprintf("Task_%s_%s", task.ID, task.Type))
 	defer core.EndSpan(ctx)
 
 	// Add structured task information to span
-	span.WithAnnotation("task", map[string]interface{}{
+	span.WithAnnotation("task", map[string]any{
 		"id":        task.ID,
 		"type":      task.Type,
 		"processor": task.ProcessorType,

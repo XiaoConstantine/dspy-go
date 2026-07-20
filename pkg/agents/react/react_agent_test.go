@@ -152,7 +152,7 @@ result: Task completed successfully
 
 	// Execute task
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"task": "Test task"}
+	input := map[string]any{"task": "Test task"}
 
 	result, err := agent.Execute(ctx, input)
 
@@ -195,7 +195,7 @@ result: Task completed
 
 	// Execute task
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"task": "Simple test task"}
+	input := map[string]any{"task": "Simple test task"}
 
 	result, err := agent.Execute(ctx, input)
 
@@ -250,7 +250,7 @@ result: complete
 		},
 	}))
 
-	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "Summarize the task"})
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]any{"task": "Summarize the task"})
 	require.NoError(t, err)
 
 	artifacts := agent.GetArtifacts()
@@ -304,7 +304,7 @@ result: complete
 	assert.Equal(t, "repo:test", loadedSkill.Domain)
 	assert.NoError(t, agent.GetSkillLoadError())
 
-	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "Summarize the task"})
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]any{"task": "Summarize the task"})
 	require.NoError(t, err)
 }
 
@@ -390,7 +390,7 @@ result: done
 	require.NoError(t, agent.Initialize(mockLLM, signature))
 	require.NoError(t, agent.RegisterTool(mockTool))
 
-	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]interface{}{"task": "short task"})
+	_, err := agent.Execute(core.WithExecutionState(context.Background()), map[string]any{"task": "short task"})
 	require.NoError(t, err)
 
 	history := agent.GetExecutionHistory()
@@ -430,7 +430,7 @@ func TestReActAgent_Execute_Timeout(t *testing.T) {
 
 	// Execute task with a context that will timeout quickly
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"task": "Test task"}
+	input := map[string]any{"task": "Test task"}
 
 	// Since we can't easily simulate slow LLM, just test that timeout is respected
 	start := time.Now()
@@ -480,7 +480,7 @@ func TestReActAgent_InterceptorSupport(t *testing.T) {
 	assert.Len(t, interceptors, 0)
 
 	// Create mock interceptor
-	mockInterceptor := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, next core.AgentHandler) (map[string]interface{}, error) {
+	mockInterceptor := func(ctx context.Context, input map[string]any, info *core.AgentInfo, next core.AgentHandler) (map[string]any, error) {
 		// Add metadata to input
 		input["intercepted"] = true
 		return next(ctx, input)
@@ -522,7 +522,7 @@ result: Task completed
 
 	// Test with simple task (should use ReAct)
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"task": "Simple task"}
+	input := map[string]any{"task": "Simple task"}
 
 	result, err := agent.Execute(ctx, input)
 	assert.NoError(t, err)
@@ -534,17 +534,17 @@ func TestReActAgent_analyzeTaskComplexity(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		input    map[string]interface{}
+		input    map[string]any
 		expected float64 // Rough expectation, not exact
 	}{
 		{
 			name:     "simple task",
-			input:    map[string]interface{}{"task": "Hello"},
+			input:    map[string]any{"task": "Hello"},
 			expected: 0.5,
 		},
 		{
 			name:     "complex task",
-			input:    map[string]interface{}{"task": "Please analyze the complex multi-step process and compare multiple options while evaluating their effectiveness"},
+			input:    map[string]any{"task": "Please analyze the complex multi-step process and compare multiple options while evaluating their effectiveness"},
 			expected: 0.8, // Should be higher due to length and keywords
 		},
 	}
@@ -608,7 +608,7 @@ result: Done
 	_ = agent.Initialize(mockLLM, signature)
 
 	ctx := core.WithExecutionState(context.Background())
-	input := map[string]interface{}{"task": "Benchmark task"}
+	input := map[string]any{"task": "Benchmark task"}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -753,7 +753,7 @@ Integration test successful
 		},
 	}).Maybe()
 	mockTool.On("Validate", mock.AnythingOfType("map[string]interface {}")).Return(nil).Maybe()
-	expectedArgs := map[string]interface{}{"param": "test_value"}
+	expectedArgs := map[string]any{"param": "test_value"}
 	mockTool.On("Execute", mock.Anything, expectedArgs).Return(
 		core.ToolResult{Data: "Integration success"}, nil,
 	)
@@ -783,7 +783,7 @@ Integration test successful
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 
-	input := map[string]interface{}{"task": "Test XML parsing integration"}
+	input := map[string]any{"task": "Test XML parsing integration"}
 	result, err := agent.Execute(ctx, input)
 
 	assert.NoError(t, err)
@@ -855,7 +855,7 @@ answer: The user is Alice with ID 123
 	// Execute
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
-	_, err = agent.Execute(ctx, map[string]interface{}{"query": "Who is the user?"})
+	_, err = agent.Execute(ctx, map[string]any{"query": "Who is the user?"})
 	require.NoError(t, err)
 
 	// Verify conversation history is passed to LLM

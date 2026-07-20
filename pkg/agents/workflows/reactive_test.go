@@ -13,12 +13,12 @@ import (
 
 // ReactiveMockModule for testing reactive workflows.
 type ReactiveMockModule struct {
-	processFunc func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error)
+	processFunc func(ctx context.Context, inputs map[string]any) (map[string]any, error)
 	callCount   int
 	mu          sync.Mutex
 }
 
-func NewReactiveMockModule(processFunc func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error)) *ReactiveMockModule {
+func NewReactiveMockModule(processFunc func(ctx context.Context, inputs map[string]any) (map[string]any, error)) *ReactiveMockModule {
 	return &ReactiveMockModule{processFunc: processFunc}
 }
 
@@ -28,18 +28,18 @@ func (m *ReactiveMockModule) Process(ctx context.Context, inputs map[string]any,
 	m.mu.Unlock()
 
 	// Convert map[string]any to map[string]interface{} for our func
-	interfaceInputs := make(map[string]interface{})
+	interfaceInputs := make(map[string]any)
 	for k, v := range inputs {
 		interfaceInputs[k] = v
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	var err error
 
 	if m.processFunc != nil {
 		result, err = m.processFunc(ctx, interfaceInputs)
 	} else {
-		result = map[string]interface{}{
+		result = map[string]any{
 			"processed":   true,
 			"input_count": len(inputs),
 			"result":      "mock_result",
@@ -135,7 +135,7 @@ func TestEventBus_BasicFunctionality(t *testing.T) {
 		Data:      "test_data",
 		Priority:  5,
 		Timestamp: time.Now(),
-		Context:   map[string]interface{}{"test": true},
+		Context:   map[string]any{"test": true},
 	}
 
 	err = bus.Emit(testEvent)
@@ -283,14 +283,14 @@ func TestReactiveWorkflow_BasicUsage(t *testing.T) {
 	var processedEvents []Event
 	var mu sync.Mutex
 
-	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		mu.Lock()
 		if event, ok := inputs["event"].(Event); ok {
 			processedEvents = append(processedEvents, event)
 		}
 		mu.Unlock()
 
-		return map[string]interface{}{
+		return map[string]any{
 			"processed": true,
 			"result":    "event_processed",
 		}, nil
@@ -310,7 +310,7 @@ func TestReactiveWorkflow_BasicUsage(t *testing.T) {
 	testEvent := Event{
 		ID:   "action_1",
 		Type: "user_action",
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"action": "click",
 			"target": "button_1",
 		},
@@ -354,22 +354,22 @@ func TestReactiveWorkflow_MultipleHandlers(t *testing.T) {
 	var handler1Events, handler2Events []Event
 	var mu1, mu2 sync.Mutex
 
-	module1 := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	module1 := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		mu1.Lock()
 		if event, ok := inputs["event"].(Event); ok {
 			handler1Events = append(handler1Events, event)
 		}
 		mu1.Unlock()
-		return map[string]interface{}{"handler": "1", "processed": true, "result": "handler1_result"}, nil
+		return map[string]any{"handler": "1", "processed": true, "result": "handler1_result"}, nil
 	})
 
-	module2 := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	module2 := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		mu2.Lock()
 		if event, ok := inputs["event"].(Event); ok {
 			handler2Events = append(handler2Events, event)
 		}
 		mu2.Unlock()
-		return map[string]interface{}{"handler": "2", "processed": true, "result": "handler2_result"}, nil
+		return map[string]any{"handler": "2", "processed": true, "result": "handler2_result"}, nil
 	})
 
 	// Register different handlers for different event types
@@ -423,13 +423,13 @@ func TestReactiveWorkflow_EventFiltering(t *testing.T) {
 	var processedEvents []Event
 	var mu sync.Mutex
 
-	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		mu.Lock()
 		if event, ok := inputs["event"].(Event); ok {
 			processedEvents = append(processedEvents, event)
 		}
 		mu.Unlock()
-		return map[string]interface{}{"processed": true, "result": "processed"}, nil
+		return map[string]any{"processed": true, "result": "processed"}, nil
 	})
 
 	// Add filter for high priority events only
@@ -520,16 +520,16 @@ func TestReactiveWorkflow_EventTransformation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var receivedData []interface{}
+	var receivedData []any
 	var mu sync.Mutex
 
-	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	mockModule := NewReactiveMockModule(func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 		mu.Lock()
 		if event, ok := inputs["event"].(Event); ok {
 			receivedData = append(receivedData, event.Data)
 		}
 		mu.Unlock()
-		return map[string]interface{}{"processed": true, "result": "processed"}, nil
+		return map[string]any{"processed": true, "result": "processed"}, nil
 	})
 
 	// Add transformer that modifies event data

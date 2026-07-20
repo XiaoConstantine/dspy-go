@@ -47,7 +47,7 @@ func (d *DatabaseTool) CanHandle(ctx context.Context, intent string) bool {
 	return false
 }
 
-func (d *DatabaseTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (d *DatabaseTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	d.execCount++
 
 	// Simulate random failures based on failure rate
@@ -64,22 +64,22 @@ func (d *DatabaseTool) Execute(ctx context.Context, params map[string]interface{
 	time.Sleep(time.Duration(50+rand.IntN(100)) * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"rows": []map[string]interface{}{
+		Data: map[string]any{
+			"rows": []map[string]any{
 				{"id": 1, "name": "Alice", "email": "alice@example.com"},
 				{"id": 2, "name": "Bob", "email": "bob@example.com"},
 			},
 			"query":    query,
 			"duration": fmt.Sprintf("%dms", 50+rand.IntN(100)),
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"execution_count": d.execCount,
 			"database":        "postgresql",
 		},
 	}, nil
 }
 
-func (d *DatabaseTool) Validate(params map[string]interface{}) error {
+func (d *DatabaseTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -122,26 +122,26 @@ func (b *BackupDatabaseTool) CanHandle(ctx context.Context, intent string) bool 
 	return contains(intent, "database") || contains(intent, "query")
 }
 
-func (b *BackupDatabaseTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (b *BackupDatabaseTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	// This tool is highly reliable (backup/cache)
 	time.Sleep(20 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
-			"rows": []map[string]interface{}{
+		Data: map[string]any{
+			"rows": []map[string]any{
 				{"id": 1, "name": "Cached Alice", "email": "alice@cache.com"},
 			},
 			"source": "backup_cache",
 			"note":   "Served from backup cache for reliability",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"source":      "backup",
 			"reliability": "high",
 		},
 	}, nil
 }
 
-func (b *BackupDatabaseTool) Validate(params map[string]interface{}) error {
+func (b *BackupDatabaseTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -192,7 +192,7 @@ func (f *FileProcessorTool) CanHandle(ctx context.Context, intent string) bool {
 	return false
 }
 
-func (f *FileProcessorTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (f *FileProcessorTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	operation, ok := params["operation"].(string)
 	if !ok {
 		operation = "read"
@@ -207,21 +207,21 @@ func (f *FileProcessorTool) Execute(ctx context.Context, params map[string]inter
 	time.Sleep(30 * time.Millisecond)
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"operation": operation,
 			"filename":  filename,
 			"result":    fmt.Sprintf("Successfully %sed file: %s", operation, filename),
 			"size":      "1.2MB",
 			"format":    "JSON",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"processor_version": "3.2.1",
 			"timestamp":         time.Now().Format(time.RFC3339),
 		},
 	}, nil
 }
 
-func (f *FileProcessorTool) Validate(params map[string]interface{}) error {
+func (f *FileProcessorTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -246,6 +246,7 @@ func (f *FileProcessorTool) InputSchema() models.InputSchema {
 // Helper functions and SearchTool are defined in shared.go
 
 // Demo function for performance comparison.
+//
 //nolint:unused // Used when main() is uncommented
 func demonstratePerformanceTracking(registry *tools.SmartToolRegistry) {
 	fmt.Println("\n🏃‍♂️ Performance Tracking Demonstration")
@@ -257,7 +258,7 @@ func demonstratePerformanceTracking(registry *tools.SmartToolRegistry) {
 	fmt.Println("Executing tools to build performance history...")
 
 	for i := 0; i < 10; i++ {
-		params := map[string]interface{}{
+		params := map[string]any{
 			"query": fmt.Sprintf("SELECT * FROM table_%d", i),
 		}
 
@@ -297,6 +298,7 @@ func demonstratePerformanceTracking(registry *tools.SmartToolRegistry) {
 }
 
 // Demo function for intelligent selection with fallbacks.
+//
 //nolint:unused // Used when main() is uncommented
 func demonstrateIntelligentSelection(registry *tools.SmartToolRegistry) {
 	fmt.Println("\n🧠 Intelligent Selection with Fallbacks")
@@ -364,6 +366,7 @@ func demonstrateIntelligentSelection(registry *tools.SmartToolRegistry) {
 }
 
 // Demo function for capability analysis.
+//
 //nolint:unused // Used when main() is uncommented
 func demonstrateCapabilityAnalysis(registry *tools.SmartToolRegistry) {
 	fmt.Println("\n🔍 Capability Analysis")
@@ -398,6 +401,7 @@ func demonstrateCapabilityAnalysis(registry *tools.SmartToolRegistry) {
 }
 
 // Demo function for custom selector configuration.
+//
 //nolint:unused // Used when main() is uncommented
 func demonstrateCustomSelector() {
 	fmt.Println("\n⚙️  Custom Selector Configuration")

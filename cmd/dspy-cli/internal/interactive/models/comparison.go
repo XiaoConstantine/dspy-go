@@ -6,60 +6,60 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ComparisonModel represents the comparison studio state
 type ComparisonModel struct {
 	selectedDataset int
 	datasets        []string
-	width          int
-	height         int
-	isRunning      bool
-	results        map[string]*runner.RunResult
-	runningStatus  map[string]OptimizerStatus
-	startTime      time.Time
-	completed      int
-	total          int
-	nextScreen     string
-	spinnerFrame   int
-	sortBy         string // "name", "accuracy", "improvement", "duration"
-	mu             sync.RWMutex
+	width           int
+	height          int
+	isRunning       bool
+	results         map[string]*runner.RunResult
+	runningStatus   map[string]OptimizerStatus
+	startTime       time.Time
+	completed       int
+	total           int
+	nextScreen      string
+	spinnerFrame    int
+	sortBy          string // "name", "accuracy", "improvement", "duration"
+	mu              sync.RWMutex
 
 	// Enhanced features
-	selectedOptimizers map[string]bool // Which optimizers to compare
-	liveProgress      map[string]float64 // Real-time progress per optimizer
-	errorMessages     map[string]string  // Error messages per optimizer
-	leaderboard       []LeaderboardEntry // Sorted results
-	showDetails       bool              // Show detailed view
-	animationFrame    int               // For visual effects
-	maxExamples       int               // Configurable examples count
+	selectedOptimizers map[string]bool    // Which optimizers to compare
+	liveProgress       map[string]float64 // Real-time progress per optimizer
+	errorMessages      map[string]string  // Error messages per optimizer
+	leaderboard        []LeaderboardEntry // Sorted results
+	showDetails        bool               // Show detailed view
+	animationFrame     int                // For visual effects
+	maxExamples        int                // Configurable examples count
 }
 
 // OptimizerStatus represents the current status of an optimizer
 type OptimizerStatus struct {
-	State    string    // "pending", "initializing", "running", "completed", "failed"
-	Progress float64   // 0.0 to 1.0
-	Message  string    // Current status message
+	State     string  // "pending", "initializing", "running", "completed", "failed"
+	Progress  float64 // 0.0 to 1.0
+	Message   string  // Current status message
 	StartTime time.Time
 	EndTime   time.Time
 }
 
 // LeaderboardEntry represents a single entry in the results leaderboard
 type LeaderboardEntry struct {
-	Rank         int
+	Rank          int
 	OptimizerName string
-	Icon         string
-	DisplayName  string
-	Accuracy     float64
-	Improvement  float64
-	Duration     time.Duration
-	Status       string
-	TrendIcon    string // ↗️ ↘️ ➡️
+	Icon          string
+	DisplayName   string
+	Accuracy      float64
+	Improvement   float64
+	Duration      time.Duration
+	Status        string
+	TrendIcon     string // ↗️ ↘️ ➡️
 }
 
 // ComparisonResult holds the result with optimizer info for display
@@ -104,18 +104,18 @@ func NewComparisonModel() ComparisonModel {
 
 	return ComparisonModel{
 		selectedDataset:    0,
-		datasets:          samples.ListAvailableDatasets(),
-		results:           make(map[string]*runner.RunResult),
-		runningStatus:     make(map[string]OptimizerStatus),
+		datasets:           samples.ListAvailableDatasets(),
+		results:            make(map[string]*runner.RunResult),
+		runningStatus:      make(map[string]OptimizerStatus),
 		selectedOptimizers: selectedOptimizers,
-		liveProgress:      make(map[string]float64),
-		errorMessages:     make(map[string]string),
-		leaderboard:       []LeaderboardEntry{},
-		width:            80,  // Default width
-		height:           24,  // Default height
-		sortBy:           "accuracy", // Default sort by accuracy
-		maxExamples:      5,   // Default examples for quick comparison
-		showDetails:      false,
+		liveProgress:       make(map[string]float64),
+		errorMessages:      make(map[string]string),
+		leaderboard:        []LeaderboardEntry{},
+		width:              80,         // Default width
+		height:             24,         // Default height
+		sortBy:             "accuracy", // Default sort by accuracy
+		maxExamples:        5,          // Default examples for quick comparison
+		showDetails:        false,
 	}
 }
 
@@ -654,7 +654,6 @@ func (m ComparisonModel) tickAnimation() tea.Cmd {
 		return animationTickMsg{}
 	})
 }
-
 
 // GetNextScreen returns the next screen to navigate to
 func (m ComparisonModel) GetNextScreen() string {

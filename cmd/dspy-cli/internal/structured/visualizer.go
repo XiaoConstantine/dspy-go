@@ -92,13 +92,13 @@ func (v *PromptVisualizer) createBlocksVisualization(components []PromptComponen
 		"Task Context":         1,
 		"Tone Context":         2,
 		"Background Data":      3,
-		"Task Rules":          4,
-		"Examples":            5,
+		"Task Rules":           4,
+		"Examples":             5,
 		"Conversation History": 6,
-		"User Request":        7,
-		"Thinking Steps":      8,
-		"Output Format":       9,
-		"Prefilled Response":  10,
+		"User Request":         7,
+		"Thinking Steps":       8,
+		"Output Format":        9,
+		"Prefilled Response":   10,
 	}
 
 	// Display each component as a colored block
@@ -157,13 +157,13 @@ func (v *PromptVisualizer) createAnnotatedPrompt(prompt string, components []Pro
 		"Task Context":         1,
 		"Tone Context":         2,
 		"Background Data":      3,
-		"Task Rules":          4,
-		"Examples":            5,
+		"Task Rules":           4,
+		"Examples":             5,
 		"Conversation History": 6,
-		"User Request":        7,
-		"Thinking Steps":      8,
-		"Output Format":       9,
-		"Prefilled Response":  10,
+		"User Request":         7,
+		"Thinking Steps":       8,
+		"Output Format":        9,
+		"Prefilled Response":   10,
 	}
 
 	for typeName, number := range typeToNumber {
@@ -274,13 +274,13 @@ func (v *PromptVisualizer) createAnalysisSummary(components []PromptComponent) s
 		"Task Context":         1,
 		"Tone Context":         2,
 		"Background Data":      3,
-		"Task Rules":          4,
-		"Examples":            5,
+		"Task Rules":           4,
+		"Examples":             5,
 		"Conversation History": 6,
-		"User Request":        7,
-		"Thinking Steps":      8,
-		"Output Format":       9,
-		"Prefilled Response":  10,
+		"User Request":         7,
+		"Thinking Steps":       8,
+		"Output Format":        9,
+		"Prefilled Response":   10,
 	}
 
 	for _, cat := range categories {

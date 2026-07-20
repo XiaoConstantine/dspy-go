@@ -261,7 +261,7 @@ func (a *AnthropicLLM) Generate(ctx context.Context, prompt string, options ...c
 }
 
 // GenerateWithJSON implements the core.LLM interface.
-func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	// Generate a response and attempt to parse it as JSON
 	response, err := a.Generate(ctx, prompt, options...)
 	if err != nil {
@@ -271,7 +271,7 @@ func (a *AnthropicLLM) GenerateWithJSON(ctx context.Context, prompt string, opti
 	return utils.ParseJSONResponse(response.Content)
 }
 
-func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	logger := logging.GetLogger()
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
@@ -326,7 +326,7 @@ func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string,
 		return nil, errs.New(errs.LLMGenerationFailed, "Received nil response from Anthropic API")
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	textParts := make([]string, 0)
 
 	for _, block := range message.Content {
@@ -341,7 +341,7 @@ func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string,
 				continue
 			}
 			toolUse := block.AsToolUse()
-			arguments := map[string]interface{}{}
+			arguments := map[string]any{}
 			if len(toolUse.Input) > 0 {
 				if err := json.Unmarshal(toolUse.Input, &arguments); err != nil {
 					return nil, errs.WithFields(
@@ -353,7 +353,7 @@ func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string,
 				}
 			}
 
-			result["function_call"] = map[string]interface{}{
+			result["function_call"] = map[string]any{
 				"name":      toolUse.Name,
 				"arguments": arguments,
 			}
@@ -377,7 +377,7 @@ func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string,
 	return result, nil
 }
 
-func convertAnthropicFunctionSchemas(functions []map[string]interface{}) ([]anthropic.ToolUnionParam, error) {
+func convertAnthropicFunctionSchemas(functions []map[string]any) ([]anthropic.ToolUnionParam, error) {
 	tools := make([]anthropic.ToolUnionParam, 0, len(functions))
 
 	for _, function := range functions {
@@ -386,9 +386,9 @@ func convertAnthropicFunctionSchemas(functions []map[string]interface{}) ([]anth
 			return nil, errs.New(errs.InvalidInput, "function schema missing non-empty 'name' field")
 		}
 
-		var parameters map[string]interface{}
+		var parameters map[string]any
 		if rawParameters, hasParameters := function["parameters"]; hasParameters && rawParameters != nil {
-			paramMap, ok := rawParameters.(map[string]interface{})
+			paramMap, ok := rawParameters.(map[string]any)
 			if !ok {
 				return nil, errs.WithFields(
 					errs.New(errs.InvalidInput, "function schema 'parameters' must be an object"),
@@ -397,7 +397,7 @@ func convertAnthropicFunctionSchemas(functions []map[string]interface{}) ([]anth
 			}
 			parameters = paramMap
 		} else {
-			parameters = map[string]interface{}{"type": "object"}
+			parameters = map[string]any{"type": "object"}
 		}
 
 		inputSchema, err := toAnthropicInputSchema(parameters, name)
@@ -422,7 +422,7 @@ func convertAnthropicFunctionSchemas(functions []map[string]interface{}) ([]anth
 	return tools, nil
 }
 
-func toAnthropicInputSchema(parameters map[string]interface{}, functionName string) (anthropic.ToolInputSchemaParam, error) {
+func toAnthropicInputSchema(parameters map[string]any, functionName string) (anthropic.ToolInputSchemaParam, error) {
 	schema := anthropic.ToolInputSchemaParam{
 		Type: "object",
 	}
@@ -461,7 +461,7 @@ func toAnthropicInputSchema(parameters map[string]interface{}, functionName stri
 		schema.Required = required
 	}
 
-	extras := make(map[string]interface{})
+	extras := make(map[string]any)
 	for key, value := range parameters {
 		switch key {
 		case "type", "properties", "required":
@@ -477,11 +477,11 @@ func toAnthropicInputSchema(parameters map[string]interface{}, functionName stri
 	return schema, nil
 }
 
-func normalizeRequiredFields(raw interface{}) ([]string, error) {
+func normalizeRequiredFields(raw any) ([]string, error) {
 	switch required := raw.(type) {
 	case []string:
 		return required, nil
-	case []interface{}:
+	case []any:
 		normalized := make([]string, 0, len(required))
 		for _, field := range required {
 			fieldName, ok := field.(string)

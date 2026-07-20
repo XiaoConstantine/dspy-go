@@ -272,8 +272,8 @@ func validationAgentExample(validationExamples []AgentExample, idx int, example 
 	}
 }
 
-func cachedValidationEvalResult(score float64, err error, feedback, feedbackTarget string, feedbackMetadata map[string]interface{}) *EvalResult {
-	diagnostics := make(map[string]interface{})
+func cachedValidationEvalResult(score float64, err error, feedback, feedbackTarget string, feedbackMetadata map[string]any) *EvalResult {
+	diagnostics := make(map[string]any)
 	if err != nil {
 		diagnostics["evaluation_error"] = err.Error()
 	}

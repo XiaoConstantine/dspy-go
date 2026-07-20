@@ -9,7 +9,7 @@ import (
 // SideInfo carries diagnostic information beyond the scalar evaluation score.
 type SideInfo struct {
 	Trace       *agents.ExecutionTrace
-	Diagnostics map[string]interface{}
+	Diagnostics map[string]any
 	Scores      map[string]float64
 	Cost        float64
 	LatencyMS   float64
@@ -27,9 +27,9 @@ type EvalResult struct {
 // AgentExample describes a single evaluation task for an optimizable agent.
 type AgentExample struct {
 	ID       string
-	Inputs   map[string]interface{}
-	Outputs  map[string]interface{}
-	Metadata map[string]interface{}
+	Inputs   map[string]any
+	Outputs  map[string]any
+	Metadata map[string]any
 }
 
 // AgentEvaluator evaluates an agent on a concrete task and returns score plus ASI.

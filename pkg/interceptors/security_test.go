@@ -59,11 +59,11 @@ func TestRateLimitingAgentInterceptor(t *testing.T) {
 	interceptor := RateLimitingAgentInterceptor(2, time.Second)
 
 	ctx := context.Background()
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-		return map[string]interface{}{"result": "success"}, nil
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
+		return map[string]any{"result": "success"}, nil
 	}
 
 	// First two requests should succeed
@@ -115,7 +115,7 @@ func TestMatchesPermission(t *testing.T) {
 
 func TestSanitizeValue(t *testing.T) {
 	tests := []struct {
-		input       interface{}
+		input       any
 		expectedStr string
 		description string
 	}{
@@ -123,7 +123,7 @@ func TestSanitizeValue(t *testing.T) {
 		{"Hello\x00World", "HelloWorld", "null byte removal"},
 		{"Line1\r\nLine2\nLine3\r", "Line1 Line2 Line3 ", "line ending normalization"},
 		{strings.Repeat("A", 15000), strings.Repeat("A", 10000), "string length limit"},
-		{map[string]interface{}{"<script>": "alert('xss')"}, "", "map key/value sanitization"},
+		{map[string]any{"<script>": "alert('xss')"}, "", "map key/value sanitization"},
 	}
 
 	for _, test := range tests {
@@ -138,8 +138,8 @@ func TestSanitizeValue(t *testing.T) {
 			} else {
 				t.Errorf("%s: result is not a string", test.description)
 			}
-		case map[string]interface{}:
-			if m, ok := result.(map[string]interface{}); ok {
+		case map[string]any:
+			if m, ok := result.(map[string]any); ok {
 				// Check that keys and values are sanitized
 				for k, v := range m {
 					if strings.Contains(k, "<script>") || strings.Contains(v.(string), "<script>") {
@@ -193,10 +193,10 @@ func TestRateLimitingToolInterceptor(t *testing.T) {
 	interceptor := RateLimitingToolInterceptor(1, time.Second)
 
 	ctx := context.Background()
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		return core.ToolResult{Data: "success"}, nil
 	}
 
@@ -242,7 +242,7 @@ func TestAllowHTMLValidation(t *testing.T) {
 			}
 
 			compiledPatterns := make([]*regexp.Regexp, 0)
-			inputs := map[string]interface{}{"test": test.input}
+			inputs := map[string]any{"test": test.input}
 
 			err := validateInputsGeneric(inputs, config, compiledPatterns)
 
@@ -271,8 +271,8 @@ func TestDeterministicCacheKeys(t *testing.T) {
 	}
 
 	// Test with tool cache keys too
-	args1 := map[string]interface{}{"b": "value2", "a": "value1"}
-	args2 := map[string]interface{}{"a": "value1", "b": "value2"}
+	args1 := map[string]any{"b": "value2", "a": "value1"}
+	args2 := map[string]any{"a": "value1", "b": "value2"}
 
 	toolInfo := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
@@ -390,12 +390,12 @@ func TestValidationAgentInterceptor(t *testing.T) {
 	ctx := context.Background()
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-		return map[string]interface{}{"result": "success"}, nil
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
+		return map[string]any{"result": "success"}, nil
 	}
 
 	// Valid input
-	input := map[string]interface{}{"safe_field": "safe value"}
+	input := map[string]any{"safe_field": "safe value"}
 	result, err := interceptor(ctx, input, info, handler)
 	if err != nil {
 		t.Errorf("Expected no error for valid input, got: %v", err)
@@ -405,7 +405,7 @@ func TestValidationAgentInterceptor(t *testing.T) {
 	}
 
 	// Malicious input
-	maliciousInput := map[string]interface{}{"malicious": "<script>alert('xss')</script>"}
+	maliciousInput := map[string]any{"malicious": "<script>alert('xss')</script>"}
 	_, err = interceptor(ctx, maliciousInput, info, handler)
 	if err == nil {
 		t.Error("Expected error for malicious input")
@@ -426,12 +426,12 @@ func TestValidationToolInterceptor(t *testing.T) {
 	ctx := context.Background()
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		return core.ToolResult{Data: "success"}, nil
 	}
 
 	// Valid input
-	args := map[string]interface{}{"safe_arg": "safe value"}
+	args := map[string]any{"safe_arg": "safe value"}
 	result, err := interceptor(ctx, args, info, handler)
 	if err != nil {
 		t.Errorf("Expected no error for valid input, got: %v", err)
@@ -441,7 +441,7 @@ func TestValidationToolInterceptor(t *testing.T) {
 	}
 
 	// Malicious input
-	maliciousArgs := map[string]interface{}{"malicious": "javascript:alert('xss')"}
+	maliciousArgs := map[string]any{"malicious": "javascript:alert('xss')"}
 	_, err = interceptor(ctx, maliciousArgs, info, handler)
 	if err == nil {
 		t.Error("Expected error for malicious input")
@@ -558,17 +558,17 @@ func TestSanitizingInterceptors(t *testing.T) {
 		interceptor := SanitizingAgentInterceptor()
 
 		ctx := context.Background()
-		input := map[string]interface{}{
+		input := map[string]any{
 			"user_input": "<img src=x onerror=alert('xss')>",
 		}
 		info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
 		handlerCalled := false
-		var sanitizedInput map[string]interface{}
-		handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+		var sanitizedInput map[string]any
+		handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 			handlerCalled = true
 			sanitizedInput = input
-			return map[string]interface{}{"result": "success"}, nil
+			return map[string]any{"result": "success"}, nil
 		}
 
 		_, err := interceptor(ctx, input, info, handler)
@@ -591,13 +591,13 @@ func TestSanitizingInterceptors(t *testing.T) {
 		interceptor := SanitizingToolInterceptor()
 
 		ctx := context.Background()
-		args := map[string]interface{}{
+		args := map[string]any{
 			"query": "SELECT * FROM users; DROP TABLE users;--",
 		}
 		info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 		handlerCalled := false
-		handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+		handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 			handlerCalled = true
 			return core.ToolResult{Data: "success"}, nil
 		}
@@ -641,7 +641,7 @@ func TestSecurityHelperFunctions(t *testing.T) {
 		}
 
 		// Nested map
-		nestedMap := map[string]interface{}{
+		nestedMap := map[string]any{
 			"nested": "<script>",
 		}
 		err = validateValue(nestedMap, config, patterns)
@@ -650,7 +650,7 @@ func TestSecurityHelperFunctions(t *testing.T) {
 		}
 
 		// Array
-		array := []interface{}{"safe", "<script>"}
+		array := []any{"safe", "<script>"}
 		err = validateValue(array, config, patterns)
 		if err == nil {
 			t.Error("Expected error for forbidden pattern in array")
@@ -665,30 +665,30 @@ func TestSecurityHelperFunctions(t *testing.T) {
 		}
 
 		// Map sanitization
-		input := map[string]interface{}{
+		input := map[string]any{
 			"safe":      "normal",
 			"malicious": "<img src=x onerror=alert('xss')>",
 		}
 		result = sanitizeValue(input)
-		resultMap := result.(map[string]interface{})
+		resultMap := result.(map[string]any)
 		if !strings.Contains(resultMap["malicious"].(string), "&lt;img") {
 			t.Error("Expected HTML content to be escaped")
 		}
 
 		// Array sanitization
-		inputArray := []interface{}{"safe", "<script>"}
+		inputArray := []any{"safe", "<script>"}
 		result = sanitizeValue(inputArray)
-		resultArray := result.([]interface{})
+		resultArray := result.([]any)
 		if strings.Contains(resultArray[1].(string), "<script>") {
 			t.Error("Expected script tag to be escaped in array")
 		}
 	})
 
 	t.Run("calculateMapSize", func(t *testing.T) {
-		m := map[string]interface{}{
+		m := map[string]any{
 			"short": "hi",
 			"long":  "this is a longer string",
-			"nested": map[string]interface{}{
+			"nested": map[string]any{
 				"inner": "value",
 			},
 		}

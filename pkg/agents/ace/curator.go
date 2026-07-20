@@ -9,7 +9,7 @@ import (
 
 // Curator manages the learnings file with tiered deduplication.
 type Curator struct {
-	config            Config
+	config              Config
 	similarityThreshold float64
 }
 
@@ -20,7 +20,7 @@ func NewCurator(config Config) *Curator {
 		threshold = 0.85
 	}
 	return &Curator{
-		config:            config,
+		config:              config,
 		similarityThreshold: threshold,
 	}
 }
@@ -176,8 +176,8 @@ func (c *Curator) aggressivePrune(learnings []Learning, tokensToRemove int) ([]L
 
 	// Sort by success rate (lowest first)
 	type scored struct {
-		idx   int
-		score float64
+		idx    int
+		score  float64
 		tokens int
 	}
 

@@ -31,14 +31,14 @@ type TodoManager struct {
 
 // TodoItem represents a task in the todo list.
 type TodoItem struct {
-	ID          string                 `json:"id"`
-	Description string                 `json:"description"`
-	Status      TodoStatus             `json:"status"`
-	Created     time.Time              `json:"created"`
-	Updated     time.Time              `json:"updated"`
-	Priority    int                    `json:"priority"`
-	Context     map[string]interface{} `json:"context"`
-	Progress    float64                `json:"progress"` // 0.0 to 1.0
+	ID          string         `json:"id"`
+	Description string         `json:"description"`
+	Status      TodoStatus     `json:"status"`
+	Created     time.Time      `json:"created"`
+	Updated     time.Time      `json:"updated"`
+	Priority    int            `json:"priority"`
+	Context     map[string]any `json:"context"`
+	Progress    float64        `json:"progress"` // 0.0 to 1.0
 }
 
 // TodoStatus represents the current state of a todo item.
@@ -305,7 +305,7 @@ func (tm *TodoManager) writeTodoFile(ctx context.Context) error {
 	tm.lastWrite = time.Now()
 
 	// Also store as a memory reference for potential retrieval
-	_, err := tm.memory.StoreFile(ctx, "todo", "current", []byte(content.String()), map[string]interface{}{
+	_, err := tm.memory.StoreFile(ctx, "todo", "current", []byte(content.String()), map[string]any{
 		"update_count": tm.updateCount,
 		"last_write":   tm.lastWrite,
 	})
@@ -344,18 +344,18 @@ func (tm *TodoManager) GetPendingTodos() []TodoItem {
 }
 
 // GetMetrics returns todo management metrics.
-func (tm *TodoManager) GetMetrics() map[string]interface{} {
+func (tm *TodoManager) GetMetrics() map[string]any {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	return map[string]interface{}{
-		"total_todos":      len(tm.todos),
-		"completed_todos":  len(tm.completed),
-		"active_todos":     len(tm.getTasksByStatus(TodoInProgress)),
-		"pending_todos":    len(tm.getTasksByStatus(TodoPending)),
-		"blocked_todos":    len(tm.getTasksByStatus(TodoBlocked)),
-		"update_count":     tm.updateCount,
-		"last_write":       tm.lastWrite,
+	return map[string]any{
+		"total_todos":     len(tm.todos),
+		"completed_todos": len(tm.completed),
+		"active_todos":    len(tm.getTasksByStatus(TodoInProgress)),
+		"pending_todos":   len(tm.getTasksByStatus(TodoPending)),
+		"blocked_todos":   len(tm.getTasksByStatus(TodoBlocked)),
+		"update_count":    tm.updateCount,
+		"last_write":      tm.lastWrite,
 	}
 }
 

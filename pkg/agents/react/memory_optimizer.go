@@ -43,7 +43,7 @@ type MemoryIndex struct {
 // MemoryItem represents an item in memory.
 type MemoryItem struct {
 	Key          string
-	Value        interface{}
+	Value        any
 	Category     string
 	Importance   float64
 	AccessCount  int
@@ -127,7 +127,7 @@ func NewMemoryCompressor() *MemoryCompressor {
 }
 
 // Store saves information to optimized memory.
-func (mo *MemoryOptimizer) Store(ctx context.Context, input map[string]interface{}, output map[string]interface{}, success bool) error {
+func (mo *MemoryOptimizer) Store(ctx context.Context, input map[string]any, output map[string]any, success bool) error {
 	mo.mu.Lock()
 	defer mo.mu.Unlock()
 
@@ -138,7 +138,7 @@ func (mo *MemoryOptimizer) Store(ctx context.Context, input map[string]interface
 	key := mo.generateKey(input)
 	item := &MemoryItem{
 		Key:          key,
-		Value:        map[string]interface{}{"input": input, "output": output, "success": success},
+		Value:        map[string]any{"input": input, "output": output, "success": success},
 		Category:     mo.categorize(input),
 		Importance:   mo.calculateImportance(input, output, success),
 		AccessCount:  0,
@@ -165,7 +165,7 @@ func (mo *MemoryOptimizer) Store(ctx context.Context, input map[string]interface
 }
 
 // Retrieve gets relevant information from memory.
-func (mo *MemoryOptimizer) Retrieve(ctx context.Context, query map[string]interface{}) (interface{}, error) {
+func (mo *MemoryOptimizer) Retrieve(ctx context.Context, query map[string]any) (any, error) {
 	mo.mu.Lock()
 	defer mo.mu.Unlock()
 
@@ -193,7 +193,7 @@ func (mo *MemoryOptimizer) Retrieve(ctx context.Context, query map[string]interf
 }
 
 // generateKey creates a unique key for memory storage.
-func (mo *MemoryOptimizer) generateKey(input map[string]interface{}) string {
+func (mo *MemoryOptimizer) generateKey(input map[string]any) string {
 	// Create a deterministic key based on input
 	taskStr := ""
 	if task, ok := input["task"].(string); ok {
@@ -205,14 +205,14 @@ func (mo *MemoryOptimizer) generateKey(input map[string]interface{}) string {
 }
 
 // hash generates a hash of the input.
-func (mo *MemoryOptimizer) hash(input interface{}) string {
+func (mo *MemoryOptimizer) hash(input any) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%v", input)
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // categorize determines the category of a memory item.
-func (mo *MemoryOptimizer) categorize(input map[string]interface{}) string {
+func (mo *MemoryOptimizer) categorize(input map[string]any) string {
 	// Simple categorization based on input structure
 	if task, ok := input["task"].(string); ok {
 		// Categorize based on task keywords
@@ -238,7 +238,7 @@ func (mo *MemoryOptimizer) categorize(input map[string]interface{}) string {
 }
 
 // calculateImportance determines the importance of a memory item.
-func (mo *MemoryOptimizer) calculateImportance(input, output map[string]interface{}, success bool) float64 {
+func (mo *MemoryOptimizer) calculateImportance(input, output map[string]any, success bool) float64 {
 	importance := 0.5 // Base importance
 
 	// Success increases importance
@@ -258,7 +258,7 @@ func (mo *MemoryOptimizer) calculateImportance(input, output map[string]interfac
 }
 
 // generateEmbedding creates a vector embedding for semantic similarity.
-func (mo *MemoryOptimizer) generateEmbedding(input map[string]interface{}) []float64 {
+func (mo *MemoryOptimizer) generateEmbedding(input map[string]any) []float64 {
 	// Simplified embedding - in practice, use a proper embedding model
 	// For now, create a simple feature vector
 	embedding := make([]float64, 10)
@@ -413,8 +413,8 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 		// Mark items for merging to avoid modifying slice during iteration
 		merged := make(map[int]bool)
 		mergeOps := []struct {
-			baseIdx   int
-			mergeIdx  int
+			baseIdx    int
+			mergeIdx   int
 			mergedItem *MemoryItem
 		}{}
 
@@ -430,12 +430,12 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 				if mo.areSimilar(items[i], items[j]) {
 					mergedItem := mo.mergeItems(items[i], items[j])
 					mergeOps = append(mergeOps, struct {
-						baseIdx   int
-						mergeIdx  int
+						baseIdx    int
+						mergeIdx   int
 						mergedItem *MemoryItem
 					}{i, j, mergedItem})
 					merged[j] = true // Mark j as merged
-					break // Only merge with first similar item
+					break            // Only merge with first similar item
 				}
 			}
 		}
@@ -466,7 +466,7 @@ func (mo *MemoryOptimizer) compressByMerging(ctx context.Context) {
 				// Try to restore original items
 				mo.index.Add(items[op.baseIdx])
 				mo.index.Add(items[op.mergeIdx])
-				_ = mo.memory.Store(items[op.baseIdx].Key, items[op.baseIdx].Value) // Best effort
+				_ = mo.memory.Store(items[op.baseIdx].Key, items[op.baseIdx].Value)   // Best effort
 				_ = mo.memory.Store(items[op.mergeIdx].Key, items[op.mergeIdx].Value) // Best effort
 			}
 		}
@@ -539,7 +539,7 @@ func (mo *MemoryOptimizer) cleanup(ctx context.Context) {
 }
 
 // findRelevant finds the most relevant memories for a query.
-func (mo *MemoryOptimizer) findRelevant(query map[string]interface{}, limit int) []*MemoryItem {
+func (mo *MemoryOptimizer) findRelevant(query map[string]any, limit int) []*MemoryItem {
 	queryCategory := mo.categorize(query)
 	queryEmbedding := mo.generateEmbedding(query)
 	queryHash := mo.hash(query)
@@ -599,8 +599,8 @@ func (mo *MemoryOptimizer) groupSimilarMemories() map[string][]*MemoryItem {
 }
 
 // createSummary creates a summary of multiple memory items.
-func (mo *MemoryOptimizer) createSummary(items []*MemoryItem) interface{} {
-	summary := map[string]interface{}{
+func (mo *MemoryOptimizer) createSummary(items []*MemoryItem) any {
+	summary := map[string]any{
 		"type":         "summary",
 		"item_count":   len(items),
 		"created":      time.Now(),
@@ -611,7 +611,7 @@ func (mo *MemoryOptimizer) createSummary(items []*MemoryItem) interface{} {
 	successCount := 0
 	for _, item := range items {
 		summary["categories"].(map[string]int)[item.Category]++
-		if val, ok := item.Value.(map[string]interface{}); ok {
+		if val, ok := item.Value.(map[string]any); ok {
 			if success, ok := val["success"].(bool); ok && success {
 				successCount++
 			}
@@ -678,11 +678,11 @@ func (mo *MemoryOptimizer) mergeItems(item1, item2 *MemoryItem) *MemoryItem {
 }
 
 // mergeValues merges two values.
-func (mo *MemoryOptimizer) mergeValues(val1, val2 interface{}) interface{} {
+func (mo *MemoryOptimizer) mergeValues(val1, val2 any) any {
 	// Simple merge - in practice, this could be more sophisticated
-	return map[string]interface{}{
+	return map[string]any{
 		"merged":    true,
-		"values":    []interface{}{val1, val2},
+		"values":    []any{val1, val2},
 		"merged_at": time.Now(),
 	}
 }
@@ -823,11 +823,11 @@ func (mi *MemoryIndex) Size() int {
 }
 
 // GetStatistics returns memory statistics.
-func (mo *MemoryOptimizer) GetStatistics() map[string]interface{} {
+func (mo *MemoryOptimizer) GetStatistics() map[string]any {
 	mo.mu.RLock()
 	defer mo.mu.RUnlock()
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"total_items":       mo.index.Size(),
 		"categories":        len(mo.index.categories),
 		"retention_rate":    mo.threshold,

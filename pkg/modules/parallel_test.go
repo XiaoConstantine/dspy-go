@@ -40,7 +40,7 @@ func NewMockModule(shouldFail bool, processingTime time.Duration) *MockModule {
 	}
 }
 
-func (m *MockModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	m.mu.Lock()
 	m.callCount++
 	count := m.callCount
@@ -60,7 +60,7 @@ func (m *MockModule) Process(ctx context.Context, inputs map[string]interface{},
 		return nil, stderrors.New("invalid input type")
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"output": fmt.Sprintf("processed_%s_call_%d", input, count),
 	}, nil
 }
@@ -106,7 +106,7 @@ func TestParallelSingleInput(t *testing.T) {
 	parallel := NewParallel(mockModule)
 
 	ctx := context.Background()
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"input": "test",
 	}
 
@@ -123,7 +123,7 @@ func TestParallelBatchProcessing(t *testing.T) {
 	ctx := context.Background()
 
 	// Create batch inputs
-	batchInputs := []map[string]interface{}{
+	batchInputs := []map[string]any{
 		{"input": "item1"},
 		{"input": "item2"},
 		{"input": "item3"},
@@ -131,7 +131,7 @@ func TestParallelBatchProcessing(t *testing.T) {
 		{"input": "item5"},
 	}
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"batch_inputs": batchInputs,
 	}
 
@@ -141,21 +141,21 @@ func TestParallelBatchProcessing(t *testing.T) {
 
 	require.NoError(t, err)
 
-	results, ok := result["results"].([]map[string]interface{})
+	results, ok := result["results"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, results, 5)
 
 	// Verify all results are present and processed
 	processedItems := make(map[string]bool)
 	for _, res := range results {
-	output, ok := res["output"].(string)
-	require.True(t, ok)
+		output, ok := res["output"].(string)
+		require.True(t, ok)
 
-	// Extract the original input from the output (format: "processed_itemX_call_Y")
-	parts := strings.SplitN(strings.TrimPrefix(output, "processed_"), "_", 2)
-	if len(parts) > 0 {
-	processedItems[parts[0]] = true
-	}
+		// Extract the original input from the output (format: "processed_itemX_call_Y")
+		parts := strings.SplitN(strings.TrimPrefix(output, "processed_"), "_", 2)
+		if len(parts) > 0 {
+			processedItems[parts[0]] = true
+		}
 	}
 	assert.Len(t, processedItems, len(batchInputs), "should have processed all unique items")
 
@@ -172,19 +172,19 @@ func TestParallelWithFailures(t *testing.T) {
 	parallel := NewParallel(mockModule, WithReturnFailures(true))
 
 	ctx := context.Background()
-	batchInputs := []map[string]interface{}{
+	batchInputs := []map[string]any{
 		{"input": "item1"},
 		{"input": "item2"},
 	}
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"batch_inputs": batchInputs,
 	}
 
 	result, err := parallel.Process(ctx, inputs)
 	require.NoError(t, err)
 
-	results, ok := result["results"].([]map[string]interface{})
+	results, ok := result["results"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, results, 2) // Same length as input, but with nil values
 
@@ -193,7 +193,7 @@ func TestParallelWithFailures(t *testing.T) {
 		assert.Nil(t, res)
 	}
 
-	failures, ok := result["failures"].([]map[string]interface{})
+	failures, ok := result["failures"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, failures, 2) // Two failures
 
@@ -209,13 +209,13 @@ func TestParallelStopOnFirstError(t *testing.T) {
 	parallel := NewParallel(mockModule, WithStopOnFirstError(true))
 
 	ctx := context.Background()
-	batchInputs := []map[string]interface{}{
+	batchInputs := []map[string]any{
 		{"input": "item1"},
 		{"input": "item2"},
 		{"input": "item3"},
 	}
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"batch_inputs": batchInputs,
 	}
 
@@ -242,21 +242,21 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 	parallel := NewParallel(mockModule, WithReturnFailures(true))
 
 	ctx := context.Background()
-	batchInputs := []map[string]interface{}{
+	batchInputs := []map[string]any{
 		{"input": "item1"}, // Will succeed
 		{"input": "item2"}, // Will fail
 		{"input": "item3"}, // Will succeed
 		{"input": "item4"}, // Will fail
 	}
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"batch_inputs": batchInputs,
 	}
 
 	result, err := parallel.Process(ctx, inputs)
 	require.NoError(t, err)
 
-	results, ok := result["results"].([]map[string]interface{})
+	results, ok := result["results"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, results, 4) // Same length as input batch
 
@@ -278,7 +278,7 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 	assert.Equal(t, 2, successCount)
 	assert.Equal(t, 2, nilCount)
 
-	failures, ok := result["failures"].([]map[string]interface{})
+	failures, ok := result["failures"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, failures, 2) // Two failures
 
@@ -294,14 +294,14 @@ func TestParallelEmptyBatch(t *testing.T) {
 	parallel := NewParallel(mockModule)
 
 	ctx := context.Background()
-	inputs := map[string]interface{}{
-		"batch_inputs": []map[string]interface{}{},
+	inputs := map[string]any{
+		"batch_inputs": []map[string]any{},
 	}
 
 	result, err := parallel.Process(ctx, inputs)
 	require.NoError(t, err)
 
-	results, ok := result["results"].([]map[string]interface{})
+	results, ok := result["results"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, results, 0)
 }
@@ -339,7 +339,7 @@ type ConditionalModule struct {
 	mu         sync.Mutex
 }
 
-func (m *ConditionalModule) Process(ctx context.Context, inputs map[string]interface{}, opts ...core.Option) (map[string]interface{}, error) {
+func (m *ConditionalModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	m.mu.Lock()
 	m.callCount++
 	count := m.callCount
@@ -355,7 +355,7 @@ func (m *ConditionalModule) Process(ctx context.Context, inputs map[string]inter
 		return nil, fmt.Errorf("conditional module failed for input %s", input)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"output": fmt.Sprintf("processed_%s_call_%d", input, count),
 	}, nil
 }
@@ -390,11 +390,11 @@ func (m *MockLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion}
 }
 
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, stderrors.New("not implemented")
 }
 
-func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, stderrors.New("not implemented")
 }
 
@@ -442,14 +442,14 @@ func TestParallelConcurrencyControl(t *testing.T) {
 	parallel := NewParallel(mockModule, WithMaxWorkers(maxWorkers))
 
 	ctx := context.Background()
-	batchInputs := make([]map[string]interface{}, 10)
+	batchInputs := make([]map[string]any, 10)
 	for i := 0; i < 10; i++ {
-		batchInputs[i] = map[string]interface{}{
+		batchInputs[i] = map[string]any{
 			"input": fmt.Sprintf("item%d", i),
 		}
 	}
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"batch_inputs": batchInputs,
 	}
 
@@ -459,7 +459,7 @@ func TestParallelConcurrencyControl(t *testing.T) {
 
 	require.NoError(t, err)
 
-	results, ok := result["results"].([]map[string]interface{})
+	results, ok := result["results"].([]map[string]any)
 	require.True(t, ok)
 	assert.Len(t, results, 10)
 

@@ -59,7 +59,7 @@ func (s *SearchTool) CanHandle(ctx context.Context, intent string) bool {
 	return false
 }
 
-func (s *SearchTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (s *SearchTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	query, ok := params["query"].(string)
 	if !ok {
 		query = "default search"
@@ -68,26 +68,26 @@ func (s *SearchTool) Execute(ctx context.Context, params map[string]interface{})
 	// Simulate search operation
 	time.Sleep(50 * time.Millisecond)
 
-	results := []map[string]interface{}{
+	results := []map[string]any{
 		{"id": 1, "title": "Result 1 for " + query, "relevance": 0.95},
 		{"id": 2, "title": "Result 2 for " + query, "relevance": 0.87},
 		{"id": 3, "title": "Result 3 for " + query, "relevance": 0.82},
 	}
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"results": results,
 			"count":   len(results),
 			"query":   query,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"execution_time_ms": 50,
 			"source":            "advanced_search_api",
 		},
 	}, nil
 }
 
-func (s *SearchTool) Validate(params map[string]interface{}) error {
+func (s *SearchTool) Validate(params map[string]any) error {
 	return nil
 }
 

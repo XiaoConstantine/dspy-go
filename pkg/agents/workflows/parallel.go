@@ -23,8 +23,8 @@ func NewParallelWorkflow(memory agents.Memory, maxConcurrent int) *ParallelWorkf
 	}
 }
 
-func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-	state := make(map[string]interface{})
+func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+	state := make(map[string]any)
 	for k, v := range inputs {
 		state[k] = v
 	}
@@ -79,7 +79,7 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]interf
 			}
 
 			// Prepare inputs for this step
-			stepInputs := make(map[string]interface{})
+			stepInputs := make(map[string]any)
 			signature := step.Module.GetSignature()
 
 			for _, field := range signature.Inputs {

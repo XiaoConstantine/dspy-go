@@ -142,7 +142,7 @@ func (g *GEPA) buildAncestorMergedCandidate(source *GEPACandidate, choice *gepaA
 		Fitness:        source.Fitness,
 		ParentIDs:      []string{source.ID, choice.partner.ID},
 		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]any{
 			"proposal_type":                "ancestor_merge",
 			"merge_partner_id":             choice.partner.ID,
 			"merge_common_ancestor_id":     choice.ancestor.ID,

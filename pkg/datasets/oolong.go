@@ -40,7 +40,7 @@ func (t *OolongTask) UnmarshalJSON(data []byte) error {
 	type taskAlias OolongTask
 	var raw struct {
 		taskAlias
-		ID interface{} `json:"id"`
+		ID any `json:"id"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err

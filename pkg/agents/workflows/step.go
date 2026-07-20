@@ -26,7 +26,7 @@ type Step struct {
 
 	// Condition is an optional function that determines if this step should execute
 	// It can examine the current workflow state to make this decision
-	Condition func(state map[string]interface{}) bool
+	Condition func(state map[string]any) bool
 
 	// RetryConfig specifies how to handle failures of this step
 	RetryConfig *RetryConfig
@@ -47,17 +47,17 @@ type StepResult struct {
 	StepID string
 
 	// Outputs contains the data produced by this step
-	Outputs map[string]interface{}
+	Outputs map[string]any
 
 	// Metadata contains additional information about the execution
-	Metadata map[string]interface{}
+	Metadata map[string]any
 
 	// NextSteps indicates which steps should run next (may be modified by step execution)
 	NextSteps []string
 }
 
 // Execute runs the step's DSPy module with the provided inputs.
-func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
+func (s *Step) Execute(ctx context.Context, inputs map[string]any) (*StepResult, error) {
 	signature := s.Module.GetSignature()
 
 	// First validate that we have all required inputs
@@ -110,7 +110,7 @@ func (s *Step) Execute(ctx context.Context, inputs map[string]interface{}) (*Ste
 }
 
 // executeOnce performs a single execution attempt of the step.
-func (s *Step) executeOnce(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
+func (s *Step) executeOnce(ctx context.Context, inputs map[string]any) (*StepResult, error) {
 	if err := checkCtxErr(ctx); err != nil {
 		return nil, err
 	}
@@ -127,12 +127,12 @@ func (s *Step) executeOnce(ctx context.Context, inputs map[string]interface{}) (
 		StepID:    s.ID,
 		Outputs:   outputs,
 		NextSteps: s.NextSteps,
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 	}, nil
 }
 
 // executeWithRetry implements retry logic for the step.
-func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]interface{}) (*StepResult, error) {
+func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]any) (*StepResult, error) {
 	var lastErr error
 	for attempt := 0; attempt < s.RetryConfig.MaxAttempts; attempt++ {
 
@@ -164,7 +164,7 @@ func (s *Step) executeWithRetry(ctx context.Context, inputs map[string]interface
 }
 
 // validateInputs checks if all required input fields are present.
-func (s *Step) validateInputs(inputs map[string]interface{}, signature core.Signature) error {
+func (s *Step) validateInputs(inputs map[string]any, signature core.Signature) error {
 	for _, field := range signature.Inputs {
 		if _, ok := inputs[field.Name]; !ok {
 			return errors.WithFields(
@@ -179,7 +179,7 @@ func (s *Step) validateInputs(inputs map[string]interface{}, signature core.Sign
 }
 
 // validateOutputs checks if all expected output fields are present.
-func (s *Step) validateOutputs(outputs map[string]interface{}, signature core.Signature) error {
+func (s *Step) validateOutputs(outputs map[string]any, signature core.Signature) error {
 	for _, field := range signature.Outputs {
 		if _, ok := outputs[field.Name]; !ok {
 			return errors.WithFields(
@@ -203,7 +203,7 @@ func checkCtxErr(ctx context.Context) error {
 	}
 }
 
-func getKeysAsArray(m map[string]interface{}) []string {
+func getKeysAsArray(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

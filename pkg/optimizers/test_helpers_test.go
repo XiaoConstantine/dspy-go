@@ -21,7 +21,7 @@ func setupTestMockLLM(t *testing.T) *testutil.MockLLM {
 	mockLLM := new(testutil.MockLLM)
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: `answer:
 	Paris`}, nil).Maybe()
-	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]interface{}{"answer": "Paris"}, nil).Maybe()
+	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(map[string]any{"answer": "Paris"}, nil).Maybe()
 
 	core.GlobalConfig.DefaultLLM = mockLLM
 	core.GlobalConfig.TeacherLLM = mockLLM

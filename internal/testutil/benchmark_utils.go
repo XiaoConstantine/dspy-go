@@ -83,11 +83,11 @@ func CreateBenchmarkDatasets() map[string]BenchmarkDataset {
 		for i := 0; i < size; i++ {
 			qa := baseQA[i%len(baseQA)]
 			examples[i] = core.Example{
-				Inputs: map[string]interface{}{
+				Inputs: map[string]any{
 					"question": qa.question,
 					"prompt":   qa.question, // For MIPRO compatibility
 				},
-				Outputs: map[string]interface{}{
+				Outputs: map[string]any{
 					"answer": qa.answer,
 				},
 			}
@@ -110,8 +110,8 @@ func CreateBenchmarkProgram(predictor core.Module) core.Program {
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return modules["predictor"].Process(ctx, inputs)
 			}
 		},
@@ -119,7 +119,7 @@ func CreateBenchmarkProgram(predictor core.Module) core.Program {
 }
 
 // BenchmarkAccuracyMetric provides a standard accuracy metric for benchmarking.
-func BenchmarkAccuracyMetric(expected, actual map[string]interface{}) float64 {
+func BenchmarkAccuracyMetric(expected, actual map[string]any) float64 {
 	expectedAnswer, ok := expected["answer"].(string)
 	if !ok {
 		return 0.0

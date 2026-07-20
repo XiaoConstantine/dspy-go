@@ -458,7 +458,7 @@ func TestOpenAILLM_GenerateWithJSON(t *testing.T) {
 
 	if data, ok := response["data"]; !ok {
 		t.Errorf("expected data field")
-	} else if dataMap, ok := data.(map[string]interface{}); !ok {
+	} else if dataMap, ok := data.(map[string]any); !ok {
 		t.Errorf("expected data to be a map")
 	} else if key, ok := dataMap["key"]; !ok || key != "value" {
 		t.Errorf("expected data.key field with value 'value'")
@@ -572,7 +572,7 @@ func TestOpenAILLM_CreateEmbeddings(t *testing.T) {
 		}
 
 		// Verify input is an array
-		inputs, ok := req.Input.([]interface{})
+		inputs, ok := req.Input.([]any)
 		if !ok {
 			t.Errorf("expected input to be an array")
 		}
@@ -1052,15 +1052,15 @@ func TestOpenAILLM_GenerateWithFunctions(t *testing.T) {
 		t.Fatalf("failed to create LLM: %v", err)
 	}
 
-	functions := []map[string]interface{}{
+	functions := []map[string]any{
 		{
 			"name":        "get_weather",
 			"description": "Get weather by city",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"location": map[string]interface{}{"type": "string"},
-					"unit":     map[string]interface{}{"type": "string"},
+				"properties": map[string]any{
+					"location": map[string]any{"type": "string"},
+					"unit":     map[string]any{"type": "string"},
 				},
 				"required": []string{"location"},
 			},
@@ -1072,7 +1072,7 @@ func TestOpenAILLM_GenerateWithFunctions(t *testing.T) {
 		t.Fatalf("GenerateWithFunctions failed: %v", err)
 	}
 
-	toolCall, ok := result["function_call"].(map[string]interface{})
+	toolCall, ok := result["function_call"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected function_call map in result, got %#v", result["function_call"])
 	}
@@ -1081,7 +1081,7 @@ func TestOpenAILLM_GenerateWithFunctions(t *testing.T) {
 		t.Errorf("expected tool name get_weather, got %v", toolCall["name"])
 	}
 
-	arguments, ok := toolCall["arguments"].(map[string]interface{})
+	arguments, ok := toolCall["arguments"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected arguments map, got %#v", toolCall["arguments"])
 	}
@@ -1230,10 +1230,10 @@ func TestOpenAILLM_GenerateWithTools(t *testing.T) {
 	require.Len(t, capturedRequest.Tools, 1)
 	assert.Equal(t, "auto", capturedRequest.ToolChoice)
 
-	functionCall, ok := result["function_call"].(map[string]interface{})
+	functionCall, ok := result["function_call"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Finish", functionCall["name"])
-	assert.Equal(t, map[string]interface{}{"answer": "done"}, functionCall["arguments"])
+	assert.Equal(t, map[string]any{"answer": "done"}, functionCall["arguments"])
 	toolCalls, ok := result["tool_calls"].([]core.ToolCall)
 	require.True(t, ok)
 	require.Len(t, toolCalls, 1)
@@ -1419,7 +1419,7 @@ func TestOpenAILLM_GenerateWithTools_RetriesTransientInvalidJSONOnce(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, 2, requestCount)
 	require.True(t, sawClose)
-	functionCall, ok := result["function_call"].(map[string]interface{})
+	functionCall, ok := result["function_call"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "Finish", functionCall["name"])
 }

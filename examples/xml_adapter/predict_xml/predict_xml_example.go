@@ -159,9 +159,9 @@ func main() {
 
 	// Secure XML configuration with strict limits
 	secureConfig := interceptors.SecureXMLConfig().
-		WithMaxSize(1024).      // Smaller limit for security
-		WithMaxDepth(3).        // Limit XML nesting
-		WithTimeout(5 * time.Second)       // 5 second timeout
+		WithMaxSize(1024).           // Smaller limit for security
+		WithMaxDepth(3).             // Limit XML nesting
+		WithTimeout(5 * time.Second) // 5 second timeout
 
 	predict4 := modules.NewPredict(signature4).
 		WithName("Secure Predict").

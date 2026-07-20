@@ -10,13 +10,13 @@ import (
 )
 
 type HotPotQAExample struct {
-	ID              string          `json:"_id"`
-	SupportingFacts [][]interface{} `json:"supporting_facts"`
-	Context         [][]interface{} `json:"context"`
-	Question        string          `json:"question"`
-	Answer          string          `json:"answer"`
-	Type            string          `json:"type"`
-	Level           string          `json:"level"`
+	ID              string  `json:"_id"`
+	SupportingFacts [][]any `json:"supporting_facts"`
+	Context         [][]any `json:"context"`
+	Question        string  `json:"question"`
+	Answer          string  `json:"answer"`
+	Type            string  `json:"type"`
+	Level           string  `json:"level"`
 }
 
 func LoadHotpotQA() ([]HotPotQAExample, error) {

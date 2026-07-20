@@ -10,7 +10,7 @@ import (
 )
 
 // ToolFunc represents a function that can be called as a tool.
-type ToolFunc func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error)
+type ToolFunc func(ctx context.Context, args map[string]any) (*models.CallToolResult, error)
 
 // FuncTool wraps a Go function as a Tool implementation.
 type FuncTool struct {
@@ -73,12 +73,12 @@ func (t *FuncTool) CanHandle(ctx context.Context, intent string) bool {
 }
 
 // Call executes the wrapped function with the provided arguments.
-func (t *FuncTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (t *FuncTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	return t.fn(ctx, args)
 }
 
 // Execute runs the tool with provided parameters and adapts the result to the core interface.
-func (t *FuncTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t *FuncTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	result, err := t.Call(ctx, params)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -87,15 +87,15 @@ func (t *FuncTool) Execute(ctx context.Context, params map[string]interface{}) (
 	// Convert CallToolResult to core.ToolResult
 	toolResult := core.ToolResult{
 		Data:        extractContentText(result.Content),
-		Metadata:    map[string]interface{}{"isError": result.IsError},
-		Annotations: map[string]interface{}{},
+		Metadata:    map[string]any{"isError": result.IsError},
+		Annotations: map[string]any{},
 	}
 
 	return toolResult, nil
 }
 
 // Validate checks if the parameters match the expected schema.
-func (t *FuncTool) Validate(params map[string]interface{}) error {
+func (t *FuncTool) Validate(params map[string]any) error {
 	// Use the full InputSchema for validation
 	for name, param := range t.schema.Properties {
 		if param.Required {

@@ -21,10 +21,10 @@ func TestBayesianToolSelector_ScoreTools(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		intent         string
-		expectedBest   string
-		minScores      int
+		name         string
+		intent       string
+		expectedBest string
+		minScores    int
 	}{
 		{
 			name:         "search intent should favor search tool",

@@ -74,7 +74,7 @@ type SIMBAConfig struct {
 // Trajectory represents an execution trajectory for rule extraction.
 type Trajectory struct {
 	Example       core.Example
-	Prediction    map[string]interface{}
+	Prediction    map[string]any
 	Score         float64
 	Success       bool
 	ProgramID     string // To track which program generated this
@@ -188,7 +188,7 @@ type SIMBA struct {
 	config SIMBAConfig
 
 	// Evaluation metric (set during Compile)
-	metric func(expected, actual map[string]interface{}) float64
+	metric func(expected, actual map[string]any) float64
 
 	// Language models
 	primaryModel  core.PromptModel // Primary optimization model
@@ -425,7 +425,7 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 	}
 
 	// Convert core.Metric to SIMBA's metric format
-	simbaMetric := func(expected, actual map[string]interface{}) float64 {
+	simbaMetric := func(expected, actual map[string]any) float64 {
 		return metric(expected, actual)
 	}
 	s.metric = simbaMetric

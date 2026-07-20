@@ -58,10 +58,10 @@ func CreateRouterWorkflow() *workflows.RouterWorkflow {
 	return routerWorkflow
 }
 
-func CreateParallelWorkflow(stakeholders []string) (*workflows.ParallelWorkflow, map[string]interface{}, error) {
+func CreateParallelWorkflow(stakeholders []string) (*workflows.ParallelWorkflow, map[string]any, error) {
 	// Create a new parallel workflow with in-memory storage
 	workflow := workflows.NewParallelWorkflow(agents.NewInMemoryStore(), 3)
-	inputs := make(map[string]interface{})
+	inputs := make(map[string]any)
 
 	for i, stakeholder := range stakeholders {
 		step := &workflows.Step{
@@ -182,14 +182,14 @@ Format example:
 // A simple optimizer following the pattern from the Python implementation.
 type PromptingOptimizer struct {
 	// Metric evaluates solution quality and returns PASS/FAIL with feedback
-	Metric      func(ctx context.Context, solution map[string]interface{}) (pass bool, feedback string)
+	Metric      func(ctx context.Context, solution map[string]any) (pass bool, feedback string)
 	MaxAttempts int
 	Memory      []string // Track previous attempts like Python version
 	Logger      *logging.Logger
 }
 
 func NewPromptingOptimizer(
-	metric func(ctx context.Context, solution map[string]interface{}) (bool, string),
+	metric func(ctx context.Context, solution map[string]any) (bool, string),
 	maxAttempts int,
 ) *PromptingOptimizer {
 	return &PromptingOptimizer{
@@ -211,7 +211,7 @@ func (o *PromptingOptimizer) Compile(
 
 	// Initial attempt without context
 	o.Logger.Info(ctx, "Making initial attempt...")
-	result, err := program.Execute(ctx, map[string]interface{}{
+	result, err := program.Execute(ctx, map[string]any{
 		"task": "Implement MinStack with O(1) operations",
 	})
 	if err != nil {
@@ -250,7 +250,7 @@ func (o *PromptingOptimizer) Compile(
 		context += fmt.Sprintf("\nFeedback: %s", feedback)
 
 		// Try again with feedback
-		result, err = program.Execute(attemptCtx, map[string]interface{}{
+		result, err = program.Execute(attemptCtx, map[string]any{
 			"task":    "Implement MinStack with O(1) operations",
 			"context": context,
 		})
@@ -274,7 +274,7 @@ func (o *PromptingOptimizer) Compile(
 // Example processor implementation.
 type ExampleProcessor struct{}
 
-func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, taskContext map[string]any) (any, error) {
 	// Create a logger to help us understand what's happening
 	logger := logging.GetLogger()
 	logger.Info(ctx, "Processing task: %s (Type: %s)", task.ID, task.Type)
@@ -293,25 +293,25 @@ func (p *ExampleProcessor) Process(ctx context.Context, task agents.Task, taskCo
 	}
 }
 
-func (p *ExampleProcessor) handleAnalysisTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleAnalysisTask(task agents.Task, taskContext map[string]any) (any, error) {
 	// Simulate analysis work
 	result := fmt.Sprintf("Completed analysis for: %s", task.Metadata)
 	return result, nil
 }
 
-func (p *ExampleProcessor) handleDecompositionTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleDecompositionTask(task agents.Task, taskContext map[string]any) (any, error) {
 	// Simulate decomposition work
 	result := fmt.Sprintf("Decomposed task: %s", task.Metadata)
 	return result, nil
 }
 
-func (p *ExampleProcessor) handleFormattingTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleFormattingTask(task agents.Task, taskContext map[string]any) (any, error) {
 	// Simulate formatting work
 	result := fmt.Sprintf("Formatted output for: %s", task.Metadata)
 	return result, nil
 }
 
-func (p *ExampleProcessor) handleGenericTask(task agents.Task, taskContext map[string]interface{}) (interface{}, error) {
+func (p *ExampleProcessor) handleGenericTask(task agents.Task, taskContext map[string]any) (any, error) {
 	// Handle any other task type
 	result := fmt.Sprintf("Processed task %s: %s", task.ID, task.Metadata)
 	return result, nil

@@ -161,7 +161,7 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 	}
 
 	taskPrompt := a.buildTaskPrompt(req)
-	resultMap, err := sharedAgent.Execute(runCtx, map[string]interface{}{
+	resultMap, err := sharedAgent.Execute(runCtx, map[string]any{
 		"task":      taskPrompt,
 		"task_id":   req.TaskID,
 		"max_turns": a.maxTurns(req),
@@ -388,7 +388,7 @@ func containerEnvValue(env []string, key string, fallback string) string {
 	return fallback
 }
 
-func boolValue(value interface{}) bool {
+func boolValue(value any) bool {
 	if typed, ok := value.(bool); ok {
 		return typed
 	}

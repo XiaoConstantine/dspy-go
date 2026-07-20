@@ -20,7 +20,7 @@ type TraceStep struct {
 	Thought            string
 	ActionRaw          string
 	Tool               string
-	Arguments          map[string]interface{}
+	Arguments          map[string]any
 	Observation        string
 	ObservationDisplay string
 	ObservationDetails map[string]any
@@ -37,8 +37,8 @@ type ExecutionTrace struct {
 	AgentID          string
 	AgentType        string
 	Task             string
-	Input            map[string]interface{}
-	Output           map[string]interface{}
+	Input            map[string]any
+	Output           map[string]any
 	Steps            []TraceStep
 	Status           TraceStatus
 	Error            string
@@ -47,7 +47,7 @@ type ExecutionTrace struct {
 	ProcessingTime   time.Duration
 	TokenUsage       map[string]int64
 	ToolUsageCount   map[string]int
-	ContextMetadata  map[string]interface{}
+	ContextMetadata  map[string]any
 	TerminationCause string
 }
 

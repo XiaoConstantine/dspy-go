@@ -43,7 +43,7 @@ func FindCodeBlocks(text string) []string {
 			code := strings.TrimSpace(match[1])
 			if code != "" {
 				// Strip language marker if LLM included it in the code content
-				// This handles cases like ```go\ngo\nactual code``` 
+				// This handles cases like ```go\ngo\nactual code```
 				code = stripLanguageMarker(code)
 				if code != "" {
 					results = append(results, code)
@@ -68,8 +68,8 @@ func stripLanguageMarker(code string) string {
 	lines := strings.SplitN(code, "\n", 2)
 	if len(lines) >= 2 {
 		firstLine := strings.TrimSpace(lines[0])
-		if firstLine == "go" || firstLine == "golang" || firstLine == "repl" || 
-		   firstLine == "Go" || firstLine == "GO" {
+		if firstLine == "go" || firstLine == "golang" || firstLine == "repl" ||
+			firstLine == "Go" || firstLine == "GO" {
 			return strings.TrimSpace(lines[1])
 		}
 	}

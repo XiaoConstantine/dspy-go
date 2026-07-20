@@ -53,7 +53,7 @@ func getDefaultLLMConfig() LLMConfig {
 			Embedding: EmbeddingConfig{
 				Model:     "text-embedding-3-small",
 				BatchSize: 32,
-				Params:    map[string]interface{}{},
+				Params:    map[string]any{},
 			},
 			Capabilities: []string{
 				"completion",
@@ -106,7 +106,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 			Embedding: EmbeddingConfig{
 				Model:     "text-embedding-3-small",
 				BatchSize: 32,
-				Params:    map[string]interface{}{},
+				Params:    map[string]any{},
 			},
 			Capabilities: []string{
 				"completion",
@@ -144,7 +144,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 			Embedding: EmbeddingConfig{
 				Model:     "gemini-embedding-2",
 				BatchSize: 32,
-				Params:    map[string]interface{}{},
+				Params:    map[string]any{},
 			},
 			Capabilities: []string{
 				"completion",
@@ -183,7 +183,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 			Embedding: EmbeddingConfig{
 				Model:     "nomic-embed-text",
 				BatchSize: 16,
-				Params:    map[string]interface{}{},
+				Params:    map[string]any{},
 			},
 			Capabilities: []string{
 				"completion",
@@ -221,7 +221,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 			Embedding: EmbeddingConfig{
 				Model:     "",
 				BatchSize: 16,
-				Params:    map[string]interface{}{},
+				Params:    map[string]any{},
 			},
 			Capabilities: []string{
 				"completion",
@@ -244,7 +244,7 @@ func getDefaultLoggingConfig() LoggingConfig {
 				Colors: true,
 			},
 		},
-		DefaultFields: map[string]interface{}{
+		DefaultFields: map[string]any{
 			"service": "dspy-go",
 			"version": "1.0.0",
 		},
@@ -342,7 +342,7 @@ func getDefaultAgentsConfig() AgentsConfig {
 			Persistence: WorkflowPersistenceConfig{
 				Enabled: false,
 				Backend: "file",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"path": "./data/workflows",
 				},
 			},
@@ -464,7 +464,7 @@ func GetDefaultEmbeddingConfig() *EmbeddingConfig {
 	return &EmbeddingConfig{
 		Model:     "",
 		BatchSize: 32,
-		Params:    map[string]interface{}{},
+		Params:    map[string]any{},
 	}
 }
 
@@ -644,7 +644,7 @@ func mergeEmbeddingConfig(partial EmbeddingConfig, defaults EmbeddingConfig) Emb
 		result.BatchSize = defaults.BatchSize
 	}
 	if result.Params == nil {
-		result.Params = make(map[string]interface{})
+		result.Params = make(map[string]any)
 	}
 	for k, v := range defaults.Params {
 		if _, exists := result.Params[k]; !exists {

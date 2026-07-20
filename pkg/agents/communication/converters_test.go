@@ -32,8 +32,8 @@ func TestMessageToAgentInput_Simple(t *testing.T) {
 
 func TestMessageToAgentInput_MultipleParts(t *testing.T) {
 	msg := NewMessage(RoleUser,
-		NewTextPartWithMetadata("Paris", map[string]interface{}{"field": "city"}),
-		NewTextPartWithMetadata("France", map[string]interface{}{"field": "country"}),
+		NewTextPartWithMetadata("Paris", map[string]any{"field": "city"}),
+		NewTextPartWithMetadata("France", map[string]any{"field": "country"}),
 	)
 
 	input, err := MessageToAgentInput(msg)
@@ -87,7 +87,7 @@ func TestMessageToAgentInput_WithFiles(t *testing.T) {
 }
 
 func TestMessageToAgentInput_WithData(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"temperature": 0.7,
 		"maxTokens":   100,
 	}
@@ -134,7 +134,7 @@ func TestMessageToAgentInput_EmptyParts(t *testing.T) {
 // ============================================================================
 
 func TestAgentOutputToMessage_Simple(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"answer": "The capital of France is Paris",
 	}
 
@@ -158,7 +158,7 @@ func TestAgentOutputToMessage_Simple(t *testing.T) {
 }
 
 func TestAgentOutputToMessage_MultipleFields(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"answer":     "Paris",
 		"confidence": "high",
 		"source":     "Wikipedia",
@@ -185,10 +185,10 @@ func TestAgentOutputToMessage_MultipleFields(t *testing.T) {
 }
 
 func TestAgentOutputToMessage_SkipsInternalFields(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"answer":      "Paris",
 		"_context_id": "ctx-123",
-		"_metadata":   map[string]interface{}{"internal": true},
+		"_metadata":   map[string]any{"internal": true},
 		"_some_field": "should be skipped",
 	}
 
@@ -216,7 +216,7 @@ func TestAgentOutputToMessage_NilOutput(t *testing.T) {
 }
 
 func TestAgentOutputToMessage_EmptyOutput(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"_only_internal": "value",
 	}
 
@@ -231,7 +231,7 @@ func TestAgentOutputToMessage_EmptyOutput(t *testing.T) {
 // ============================================================================
 
 func TestAgentOutputToArtifact_Simple(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"result": "Success",
 	}
 
@@ -249,9 +249,9 @@ func TestAgentOutputToArtifact_Simple(t *testing.T) {
 }
 
 func TestAgentOutputToArtifact_WithMetadata(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"result": "Success",
-		"_metadata": map[string]interface{}{
+		"_metadata": map[string]any{
 			"version":   "1.0",
 			"timestamp": "2024-01-01",
 		},
@@ -276,7 +276,7 @@ func TestAgentOutputToArtifact_WithMetadata(t *testing.T) {
 
 func TestRoundTrip_SimpleQuestion(t *testing.T) {
 	// Start with agent input
-	originalInput := map[string]interface{}{
+	originalInput := map[string]any{
 		"question": "What is 2+2?",
 	}
 
@@ -297,7 +297,7 @@ func TestRoundTrip_SimpleQuestion(t *testing.T) {
 
 func TestRoundTrip_AgentOutput(t *testing.T) {
 	// Start with agent output
-	originalOutput := map[string]interface{}{
+	originalOutput := map[string]any{
 		"answer": "The answer is 4",
 	}
 
@@ -352,11 +352,11 @@ func (m *mockTool) CanHandle(ctx context.Context, intent string) bool {
 	return true
 }
 
-func (m *mockTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *mockTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	return core.ToolResult{}, nil
 }
 
-func (m *mockTool) Validate(params map[string]interface{}) error {
+func (m *mockTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -420,7 +420,7 @@ func TestCapabilitiesToToolMetadata(t *testing.T) {
 			Name:        "search",
 			Description: "Search function",
 			Type:        "function",
-			Schema: map[string]interface{}{
+			Schema: map[string]any{
 				"type": "object",
 			},
 		},
@@ -552,7 +552,7 @@ func TestMessageToAgentInput_ComplexTypes(t *testing.T) {
 }
 
 func TestAgentOutputToMessage_VariousTypes(t *testing.T) {
-	output := map[string]interface{}{
+	output := map[string]any{
 		"string": "text",
 		"number": 42,
 		"float":  3.14,

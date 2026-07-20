@@ -190,7 +190,7 @@ Use XML format for actions: <action><tool_name>toolname</tool_name><parameters>{
 		fmt.Printf("\n%s [Task %d/%d] %s\n", icon, i+1, len(tasks), task.name)
 		fmt.Printf("   Query: %s\n", task.description)
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"task": task.description,
 		}
 
@@ -369,7 +369,7 @@ func registerTools(agent *react.ReActAgent) {
 				},
 			},
 		},
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			query, _ := args["query"].(string)
 
 			// Check for broken database query - simulates a failure
@@ -421,7 +421,7 @@ func registerTools(agent *react.ReActAgent) {
 				},
 			},
 		},
-		func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+		func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 			expression, _ := args["expression"].(string)
 
 			// Simple expression evaluation for demo

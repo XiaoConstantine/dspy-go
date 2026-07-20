@@ -206,8 +206,8 @@ var _ optimize.OptimizableAgent = (*ReActAgent)(nil)
 // ExecutionRecord tracks execution history for reflection.
 type ExecutionRecord struct {
 	Timestamp   time.Time
-	Input       map[string]interface{}
-	Output      map[string]interface{}
+	Input       map[string]any
+	Output      map[string]any
 	Actions     []ActionRecord
 	Trace       *agents.ExecutionTrace
 	Success     bool
@@ -227,7 +227,7 @@ type ActionRecord struct {
 	Thought     string
 	Action      string
 	Tool        string
-	Arguments   map[string]interface{}
+	Arguments   map[string]any
 	Observation string
 	Success     bool
 	Duration    time.Duration
@@ -673,7 +673,7 @@ func (r *ReActAgent) Clone() (optimize.OptimizableAgent, error) {
 }
 
 // Execute runs the agent's task with given input.
-func (r *ReActAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (r *ReActAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	// Check if we should use interceptors
 	if r.config.EnableInterceptors && len(r.interceptors) > 0 {
 		return r.ExecuteWithInterceptors(ctx, input, r.interceptors)
@@ -683,7 +683,7 @@ func (r *ReActAgent) Execute(ctx context.Context, input map[string]interface{}) 
 }
 
 // executeInternal performs the actual execution logic with context engineering.
-func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) (map[string]any, error) {
 	startTime := time.Now()
 	ctx, span := core.StartSpan(ctx, "ReActAgent.Execute")
 	defer core.EndSpan(ctx)
@@ -716,7 +716,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 
 	// STEP 1: Build optimized context using Manus patterns (if enabled)
 	var contextResponse *contextmgmt.ContextResponse
-	var optimizedInput map[string]interface{}
+	var optimizedInput map[string]any
 	if r.config.EnableContextEngineering && r.contextManager != nil {
 		var err error
 		optimizedInput, contextResponse, err = r.buildOptimizedContext(ctx, input, executionID)
@@ -749,7 +749,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 	}
 
 	// STEP 3: Execute using standard ReAct flow but with optimized context
-	var result map[string]interface{}
+	var result map[string]any
 	var reactTrace *modules.ReActTrace
 	var executionActions []ActionRecord
 	var err error
@@ -836,7 +836,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]inter
 }
 
 // executeReAct performs classic ReAct execution.
-func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]interface{}) (map[string]interface{}, *modules.ReActTrace, error) {
+func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, error) {
 	if r.module == nil {
 		return nil, nil, fmt.Errorf("agent not initialized")
 	}
@@ -846,12 +846,12 @@ func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]interfac
 }
 
 // executeReWOO performs plan-then-execute execution.
-func (r *ReActAgent) executeReWOO(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (r *ReActAgent) executeReWOO(ctx context.Context, input map[string]any) (map[string]any, error) {
 	results, _, err := r.executeReWOOWithActions(ctx, input)
 	return results, err
 }
 
-func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[string]interface{}) (map[string]interface{}, []ActionRecord, error) {
+func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[string]any) (map[string]any, []ActionRecord, error) {
 	logger := logging.GetLogger()
 
 	// First, create a plan
@@ -871,7 +871,7 @@ func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[stri
 	logger.Info(ctx, "Executing plan with %d steps", len(plan.Steps))
 
 	// Execute plan steps
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 	actions := make([]ActionRecord, 0, len(plan.Steps))
 	for i, step := range plan.Steps {
 		stepStart := time.Now()
@@ -900,7 +900,7 @@ func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[stri
 	return results, actions, nil
 }
 
-func (r *ReActAgent) executeHybridWithTrace(ctx context.Context, input map[string]interface{}) (map[string]interface{}, *modules.ReActTrace, []ActionRecord, error) {
+func (r *ReActAgent) executeHybridWithTrace(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, []ActionRecord, error) {
 	// Analyze task complexity to choose mode
 	complexity := r.analyzeTaskComplexity(input)
 
@@ -916,7 +916,7 @@ func (r *ReActAgent) executeHybridWithTrace(ctx context.Context, input map[strin
 }
 
 // analyzeTaskComplexity estimates task complexity.
-func (r *ReActAgent) analyzeTaskComplexity(input map[string]interface{}) float64 {
+func (r *ReActAgent) analyzeTaskComplexity(input map[string]any) float64 {
 	// Simple heuristic based on input structure
 	// In practice, this could use ML or more sophisticated analysis
 	complexity := 0.5
@@ -947,7 +947,7 @@ func (r *ReActAgent) analyzeTaskComplexity(input map[string]interface{}) float64
 }
 
 // executePlanStep executes a single step of a plan.
-func (r *ReActAgent) executePlanStep(ctx context.Context, step PlanStep, previousResults map[string]interface{}) (interface{}, error) {
+func (r *ReActAgent) executePlanStep(ctx context.Context, step PlanStep, previousResults map[string]any) (any, error) {
 	logger := logging.GetLogger()
 	logger.Debug(ctx, "Executing plan step: %s (tool: %s)", step.ID, step.Tool)
 
@@ -960,7 +960,7 @@ func (r *ReActAgent) executePlanStep(ctx context.Context, step PlanStep, previou
 	}
 
 	// Prepare arguments by merging step arguments with previous results
-	arguments := make(map[string]interface{})
+	arguments := make(map[string]any)
 
 	// Copy step arguments
 	for k, v := range step.Arguments {
@@ -1004,7 +1004,7 @@ func (r *ReActAgent) executePlanStep(ctx context.Context, step PlanStep, previou
 		}
 		// For non-critical steps, log the error but return a result indicating failure
 		logger.Warn(ctx, "Non-critical step '%s' failed: %v", step.ID, err)
-		return map[string]interface{}{
+		return map[string]any{
 			"success": false,
 			"error":   err.Error(),
 			"step_id": step.ID,
@@ -1016,7 +1016,7 @@ func (r *ReActAgent) executePlanStep(ctx context.Context, step PlanStep, previou
 }
 
 // loadMemoryContext loads relevant memory for the task.
-func (r *ReActAgent) loadMemoryContext(ctx context.Context, input map[string]interface{}) (interface{}, error) {
+func (r *ReActAgent) loadMemoryContext(ctx context.Context, input map[string]any) (any, error) {
 	if r.Optimizer == nil {
 		return nil, nil
 	}
@@ -1096,7 +1096,7 @@ func (r *ReActAgent) GetMemory() agents.Memory {
 }
 
 // ExecuteWithInterceptors runs the agent with interceptor support.
-func (r *ReActAgent) ExecuteWithInterceptors(ctx context.Context, input map[string]interface{}, interceptors []core.AgentInterceptor) (map[string]interface{}, error) {
+func (r *ReActAgent) ExecuteWithInterceptors(ctx context.Context, input map[string]any, interceptors []core.AgentInterceptor) (map[string]any, error) {
 	// Use provided interceptors, or fall back to agent's default interceptors
 	if interceptors == nil {
 		interceptors = r.interceptors
@@ -1106,7 +1106,7 @@ func (r *ReActAgent) ExecuteWithInterceptors(ctx context.Context, input map[stri
 	info := core.NewAgentInfo(r.id, "ReActAgent", r.capabilities)
 
 	// Create the base handler that calls the agent's execute method
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		return r.executeInternal(ctx, input)
 	}
 
@@ -1181,7 +1181,7 @@ func (r *ReActAgent) LastExecutionTrace() *agents.ExecutionTrace {
 // Context Engineering helper methods
 
 // buildOptimizedContext creates highly optimized context using all Manus patterns.
-func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string]interface{}, executionID string) (map[string]interface{}, *contextmgmt.ContextResponse, error) {
+func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string]any, executionID string) (map[string]any, *contextmgmt.ContextResponse, error) {
 	logger := logging.GetLogger()
 
 	// Extract observations and task from input
@@ -1225,14 +1225,14 @@ func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string
 	}
 
 	// Create enhanced input with optimized context
-	optimizedInput := make(map[string]interface{})
+	optimizedInput := make(map[string]any)
 	for k, v := range input {
 		optimizedInput[k] = v
 	}
 
 	// Replace or enhance with optimized context
 	optimizedInput["optimized_context"] = contextResponse.Context
-	optimizedInput["context_metadata"] = map[string]interface{}{
+	optimizedInput["context_metadata"] = map[string]any{
 		"version":        contextResponse.ContextVersion,
 		"token_count":    contextResponse.TokenCount,
 		"cache_hit_rate": contextResponse.CacheHitRate,
@@ -1247,7 +1247,7 @@ func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string
 }
 
 // updateContextSystems updates context management systems based on execution results.
-func (r *ReActAgent) updateContextSystems(ctx context.Context, executionID string, input map[string]interface{}, result map[string]interface{}, err error) {
+func (r *ReActAgent) updateContextSystems(ctx context.Context, executionID string, input map[string]any, result map[string]any, err error) {
 	logger := logging.GetLogger()
 
 	// Update todo management (thread-safe)
@@ -1271,7 +1271,7 @@ func (r *ReActAgent) updateContextSystems(ctx context.Context, executionID strin
 	// Record success/failure for learning
 	if r.config.AutoErrorLearning {
 		if err == nil {
-			r.contextManager.RecordSuccess(ctx, "agent_execution", "Successful task completion", map[string]interface{}{
+			r.contextManager.RecordSuccess(ctx, "agent_execution", "Successful task completion", map[string]any{
 				"execution_id": executionID,
 				"input":        input,
 				"result":       result,
@@ -1288,7 +1288,7 @@ func (r *ReActAgent) recordExecutionError(ctx context.Context, executionID strin
 	errorType := r.classifyError(err)
 	severity := r.assessErrorSeverity(err)
 
-	r.contextManager.RecordError(ctx, errorType, err.Error(), severity, map[string]interface{}{
+	r.contextManager.RecordError(ctx, errorType, err.Error(), severity, map[string]any{
 		"execution_id": executionID,
 		"agent_id":     r.id,
 		"timestamp":    time.Now(),
@@ -1332,7 +1332,7 @@ func (r *ReActAgent) assessErrorSeverity(err error) contextmgmt.ErrorSeverity {
 }
 
 // createEnhancedExecutionRecord creates a comprehensive execution record.
-func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]interface{}, result map[string]interface{}, err error, contextResponse *contextmgmt.ContextResponse, reactTrace *modules.ReActTrace, actions []ActionRecord, processingTime time.Duration) ExecutionRecord {
+func (r *ReActAgent) createEnhancedExecutionRecord(executionID string, input map[string]any, result map[string]any, err error, contextResponse *contextmgmt.ContextResponse, reactTrace *modules.ReActTrace, actions []ActionRecord, processingTime time.Duration) ExecutionRecord {
 	// Thread-safe access to contextVersion
 	r.mu.RLock()
 	contextVersion := r.contextVersion
@@ -1407,14 +1407,14 @@ func cloneActionRecords(actions []ActionRecord) []ActionRecord {
 }
 
 // extractObservations extracts observations from input.
-func (r *ReActAgent) extractObservations(input map[string]interface{}) []string {
+func (r *ReActAgent) extractObservations(input map[string]any) []string {
 	var observations []string
 
 	if obs, ok := input["observations"]; ok {
 		switch v := obs.(type) {
 		case []string:
 			observations = v
-		case []interface{}:
+		case []any:
 			for _, item := range v {
 				if str, ok := item.(string); ok {
 					observations = append(observations, str)
@@ -1436,7 +1436,7 @@ func (r *ReActAgent) extractObservations(input map[string]interface{}) []string 
 }
 
 // extractCurrentTask extracts current task from input.
-func (r *ReActAgent) extractCurrentTask(input map[string]interface{}) string {
+func (r *ReActAgent) extractCurrentTask(input map[string]any) string {
 	// Try multiple common keys for task description
 	taskKeys := []string{"task", "current_task", "objective", "goal", "instruction"}
 
@@ -1450,8 +1450,8 @@ func (r *ReActAgent) extractCurrentTask(input map[string]interface{}) string {
 }
 
 // extractAdditionalData extracts additional context data.
-func (r *ReActAgent) extractAdditionalData(input map[string]interface{}) map[string]interface{} {
-	additional := make(map[string]interface{})
+func (r *ReActAgent) extractAdditionalData(input map[string]any) map[string]any {
+	additional := make(map[string]any)
 
 	// Copy all non-standard keys as additional data
 	excludeKeys := map[string]bool{
@@ -1595,12 +1595,12 @@ func sanitizeArtifactContent(content string) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func planStepSucceeded(stepResult interface{}, err error) bool {
+func planStepSucceeded(stepResult any, err error) bool {
 	if err != nil {
 		return false
 	}
 
-	resultMap, ok := stepResult.(map[string]interface{})
+	resultMap, ok := stepResult.(map[string]any)
 	if !ok {
 		return true
 	}
@@ -1613,7 +1613,7 @@ func planStepSucceeded(stepResult interface{}, err error) bool {
 	return true
 }
 
-func formatPlanObservation(stepResult interface{}, err error) string {
+func formatPlanObservation(stepResult any, err error) string {
 	if err != nil {
 		return err.Error()
 	}
@@ -1623,7 +1623,7 @@ func formatPlanObservation(stepResult interface{}, err error) string {
 	return fmt.Sprint(stepResult)
 }
 
-func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result map[string]interface{}, err error, reactTrace *modules.ReActTrace, actions []ActionRecord, contextResponse *contextmgmt.ContextResponse, completedAt time.Time, processingTime time.Duration) *agents.ExecutionTrace {
+func (r *ReActAgent) buildExecutionTrace(input map[string]any, result map[string]any, err error, reactTrace *modules.ReActTrace, actions []ActionRecord, contextResponse *contextmgmt.ContextResponse, completedAt time.Time, processingTime time.Duration) *agents.ExecutionTrace {
 	var steps []agents.TraceStep
 	if reactTrace != nil && len(reactTrace.Steps) > 0 {
 		steps = make([]agents.TraceStep, 0, len(reactTrace.Steps))
@@ -1675,7 +1675,7 @@ func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result ma
 		}
 	}
 
-	contextMetadata := make(map[string]interface{})
+	contextMetadata := make(map[string]any)
 	if contextResponse != nil {
 		contextMetadata["optimizations_applied"] = append([]string(nil), contextResponse.OptimizationsApplied...)
 		contextMetadata["cost_savings"] = contextResponse.CostSavings
@@ -1714,11 +1714,11 @@ func (r *ReActAgent) buildExecutionTrace(input map[string]interface{}, result ma
 }
 
 // GetContextPerformanceMetrics returns comprehensive context management metrics.
-func (r *ReActAgent) GetContextPerformanceMetrics() map[string]interface{} {
+func (r *ReActAgent) GetContextPerformanceMetrics() map[string]any {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	metrics := map[string]interface{}{
+	metrics := map[string]any{
 		"total_executions":     r.totalExecutions,
 		"context_version":      r.contextVersion,
 		"context_savings":      r.contextSavings,
@@ -1736,9 +1736,9 @@ func (r *ReActAgent) GetContextPerformanceMetrics() map[string]interface{} {
 }
 
 // GetContextHealthStatus returns health status of context management systems.
-func (r *ReActAgent) GetContextHealthStatus() map[string]interface{} {
+func (r *ReActAgent) GetContextHealthStatus() map[string]any {
 	if !r.config.EnableContextEngineering || r.contextManager == nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"status":  "disabled",
 			"message": "Context management is disabled",
 		}

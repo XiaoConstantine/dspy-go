@@ -28,40 +28,40 @@ type ErrorRetainer struct {
 	retentionTime time.Duration
 
 	// Metrics
-	totalErrors       int64
-	totalSuccesses    int64
-	learnedPatterns   int64
-	preventedRetries  int64
+	totalErrors      int64
+	totalSuccesses   int64
+	learnedPatterns  int64
+	preventedRetries int64
 }
 
 // ErrorRecord captures detailed information about failures for learning.
 type ErrorRecord struct {
-	ID          string                 `json:"id"`
-	Timestamp   time.Time              `json:"timestamp"`
-	ErrorType   string                 `json:"error_type"`
-	Message     string                 `json:"message"`
-	Context     map[string]interface{} `json:"context"`
-	StackTrace  string                 `json:"stack_trace,omitempty"`
-	Input       string                 `json:"input,omitempty"`
-	Attempt     int                    `json:"attempt"`
-	Resolution  string                 `json:"resolution,omitempty"`
-	Severity    ErrorSeverity          `json:"severity"`
-	Pattern     string                 `json:"pattern,omitempty"`
-	Learned     bool                   `json:"learned"`
+	ID         string         `json:"id"`
+	Timestamp  time.Time      `json:"timestamp"`
+	ErrorType  string         `json:"error_type"`
+	Message    string         `json:"message"`
+	Context    map[string]any `json:"context"`
+	StackTrace string         `json:"stack_trace,omitempty"`
+	Input      string         `json:"input,omitempty"`
+	Attempt    int            `json:"attempt"`
+	Resolution string         `json:"resolution,omitempty"`
+	Severity   ErrorSeverity  `json:"severity"`
+	Pattern    string         `json:"pattern,omitempty"`
+	Learned    bool           `json:"learned"`
 }
 
 // SuccessRecord captures successful resolutions for pattern reinforcement.
 type SuccessRecord struct {
-	ID           string                 `json:"id"`
-	Timestamp    time.Time              `json:"timestamp"`
-	SuccessType  string                 `json:"success_type"`
-	Description  string                 `json:"description"`
-	Context      map[string]interface{} `json:"context"`
-	Input        string                 `json:"input,omitempty"`
-	Output       string                 `json:"output,omitempty"`
-	PrevErrors   []string               `json:"previous_errors,omitempty"`
-	Pattern      string                 `json:"pattern,omitempty"`
-	Confidence   float64                `json:"confidence"`
+	ID          string         `json:"id"`
+	Timestamp   time.Time      `json:"timestamp"`
+	SuccessType string         `json:"success_type"`
+	Description string         `json:"description"`
+	Context     map[string]any `json:"context"`
+	Input       string         `json:"input,omitempty"`
+	Output      string         `json:"output,omitempty"`
+	PrevErrors  []string       `json:"previous_errors,omitempty"`
+	Pattern     string         `json:"pattern,omitempty"`
+	Confidence  float64        `json:"confidence"`
 }
 
 // ErrorSeverity categorizes errors for prioritized learning.
@@ -90,7 +90,7 @@ func NewErrorRetainer(memory *FileSystemMemory, config Config) *ErrorRetainer {
 
 // RecordError captures an error for learning and pattern recognition.
 // CRITICAL: This makes errors visible to the agent for implicit learning.
-func (er *ErrorRetainer) RecordError(ctx context.Context, errorType, message string, severity ErrorSeverity, errorCtx map[string]interface{}) string {
+func (er *ErrorRetainer) RecordError(ctx context.Context, errorType, message string, severity ErrorSeverity, errorCtx map[string]any) string {
 	er.mu.Lock()
 	defer er.mu.Unlock()
 
@@ -131,7 +131,7 @@ func (er *ErrorRetainer) RecordError(ctx context.Context, errorType, message str
 }
 
 // RecordSuccess captures successful resolutions to reinforce positive patterns.
-func (er *ErrorRetainer) RecordSuccess(ctx context.Context, successType, description string, successCtx map[string]interface{}) string {
+func (er *ErrorRetainer) RecordSuccess(ctx context.Context, successType, description string, successCtx map[string]any) string {
 	er.mu.Lock()
 	defer er.mu.Unlock()
 
@@ -272,7 +272,7 @@ func (er *ErrorRetainer) ShouldPreventRetry(errorType, message string, currentAt
 }
 
 // GetLearningMetrics returns metrics about error learning effectiveness.
-func (er *ErrorRetainer) GetLearningMetrics() map[string]interface{} {
+func (er *ErrorRetainer) GetLearningMetrics() map[string]any {
 	er.mu.RLock()
 	defer er.mu.RUnlock()
 
@@ -283,15 +283,15 @@ func (er *ErrorRetainer) GetLearningMetrics() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
-		"total_errors":       er.totalErrors,
-		"total_successes":    er.totalSuccesses,
-		"current_errors":     len(er.errors),
-		"current_successes":  len(er.successes),
-		"learned_errors":     learnedErrors,
-		"learned_patterns":   er.learnedPatterns,
-		"prevented_retries":  er.preventedRetries,
-		"learning_rate":      float64(learnedErrors) / float64(len(er.errors)+1), // +1 to avoid division by zero
+	return map[string]any{
+		"total_errors":      er.totalErrors,
+		"total_successes":   er.totalSuccesses,
+		"current_errors":    len(er.errors),
+		"current_successes": len(er.successes),
+		"learned_errors":    learnedErrors,
+		"learned_patterns":  er.learnedPatterns,
+		"prevented_retries": er.preventedRetries,
+		"learning_rate":     float64(learnedErrors) / float64(len(er.errors)+1), // +1 to avoid division by zero
 	}
 }
 
@@ -313,13 +313,13 @@ func (er *ErrorRetainer) getAttemptCount(errorType, message string) int {
 func (er *ErrorRetainer) detectErrorPattern(errorType, message string) string {
 	// Simple pattern detection based on error type and message keywords
 	patterns := map[string][]string{
-		"timeout":        {"timeout", "deadline", "connection"},
-		"auth_failure":   {"auth", "authentication", "unauthorized", "forbidden"},
-		"rate_limit":     {"rate", "limit", "throttle", "quota"},
-		"not_found":      {"not found", "404", "missing", "does not exist"},
-		"invalid_input":  {"invalid", "malformed", "parse", "format"},
-		"network":        {"network", "connection", "dns", "host"},
-		"permission":     {"permission", "access", "denied", "forbidden"},
+		"timeout":       {"timeout", "deadline", "connection"},
+		"auth_failure":  {"auth", "authentication", "unauthorized", "forbidden"},
+		"rate_limit":    {"rate", "limit", "throttle", "quota"},
+		"not_found":     {"not found", "404", "missing", "does not exist"},
+		"invalid_input": {"invalid", "malformed", "parse", "format"},
+		"network":       {"network", "connection", "dns", "host"},
+		"permission":    {"permission", "access", "denied", "forbidden"},
 	}
 
 	lowerMessage := strings.ToLower(message)
@@ -384,7 +384,7 @@ func (er *ErrorRetainer) getRelatedErrors(successType string) []string {
 	// Find errors that might be related to this success
 	for _, err := range er.errors {
 		if strings.Contains(err.ErrorType, successType) ||
-		   strings.Contains(successType, err.ErrorType) {
+			strings.Contains(successType, err.ErrorType) {
 			related = append(related, err.ID)
 		}
 	}
@@ -395,7 +395,7 @@ func (er *ErrorRetainer) getRelatedErrors(successType string) []string {
 func (er *ErrorRetainer) markErrorsAsLearned(successType, pattern string) {
 	for i := range er.errors {
 		if er.errors[i].Pattern == pattern ||
-		   strings.Contains(er.errors[i].ErrorType, successType) {
+			strings.Contains(er.errors[i].ErrorType, successType) {
 			if !er.errors[i].Learned {
 				er.errors[i].Learned = true
 				er.learnedPatterns++
@@ -478,7 +478,7 @@ func (er *ErrorRetainer) persistErrors(ctx context.Context) error {
 		return err
 	}
 
-	_, err = er.memory.StoreFile(ctx, "errors", "current", data, map[string]interface{}{
+	_, err = er.memory.StoreFile(ctx, "errors", "current", data, map[string]any{
 		"count":     len(er.errors),
 		"timestamp": time.Now(),
 	})
@@ -492,7 +492,7 @@ func (er *ErrorRetainer) persistSuccesses(ctx context.Context) error {
 		return err
 	}
 
-	_, err = er.memory.StoreFile(ctx, "successes", "current", data, map[string]interface{}{
+	_, err = er.memory.StoreFile(ctx, "successes", "current", data, map[string]any{
 		"count":     len(er.successes),
 		"timestamp": time.Now(),
 	})

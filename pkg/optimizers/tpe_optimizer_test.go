@@ -19,7 +19,7 @@ func TestTPEOptimizer(t *testing.T) {
 		}
 
 		// Create parameter space - simple categorical parameters
-		paramSpace := map[string][]interface{}{
+		paramSpace := map[string][]any{
 			"param1": {float64(0), float64(1), float64(2)},
 			"param2": {float64(0), float64(1)},
 		}
@@ -103,7 +103,7 @@ func TestTPEOptimizer(t *testing.T) {
 
 		// Test with empty parameter space
 		err := tpe.Initialize(SearchConfig{
-			ParamSpace: map[string][]interface{}{},
+			ParamSpace: map[string][]any{},
 			MaxTrials:  10,
 		})
 		assert.Error(t, err, "Initialize should return error for empty parameter space")
@@ -111,7 +111,7 @@ func TestTPEOptimizer(t *testing.T) {
 
 		// Test with valid config
 		err = tpe.Initialize(SearchConfig{
-			ParamSpace: map[string][]interface{}{"param": {0, 1}},
+			ParamSpace: map[string][]any{"param": {0, 1}},
 			MaxTrials:  10,
 		})
 		assert.NoError(t, err)
@@ -123,7 +123,7 @@ func TestTPEOptimizer(t *testing.T) {
 		tpe := NewTPEOptimizer(config)
 
 		err := tpe.Initialize(SearchConfig{
-			ParamSpace: map[string][]interface{}{
+			ParamSpace: map[string][]any{
 				"param1": {float64(0), float64(1)},
 			},
 			MaxTrials: 20,
@@ -153,7 +153,7 @@ func TestTPEOptimizer(t *testing.T) {
 		tpe := NewTPEOptimizer(config)
 
 		err := tpe.Initialize(SearchConfig{
-			ParamSpace: map[string][]interface{}{
+			ParamSpace: map[string][]any{
 				"param1": {float64(0), float64(1), float64(2)},
 				"param2": {float64(0), float64(1)},
 			},
@@ -215,7 +215,7 @@ func TestTPEOptimizer(t *testing.T) {
 
 		// Initialize with parameter space
 		err := tpeImpl.Initialize(SearchConfig{
-			ParamSpace: map[string][]interface{}{
+			ParamSpace: map[string][]any{
 				"param1": {float64(0), float64(1)},
 			},
 			MaxTrials: 10,
@@ -223,8 +223,8 @@ func TestTPEOptimizer(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Test with empty params lists
-		goodParams := []map[string]interface{}{}
-		badParams := []map[string]interface{}{
+		goodParams := []map[string]any{}
+		badParams := []map[string]any{
 			{"param1": float64(0)},
 		}
 
@@ -235,7 +235,7 @@ func TestTPEOptimizer(t *testing.T) {
 		// Add a few observations with the same score
 		ctx := context.Background()
 		for i := 0; i < 5; i++ {
-			params := map[string]interface{}{"param1": float64(i % 2)}
+			params := map[string]any{"param1": float64(i % 2)}
 			err = tpeImpl.UpdateResults(params, 0.5) // Same score for all
 			assert.NoError(t, err)
 		}
@@ -261,7 +261,7 @@ func TestTPEOptimizer(t *testing.T) {
 
 		// Initialize with a parameter space for testing
 		err := tpeImpl.Initialize(SearchConfig{
-			ParamSpace: map[string][]interface{}{
+			ParamSpace: map[string][]any{
 				"param": {float64(0), float64(1), float64(2)},
 			},
 			MaxTrials: 10,
@@ -269,12 +269,12 @@ func TestTPEOptimizer(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Test countValues
-		params := []map[string]interface{}{
+		params := []map[string]any{
 			{"param": float64(0)},
 			{"param": float64(0)},
 			{"param": float64(1)},
 		}
-		possibleValues := []interface{}{float64(0), float64(1), float64(2)}
+		possibleValues := []any{float64(0), float64(1), float64(2)}
 
 		counts := tpeImpl.countValues(params, "param", possibleValues)
 		assert.Equal(t, []float64{2, 1, 0}, counts)
@@ -288,12 +288,12 @@ func TestTPEOptimizer(t *testing.T) {
 		assert.True(t, smoothed[1] > smoothed[2], "smoothed[1] should be greater than smoothed[2]")
 
 		// Test computeLikelihood
-		candidate := map[string]interface{}{"param": float64(0)}
+		candidate := map[string]any{"param": float64(0)}
 		likelihood := tpeImpl.computeLikelihood(candidate, params)
 		assert.True(t, likelihood >= 0.0, "likelihood should be non-negative")
 
 		// Test with empty params
-		emptyLikelihood := tpeImpl.computeLikelihood(candidate, []map[string]interface{}{})
+		emptyLikelihood := tpeImpl.computeLikelihood(candidate, []map[string]any{})
 		assert.Equal(t, 0.0, emptyLikelihood)
 
 		// Test expectedImprovement - create more realistic test data
@@ -305,7 +305,7 @@ func TestTPEOptimizer(t *testing.T) {
 			if paramValue == 0 {
 				score = 0.9
 			}
-			err := tpeImpl.UpdateResults(map[string]interface{}{"param": paramValue}, score)
+			err := tpeImpl.UpdateResults(map[string]any{"param": paramValue}, score)
 			assert.NoError(t, err)
 		}
 

@@ -205,17 +205,16 @@ func convertToDisplaySignature(sig core.Signature) display.Signature {
 	}
 }
 
-
 // exportSignature exports the signature to a file
 func exportSignature(sig core.Signature, path string) error {
 	// Create export format
-	_ = map[string]interface{}{
-		"signature": map[string]interface{}{
+	_ = map[string]any{
+		"signature": map[string]any{
 			"inputs":      sig.Inputs,
 			"outputs":     sig.Outputs,
 			"instruction": sig.Instruction,
 		},
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"generated_by": "dspy-cli analyze",
 			"version":      "1.0.0",
 		},

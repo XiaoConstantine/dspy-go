@@ -233,7 +233,6 @@ func (m *Manager) GetOptimizersConfig() *OptimizersConfig {
 	return &m.config.Optimizers
 }
 
-
 // Reload reloads the configuration from sources.
 func (m *Manager) Reload() error {
 	oldConfig := m.Get()
@@ -499,7 +498,7 @@ func (m *Manager) Merge(other *Config) error {
 }
 
 // Export exports the configuration to a map for external use.
-func (m *Manager) Export() (map[string]interface{}, error) {
+func (m *Manager) Export() (map[string]any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -513,7 +512,7 @@ func (m *Manager) Export() (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to marshal configuration: %w", err)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := yaml.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal to map: %w", err)
 	}
@@ -522,7 +521,7 @@ func (m *Manager) Export() (map[string]interface{}, error) {
 }
 
 // Import imports configuration from a map.
-func (m *Manager) Import(data map[string]interface{}) error {
+func (m *Manager) Import(data map[string]any) error {
 	// Convert map to YAML and back to Config
 	yamlData, err := yaml.Marshal(data)
 	if err != nil {

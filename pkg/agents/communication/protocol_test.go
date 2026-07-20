@@ -38,7 +38,7 @@ func TestNewFilePart(t *testing.T) {
 }
 
 func TestNewDataPart(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"key1": "value1",
 		"key2": 42,
 	}
@@ -70,7 +70,7 @@ func TestPartJSONSerialization(t *testing.T) {
 		},
 		{
 			name: "data part",
-			part: NewDataPart(map[string]interface{}{"foo": "bar"}),
+			part: NewDataPart(map[string]any{"foo": "bar"}),
 		},
 	}
 
@@ -264,8 +264,8 @@ func TestNewArtifact(t *testing.T) {
 }
 
 func TestNewArtifactWithMetadata(t *testing.T) {
-	metadata := map[string]interface{}{
-		"source": "test",
+	metadata := map[string]any{
+		"source":  "test",
 		"version": 1,
 	}
 	artifact := NewArtifactWithMetadata(metadata, NewTextPart("test"))
@@ -325,10 +325,10 @@ func TestNewCapability(t *testing.T) {
 }
 
 func TestCapabilityWithSchema(t *testing.T) {
-	schema := map[string]interface{}{
+	schema := map[string]any{
 		"type": "object",
-		"properties": map[string]interface{}{
-			"query": map[string]interface{}{
+		"properties": map[string]any{
+			"query": map[string]any{
 				"type": "string",
 			},
 		},
@@ -349,8 +349,8 @@ func TestCapabilityWithSchema(t *testing.T) {
 // ============================================================================
 
 func TestNewJSONRPCRequest(t *testing.T) {
-	params := map[string]interface{}{
-		"message": map[string]interface{}{
+	params := map[string]any{
+		"message": map[string]any{
 			"text": "hello",
 		},
 	}
@@ -369,7 +369,7 @@ func TestNewJSONRPCRequest(t *testing.T) {
 }
 
 func TestNewJSONRPCResponse(t *testing.T) {
-	result := map[string]interface{}{"success": true}
+	result := map[string]any{"success": true}
 	resp := NewJSONRPCResponse("req-1", result)
 
 	if resp.JSONRPC != "2.0" {
@@ -502,14 +502,14 @@ func TestTaskStatusWithMessage(t *testing.T) {
 
 func TestRPCErrorWithData(t *testing.T) {
 	err := NewRPCError(500, "Internal error")
-	data := map[string]interface{}{"details": "Something broke"}
+	data := map[string]any{"details": "Something broke"}
 
 	updated := err.WithData(data)
 
 	if updated.Data == nil {
 		t.Fatal("expected data to be set")
 	}
-	if dataMap, ok := updated.Data.(map[string]interface{}); ok {
+	if dataMap, ok := updated.Data.(map[string]any); ok {
 		if dataMap["details"] != "Something broke" {
 			t.Error("data not preserved")
 		}

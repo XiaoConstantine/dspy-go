@@ -79,14 +79,14 @@ func RunMIPROExample(apiKey string) {
 			"cot":       cot,
 			"extractor": extractor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			// First run chain of thought
 			cotResult, err := cot.Process(ctx, inputs)
 			if err != nil {
 				return nil, fmt.Errorf("chain of thought failed: %w", err)
 			}
 
-			extractorInput := map[string]interface{}{
+			extractorInput := map[string]any{
 				"prompt": cotResult["completion"],
 			}
 
@@ -96,7 +96,7 @@ func RunMIPROExample(apiKey string) {
 	)
 
 	// Define a metric function for evaluation
-	metricFunc := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+	metricFunc := func(example, prediction map[string]any, ctx context.Context) float64 {
 		// Simple exact match metric
 		expectedAnswer, ok1 := example["completion"].(string)
 		predictedAnswer, ok2 := prediction["completion"].(string)
@@ -165,7 +165,7 @@ func RunMIPROExample(apiKey string) {
 			"cot":       optimizedCot,
 			"extractor": optimizedExtractor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			// First run the optimized chain of thought
 			cotResult, err := optimizedCot.Process(ctx, inputs)
 			if err != nil {
@@ -173,7 +173,7 @@ func RunMIPROExample(apiKey string) {
 			}
 
 			// Map field names properly
-			extractorInput := map[string]interface{}{
+			extractorInput := map[string]any{
 				"prompt": cotResult["completion"],
 			}
 
@@ -194,10 +194,10 @@ func createDataset(examples []datasets.GSM8KExample) core.Dataset {
 	data := make([]core.Example, len(examples))
 	for i, ex := range examples {
 		data[i] = core.Example{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"prompt": ex.Question,
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"completion": ex.Answer,
 			},
 		}
@@ -260,7 +260,7 @@ func runEvaluation(ctx context.Context, program core.Program, examples []dataset
 
 	logger.Info(ctx, "Running evaluation on test examples...")
 	for _, ex := range examples {
-		result, err := program.Execute(ctx, map[string]interface{}{"prompt": ex.Question})
+		result, err := program.Execute(ctx, map[string]any{"prompt": ex.Question})
 		if err != nil {
 			logger.Warn(ctx, "Error executing program: %v", err)
 			continue

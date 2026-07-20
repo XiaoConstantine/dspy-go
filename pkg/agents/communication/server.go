@@ -96,7 +96,7 @@ func (r *taskRegistry) delete(id string) {
 // subscriber represents a client subscribed to task updates.
 type subscriber struct {
 	taskID  string
-	channel chan interface{} // Can send TaskStatusUpdateEvent or TaskArtifactUpdateEvent
+	channel chan any // Can send TaskStatusUpdateEvent or TaskArtifactUpdateEvent
 }
 
 type subscriberRegistry struct {
@@ -116,7 +116,7 @@ func (r *subscriberRegistry) subscribe(taskID string) *subscriber {
 
 	sub := &subscriber{
 		taskID:  taskID,
-		channel: make(chan interface{}, 100), // Buffer to prevent blocking
+		channel: make(chan any, 100), // Buffer to prevent blocking
 	}
 
 	r.subscribers[taskID] = append(r.subscribers[taskID], sub)
@@ -137,7 +137,7 @@ func (r *subscriberRegistry) unsubscribe(sub *subscriber) {
 	}
 }
 
-func (r *subscriberRegistry) notify(taskID string, event interface{}) {
+func (r *subscriberRegistry) notify(taskID string, event any) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -344,8 +344,8 @@ func (s *Server) cleanupOldTasks() {
 
 // decodeMessageFromMap efficiently converts a map to a Message struct without JSON roundtrip.
 // This is more performant than marshal/unmarshal for server request handling.
-func decodeMessageFromMap(data interface{}) (*Message, error) {
-	msgMap, ok := data.(map[string]interface{})
+func decodeMessageFromMap(data any) (*Message, error) {
+	msgMap, ok := data.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("message must be an object")
 	}
@@ -372,14 +372,14 @@ func decodeMessageFromMap(data interface{}) (*Message, error) {
 		return nil, fmt.Errorf("missing 'parts' field")
 	}
 
-	partsSlice, ok := partsData.([]interface{})
+	partsSlice, ok := partsData.([]any)
 	if !ok {
 		return nil, fmt.Errorf("'parts' must be an array")
 	}
 
 	msg.Parts = make([]Part, len(partsSlice))
 	for i, partData := range partsSlice {
-		partMap, ok := partData.(map[string]interface{})
+		partMap, ok := partData.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("part[%d] must be an object", i)
 		}
@@ -397,7 +397,7 @@ func decodeMessageFromMap(data interface{}) (*Message, error) {
 	}
 
 	// Extract metadata (optional)
-	if metadata, ok := msgMap["metadata"].(map[string]interface{}); ok {
+	if metadata, ok := msgMap["metadata"].(map[string]any); ok {
 		msg.Metadata = metadata
 	}
 
@@ -405,7 +405,7 @@ func decodeMessageFromMap(data interface{}) (*Message, error) {
 }
 
 // decodePartFromMap converts a map to a Part struct.
-func decodePartFromMap(partMap map[string]interface{}) (Part, error) {
+func decodePartFromMap(partMap map[string]any) (Part, error) {
 	part := Part{}
 
 	// Extract type (required)
@@ -420,7 +420,7 @@ func decodePartFromMap(partMap map[string]interface{}) (Part, error) {
 		part.Text = text
 	}
 
-	if fileData, ok := partMap["file"].(map[string]interface{}); ok {
+	if fileData, ok := partMap["file"].(map[string]any); ok {
 		filePart := &FilePart{}
 		if uri, ok := fileData["uri"].(string); ok {
 			filePart.URI = uri
@@ -434,11 +434,11 @@ func decodePartFromMap(partMap map[string]interface{}) (Part, error) {
 		part.File = filePart
 	}
 
-	if data, ok := partMap["data"].(map[string]interface{}); ok {
+	if data, ok := partMap["data"].(map[string]any); ok {
 		part.Data = data
 	}
 
-	if metadata, ok := partMap["metadata"].(map[string]interface{}); ok {
+	if metadata, ok := partMap["metadata"].(map[string]any); ok {
 		part.Metadata = metadata
 	}
 
@@ -540,7 +540,7 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 	go s.processTask(ctx, task, msg)
 
 	// Return task info immediately
-	return NewJSONRPCResponse(req.ID, map[string]interface{}{
+	return NewJSONRPCResponse(req.ID, map[string]any{
 		"taskId": task.ID,
 		"status": task.GetStatus(),
 	})
@@ -727,7 +727,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendSSEEvent sends a Server-Sent Event.
-func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, eventType string, data interface{}) {
+func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return

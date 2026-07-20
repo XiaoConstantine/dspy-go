@@ -13,7 +13,6 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 )
 
-
 // Function to create the HTML parsing program structure.
 func createHTMLParsingProgram() core.Program {
 	// Create a signature for extracting structured data from HTML
@@ -33,7 +32,7 @@ func createHTMLParsingProgram() core.Program {
 	// Create the program
 	program := core.NewProgram(
 		map[string]core.Module{"extract_metadata": extract},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return extract.Process(ctx, inputs)
 		},
 	)
@@ -49,7 +48,7 @@ func cleanMarkdownCodeBlocks(input string) string {
 	return input
 }
 
-func createMetricFunc() func(example, prediction map[string]interface{}, ctx context.Context) bool {
+func createMetricFunc() func(example, prediction map[string]any, ctx context.Context) bool {
 	// Create a signature for our judge module
 	signature := core.NewSignature(
 		[]core.InputField{
@@ -70,9 +69,9 @@ func createMetricFunc() func(example, prediction map[string]interface{}, ctx con
 	judge := modules.NewChainOfThought(signature).WithStructuredOutput()
 
 	// Return a metric function that uses this module
-	return func(example, prediction map[string]interface{}, ctx context.Context) bool {
+	return func(example, prediction map[string]any, ctx context.Context) bool {
 		// Create inputs for the judge module
-		inputs := map[string]interface{}{
+		inputs := map[string]any{
 			"document":           example["document"],
 			"predicted_metadata": prediction,
 		}
@@ -143,7 +142,7 @@ Use proper HTML structure with html, head, and body tags.`)
 	synthesize_doc := modules.NewPredict(synthesizeDocSignature).WithStructuredOutput()
 
 	// Generate topics
-	topicsResult, err := synthesize_topics.Process(ctx, map[string]interface{}{
+	topicsResult, err := synthesize_topics.Process(ctx, map[string]any{
 		"count": 5,
 	})
 	if err != nil {
@@ -162,7 +161,7 @@ Use proper HTML structure with html, head, and body tags.`)
 					topics = append(topics, line)
 				}
 			}
-		} else if topicsList, ok := topicsContent.([]interface{}); ok {
+		} else if topicsList, ok := topicsContent.([]any); ok {
 			logger.Info(ctx, "Topics already in list format, extracting...")
 			for _, t := range topicsList {
 				if topic, ok := t.(string); ok {
@@ -174,7 +173,7 @@ Use proper HTML structure with html, head, and body tags.`)
 	// Generate HTML documents for each topic
 	var trainingExamples []core.Example
 	for _, t := range topics {
-		docResult, err := synthesize_doc.Process(ctx, map[string]interface{}{
+		docResult, err := synthesize_doc.Process(ctx, map[string]any{
 			"topic": t,
 		})
 		if err != nil {
@@ -186,10 +185,10 @@ Use proper HTML structure with html, head, and body tags.`)
 			if ok && htmlString != "" {
 				htmlString = cleanMarkdownCodeBlocks(htmlString)
 				example := core.Example{
-					Inputs: map[string]interface{}{
+					Inputs: map[string]any{
 						"document": htmlString,
 					},
-					Outputs: make(map[string]interface{}), // Leave empty for generation
+					Outputs: make(map[string]any),
 				}
 				trainingExamples = append(trainingExamples, example)
 				logger.Info(ctx, "Created training example from %s document (%d chars)", t, len(htmlString))
@@ -209,7 +208,7 @@ Use proper HTML structure with html, head, and body tags.`)
 	metricFunc := createMetricFunc()
 
 	// Q3: How can I teach LLM to be better at this task?
-	metric := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+	metric := func(example, prediction map[string]any, ctx context.Context) float64 {
 		if metricFunc(example, prediction, ctx) {
 			return 1.0
 		}
@@ -236,7 +235,7 @@ Use proper HTML structure with html, head, and body tags.`)
 	}
 
 	// Create a bool-returning metric for the BootstrapFewShot constructor
-	optimizerMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+	optimizerMetric := func(example, prediction map[string]any, ctx context.Context) bool {
 		score := metric(example, prediction, ctx) // Use the float64 metric internally
 		return score >= 0.7                       // Threshold for pass/fail
 	}
@@ -252,7 +251,7 @@ Use proper HTML structure with html, head, and body tags.`)
 	trainDataset := datasets.NewSimpleDataset(trainingExamples)
 
 	// Define metric function for optimizer compile
-	compileMetric := func(expected, actual map[string]interface{}) float64 {
+	compileMetric := func(expected, actual map[string]any) float64 {
 		// Simple exact match for demonstration
 		if expected["title"] == actual["title"] {
 			return 1.0

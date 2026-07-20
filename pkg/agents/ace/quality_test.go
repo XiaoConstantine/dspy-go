@@ -57,10 +57,10 @@ func TestQualityCalculator(t *testing.T) {
 
 	t.Run("custom weights", func(t *testing.T) {
 		qc := NewQualityCalculator().WithWeights(QualityWeights{
-			Outcome:    1.0,
-			Efficiency: 0.0,
+			Outcome:     1.0,
+			Efficiency:  0.0,
 			ToolSuccess: 0.0,
-			ErrorFree:  0.0,
+			ErrorFree:   0.0,
 		})
 
 		success := &Trajectory{FinalOutcome: OutcomeSuccess, Steps: make([]Step, 20)}
@@ -72,10 +72,10 @@ func TestQualityCalculator(t *testing.T) {
 
 	t.Run("efficiency scoring", func(t *testing.T) {
 		qc := NewQualityCalculator().WithExpectedSteps(3, 10).WithWeights(QualityWeights{
-			Outcome:    0.0,
-			Efficiency: 1.0,
+			Outcome:     0.0,
+			Efficiency:  1.0,
 			ToolSuccess: 0.0,
-			ErrorFree:  0.0,
+			ErrorFree:   0.0,
 		})
 
 		fast := &Trajectory{Steps: make([]Step, 2)}
@@ -89,10 +89,10 @@ func TestQualityCalculator(t *testing.T) {
 
 	t.Run("tool success rate", func(t *testing.T) {
 		qc := NewQualityCalculator().WithWeights(QualityWeights{
-			Outcome:    0.0,
-			Efficiency: 0.0,
+			Outcome:     0.0,
+			Efficiency:  0.0,
 			ToolSuccess: 1.0,
-			ErrorFree:  0.0,
+			ErrorFree:   0.0,
 		})
 
 		allSuccess := &Trajectory{

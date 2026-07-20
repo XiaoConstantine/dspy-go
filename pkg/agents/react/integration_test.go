@@ -25,7 +25,7 @@ func TestReActAgent_IntegrationTestsClean(t *testing.T) {
 		)
 
 		// Register test tools using testutil mocks
-		mathTool := testutil.NewMockCoreTool("math_calculator", "Performs math calculations", func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+		mathTool := testutil.NewMockCoreTool("math_calculator", "Performs math calculations", func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{Data: "42"}, nil
 		})
 		err := agent.RegisterTool(mathTool)
@@ -48,7 +48,7 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		ctx := context.Background()
 
 		// Test simple task execution
-		simpleInput := map[string]interface{}{"task": "calculate 15 + 27"}
+		simpleInput := map[string]any{"task": "calculate 15 + 27"}
 		result, err := agent.Execute(ctx, simpleInput)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
@@ -84,7 +84,7 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test memory"}
+		input := map[string]any{"task": "test memory"}
 		_, err = agent.Execute(ctx, input)
 		require.NoError(t, err)
 
@@ -115,7 +115,7 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		require.NoError(t, err)
 
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test reflection"}
+		input := map[string]any{"task": "test reflection"}
 		_, err = agent.Execute(ctx, input)
 		require.NoError(t, err)
 
@@ -146,7 +146,7 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		if agent.Planner != nil {
 			ctx := context.Background()
 			task := "analyze data and create report"
-			input := map[string]interface{}{"task": task}
+			input := map[string]any{"task": task}
 			tools := []core.Tool{}
 
 			plan, err := agent.Planner.CreatePlan(ctx, input, tools)
@@ -169,7 +169,7 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		agent := NewReActAgent("tool-agent", "Tool Test Agent")
 
 		// Test tool registration
-		testTool := testutil.NewMockCoreTool("test_tool", "Test tool", func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+		testTool := testutil.NewMockCoreTool("test_tool", "Test tool", func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{Data: "test result"}, nil
 		})
 		err := agent.RegisterTool(testTool)
@@ -191,12 +191,12 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		step := PlanStep{
 			ID:        "step1",
 			Tool:      "test_tool",
-			Arguments: map[string]interface{}{"arg1": "value1"},
+			Arguments: map[string]any{"arg1": "value1"},
 			Critical:  false,
 			Timeout:   5 * time.Second,
 		}
 
-		result, err := agent.executePlanStep(ctx, step, map[string]interface{}{})
+		result, err := agent.executePlanStep(ctx, step, map[string]any{})
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 	})

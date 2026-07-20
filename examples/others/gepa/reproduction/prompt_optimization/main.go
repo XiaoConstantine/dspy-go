@@ -57,74 +57,74 @@ func createMultiHopRetrievalData() []core.Example {
 	// Create examples that match the multi-hop retrieval task from Figure 2
 	examples := []core.Example{
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What is the population of the wider metropolitan area that includes the city where the University of Edinburgh is located?",
 				"summary_1": "The University of Edinburgh is located in Edinburgh, Scotland. Edinburgh is the capital city of Scotland with a population of approximately 540,000 people within the city limits.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Edinburgh metropolitan area population Scotland wider region",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What album was released by the band that performed the opening theme for the TV series that aired from 1993 to 1998?",
 				"summary_1": "The TV series that aired from 1993 to 1998 is 'The X-Files'. The opening theme was performed by the band 'Mark Snow'.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Mark Snow discography albums released X-Files composer",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What is the birth year of the director of the movie that won the Academy Award for Best Picture in 1995?",
 				"summary_1": "The movie that won the Academy Award for Best Picture in 1995 was 'Forrest Gump'. The movie was directed by Robert Zemeckis.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Robert Zemeckis birth year director born when",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What is the height of the tallest building in the city where the 2024 Olympics were held?",
 				"summary_1": "The 2024 Summer Olympics were held in Paris, France. Paris is the capital and largest city of France.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "tallest building Paris France height skyscraper highest",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What company acquired the social media platform founded by the person who also co-founded PayPal?",
 				"summary_1": "The social media platform founded by a PayPal co-founder is Twitter (now X). It was founded by Jack Dorsey, who was also involved with PayPal's early development.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Twitter acquisition company bought Elon Musk X platform",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What is the scientific name of the animal that is the national symbol of the country that borders both China and Russia?",
 				"summary_1": "The country that borders both China and Russia is Mongolia. Mongolia's national symbol and national animal is the Przewalski's horse, also known as the Mongolian wild horse.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Przewalski's horse scientific name Equus ferus przewalskii Mongolia",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What is the architectural style of the cathedral in the city that is the birthplace of Shakespeare?",
 				"summary_1": "William Shakespeare was born in Stratford-upon-Avon, England. The city is known for its Tudor-style architecture and Shakespeare-related sites.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Stratford-upon-Avon cathedral architecture style Holy Trinity Church",
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question":  "What is the market capitalization of the company that owns the search engine with the largest market share?",
 				"summary_1": "The search engine with the largest market share is Google Search, which commands over 90% of the global search market. Google Search is owned by Google LLC, which is a subsidiary of Alphabet Inc.",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"query": "Alphabet Inc market capitalization Google parent company stock value",
 			},
 		},
@@ -140,7 +140,7 @@ func createMultiHopRetrievalData() []core.Example {
 }
 
 // evaluateQueryQuality evaluates the quality of generated queries.
-func evaluateQueryQuality(expected, actual map[string]interface{}) float64 {
+func evaluateQueryQuality(expected, actual map[string]any) float64 {
 	expectedQuery := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", expected["query"])))
 	actualQuery := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", actual["query"])))
 
@@ -198,7 +198,7 @@ func (exp *Figure2ReproductionExperiment) runFigure2Reproduction(apiKey string) 
 
 	program := core.NewProgram(
 		map[string]core.Module{"retriever": module},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return module.Process(ctx, inputs)
 		},
 	)

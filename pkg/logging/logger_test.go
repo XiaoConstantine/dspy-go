@@ -78,7 +78,7 @@ func (m *MockOutput) SetCloseError(err error) {
 
 func TestNewLogger(t *testing.T) {
 	mockOutput := NewMockOutput()
-	defaultFields := map[string]interface{}{
+	defaultFields := map[string]any{
 		"service": "test",
 		"version": "1.0",
 	}
@@ -455,7 +455,7 @@ func TestPromptCompletionLevelFiltering(t *testing.T) {
 
 func TestDefaultFields(t *testing.T) {
 	mockOutput := NewMockOutput()
-	defaultFields := map[string]interface{}{
+	defaultFields := map[string]any{
 		"service": "test-service",
 		"version": "1.0.0",
 		"env":     "test",
@@ -480,7 +480,7 @@ func TestDefaultFields(t *testing.T) {
 
 func TestFieldPriority(t *testing.T) {
 	mockOutput := NewMockOutput()
-	defaultFields := map[string]interface{}{
+	defaultFields := map[string]any{
 		"service": "default-service",
 		"version": "1.0.0",
 	}

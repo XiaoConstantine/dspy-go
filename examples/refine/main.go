@@ -62,7 +62,7 @@ func runMathExample(ctx context.Context) {
 	mathSolver := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Define reward function that checks for correct mathematical reasoning
-	mathRewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	mathRewardFn := func(inputs, outputs map[string]any) float64 {
 		reasoning, hasReasoning := outputs["reasoning"].(string)
 		answer, hasAnswer := outputs["answer"].(string)
 
@@ -111,7 +111,7 @@ func runMathExample(ctx context.Context) {
 	// Test problem
 	problem := "Sarah has 24 apples. She gives 1/3 of them to her friend and eats 2 of the remaining apples. How many apples does she have left?"
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"problem": problem,
 	}
 
@@ -145,7 +145,7 @@ func runCreativeWritingExample(ctx context.Context) {
 	writer := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Define reward function for creative writing quality
-	creativityRewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	creativityRewardFn := func(inputs, outputs map[string]any) float64 {
 		story, hasStory := outputs["story"].(string)
 		if !hasStory || len(story) < 50 {
 			return 0.0
@@ -199,7 +199,7 @@ func runCreativeWritingExample(ctx context.Context) {
 	refiner := modules.NewRefine(writer, config)
 
 	// Test inputs
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"prompt": "A time traveler discovers they can only travel to moments of great historical significance, but each trip changes something small that has big consequences.",
 		"style":  "suspenseful and thought-provoking",
 	}
@@ -236,7 +236,7 @@ func runQAExample(ctx context.Context) {
 	qa := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Define reward function for answer quality
-	qaRewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	qaRewardFn := func(inputs, outputs map[string]any) float64 {
 		answer, hasAnswer := outputs["answer"].(string)
 		confidence, hasConfidence := outputs["confidence"].(string)
 		context := inputs["context"].(string)
@@ -298,7 +298,7 @@ func runQAExample(ctx context.Context) {
 
 	question := "What makes Python popular among programmers?"
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"context":  context,
 		"question": question,
 	}
@@ -323,7 +323,7 @@ func demonstrateFeedback(ctx context.Context) {
 
 	feedback := modules.NewOfferFeedback()
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"program_inputs":   "What is 2+2?",
 		"program_outputs":  "The answer is four",
 		"reward_value":     "0.3",
@@ -365,7 +365,7 @@ func runAdvancedExample(ctx context.Context) {
 	coder := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Complex reward function that evaluates multiple aspects
-	codeQualityRewardFn := func(inputs, outputs map[string]interface{}) float64 {
+	codeQualityRewardFn := func(inputs, outputs map[string]any) float64 {
 		code, hasCode := outputs["code"].(string)
 		explanation, hasExplanation := outputs["explanation"].(string)
 
@@ -417,7 +417,7 @@ func runAdvancedExample(ctx context.Context) {
 	refiner := modules.NewRefine(coder, config)
 
 	// Test inputs
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"task":     "Create a function that calculates the factorial of a number",
 		"language": "JavaScript",
 	}

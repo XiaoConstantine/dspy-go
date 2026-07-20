@@ -52,7 +52,7 @@ func (m *Middleware) WithCache(
 		if err := json.Unmarshal(cached, &response); err == nil {
 			// Mark as cache hit
 			if response.Metadata == nil {
-				response.Metadata = make(map[string]interface{})
+				response.Metadata = make(map[string]any)
 			}
 			response.Metadata["cache_hit"] = true
 			response.Metadata["cache_key"] = cacheKey
@@ -69,7 +69,7 @@ func (m *Middleware) WithCache(
 	// Cache the successful response
 	if response != nil {
 		if response.Metadata == nil {
-			response.Metadata = make(map[string]interface{})
+			response.Metadata = make(map[string]any)
 		}
 		response.Metadata["cache_hit"] = false
 		response.Metadata["cache_key"] = cacheKey
@@ -88,7 +88,7 @@ func (m *Middleware) GenerateCacheKey(modelID string, prompt string, options []c
 }
 
 // GenerateJSONCacheKey creates a cache key for JSON-structured generation.
-func (m *Middleware) GenerateJSONCacheKey(modelID string, prompt string, schema interface{}, options []core.GenerateOption) string {
+func (m *Middleware) GenerateJSONCacheKey(modelID string, prompt string, schema any, options []core.GenerateOption) string {
 	return m.keyGenerator.GenerateJSONKey(modelID, prompt, schema, options)
 }
 

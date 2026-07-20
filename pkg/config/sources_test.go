@@ -39,7 +39,7 @@ func TestEnvironmentSourceSetLLMProviderValue(t *testing.T) {
 		key           string
 		value         string
 		expectedField string
-		expectedValue interface{}
+		expectedValue any
 	}{
 		{"provider", "anthropic", "Provider", "anthropic"},
 		{"model.id", "claude-3-sonnet", "ModelID", "claude-3-sonnet"},
@@ -102,7 +102,7 @@ func TestEnvironmentSourceSetLLMGlobalValue(t *testing.T) {
 		key           string
 		value         string
 		expectedField string
-		expectedValue interface{}
+		expectedValue any
 	}{
 		{"concurrency.level", "5", "ConcurrencyLevel", 5},
 		{"concurrencyLevel", "5", "ConcurrencyLevel", 5},

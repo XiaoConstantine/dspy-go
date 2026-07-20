@@ -14,12 +14,12 @@ type MockMemory struct {
 	mock.Mock
 }
 
-func (m *MockMemory) Store(key string, value interface{}) error {
+func (m *MockMemory) Store(key string, value any) error {
 	args := m.Called(key, value)
 	return args.Error(0)
 }
 
-func (m *MockMemory) Retrieve(key string) (interface{}, error) {
+func (m *MockMemory) Retrieve(key string) (any, error) {
 	args := m.Called(key)
 	return args.Get(0), args.Error(1)
 }

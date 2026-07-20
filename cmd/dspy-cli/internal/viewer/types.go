@@ -123,19 +123,19 @@ const (
 
 // TraceEvent represents a single event in the native dspy-go format.
 type TraceEvent struct {
-	Type      TraceEventType         `json:"type"`
-	Timestamp time.Time              `json:"timestamp"`
-	TraceID   string                 `json:"trace_id"`
-	SpanID    string                 `json:"span_id,omitempty"`
-	ParentID  string                 `json:"parent_id,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
+	Type      TraceEventType `json:"type"`
+	Timestamp time.Time      `json:"timestamp"`
+	TraceID   string         `json:"trace_id"`
+	SpanID    string         `json:"span_id,omitempty"`
+	ParentID  string         `json:"parent_id,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
 // SessionData holds parsed session metadata from native format.
 type SessionData struct {
 	TraceID   string
 	StartTime time.Time
-	Metadata  map[string]interface{}
+	Metadata  map[string]any
 }
 
 // SpanData holds parsed span information.
@@ -146,8 +146,8 @@ type SpanData struct {
 	StartTime  time.Time
 	EndTime    time.Time
 	DurationMs int64
-	Inputs     map[string]interface{}
-	Outputs    map[string]interface{}
+	Inputs     map[string]any
+	Outputs    map[string]any
 	Error      string
 	Events     []TraceEvent // Child events within this span
 }
@@ -178,8 +178,8 @@ type ModuleData struct {
 	LLMCalls    int
 	TotalTokens int
 	Success     bool
-	Inputs      map[string]interface{}
-	Outputs     map[string]interface{}
+	Inputs      map[string]any
+	Outputs     map[string]any
 }
 
 // CodeExecData holds parsed code execution information.
@@ -190,9 +190,9 @@ type CodeExecData struct {
 	Code        string
 	Stdout      string
 	Stderr      string
-	Locals      map[string]interface{}
+	Locals      map[string]any
 	DurationMs  int64
-	SubLLMCalls []map[string]interface{}
+	SubLLMCalls []map[string]any
 }
 
 // ToolCallData holds parsed tool call information.
@@ -200,8 +200,8 @@ type ToolCallData struct {
 	SpanID     string
 	Timestamp  time.Time
 	ToolName   string
-	Input      interface{}
-	Output     interface{}
+	Input      any
+	Output     any
 	DurationMs int64
 	Success    bool
 	Error      string

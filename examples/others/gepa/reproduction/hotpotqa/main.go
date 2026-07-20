@@ -20,11 +20,11 @@ import (
 
 // HotpotQAReproductionExperiment reproduces the GEPA paper's HotpotQA experiments.
 type HotpotQAReproductionExperiment struct {
-	logger       *logging.Logger
-	ctx          context.Context
-	config       *ExperimentConfig
-	cache        *ResponseCache
-	startTime    time.Time
+	logger    *logging.Logger
+	ctx       context.Context
+	config    *ExperimentConfig
+	cache     *ResponseCache
+	startTime time.Time
 }
 
 // ExperimentConfig matches the paper's experimental setup.
@@ -202,11 +202,11 @@ func (exp *HotpotQAReproductionExperiment) loadAndSplitDataset() ([]core.Example
 		}
 
 		examples[i] = core.Example{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question": ex.Question,
 				"context":  contextStr, // Add the missing context!
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": ex.Answer,
 			},
 		}
@@ -270,7 +270,7 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 	// Create program
 	program := core.NewProgram(
 		map[string]core.Module{"reasoner": module},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return module.Process(ctx, inputs)
 		},
 	)
@@ -316,7 +316,7 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 	})
 
 	// Define evaluation metric (paper uses F1 score)
-	metricFunc := func(expected, actual map[string]interface{}) float64 {
+	metricFunc := func(expected, actual map[string]any) float64 {
 		expectedAnswer := fmt.Sprintf("%v", expected["answer"])
 		actualAnswer := fmt.Sprintf("%v", actual["answer"])
 		return computePaperF1Score(actualAnswer, expectedAnswer)
@@ -351,7 +351,7 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 	return nil
 }
 
-func (exp *HotpotQAReproductionExperiment) evaluateProgram(program core.Program, examples []core.Example, metricFunc func(map[string]interface{}, map[string]interface{}) float64) float64 {
+func (exp *HotpotQAReproductionExperiment) evaluateProgram(program core.Program, examples []core.Example, metricFunc func(map[string]any, map[string]any) float64) float64 {
 	totalScore := 0.0
 	validCount := 0
 
@@ -361,7 +361,7 @@ func (exp *HotpotQAReproductionExperiment) evaluateProgram(program core.Program,
 		}
 
 		// Pass both question and context to the program
-		inputs := map[string]interface{}{
+		inputs := map[string]any{
 			"question": example.Inputs["question"],
 			"context":  example.Inputs["context"],
 		}

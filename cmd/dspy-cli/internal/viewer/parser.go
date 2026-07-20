@@ -168,7 +168,7 @@ func parseSpanEvent(data *LogData, event TraceEvent) {
 			if op, ok := event.Data["operation"].(string); ok {
 				span.Operation = op
 			}
-			if inputs, ok := event.Data["inputs"].(map[string]interface{}); ok {
+			if inputs, ok := event.Data["inputs"].(map[string]any); ok {
 				span.Inputs = inputs
 			}
 		case "end":
@@ -176,7 +176,7 @@ func parseSpanEvent(data *LogData, event TraceEvent) {
 			if duration, ok := event.Data["duration_ms"].(float64); ok {
 				span.DurationMs = int64(duration)
 			}
-			if outputs, ok := event.Data["outputs"].(map[string]interface{}); ok {
+			if outputs, ok := event.Data["outputs"].(map[string]any); ok {
 				span.Outputs = outputs
 			}
 			if errMsg, ok := event.Data["error"].(string); ok {
@@ -210,7 +210,7 @@ func parseLLMCallEvent(event TraceEvent) *LLMCallData {
 	}
 
 	// Parse usage data
-	if usage, ok := event.Data["usage"].(map[string]interface{}); ok {
+	if usage, ok := event.Data["usage"].(map[string]any); ok {
 		if pt, ok := usage["prompt_tokens"].(float64); ok {
 			call.PromptTokens = int(pt)
 		}
@@ -256,10 +256,10 @@ func parseModuleEvent(event TraceEvent) *ModuleData {
 	if success, ok := event.Data["success"].(bool); ok {
 		mod.Success = success
 	}
-	if inputs, ok := event.Data["inputs"].(map[string]interface{}); ok {
+	if inputs, ok := event.Data["inputs"].(map[string]any); ok {
 		mod.Inputs = inputs
 	}
-	if outputs, ok := event.Data["outputs"].(map[string]interface{}); ok {
+	if outputs, ok := event.Data["outputs"].(map[string]any); ok {
 		mod.Outputs = outputs
 	}
 
@@ -288,12 +288,12 @@ func parseCodeExecEvent(event TraceEvent) *CodeExecData {
 	if duration, ok := event.Data["duration_ms"].(float64); ok {
 		exec.DurationMs = int64(duration)
 	}
-	if locals, ok := event.Data["locals"].(map[string]interface{}); ok {
+	if locals, ok := event.Data["locals"].(map[string]any); ok {
 		exec.Locals = locals
 	}
-	if calls, ok := event.Data["sub_llm_calls"].([]interface{}); ok {
+	if calls, ok := event.Data["sub_llm_calls"].([]any); ok {
 		for _, c := range calls {
-			if callMap, ok := c.(map[string]interface{}); ok {
+			if callMap, ok := c.(map[string]any); ok {
 				exec.SubLLMCalls = append(exec.SubLLMCalls, callMap)
 			}
 		}

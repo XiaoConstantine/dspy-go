@@ -10,10 +10,10 @@ import (
 // Memory provides storage capabilities for agents.
 type Memory interface {
 	// Store saves a value with a given key
-	Store(key string, value interface{}) error
+	Store(key string, value any) error
 
 	// Retrieve gets a value by key
-	Retrieve(key string) (interface{}, error)
+	Retrieve(key string) (any, error)
 
 	// Delete removes a value by key
 	Delete(key string) error
@@ -27,24 +27,24 @@ type Memory interface {
 
 // Simple in-memory implementation.
 type InMemoryStore struct {
-	data map[string]interface{}
+	data map[string]any
 	mu   sync.RWMutex
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		data: make(map[string]interface{}),
+		data: make(map[string]any),
 	}
 }
 
-func (s *InMemoryStore) Store(key string, value interface{}) error {
+func (s *InMemoryStore) Store(key string, value any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[key] = value
 	return nil
 }
 
-func (s *InMemoryStore) Retrieve(key string) (interface{}, error) {
+func (s *InMemoryStore) Retrieve(key string) (any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -95,6 +95,6 @@ func (s *InMemoryStore) Clear() error {
 
 	// Create a new map rather than ranging and deleting
 	// This is more efficient for clearing everything
-	s.data = make(map[string]interface{})
+	s.data = make(map[string]any)
 	return nil
 }

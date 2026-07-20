@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	a2a "github.com/XiaoConstantine/dspy-go/pkg/agents/communication"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	a2a "github.com/XiaoConstantine/dspy-go/pkg/agents/communication"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -44,7 +44,7 @@ Your task is to:
 	}, nil
 }
 
-func (s *SearchAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (s *SearchAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	logger := logging.GetLogger()
 	logger.Info(ctx, "🔍 SearchAgent: Gathering information...")
 
@@ -97,7 +97,7 @@ Be critical, thorough, and evidence-based.`)
 	}, nil
 }
 
-func (a *AnalysisAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (a *AnalysisAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	logger := logging.GetLogger()
 	logger.Info(ctx, "📊 AnalysisAgent: Analyzing search results...")
 
@@ -153,7 +153,7 @@ Use clear, professional language. Structure the content logically.`)
 	}, nil
 }
 
-func (s *SynthesisAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (s *SynthesisAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	logger := logging.GetLogger()
 	logger.Info(ctx, "📝 SynthesisAgent: Creating research report...")
 
@@ -190,7 +190,7 @@ func NewResearchOrchestrator() (*ResearchOrchestrator, *a2a.A2AExecutor) {
 	return agent, executor
 }
 
-func (r *ResearchOrchestrator) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (r *ResearchOrchestrator) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	logger := logging.GetLogger()
 	topic, ok := input["topic"].(string)
 	if !ok {
@@ -225,8 +225,8 @@ func (r *ResearchOrchestrator) Execute(ctx context.Context, input map[string]int
 	logger.Info(ctx, "%s", strings.Repeat("-", 80))
 
 	analysisInput := a2a.NewMessage(a2a.RoleUser,
-		a2a.NewTextPartWithMetadata(topic, map[string]interface{}{"field": "topic"}),
-		a2a.NewTextPartWithMetadata(searchResults, map[string]interface{}{"field": "search_results"}),
+		a2a.NewTextPartWithMetadata(topic, map[string]any{"field": "topic"}),
+		a2a.NewTextPartWithMetadata(searchResults, map[string]any{"field": "search_results"}),
 	)
 
 	analysisResult, err := r.executor.CallSubAgent(ctx, "analysis", analysisInput)
@@ -262,11 +262,11 @@ func (r *ResearchOrchestrator) Execute(ctx context.Context, input map[string]int
 	logger.Info(ctx, "%s", strings.Repeat("-", 80))
 
 	synthesisInput := a2a.NewMessage(a2a.RoleUser,
-		a2a.NewTextPartWithMetadata(topic, map[string]interface{}{"field": "topic"}),
-		a2a.NewTextPartWithMetadata(keyFindings, map[string]interface{}{"field": "key_findings"}),
-		a2a.NewTextPartWithMetadata(patterns, map[string]interface{}{"field": "patterns"}),
-		a2a.NewTextPartWithMetadata(contradictions, map[string]interface{}{"field": "contradictions"}),
-		a2a.NewTextPartWithMetadata(gaps, map[string]interface{}{"field": "gaps"}),
+		a2a.NewTextPartWithMetadata(topic, map[string]any{"field": "topic"}),
+		a2a.NewTextPartWithMetadata(keyFindings, map[string]any{"field": "key_findings"}),
+		a2a.NewTextPartWithMetadata(patterns, map[string]any{"field": "patterns"}),
+		a2a.NewTextPartWithMetadata(contradictions, map[string]any{"field": "contradictions"}),
+		a2a.NewTextPartWithMetadata(gaps, map[string]any{"field": "gaps"}),
 	)
 
 	synthesisResult, err := r.executor.CallSubAgent(ctx, "synthesis", synthesisInput)
@@ -278,14 +278,14 @@ func (r *ResearchOrchestrator) Execute(ctx context.Context, input map[string]int
 	logger.Info(ctx, "\n%s", strings.Repeat("=", 80))
 
 	// Compile final output
-	output := map[string]interface{}{
-		"topic":           topic,
-		"search_queries":  searchQueries,
-		"search_results":  searchResults,
-		"key_findings":    keyFindings,
-		"patterns":        patterns,
-		"contradictions":  contradictions,
-		"gaps":            gaps,
+	output := map[string]any{
+		"topic":          topic,
+		"search_queries": searchQueries,
+		"search_results": searchResults,
+		"key_findings":   keyFindings,
+		"patterns":       patterns,
+		"contradictions": contradictions,
+		"gaps":           gaps,
 	}
 
 	// Add synthesis results
@@ -310,7 +310,7 @@ func (r *ResearchOrchestrator) GetMemory() agents.Memory {
 // Helper function to print research report
 // ============================================================================
 
-func printResearchReport(ctx context.Context, result map[string]interface{}) {
+func printResearchReport(ctx context.Context, result map[string]any) {
 	logger := logging.GetLogger()
 
 	logger.Info(ctx, "\n╔════════════════════════════════════════════════════════════════╗")
@@ -443,7 +443,7 @@ func main() {
 
 		// Create message with metadata specifying the field name as "topic"
 		msg := a2a.NewMessage(a2a.RoleUser,
-			a2a.NewTextPartWithMetadata(topic, map[string]interface{}{"field": "topic"}),
+			a2a.NewTextPartWithMetadata(topic, map[string]any{"field": "topic"}),
 		)
 		artifact, err := orchestratorExec.Execute(ctx, msg)
 		if err != nil {
@@ -452,7 +452,7 @@ func main() {
 		}
 
 		// Convert artifact to result map
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		result["topic"] = topic
 
 		for _, part := range artifact.Parts {

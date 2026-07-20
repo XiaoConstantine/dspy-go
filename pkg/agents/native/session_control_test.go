@@ -49,7 +49,7 @@ func TestAgent_GetSessionState_UsesConfiguredSessionID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task": "Create state",
 	})
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestAgent_ForkActiveSession_CanLeaveActiveBranchUnchanged(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task": "Seed active branch",
 	})
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestAgent_SessionControls_SupportLifecycleWithoutRawBranchKeys(t *testing.T
 	})
 	require.NoError(t, err)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task": "main first",
 	})
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestAgent_SessionControls_SupportLifecycleWithoutRawBranchKeys(t *testing.T
 	require.NotNil(t, state.ActiveBranch)
 	assert.Equal(t, forked.ID, state.ActiveBranch.ID)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task": "branch second",
 	})
 	require.NoError(t, err)
@@ -175,7 +175,7 @@ func TestAgent_SessionControls_SupportLifecycleWithoutRawBranchKeys(t *testing.T
 	require.NotNil(t, state.ActiveBranch)
 	assert.Equal(t, originalBranchID, state.ActiveBranch.ID)
 
-	_, err = agent.Execute(context.Background(), map[string]interface{}{
+	_, err = agent.Execute(context.Background(), map[string]any{
 		"task": "main third",
 	})
 	require.NoError(t, err)

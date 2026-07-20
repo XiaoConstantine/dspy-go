@@ -5,30 +5,30 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/structured"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // PromptAnalyzerModel represents the prompt analyzer screen
 type PromptAnalyzerModel struct {
-	width          int
-	height         int
-	nextScreen     string
-	analyzer       *structured.PromptAnalyzer
-	currentPrompt  string
-	analysis       []structured.PromptComponent
+	width           int
+	height          int
+	nextScreen      string
+	analyzer        *structured.PromptAnalyzer
+	currentPrompt   string
+	analysis        []structured.PromptComponent
 	recommendations []structured.OptimizerRecommendation
-	showResults    bool
-	mode           string // "input", "results", "signature", "optimized"
-	inputCursor    int
-	inputLines     []string
-	scrollOffset   int
-	lastInputLen   int // Track input length to detect paste operations
-	signature      interface{} // Store the DSPy signature
-	optimizedSig   interface{} // Store the optimized signature
+	showResults     bool
+	mode            string // "input", "results", "signature", "optimized"
+	inputCursor     int
+	inputLines      []string
+	scrollOffset    int
+	lastInputLen    int // Track input length to detect paste operations
+	signature       any // Store the DSPy signature
+	optimizedSig    any // Store the optimized signature
 }
 
 // NewPromptAnalyzerModel creates a new prompt analyzer model
@@ -716,19 +716,19 @@ func getComponentTypeFromField(fieldName string) string {
 		"task_context":         "Task Context",
 		"tone_context":         "Tone Context",
 		"background_data":      "Background Data",
-		"task_rules":          "Task Rules",
-		"examples":            "Examples",
+		"task_rules":           "Task Rules",
+		"examples":             "Examples",
 		"conversation_history": "Conversation History",
-		"user_request":        "User Request",
-		"thinking_steps":      "Thinking Steps",
-		"role_context":        "Task Context",
-		"tone_guidelines":     "Tone Context",
-		"background_info":     "Background Data",
-		"constraints":         "Task Rules",
-		"demonstrations":      "Examples",
-		"chat_history":        "Conversation History",
-		"user_query":          "User Request",
-		"reasoning_steps":     "Thinking Steps",
+		"user_request":         "User Request",
+		"thinking_steps":       "Thinking Steps",
+		"role_context":         "Task Context",
+		"tone_guidelines":      "Tone Context",
+		"background_info":      "Background Data",
+		"constraints":          "Task Rules",
+		"demonstrations":       "Examples",
+		"chat_history":         "Conversation History",
+		"user_query":           "User Request",
+		"reasoning_steps":      "Thinking Steps",
 	}
 
 	if component, exists := fieldToComponent[fieldName]; exists {
@@ -804,16 +804,16 @@ func truncateString(s string, maxLen int) string {
 // getComponentColor returns the color for each component type using lipgloss colors
 func getComponentColor(componentType string) string {
 	colorMap := map[string]string{
-		"Task Context":         "#6BB6FF",  // Light blue for identity/role
-		"Tone Context":         "#B19CD9",  // Purple for style/tone
-		"Background Data":      "#87CEEB",  // Sky blue for information/data
-		"Task Rules":          "#FFB6C1",   // Light pink for rules/constraints
-		"Examples":            "#98FB98",   // Pale green for demonstrations
-		"Conversation History": "#F0E68C",  // Khaki for context/history
-		"User Request":        "#DDA0DD",   // Plum for user input
-		"Thinking Steps":      "#D3D3D3",   // Light gray for reasoning
-		"Output Format":       "#87CEFA",   // Light sky blue for structure
-		"Prefilled Response":  "#90EE90",   // Light green for output starters
+		"Task Context":         "#6BB6FF", // Light blue for identity/role
+		"Tone Context":         "#B19CD9", // Purple for style/tone
+		"Background Data":      "#87CEEB", // Sky blue for information/data
+		"Task Rules":           "#FFB6C1", // Light pink for rules/constraints
+		"Examples":             "#98FB98", // Pale green for demonstrations
+		"Conversation History": "#F0E68C", // Khaki for context/history
+		"User Request":         "#DDA0DD", // Plum for user input
+		"Thinking Steps":       "#D3D3D3", // Light gray for reasoning
+		"Output Format":        "#87CEFA", // Light sky blue for structure
+		"Prefilled Response":   "#90EE90", // Light green for output starters
 	}
 
 	if color, exists := colorMap[componentType]; exists {

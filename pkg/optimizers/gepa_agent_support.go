@@ -56,7 +56,7 @@ func (g *GEPA) BootstrapPopulationFromSeed(ctx context.Context, seed *GEPACandid
 			break
 		}
 
-		candidate := g.candidateFromSeed(seed, variation, 0, nil, map[string]interface{}{
+		candidate := g.candidateFromSeed(seed, variation, 0, nil, map[string]any{
 			"variation_index":  i,
 			"base_instruction": seed.Instruction,
 		})
@@ -121,7 +121,7 @@ func (g *GEPA) HasConverged() bool {
 	return g.hasConverged()
 }
 
-func (g *GEPA) candidateFromSeed(seed *GEPACandidate, instruction string, generation int, parentIDs []string, extraMetadata map[string]interface{}) *GEPACandidate {
+func (g *GEPA) candidateFromSeed(seed *GEPACandidate, instruction string, generation int, parentIDs []string, extraMetadata map[string]any) *GEPACandidate {
 	moduleName := seedModuleName(seed)
 
 	return &GEPACandidate{
@@ -151,7 +151,7 @@ func (g *GEPA) ensureCandidateMetrics(candidateID string) {
 		BestFitness:      0.0,
 		ExecutionTimes:   make([]time.Duration, 0),
 		ErrorCounts:      make(map[string]int),
-		Metadata:         make(map[string]interface{}),
+		Metadata:         make(map[string]any),
 	}
 }
 
@@ -169,12 +169,12 @@ func (s *GEPAState) RecordCandidateFitness(candidate *GEPACandidate, fitness *Mu
 		metrics = &CandidateMetrics{
 			ExecutionTimes: make([]time.Duration, 0),
 			ErrorCounts:    make(map[string]int),
-			Metadata:       make(map[string]interface{}),
+			Metadata:       make(map[string]any),
 		}
 		s.CandidateMetrics[candidate.ID] = metrics
 	}
 	if metrics.Metadata == nil {
-		metrics.Metadata = make(map[string]interface{})
+		metrics.Metadata = make(map[string]any)
 	}
 
 	metrics.AverageFitness = averageScore
@@ -358,16 +358,16 @@ func seedModuleName(seed *GEPACandidate) string {
 	return "agent_artifact"
 }
 
-func cloneCandidateMetadata(source map[string]interface{}) map[string]interface{} {
-	cloned := make(map[string]interface{}, len(source))
+func cloneCandidateMetadata(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
 	for key, value := range source {
 		cloned[key] = value
 	}
 	return cloned
 }
 
-func mergeCandidateMetadata(extra map[string]interface{}, sources ...map[string]interface{}) map[string]interface{} {
-	merged := make(map[string]interface{})
+func mergeCandidateMetadata(extra map[string]any, sources ...map[string]any) map[string]any {
+	merged := make(map[string]any)
 	// Earlier sources win for conflicting inherited keys; the explicit extra
 	// metadata for the new candidate overwrites inherited values last.
 	for _, source := range sources {

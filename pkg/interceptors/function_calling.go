@@ -223,7 +223,7 @@ func supportsToolCalling(llm core.CapabilityProvider) bool {
 
 // buildFunctionSchemas converts tools from the registry into function schemas
 // that can be passed to GenerateWithFunctions.
-func buildFunctionSchemas(config FunctionCallingConfig) ([]map[string]interface{}, error) {
+func buildFunctionSchemas(config FunctionCallingConfig) ([]map[string]any, error) {
 	functions, err := tools.BuildFunctionSchemas(config.ToolRegistry)
 	if err != nil {
 		return nil, err
@@ -291,7 +291,7 @@ func buildPromptFromInputs(inputs map[string]any, info *core.ModuleInfo) string 
 
 // transformFunctionCallResult converts the LLM's function call response
 // into the format expected by the ReAct module.
-func transformFunctionCallResult(result map[string]interface{}, originalInputs map[string]any) (map[string]any, error) {
+func transformFunctionCallResult(result map[string]any, originalInputs map[string]any) (map[string]any, error) {
 	output := make(map[string]any)
 
 	// Copy through original inputs that should be preserved
@@ -305,14 +305,14 @@ func transformFunctionCallResult(result map[string]interface{}, originalInputs m
 	}
 
 	// Extract function call from result
-	functionCall, hasFunctionCall := result["function_call"].(map[string]interface{})
+	functionCall, hasFunctionCall := result["function_call"].(map[string]any)
 
 	if hasFunctionCall {
 		toolName, _ := functionCall["name"].(string)
-		arguments, _ := functionCall["arguments"].(map[string]interface{})
+		arguments, _ := functionCall["arguments"].(map[string]any)
 
 		// Set the action field as a structured map (ReAct can handle both string and map)
-		output["action"] = map[string]interface{}{
+		output["action"] = map[string]any{
 			"tool_name": toolName,
 			"arguments": arguments,
 		}
@@ -338,9 +338,9 @@ func transformFunctionCallResult(result map[string]interface{}, originalInputs m
 		// LLM responded with text instead of a function call
 		// This shouldn't happen in strict mode, but handle gracefully
 		output["thought"] = content
-		output["action"] = map[string]interface{}{
+		output["action"] = map[string]any{
 			"tool_name": "Finish",
-			"arguments": map[string]interface{}{
+			"arguments": map[string]any{
 				"answer": content,
 			},
 		}

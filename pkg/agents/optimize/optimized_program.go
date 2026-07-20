@@ -36,14 +36,14 @@ type OptimizationTargetDescriptor struct {
 // OptimizedAgentProgram is the shared persisted envelope for optimized agent
 // artifacts across native, ReAct, and RLM-backed agents.
 type OptimizedAgentProgram struct {
-	Schema      string                 `json:"schema"`
-	Version     int                    `json:"version"`
-	AgentType   string                 `json:"agent_type,omitempty"`
-	TargetOrder []string               `json:"target_order,omitempty"`
-	Text        map[string]string      `json:"text,omitempty"`
-	Int         map[string]int         `json:"int,omitempty"`
-	Bool        map[string]bool        `json:"bool,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Schema      string            `json:"schema"`
+	Version     int               `json:"version"`
+	AgentType   string            `json:"agent_type,omitempty"`
+	TargetOrder []string          `json:"target_order,omitempty"`
+	Text        map[string]string `json:"text,omitempty"`
+	Int         map[string]int    `json:"int,omitempty"`
+	Bool        map[string]bool   `json:"bool,omitempty"`
+	Metadata    map[string]any    `json:"metadata,omitempty"`
 }
 
 type optimizationTargetLister interface {

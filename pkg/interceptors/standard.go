@@ -33,7 +33,7 @@ func LoggingModuleInterceptor() core.ModuleInterceptor {
 // LoggingAgentInterceptor creates an interceptor that logs agent execution.
 // It logs before and after agent execution with timing information.
 func LoggingAgentInterceptor() core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		logger := logging.GetLogger()
 		start := time.Now()
 
@@ -55,7 +55,7 @@ func LoggingAgentInterceptor() core.AgentInterceptor {
 // LoggingToolInterceptor creates an interceptor that logs tool execution.
 // It logs before and after tool execution with timing and argument information.
 func LoggingToolInterceptor() core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		logger := logging.GetLogger()
 		start := time.Now()
 
@@ -79,7 +79,7 @@ func LoggingToolInterceptor() core.ToolInterceptor {
 func TracingModuleInterceptor() core.ModuleInterceptor {
 	return func(ctx context.Context, inputs map[string]any, info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
 		// Start a new span for this module execution
-		ctx, span := core.StartSpanWithContext(ctx, "module.process", info.ModuleName, map[string]interface{}{
+		ctx, span := core.StartSpanWithContext(ctx, "module.process", info.ModuleName, map[string]any{
 			"module_type": info.ModuleType,
 			"version":     info.Version,
 		})
@@ -109,12 +109,12 @@ func TracingModuleInterceptor() core.ModuleInterceptor {
 
 // TracingAgentInterceptor creates an interceptor that adds distributed tracing to agent execution.
 func TracingAgentInterceptor() core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		// Start a new span for this agent execution
-		ctx, span := core.StartSpanWithContext(ctx, "agent.execute", info.AgentID, map[string]interface{}{
-			"agent_type":    info.AgentType,
-			"version":       info.Version,
-			"capabilities":  len(info.Capabilities),
+		ctx, span := core.StartSpanWithContext(ctx, "agent.execute", info.AgentID, map[string]any{
+			"agent_type":   info.AgentType,
+			"version":      info.Version,
+			"capabilities": len(info.Capabilities),
 		})
 		defer core.EndSpan(ctx)
 
@@ -141,12 +141,12 @@ func TracingAgentInterceptor() core.AgentInterceptor {
 
 // TracingToolInterceptor creates an interceptor that adds distributed tracing to tool execution.
 func TracingToolInterceptor() core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		// Start a new span for this tool execution
-		ctx, span := core.StartSpanWithContext(ctx, "tool.call", info.Name, map[string]interface{}{
-			"tool_type":    info.ToolType,
-			"version":      info.Version,
-			"description":  info.Description,
+		ctx, span := core.StartSpanWithContext(ctx, "tool.call", info.Name, map[string]any{
+			"tool_type":   info.ToolType,
+			"version":     info.Version,
+			"description": info.Description,
 		})
 		defer core.EndSpan(ctx)
 
@@ -185,14 +185,14 @@ func MetricsModuleInterceptor() core.ModuleInterceptor {
 		// Record metrics in execution state for later collection
 		if state := core.GetExecutionState(ctx); state != nil {
 			// Create metrics annotation for this module execution
-			metrics := map[string]interface{}{
-				"module_name":     info.ModuleName,
-				"module_type":     info.ModuleType,
-				"duration_ms":     duration.Milliseconds(),
-				"success":         err == nil,
-				"timestamp":       start.Unix(),
-				"input_count":     len(inputs),
-				"output_count":    len(result),
+			metrics := map[string]any{
+				"module_name":  info.ModuleName,
+				"module_type":  info.ModuleType,
+				"duration_ms":  duration.Milliseconds(),
+				"success":      err == nil,
+				"timestamp":    start.Unix(),
+				"input_count":  len(inputs),
+				"output_count": len(result),
 			}
 
 			// Add token usage if available
@@ -215,7 +215,7 @@ func MetricsModuleInterceptor() core.ModuleInterceptor {
 
 // MetricsAgentInterceptor creates an interceptor that collects performance metrics for agents.
 func MetricsAgentInterceptor() core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		start := time.Now()
 
 		result, err := handler(ctx, input)
@@ -224,7 +224,7 @@ func MetricsAgentInterceptor() core.AgentInterceptor {
 
 		// Record metrics in execution state for later collection
 		if state := core.GetExecutionState(ctx); state != nil {
-			metrics := map[string]interface{}{
+			metrics := map[string]any{
 				"agent_id":          info.AgentID,
 				"agent_type":        info.AgentType,
 				"duration_ms":       duration.Milliseconds(),
@@ -255,7 +255,7 @@ func MetricsAgentInterceptor() core.AgentInterceptor {
 
 // MetricsToolInterceptor creates an interceptor that collects performance metrics for tools.
 func MetricsToolInterceptor() core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		start := time.Now()
 
 		result, err := handler(ctx, args)
@@ -264,13 +264,13 @@ func MetricsToolInterceptor() core.ToolInterceptor {
 
 		// Record metrics in execution state for later collection
 		if state := core.GetExecutionState(ctx); state != nil {
-			metrics := map[string]interface{}{
-				"tool_name":    info.Name,
-				"tool_type":    info.ToolType,
-				"duration_ms":  duration.Milliseconds(),
-				"success":      err == nil,
-				"timestamp":    start.Unix(),
-				"args_count":   len(args),
+			metrics := map[string]any{
+				"tool_name":   info.Name,
+				"tool_type":   info.ToolType,
+				"duration_ms": duration.Milliseconds(),
+				"success":     err == nil,
+				"timestamp":   start.Unix(),
+				"args_count":  len(args),
 			}
 
 			// Add result information if available
@@ -309,7 +309,7 @@ func getOutputFieldNames(outputs map[string]any) []string {
 }
 
 // getMapKeys extracts keys from a generic map.
-func getMapKeys(m map[string]interface{}) []string {
+func getMapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

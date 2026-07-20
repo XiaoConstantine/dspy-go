@@ -37,9 +37,9 @@ type XMLConfig struct {
 // DefaultXMLConfig returns XMLConfig with sensible defaults.
 func DefaultXMLConfig() XMLConfig {
 	return XMLConfig{
-		StrictParsing:      false,  // Allow missing fields for robustness
+		StrictParsing:      false, // Allow missing fields for robustness
 		FallbackToText:     true,
-		ValidateXML:        false,  // Disable validation to handle unescaped entities
+		ValidateXML:        false, // Disable validation to handle unescaped entities
 		MaxDepth:           10,
 		MaxSize:            1024 * 1024, // 1MB
 		ParseTimeout:       30 * time.Second,
@@ -135,9 +135,9 @@ func FlexibleXMLConfig() XMLConfig {
 // PerformantXMLConfig creates a configuration optimized for performance.
 func PerformantXMLConfig() XMLConfig {
 	return DefaultXMLConfig().
-		WithValidation(false).   // Skip validation for speed
-		WithMaxDepth(5).         // Limit depth for performance
-		WithMaxSize(32 * 1024)   // Limit size to 32KB for better performance while allowing typical LLM responses
+		WithValidation(false). // Skip validation for speed
+		WithMaxDepth(5).       // Limit depth for performance
+		WithMaxSize(32 * 1024) // Limit size to 32KB for better performance while allowing typical LLM responses
 }
 
 // SecureXMLConfig creates a configuration with enhanced security settings.

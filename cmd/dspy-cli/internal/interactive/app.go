@@ -3,8 +3,8 @@ package interactive
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/models"
+	"github.com/charmbracelet/bubbletea"
 )
 
 // Screen names for navigation
@@ -13,11 +13,11 @@ const (
 	ScreenOptimizerDetail  = "optimizer_detail"
 	ScreenConfig           = "config"
 	ScreenComparisonStudio = "comparison_studio"
-	ScreenWizard          = "recommendation_wizard"
+	ScreenWizard           = "recommendation_wizard"
 	ScreenLiveOptimization = "live_optimization"
-	ScreenResults         = "results"
-	ScreenHelp            = "help"
-	ScreenPromptAnalyzer  = "prompt_analyzer"
+	ScreenResults          = "results"
+	ScreenHelp             = "help"
+	ScreenPromptAnalyzer   = "prompt_analyzer"
 )
 
 // AppModel is the main application model that manages all screens
@@ -366,7 +366,6 @@ func (m AppModel) extractOptimizerFromSelection() string {
 	// Default fallback
 	return "bootstrap"
 }
-
 
 func (m AppModel) renderWizard() string {
 	return `

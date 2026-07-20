@@ -267,7 +267,7 @@ func TestDependencyPipeline_ExecuteWithDependencies(t *testing.T) {
 
 	// Execute pipeline
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -278,7 +278,7 @@ func TestDependencyPipeline_ExecuteWithDependencies(t *testing.T) {
 
 	// Verify execution order by checking processed_by fields
 	for i, toolResult := range result.Results {
-		data, ok := toolResult.Data.(map[string]interface{})
+		data, ok := toolResult.Data.(map[string]any)
 		require.True(t, ok)
 
 		expectedTool := nodes[i].ToolName
@@ -348,7 +348,7 @@ func TestDependencyPipeline_ParallelExecution(t *testing.T) {
 
 	// Execute and verify
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -367,7 +367,7 @@ func TestDependencyPipeline_ParallelExecution(t *testing.T) {
 	transformerExecuted := false
 
 	for _, result := range result.Results {
-		if resultData, ok := result.Data.(map[string]interface{}); ok {
+		if resultData, ok := result.Data.(map[string]any); ok {
 			if processedBy, ok := resultData["processed_by"].(string); ok {
 				if processedBy == "validator" {
 					validatorExecuted = true
@@ -420,7 +420,7 @@ func TestDependencyPipeline_ErrorHandling(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -519,7 +519,7 @@ func TestDependencyPipeline_ContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -537,7 +537,7 @@ func TestDependencyPipeline_EmptyGraph(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 

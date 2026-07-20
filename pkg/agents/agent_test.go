@@ -25,12 +25,12 @@ func (m *MockTool) Description() string {
 	return args.String(0)
 }
 
-func (m *MockTool) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (m *MockTool) Execute(ctx context.Context, params map[string]any) (any, error) {
 	args := m.Called(ctx, params)
 	return args.Get(0), args.Error(1)
 }
 
-func (m *MockTool) ValidateParams(params map[string]interface{}) error {
+func (m *MockTool) ValidateParams(params map[string]any) error {
 	args := m.Called(params)
 	return args.Error(0)
 }
@@ -40,9 +40,9 @@ type MockAgent struct {
 	mock.Mock
 }
 
-func (m *MockAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (m *MockAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	args := m.Called(ctx, input)
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
 func (m *MockAgent) GetCapabilities() []core.Tool {
@@ -62,7 +62,7 @@ func TestAgentInterface(t *testing.T) {
 		mockMemory := NewInMemoryStore()
 
 		// Setup expectations
-		expectedOutput := map[string]interface{}{
+		expectedOutput := map[string]any{
 			"result": "success",
 		}
 		mockAgent.On("Execute", mock.Anything, mock.Anything).Return(expectedOutput, nil)
@@ -71,7 +71,7 @@ func TestAgentInterface(t *testing.T) {
 
 		// Test Execute
 		ctx := context.Background()
-		input := map[string]interface{}{
+		input := map[string]any{
 			"test": "input",
 		}
 		output, err := mockAgent.Execute(ctx, input)
@@ -110,7 +110,7 @@ func TestAgentInterface(t *testing.T) {
 
 		// Test Execute
 		ctx := context.Background()
-		params := map[string]interface{}{
+		params := map[string]any{
 			"param": "value",
 		}
 		result, err := mockTool.Execute(ctx, params)

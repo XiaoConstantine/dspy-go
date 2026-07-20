@@ -138,7 +138,7 @@ func TestWithFreshExecutionStatePreservesTraceID(t *testing.T) {
 
 func TestSpanConcurrentAnnotations(t *testing.T) {
 	span := &Span{
-		Annotations: make(map[string]interface{}),
+		Annotations: make(map[string]any),
 	}
 
 	var wg sync.WaitGroup
@@ -167,11 +167,11 @@ func (s *recordLLMCallCompatStub) Generate(context.Context, string, ...GenerateO
 	return nil, nil
 }
 
-func (s *recordLLMCallCompatStub) GenerateWithJSON(context.Context, string, ...GenerateOption) (map[string]interface{}, error) {
+func (s *recordLLMCallCompatStub) GenerateWithJSON(context.Context, string, ...GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (s *recordLLMCallCompatStub) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...GenerateOption) (map[string]interface{}, error) {
+func (s *recordLLMCallCompatStub) GenerateWithFunctions(context.Context, string, []map[string]any, ...GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 

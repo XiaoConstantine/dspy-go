@@ -64,10 +64,10 @@ func TestGenerateJSONKey(t *testing.T) {
 	generator := NewKeyGenerator("test_")
 
 	t.Run("Basic JSON key generation", func(t *testing.T) {
-		schema := map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{
-				"name": map[string]interface{}{"type": "string"},
+		schema := map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{"type": "string"},
 			},
 		}
 		key := generator.GenerateJSONKey("gpt-4", "Generate JSON", schema, nil)
@@ -76,15 +76,15 @@ func TestGenerateJSONKey(t *testing.T) {
 	})
 
 	t.Run("Same inputs produce same JSON key", func(t *testing.T) {
-		schema := map[string]interface{}{"type": "object"}
+		schema := map[string]any{"type": "object"}
 		key1 := generator.GenerateJSONKey("gpt-4", "Generate JSON", schema, nil)
 		key2 := generator.GenerateJSONKey("gpt-4", "Generate JSON", schema, nil)
 		assert.Equal(t, key1, key2)
 	})
 
 	t.Run("Different schemas produce different keys", func(t *testing.T) {
-		schema1 := map[string]interface{}{"type": "object"}
-		schema2 := map[string]interface{}{"type": "array"}
+		schema1 := map[string]any{"type": "object"}
+		schema2 := map[string]any{"type": "array"}
 		key1 := generator.GenerateJSONKey("gpt-4", "Generate JSON", schema1, nil)
 		key2 := generator.GenerateJSONKey("gpt-4", "Generate JSON", schema2, nil)
 		assert.NotEqual(t, key1, key2)

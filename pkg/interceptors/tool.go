@@ -11,7 +11,7 @@ import (
 
 // ApprovalToolInterceptor blocks tool execution when the approval callback denies it.
 func ApprovalToolInterceptor(approve core.ToolApprovalFunc) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		if approve == nil {
 			return handler(ctx, args)
 		}
@@ -34,7 +34,7 @@ func ApprovalToolInterceptor(approve core.ToolApprovalFunc) core.ToolInterceptor
 
 // RedactionToolInterceptor rewrites model/display text and details using the provided redactor.
 func RedactionToolInterceptor(redact func(string) string) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		result, err := handler(ctx, args)
 		if err != nil {
 			return result, err
@@ -44,10 +44,10 @@ func RedactionToolInterceptor(redact func(string) string) core.ToolInterceptor {
 		}
 
 		if result.Metadata == nil {
-			result.Metadata = make(map[string]interface{})
+			result.Metadata = make(map[string]any)
 		}
 		if result.Annotations == nil {
-			result.Annotations = make(map[string]interface{})
+			result.Annotations = make(map[string]any)
 		}
 
 		modelText := core.ToolResultMetadataString(result.Metadata, core.ToolResultModelTextMeta)
@@ -94,14 +94,14 @@ func RedactionToolInterceptor(redact func(string) string) core.ToolInterceptor {
 
 // TruncationToolInterceptor trims model/display text while preserving the full raw result.
 func TruncationToolInterceptor(modelLimit int, displayLimit int) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		result, err := handler(ctx, args)
 		if err != nil {
 			return result, err
 		}
 
 		if result.Metadata == nil {
-			result.Metadata = make(map[string]interface{})
+			result.Metadata = make(map[string]any)
 		}
 
 		modelText := core.ToolResultMetadataString(result.Metadata, core.ToolResultModelTextMeta)

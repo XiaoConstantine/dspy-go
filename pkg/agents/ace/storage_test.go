@@ -239,7 +239,7 @@ func TestLearning(t *testing.T) {
 	t.Run("should prune", func(t *testing.T) {
 		l := Learning{Helpful: 1, Harmful: 9}
 		assert.False(t, l.ShouldPrune(0.3, 20)) // Not enough uses
-		assert.True(t, l.ShouldPrune(0.3, 5))  // Enough uses, low rate
+		assert.True(t, l.ShouldPrune(0.3, 5))   // Enough uses, low rate
 	})
 
 	t.Run("short code", func(t *testing.T) {
@@ -617,11 +617,11 @@ func TestExtractCategoryFromIDEdgeCases(t *testing.T) {
 		{"mistakes-12345", "mistakes"},
 		{"patterns-00001", "patterns"},
 		{"context-99999", "context"},
-		{"simple", "simple"},     // No dash - returns whole string
-		{"a-b-c", "a"},           // Multiple dashes, takes first part
-		{"", ""},                 // Empty string
-		{"-00001", ""},           // Starts with dash
-		{"test-", "test"},        // Ends with dash
+		{"simple", "simple"}, // No dash - returns whole string
+		{"a-b-c", "a"},       // Multiple dashes, takes first part
+		{"", ""},             // Empty string
+		{"-00001", ""},       // Starts with dash
+		{"test-", "test"},    // Ends with dash
 	}
 
 	for _, tt := range tests {
@@ -663,11 +663,11 @@ func TestFormatLearningsWithSpecialCharacters(t *testing.T) {
 
 func TestShouldPruneEdgeCases(t *testing.T) {
 	tests := []struct {
-		name         string
-		learning     Learning
-		minRatio     float64
-		minUsage     int
-		shouldPrune  bool
+		name        string
+		learning    Learning
+		minRatio    float64
+		minUsage    int
+		shouldPrune bool
 	}{
 		{
 			name:        "exactly at min usage",

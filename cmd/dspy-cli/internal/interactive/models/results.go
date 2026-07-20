@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 )
 
 // ResultsModel represents the results visualization screen
@@ -367,13 +367,13 @@ func (m ResultsModel) renderMetricsGrid() string {
 	metrics := []string{
 		metricStyle.Render(
 			valueStyle.Render(fmt.Sprintf("%.1f%%", m.result.FinalAccuracy*100)) + "\n" +
-			labelStyle.Render("Final Accuracy")),
+				labelStyle.Render("Final Accuracy")),
 		metricStyle.Render(
 			valueStyle.Render(fmt.Sprintf("+%.1f%%", m.result.ImprovementPct)) + "\n" +
-			labelStyle.Render("Improvement")),
+				labelStyle.Render("Improvement")),
 		metricStyle.Render(
 			valueStyle.Render(fmt.Sprintf("%d", m.result.ExamplesUsed)) + "\n" +
-			labelStyle.Render("Examples Used")),
+				labelStyle.Render("Examples Used")),
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, metrics...)
@@ -589,9 +589,9 @@ func (m *ResultsModel) exportResults() {
 
 func (m *ResultsModel) exportAsJSON() {
 	// Create JSON structure
-	exportData := map[string]interface{}{
+	exportData := map[string]any{
 		"optimizer":        m.result.OptimizerName,
-		"dataset":         m.result.DatasetName,
+		"dataset":          m.result.DatasetName,
 		"initial_accuracy": fmt.Sprintf("%.2f%%", m.result.InitialAccuracy*100),
 		"final_accuracy":   fmt.Sprintf("%.2f%%", m.result.FinalAccuracy*100),
 		"improvement":      fmt.Sprintf("%.2f%%", m.result.ImprovementPct),

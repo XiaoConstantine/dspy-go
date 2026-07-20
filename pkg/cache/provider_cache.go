@@ -52,7 +52,7 @@ func (pc *ProviderCache) CacheGenerateJSON(
 	ctx context.Context,
 	modelID string,
 	prompt string,
-	schema interface{},
+	schema any,
 	options []core.GenerateOption,
 	generateFn func() (*core.LLMResponse, error),
 ) (*core.LLMResponse, error) {

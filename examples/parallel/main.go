@@ -66,7 +66,7 @@ func runBasicBatchExample(ctx context.Context) {
 	parallel := modules.NewParallel(predict)
 
 	// Prepare batch inputs
-	batchInputs := []map[string]interface{}{
+	batchInputs := []map[string]any{
 		{"text": "Artificial intelligence is transforming healthcare by enabling more accurate diagnoses, personalized treatments, and efficient drug discovery. Machine learning algorithms can analyze medical images, predict patient outcomes, and assist doctors in making better decisions."},
 		{"text": "Climate change is causing rising sea levels, extreme weather events, and ecosystem disruption worldwide. Scientists emphasize the urgent need for renewable energy adoption and carbon emission reduction to mitigate these effects."},
 		{"text": "The stock market experienced significant volatility this week due to inflation concerns and geopolitical tensions. Investors are closely watching central bank policies and their potential impact on interest rates."},
@@ -75,7 +75,7 @@ func runBasicBatchExample(ctx context.Context) {
 	start := time.Now()
 
 	// Process all inputs in parallel
-	result, err := parallel.Process(ctx, map[string]interface{}{
+	result, err := parallel.Process(ctx, map[string]any{
 		"batch_inputs": batchInputs,
 	})
 	if err != nil {
@@ -84,7 +84,7 @@ func runBasicBatchExample(ctx context.Context) {
 	}
 
 	duration := time.Since(start)
-	results := result["results"].([]map[string]interface{})
+	results := result["results"].([]map[string]any)
 
 	fmt.Printf("Processed %d texts in %v\n\n", len(results), duration)
 
@@ -120,7 +120,7 @@ func runSentimentAnalysisExample(ctx context.Context) {
 	)
 
 	// Prepare reviews including some that might cause issues
-	reviews := []map[string]interface{}{
+	reviews := []map[string]any{
 		{"review": "This product is absolutely amazing! Best purchase I've ever made."},
 		{"review": "Terrible quality, broke after one day. Very disappointed."},
 		{"review": "It's okay, nothing special but does the job."},
@@ -130,7 +130,7 @@ func runSentimentAnalysisExample(ctx context.Context) {
 
 	start := time.Now()
 
-	result, err := parallel.Process(ctx, map[string]interface{}{
+	result, err := parallel.Process(ctx, map[string]any{
 		"batch_inputs": reviews,
 	})
 	if err != nil {
@@ -139,16 +139,16 @@ func runSentimentAnalysisExample(ctx context.Context) {
 	}
 
 	duration := time.Since(start)
-	results := result["results"].([]map[string]interface{})
-	failures, hasFailures := result["failures"].([]map[string]interface{})
+	results := result["results"].([]map[string]any)
+	failures, hasFailures := result["failures"].([]map[string]any)
 
 	fmt.Printf("Processed %d reviews in %v\n", len(reviews), duration)
 	fmt.Printf("Successful: %d, Failed: %d\n\n", len(results), len(failures))
 
 	for i, res := range results {
-	if res != nil {
-	fmt.Printf("Review %d: %s (confidence: %s)\n",
-	   i+1, res["sentiment"], res["confidence"])
+		if res != nil {
+			fmt.Printf("Review %d: %s (confidence: %s)\n",
+				i+1, res["sentiment"], res["confidence"])
 		} else {
 			fmt.Printf("Review %d: [FAILED]\n", i+1)
 		}
@@ -185,7 +185,7 @@ func runTranslationExample(ctx context.Context) {
 	parallel := modules.NewParallel(predict, modules.WithMaxWorkers(3))
 
 	// Prepare translation tasks
-	translations := []map[string]interface{}{
+	translations := []map[string]any{
 		{"text": "Hello, how are you today?", "target_language": "Spanish"},
 		{"text": "The weather is beautiful", "target_language": "French"},
 		{"text": "Thank you for your help", "target_language": "German"},
@@ -195,7 +195,7 @@ func runTranslationExample(ctx context.Context) {
 
 	start := time.Now()
 
-	result, err := parallel.Process(ctx, map[string]interface{}{
+	result, err := parallel.Process(ctx, map[string]any{
 		"batch_inputs": translations,
 	})
 	if err != nil {
@@ -204,15 +204,15 @@ func runTranslationExample(ctx context.Context) {
 	}
 
 	duration := time.Since(start)
-	results := result["results"].([]map[string]interface{})
+	results := result["results"].([]map[string]any)
 
 	fmt.Printf("Completed %d translations in %v\n\n", len(results), duration)
 
 	for i, res := range results {
-	original := translations[i]
-	if res != nil {
-	fmt.Printf("%s → %s: %s\n",
-	   original["text"], original["target_language"], res["translation"])
+		original := translations[i]
+		if res != nil {
+			fmt.Printf("%s → %s: %s\n",
+				original["text"], original["target_language"], res["translation"])
 		} else {
 			fmt.Printf("%s → %s: [FAILED]\n",
 				original["text"], original["target_language"])
@@ -244,7 +244,7 @@ func runQAWithFailuresExample(ctx context.Context) {
 		modules.WithStopOnFirstError(true), // Stop if any question fails
 	)
 
-	questions := []map[string]interface{}{
+	questions := []map[string]any{
 		{"question": "What is the capital of France?"},
 		{"question": "How many continents are there?"},
 		{"question": "What is 2 + 2?"},
@@ -253,7 +253,7 @@ func runQAWithFailuresExample(ctx context.Context) {
 
 	start := time.Now()
 
-	result, err := parallel.Process(ctx, map[string]interface{}{
+	result, err := parallel.Process(ctx, map[string]any{
 		"batch_inputs": questions,
 	})
 
@@ -264,7 +264,7 @@ func runQAWithFailuresExample(ctx context.Context) {
 		return
 	}
 
-	results := result["results"].([]map[string]interface{})
+	results := result["results"].([]map[string]any)
 	fmt.Printf("Answered %d questions in %v\n\n", len(results), duration)
 
 	for i, res := range results {

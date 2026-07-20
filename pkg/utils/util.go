@@ -15,11 +15,11 @@ import (
 // It handles common LLM response formats including:
 // - Raw JSON.
 // - JSON wrapped in markdown code blocks (```json ... ```).
-func ParseJSONResponse(response string) (map[string]interface{}, error) {
+func ParseJSONResponse(response string) (map[string]any, error) {
 	// Strip markdown code blocks if present
 	cleanedResponse := stripMarkdownCodeBlock(response)
 
-	var result map[string]interface{}
+	var result map[string]any
 	err := json.Unmarshal([]byte(cleanedResponse), &result)
 	if err != nil {
 		return nil, errors.WithFields(
@@ -100,8 +100,8 @@ func Max(a, b int) int {
 }
 
 // CloneParams creates a deep copy of a parameter map.
-func CloneParams(params map[string]interface{}) map[string]interface{} {
-	clone := make(map[string]interface{})
+func CloneParams(params map[string]any) map[string]any {
+	clone := make(map[string]any)
 	for k, v := range params {
 		clone[k] = v
 	}

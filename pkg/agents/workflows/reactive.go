@@ -19,7 +19,7 @@ type Event struct {
 	Type string `json:"type"`
 
 	// Data contains the event payload
-	Data interface{} `json:"data"`
+	Data any `json:"data"`
 
 	// Priority affects event processing order (1=highest, 10=lowest)
 	Priority int `json:"priority"`
@@ -28,7 +28,7 @@ type Event struct {
 	Timestamp time.Time `json:"timestamp"`
 
 	// Context provides additional metadata
-	Context map[string]interface{} `json:"context"`
+	Context map[string]any `json:"context"`
 
 	// Source identifies where the event originated
 	Source string `json:"source"`
@@ -71,7 +71,7 @@ type EventBus struct {
 	eventChan chan Event
 
 	// responseChan handles request-response patterns
-	responseChan map[string]chan interface{}
+	responseChan map[string]chan any
 
 	// config holds bus configuration
 	config EventBusConfig
@@ -91,12 +91,12 @@ type EventBus struct {
 
 // EventBusConfig configures the event bus behavior.
 type EventBusConfig struct {
-	BufferSize         int
+	BufferSize           int
 	BackpressureStrategy BackpressureStrategy
-	MaxHandlers        int
-	HandlerTimeout     time.Duration
-	EnablePersistence  bool
-	PersistenceStore   EventStore
+	MaxHandlers          int
+	HandlerTimeout       time.Duration
+	EnablePersistence    bool
+	PersistenceStore     EventStore
 }
 
 // EventStore interface for persisting events.
@@ -125,7 +125,7 @@ func NewEventBus(config EventBusConfig) *EventBus {
 		filters:      make([]EventFilter, 0),
 		transformers: make([]EventTransformer, 0),
 		eventChan:    make(chan Event, config.BufferSize),
-		responseChan: make(map[string]chan interface{}),
+		responseChan: make(map[string]chan any),
 		config:       config,
 		shutdown:     make(chan struct{}),
 	}
@@ -211,9 +211,9 @@ func (eb *EventBus) Emit(event Event) error {
 }
 
 // Request sends an event and waits for a response.
-func (eb *EventBus) Request(event Event, timeout time.Duration) (interface{}, error) {
+func (eb *EventBus) Request(event Event, timeout time.Duration) (any, error) {
 	responseID := event.ID + "_response"
-	responseChan := make(chan interface{}, 1)
+	responseChan := make(chan any, 1)
 
 	eb.responseMu.Lock()
 	eb.responseChan[responseID] = responseChan
@@ -238,7 +238,7 @@ func (eb *EventBus) Request(event Event, timeout time.Duration) (interface{}, er
 }
 
 // Respond sends a response to a request event.
-func (eb *EventBus) Respond(requestID string, response interface{}) error {
+func (eb *EventBus) Respond(requestID string, response any) error {
 	responseID := requestID + "_response"
 
 	eb.responseMu.RLock()
@@ -420,11 +420,11 @@ type ReactiveWorkflow struct {
 
 // ReactiveWorkflowConfig configures reactive workflow behavior.
 type ReactiveWorkflowConfig struct {
-	AutoStart          bool
-	DefaultTimeout     time.Duration
-	MaxConcurrentRuns  int
-	EnableTracing      bool
-	EnableMetrics      bool
+	AutoStart         bool
+	DefaultTimeout    time.Duration
+	MaxConcurrentRuns int
+	EnableTracing     bool
+	EnableMetrics     bool
 }
 
 // DefaultReactiveWorkflowConfig returns sensible defaults.
@@ -527,12 +527,12 @@ func (rw *ReactiveWorkflow) Emit(event Event) error {
 }
 
 // Request sends an event and waits for a response.
-func (rw *ReactiveWorkflow) Request(event Event, timeout time.Duration) (interface{}, error) {
+func (rw *ReactiveWorkflow) Request(event Event, timeout time.Duration) (any, error) {
 	return rw.eventBus.Request(event, timeout)
 }
 
 // Respond sends a response to a request event.
-func (rw *ReactiveWorkflow) Respond(requestID string, response interface{}) error {
+func (rw *ReactiveWorkflow) Respond(requestID string, response any) error {
 	return rw.eventBus.Respond(requestID, response)
 }
 
@@ -545,7 +545,7 @@ func (rw *ReactiveWorkflow) GetEventBus() *EventBus {
 func (rw *ReactiveWorkflow) createEventHandler(workflow Workflow) EventHandler {
 	return func(ctx context.Context, event Event) error {
 		// Convert event data to workflow inputs
-		inputs := map[string]interface{}{
+		inputs := map[string]any{
 			"event":      event,
 			"event_type": event.Type,
 			"event_data": event.Data,

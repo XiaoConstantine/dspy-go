@@ -10,31 +10,31 @@ func TestParseJSONResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected map[string]interface{}
+		expected map[string]any
 		wantErr  bool
 	}{
 		{
 			name:     "Valid JSON object",
 			input:    `{"key": "value", "number": 42}`,
-			expected: map[string]interface{}{"key": "value", "number": float64(42)},
+			expected: map[string]any{"key": "value", "number": float64(42)},
 			wantErr:  false,
 		},
 		{
 			name:     "Empty JSON object",
 			input:    `{}`,
-			expected: map[string]interface{}{},
+			expected: map[string]any{},
 			wantErr:  false,
 		},
 		{
 			name:     "JSON with nested object",
 			input:    `{"outer": {"inner": "value"}}`,
-			expected: map[string]interface{}{"outer": map[string]interface{}{"inner": "value"}},
+			expected: map[string]any{"outer": map[string]any{"inner": "value"}},
 			wantErr:  false,
 		},
 		{
 			name:     "JSON with array",
 			input:    `{"array": [1, 2, 3]}`,
-			expected: map[string]interface{}{"array": []interface{}{float64(1), float64(2), float64(3)}},
+			expected: map[string]any{"array": []any{float64(1), float64(2), float64(3)}},
 			wantErr:  false,
 		},
 		{
@@ -59,25 +59,25 @@ func TestParseJSONResponse(t *testing.T) {
 		{
 			name:     "JSON wrapped in markdown json block",
 			input:    "```json\n{\"key\": \"value\", \"number\": 42}\n```",
-			expected: map[string]interface{}{"key": "value", "number": float64(42)},
+			expected: map[string]any{"key": "value", "number": float64(42)},
 			wantErr:  false,
 		},
 		{
 			name:     "JSON wrapped in plain markdown block",
 			input:    "```\n{\"key\": \"value\"}\n```",
-			expected: map[string]interface{}{"key": "value"},
+			expected: map[string]any{"key": "value"},
 			wantErr:  false,
 		},
 		{
 			name:     "JSON with whitespace around markdown",
 			input:    "  ```json\n{\"answer\": \"Paris\"}\n```  ",
-			expected: map[string]interface{}{"answer": "Paris"},
+			expected: map[string]any{"answer": "Paris"},
 			wantErr:  false,
 		},
 		{
 			name:     "Multiline JSON in markdown block",
 			input:    "```json\n{\n  \"reasoning\": \"Step 1: Calculate...\",\n  \"answer\": \"42\"\n}\n```",
-			expected: map[string]interface{}{"reasoning": "Step 1: Calculate...", "answer": "42"},
+			expected: map[string]any{"reasoning": "Step 1: Calculate...", "answer": "42"},
 			wantErr:  false,
 		},
 	}
@@ -247,19 +247,19 @@ func TestMax(t *testing.T) {
 func TestCloneParams(t *testing.T) {
 	tests := []struct {
 		name   string
-		params map[string]interface{}
+		params map[string]any
 	}{
 		{
 			name:   "Non-empty map",
-			params: map[string]interface{}{"key1": "value1", "key2": 123, "key3": true},
+			params: map[string]any{"key1": "value1", "key2": 123, "key3": true},
 		},
 		{
 			name:   "Empty map",
-			params: map[string]interface{}{},
+			params: map[string]any{},
 		},
 		{
 			name:   "Map with nil value",
-			params: map[string]interface{}{"key1": nil, "key2": "value2"},
+			params: map[string]any{"key1": nil, "key2": "value2"},
 		},
 		{
 			name:   "Nil map (should return new empty map)", // CloneParams creates a new map

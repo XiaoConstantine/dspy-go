@@ -53,14 +53,14 @@ func (w *WeatherTool) CanHandle(ctx context.Context, intent string) bool {
 	return true // For simplicity, assume it can handle any intent
 }
 
-func (w *WeatherTool) Validate(params map[string]interface{}) error {
+func (w *WeatherTool) Validate(params map[string]any) error {
 	if _, ok := params["location"]; !ok {
 		return fmt.Errorf("location parameter is required")
 	}
 	return nil
 }
 
-func (w *WeatherTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (w *WeatherTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	logger := logging.GetLogger()
 	location, ok := params["location"].(string)
 	if !ok {
@@ -74,11 +74,11 @@ func (w *WeatherTool) Execute(ctx context.Context, params map[string]interface{}
 
 	return core.ToolResult{
 		Data: weatherData,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"tool_name": "weather_check",
 			"location":  location,
 		},
-		Annotations: map[string]interface{}{
+		Annotations: map[string]any{
 			"simulated": true,
 		},
 	}, nil

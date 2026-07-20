@@ -99,7 +99,7 @@ func TestReActAgentWithContextExecution(t *testing.T) {
 	ctx := context.Background()
 
 	// Test execution with context optimization
-	input := map[string]interface{}{
+	input := map[string]any{
 		"task": "Analyze the benefits of context engineering",
 		"observations": []string{
 			"Context engineering can reduce costs by 10x",
@@ -146,7 +146,7 @@ func TestContextPerformanceMetrics(t *testing.T) {
 
 	// Execute multiple tasks to generate metrics
 	for i := 0; i < 3; i++ {
-		input := map[string]interface{}{
+		input := map[string]any{
 			"input": "test input",
 		}
 
@@ -185,7 +185,7 @@ func TestContextHealthStatus(t *testing.T) {
 	tests := []struct {
 		name           string
 		enableContext  bool
-		expectedStatus interface{}
+		expectedStatus any
 	}{
 		{
 			name:           "context disabled",
@@ -256,7 +256,7 @@ func TestErrorRecordingAndLearning(t *testing.T) {
 	ctx := context.Background()
 
 	// Test successful execution first
-	input := map[string]interface{}{
+	input := map[string]any{
 		"task": "successful task",
 	}
 
@@ -268,7 +268,7 @@ func TestErrorRecordingAndLearning(t *testing.T) {
 	mockLLM.shouldError = true
 	mockLLM.errorMessage = "simulated LLM failure"
 
-	input = map[string]interface{}{
+	input = map[string]any{
 		"task": "failing task",
 	}
 
@@ -311,7 +311,7 @@ func TestTodoManagement(t *testing.T) {
 	ctx := context.Background()
 
 	// Execute task with objective that should be tracked
-	input := map[string]interface{}{
+	input := map[string]any{
 		"objective": "Implement feature X with proper error handling",
 	}
 
@@ -412,7 +412,7 @@ func TestConcurrentExecution(t *testing.T) {
 			defer func() { done <- true }()
 
 			for j := 0; j < numExecutions; j++ {
-				input := map[string]interface{}{
+				input := map[string]any{
 					"task": "concurrent task",
 				}
 
@@ -469,7 +469,7 @@ answer: %s`, response, response)
 			CompletionTokens: 15,
 			TotalTokens:      25,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"finish_reason": "stop",
 		},
 	}, nil
@@ -487,12 +487,12 @@ func (m *TestMockLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion, core.CapabilityChat}
 }
 
-func (m *TestMockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"mock": "json response"}, nil
+func (m *TestMockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
+	return map[string]any{"mock": "json response"}, nil
 }
 
-func (m *TestMockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"mock": "functions response"}, nil
+func (m *TestMockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+	return map[string]any{"mock": "functions response"}, nil
 }
 
 func (m *TestMockLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
@@ -541,7 +541,7 @@ func BenchmarkReActAgentWithContext(b *testing.B) {
 	require.NoError(b, err)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"task": "benchmark task",
 	}
 
@@ -572,7 +572,7 @@ func BenchmarkReActAgentWithoutContext(b *testing.B) {
 	require.NoError(b, err)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"task": "benchmark task",
 	}
 

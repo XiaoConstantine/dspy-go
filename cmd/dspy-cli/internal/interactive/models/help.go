@@ -4,21 +4,21 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 )
 
 // HelpModel represents the help system state
 type HelpModel struct {
-	width        int
-	height       int
-	viewport     viewport.Model
-	currentTopic string
-	topics       []HelpTopic
+	width         int
+	height        int
+	viewport      viewport.Model
+	currentTopic  string
+	topics        []HelpTopic
 	selectedTopic int
-	nextScreen   string
+	nextScreen    string
 }
 
 // HelpTopic represents a help topic

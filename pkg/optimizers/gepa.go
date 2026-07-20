@@ -154,16 +154,16 @@ func DefaultGEPAConfig() *GEPAConfig {
 
 // GEPACandidate represents a single prompt candidate in the GEPA population.
 type GEPACandidate struct {
-	ID             string                 `json:"id"`
-	ModuleName     string                 `json:"module_name"`
-	Instruction    string                 `json:"instruction"`
-	ComponentTexts map[string]string      `json:"component_texts,omitempty"`
-	Demonstrations []core.Example         `json:"demonstrations"`
-	Generation     int                    `json:"generation"`
-	Fitness        float64                `json:"fitness"`
-	ParentIDs      []string               `json:"parent_ids"`
-	CreatedAt      time.Time              `json:"created_at"`
-	Metadata       map[string]interface{} `json:"metadata"`
+	ID             string            `json:"id"`
+	ModuleName     string            `json:"module_name"`
+	Instruction    string            `json:"instruction"`
+	ComponentTexts map[string]string `json:"component_texts,omitempty"`
+	Demonstrations []core.Example    `json:"demonstrations"`
+	Generation     int               `json:"generation"`
+	Fitness        float64           `json:"fitness"`
+	ParentIDs      []string          `json:"parent_ids"`
+	CreatedAt      time.Time         `json:"created_at"`
+	Metadata       map[string]any    `json:"metadata"`
 }
 
 func cloneComponentTexts(source map[string]string) map[string]string {
@@ -280,15 +280,15 @@ type Population struct {
 
 // ExecutionTrace tracks the execution of a module for reflection analysis.
 type ExecutionTrace struct {
-	CandidateID string                 `json:"candidate_id"`
-	ModuleName  string                 `json:"module_name"`
-	Inputs      map[string]any         `json:"inputs"`
-	Outputs     map[string]any         `json:"outputs"`
-	Error       error                  `json:"error"`
-	Duration    time.Duration          `json:"duration"`
-	Success     bool                   `json:"success"`
-	Timestamp   time.Time              `json:"timestamp"`
-	ContextData map[string]interface{} `json:"context_data"`
+	CandidateID string         `json:"candidate_id"`
+	ModuleName  string         `json:"module_name"`
+	Inputs      map[string]any `json:"inputs"`
+	Outputs     map[string]any `json:"outputs"`
+	Error       error          `json:"error"`
+	Duration    time.Duration  `json:"duration"`
+	Success     bool           `json:"success"`
+	Timestamp   time.Time      `json:"timestamp"`
+	ContextData map[string]any `json:"context_data"`
 }
 
 // ExecutionPatterns represents analyzed patterns from execution traces.
@@ -337,13 +337,13 @@ type PopulationInsights struct {
 
 // CandidateMetrics tracks detailed metrics for each candidate.
 type CandidateMetrics struct {
-	TotalEvaluations int                    `json:"total_evaluations"`
-	SuccessCount     int                    `json:"success_count"`
-	AverageFitness   float64                `json:"average_fitness"`
-	BestFitness      float64                `json:"best_fitness"`
-	ExecutionTimes   []time.Duration        `json:"execution_times"`
-	ErrorCounts      map[string]int         `json:"error_counts"`
-	Metadata         map[string]interface{} `json:"metadata"`
+	TotalEvaluations int             `json:"total_evaluations"`
+	SuccessCount     int             `json:"success_count"`
+	AverageFitness   float64         `json:"average_fitness"`
+	BestFitness      float64         `json:"best_fitness"`
+	ExecutionTimes   []time.Duration `json:"execution_times"`
+	ErrorCounts      map[string]int  `json:"error_counts"`
+	Metadata         map[string]any  `json:"metadata"`
 }
 
 // gepaValidationFrontierEntry records the tied-best validation-frontier
@@ -380,7 +380,7 @@ type GEPAState struct {
 	PerformedMerges           map[string]bool                      `json:"performed_merges,omitempty"`
 	MetricCalls               int                                  `json:"metric_calls,omitempty"`
 	StopReason                string                               `json:"stop_reason,omitempty"`
-	StopMetadata              map[string]interface{}               `json:"stop_metadata,omitempty"`
+	StopMetadata              map[string]any                       `json:"stop_metadata,omitempty"`
 	candidateReflections      map[string]*ReflectionResult
 	candidateEvaluations      map[string]*gepaCandidateEvaluation
 	candidateValidationEvals  map[string]*gepaCandidateEvaluation
@@ -447,7 +447,7 @@ func (s *GEPAState) AddTrace(trace *ExecutionTrace) {
 			BestFitness:      0.0,
 			ExecutionTimes:   make([]time.Duration, 0),
 			ErrorCounts:      make(map[string]int),
-			Metadata:         make(map[string]interface{}),
+			Metadata:         make(map[string]any),
 		}
 	}
 
@@ -1124,26 +1124,26 @@ type ContextAwarePerformanceTracker struct {
 
 // ContextPerformanceMetrics tracks performance within a specific context.
 type ContextPerformanceMetrics struct {
-	ContextType      string                 `json:"context_type"`
-	ExecutionCount   int                    `json:"execution_count"`
-	SuccessRate      float64                `json:"success_rate"`
-	AverageLatency   time.Duration          `json:"average_latency"`
-	QualityScore     float64                `json:"quality_score"`
-	ErrorPatterns    map[string]int         `json:"error_patterns"`
-	PerformanceTrend []float64              `json:"performance_trend"`
-	LastUpdated      time.Time              `json:"last_updated"`
-	Metadata         map[string]interface{} `json:"metadata"`
+	ContextType      string         `json:"context_type"`
+	ExecutionCount   int            `json:"execution_count"`
+	SuccessRate      float64        `json:"success_rate"`
+	AverageLatency   time.Duration  `json:"average_latency"`
+	QualityScore     float64        `json:"quality_score"`
+	ErrorPatterns    map[string]int `json:"error_patterns"`
+	PerformanceTrend []float64      `json:"performance_trend"`
+	LastUpdated      time.Time      `json:"last_updated"`
+	Metadata         map[string]any `json:"metadata"`
 }
 
 // ContextPattern represents learned patterns within execution contexts.
 type ContextPattern struct {
-	PatternID         string                 `json:"pattern_id"`
-	ContextFeatures   map[string]interface{} `json:"context_features"`
-	SuccessFactors    []string               `json:"success_factors"`
-	FailureFactors    []string               `json:"failure_factors"`
-	OptimalCandidates []string               `json:"optimal_candidates"`
-	Confidence        float64                `json:"confidence"`
-	LastUpdated       time.Time              `json:"last_updated"`
+	PatternID         string         `json:"pattern_id"`
+	ContextFeatures   map[string]any `json:"context_features"`
+	SuccessFactors    []string       `json:"success_factors"`
+	FailureFactors    []string       `json:"failure_factors"`
+	OptimalCandidates []string       `json:"optimal_candidates"`
+	Confidence        float64        `json:"confidence"`
+	LastUpdated       time.Time      `json:"last_updated"`
 }
 
 // PerformanceContext represents the context of a performance measurement.
@@ -1173,11 +1173,11 @@ type PerformanceContext struct {
 	ExecutionPhase string `json:"execution_phase"` // init, evolution, reflection
 
 	// Custom context data
-	CustomData map[string]interface{} `json:"custom_data"`
+	CustomData map[string]any `json:"custom_data"`
 }
 
 // calculateMultiObjectiveFitness calculates fitness across multiple objectives.
-func (g *GEPA) calculateMultiObjectiveFitness(candidateID string, inputs, outputs map[string]any, err error, context map[string]interface{}) *MultiObjectiveFitness {
+func (g *GEPA) calculateMultiObjectiveFitness(candidateID string, inputs, outputs map[string]any, err error, context map[string]any) *MultiObjectiveFitness {
 	fitness := &MultiObjectiveFitness{}
 
 	// Objective 1: Success Rate (0-1)
@@ -1787,7 +1787,7 @@ func NewContextAwarePerformanceTracker() *ContextAwarePerformanceTracker {
 }
 
 // assessContextAwareEfficiency evaluates efficiency with context awareness.
-func (g *GEPA) assessContextAwareEfficiency(candidateID string, inputs, outputs map[string]any, err error, context map[string]interface{}) float64 {
+func (g *GEPA) assessContextAwareEfficiency(candidateID string, inputs, outputs map[string]any, err error, context map[string]any) float64 {
 	if g.performanceLogger == nil {
 		return g.fallbackEfficiencyAssessment(context)
 	}
@@ -1811,12 +1811,12 @@ func (g *GEPA) assessContextAwareEfficiency(candidateID string, inputs, outputs 
 }
 
 // createPerformanceContext creates a performance context from execution data.
-func (g *GEPA) createPerformanceContext(candidateID string, inputs, outputs map[string]any, context map[string]interface{}) *PerformanceContext {
+func (g *GEPA) createPerformanceContext(candidateID string, inputs, outputs map[string]any, context map[string]any) *PerformanceContext {
 	perfContext := &PerformanceContext{
 		ExecutionID: fmt.Sprintf("%s-%d", candidateID, time.Now().UnixNano()),
 		CandidateID: candidateID,
 		Generation:  g.state.CurrentGeneration,
-		CustomData:  make(map[string]interface{}),
+		CustomData:  make(map[string]any),
 	}
 
 	// Extract input characteristics
@@ -1906,7 +1906,7 @@ func (g *GEPA) getContextualBaseline(perfContext *PerformanceContext) time.Durat
 }
 
 // calculateRawEfficiency calculates basic efficiency from execution time.
-func (g *GEPA) calculateRawEfficiency(context map[string]interface{}, baseline time.Duration) float64 {
+func (g *GEPA) calculateRawEfficiency(context map[string]any, baseline time.Duration) float64 {
 	if context == nil {
 		return 0.5
 	}
@@ -1995,7 +1995,7 @@ func (g *GEPA) updateContextMetrics(perfContext *PerformanceContext, outputs map
 			QualityScore:     0.0,
 			ErrorPatterns:    make(map[string]int),
 			PerformanceTrend: make([]float64, 0),
-			Metadata:         make(map[string]interface{}),
+			Metadata:         make(map[string]any),
 		}
 		g.performanceLogger.contextMetrics[contextType] = metrics
 	}
@@ -2078,11 +2078,11 @@ func (g *GEPA) calculateInputComplexity(inputs map[string]any) float64 {
 			}
 			complexity += (float64(len(uniqueChars)) / 256.0) * 0.2 // Character variety
 
-		case []interface{}:
+		case []any:
 			// Array complexity based on size and nesting
 			complexity += (float64(len(v)) / 100.0) * 0.4
 
-		case map[string]interface{}:
+		case map[string]any:
 			// Map complexity based on key count and nesting
 			complexity += (float64(len(v)) / 50.0) * 0.5
 
@@ -2254,8 +2254,8 @@ func (g *GEPA) deriveContextType(perfContext *PerformanceContext) string {
 }
 
 // parseContextType parses a context type string back into features.
-func (g *GEPA) parseContextType(contextType string) map[string]interface{} {
-	features := make(map[string]interface{})
+func (g *GEPA) parseContextType(contextType string) map[string]any {
+	features := make(map[string]any)
 	parts := strings.Split(contextType, "_")
 
 	for _, part := range parts {
@@ -2281,7 +2281,7 @@ func (g *GEPA) parseContextType(contextType string) map[string]interface{} {
 }
 
 // fallbackEfficiencyAssessment provides fallback when context tracking is unavailable.
-func (g *GEPA) fallbackEfficiencyAssessment(context map[string]interface{}) float64 {
+func (g *GEPA) fallbackEfficiencyAssessment(context map[string]any) float64 {
 	if context == nil {
 		return 0.5
 	}
@@ -3370,7 +3370,7 @@ func (g *GEPA) evaluateValidationPopulation(ctx context.Context, program core.Pr
 			bestCandidate = g.copyCandidate(candidate)
 			bestFitness = score
 			if bestCandidate.Metadata == nil {
-				bestCandidate.Metadata = make(map[string]interface{})
+				bestCandidate.Metadata = make(map[string]any)
 			}
 			bestCandidate.Metadata["validation_score"] = score
 		}
@@ -3689,7 +3689,7 @@ func (g *GEPA) gepaExecutionTracker(ctx context.Context, inputs map[string]any,
 		Duration:    duration,
 		Success:     (err == nil),
 		Timestamp:   start,
-		ContextData: make(map[string]interface{}),
+		ContextData: make(map[string]any),
 	}
 
 	gepaState.AddTrace(trace)
@@ -3709,7 +3709,7 @@ func (g *GEPA) gepaPerformanceCollector(ctx context.Context, inputs map[string]a
 	duration := time.Since(start)
 
 	// Create enhanced context for multi-objective fitness calculation
-	perfContext := map[string]interface{}{
+	perfContext := map[string]any{
 		"execution_time":   duration,
 		"module_name":      info.ModuleName,
 		"system_load":      g.getCurrentSystemLoad(),
@@ -3738,7 +3738,7 @@ func (g *GEPA) gepaPerformanceCollector(ctx context.Context, inputs map[string]a
 
 			// Store multi-objective fitness in metadata
 			if metrics.Metadata == nil {
-				metrics.Metadata = make(map[string]interface{})
+				metrics.Metadata = make(map[string]any)
 			}
 			metrics.Metadata["multi_objective_fitness"] = multiObjFitness
 			metrics.Metadata["last_execution_context"] = perfContext
@@ -3771,7 +3771,7 @@ func (g *GEPA) gepaReflectionLogger(ctx context.Context, inputs map[string]any,
 
 	// Log reflection data
 	candidateID := g.getCurrentCandidateID(ctx)
-	reflectionData := map[string]interface{}{
+	reflectionData := map[string]any{
 		"module_name":    info.ModuleName,
 		"execution_time": duration,
 		"success":        err == nil,
@@ -3783,12 +3783,12 @@ func (g *GEPA) gepaReflectionLogger(ctx context.Context, inputs map[string]any,
 	// Store in candidate metrics for later reflection
 	if metrics, exists := gepaState.CandidateMetrics[candidateID]; exists {
 		if metrics.Metadata == nil {
-			metrics.Metadata = make(map[string]interface{})
+			metrics.Metadata = make(map[string]any)
 		}
 		if _, exists := metrics.Metadata["reflection_data"]; !exists {
-			metrics.Metadata["reflection_data"] = make([]map[string]interface{}, 0)
+			metrics.Metadata["reflection_data"] = make([]map[string]any, 0)
 		}
-		reflectionDataSlice := metrics.Metadata["reflection_data"].([]map[string]interface{})
+		reflectionDataSlice := metrics.Metadata["reflection_data"].([]map[string]any)
 		metrics.Metadata["reflection_data"] = append(reflectionDataSlice, reflectionData)
 	}
 
@@ -3880,9 +3880,9 @@ func (g *GEPA) getCurrentExecutionPhase(ctx context.Context) string {
 }
 
 // broadcastFitnessUpdate broadcasts fitness updates for real-time monitoring.
-func (g *GEPA) broadcastFitnessUpdate(candidateID string, fitness float64, multiObjFitness *MultiObjectiveFitness, perfContext map[string]interface{}) {
+func (g *GEPA) broadcastFitnessUpdate(candidateID string, fitness float64, multiObjFitness *MultiObjectiveFitness, perfContext map[string]any) {
 	// Real-time fitness update notification
-	_ = map[string]interface{}{
+	_ = map[string]any{
 		"candidate_id":            candidateID,
 		"fitness":                 fitness,
 		"multi_objective_fitness": multiObjFitness,
@@ -4007,8 +4007,8 @@ func (g *GEPA) calculatePopulationDiversity(population *Population) float64 {
 // getRealTimeInterceptorStats provides real-time statistics about interceptor performance.
 //
 //nolint:unused // This is an advanced feature not yet integrated
-func (g *GEPA) getRealTimeInterceptorStats() map[string]interface{} {
-	stats := map[string]interface{}{
+func (g *GEPA) getRealTimeInterceptorStats() map[string]any {
+	stats := map[string]any{
 		"total_executions":      0,
 		"successful_executions": 0,
 		"failed_executions":     0,
@@ -4338,7 +4338,7 @@ func (g *GEPA) initializePopulation(ctx context.Context, program core.Program) e
 				Fitness:        0.0,
 				ParentIDs:      []string{},
 				CreatedAt:      time.Now(),
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"variation_index":  i,
 					"base_instruction": baseInstruction,
 				},
@@ -4353,7 +4353,7 @@ func (g *GEPA) initializePopulation(ctx context.Context, program core.Program) e
 				BestFitness:      0.0,
 				ExecutionTimes:   make([]time.Duration, 0),
 				ErrorCounts:      make(map[string]int),
-				Metadata:         make(map[string]interface{}),
+				Metadata:         make(map[string]any),
 			}
 		}
 	}
@@ -4528,7 +4528,7 @@ func (g *GEPA) createMutatedCandidate(original *GEPACandidate) *GEPACandidate {
 		Fitness:        0.0,
 		ParentIDs:      []string{original.ID},
 		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]any{
 			"mutation_type": "prefix_addition",
 			"parent_id":     original.ID,
 		}, original.Metadata),
@@ -4744,7 +4744,7 @@ func (g *GEPA) applyComponentSelectionState(candidate *GEPACandidate, nextCursor
 		return nil
 	}
 	if candidate.Metadata == nil {
-		candidate.Metadata = make(map[string]interface{})
+		candidate.Metadata = make(map[string]any)
 	}
 	candidate.Metadata[gepaComponentSelectionCursorMetadataKey] = nextCursor
 	return candidate
@@ -4762,7 +4762,7 @@ func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPAC
 	}
 
 	appliedModules := make([]string, 0, len(modules))
-	metadataSources := []map[string]interface{}{source.Metadata}
+	metadataSources := []map[string]any{source.Metadata}
 	focusedModule := strings.TrimSpace(source.ModuleName)
 
 	for _, moduleName := range modules {
@@ -4798,7 +4798,7 @@ func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPAC
 		Fitness:        source.Fitness,
 		ParentIDs:      []string{source.ID},
 		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]any{
 			"proposal_type":        "multi_component_update",
 			"updated_components":   append([]string(nil), appliedModules...),
 			"component_update_all": true,
@@ -5382,7 +5382,7 @@ Mutation requirements for "%s":
 		Generation:     candidate.Generation + 1,
 		ParentIDs:      []string{candidate.ID},
 		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]any{
 			"mutation_type":  mutationType,
 			"parent_fitness": candidate.Fitness,
 		}, candidate.Metadata),
@@ -5494,7 +5494,7 @@ func (g *GEPA) fallbackMutation(candidate *GEPACandidate) *GEPACandidate {
 		Generation:     candidate.Generation + 1,
 		ParentIDs:      []string{candidate.ID},
 		CreatedAt:      time.Now(),
-		Metadata: mergeCandidateMetadata(map[string]interface{}{
+		Metadata: mergeCandidateMetadata(map[string]any{
 			"mutation_type":  "fallback",
 			"parent_fitness": candidate.Fitness,
 		}, candidate.Metadata),
@@ -5981,7 +5981,7 @@ func extractRichTraceEvidence(trace ExecutionTrace) []string {
 			evidence = append(evidence, "failed_test="+item)
 		}
 	}
-	if diagnostics, ok := trace.ContextData["diagnostics"].(map[string]interface{}); ok {
+	if diagnostics, ok := trace.ContextData["diagnostics"].(map[string]any); ok {
 		for _, key := range []string{"evaluation_error", "execution_error", "comparison_error"} {
 			if raw, exists := diagnostics[key]; exists {
 				if message, ok := raw.(string); ok && strings.TrimSpace(message) != "" {
@@ -5999,11 +5999,11 @@ func extractRichTraceEvidence(trace ExecutionTrace) []string {
 	return utils.DedupeStrings(evidence, 0)
 }
 
-func evidenceFromValue(raw interface{}) []string {
+func evidenceFromValue(raw any) []string {
 	switch value := raw.(type) {
 	case []string:
 		return append([]string(nil), value...)
-	case []interface{}:
+	case []any:
 		result := make([]string, 0, len(value))
 		for _, item := range value {
 			if str, ok := item.(string); ok && strings.TrimSpace(str) != "" {
@@ -6791,7 +6791,7 @@ func (g *GEPA) performIndividualReflection(ctx context.Context) error {
 
 	// Store insights in state metadata
 	if g.state.BestCandidate != nil && g.state.BestCandidate.Metadata == nil {
-		g.state.BestCandidate.Metadata = make(map[string]interface{})
+		g.state.BestCandidate.Metadata = make(map[string]any)
 	}
 	if g.state.BestCandidate != nil {
 		g.state.BestCandidate.Metadata["individual_reflection_insights"] = insights

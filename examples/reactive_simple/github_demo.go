@@ -116,7 +116,7 @@ func GitHubReviewDemo() {
 			ID:   "primary_" + fmt.Sprint(prEvent.PRNumber),
 			Type: "review_assigned",
 			Data: prEvent,
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"review_type": "primary",
 				"pr_number":   prEvent.PRNumber,
 			},
@@ -130,7 +130,7 @@ func GitHubReviewDemo() {
 				ID:   "security_" + fmt.Sprint(prEvent.PRNumber),
 				Type: "security_review_assigned",
 				Data: prEvent,
-				Context: map[string]interface{}{
+				Context: map[string]any{
 					"review_type": "security",
 					"pr_number":   prEvent.PRNumber,
 				},
@@ -280,7 +280,7 @@ func GitHubReviewDemo() {
 			Type:     "pr_opened",
 			Data:     pr,
 			Priority: 5,
-			Context: map[string]interface{}{
+			Context: map[string]any{
 				"repository": pr.Repository,
 				"author":     pr.Author,
 			},

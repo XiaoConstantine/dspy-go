@@ -10,7 +10,7 @@ type ChatCompletionRequest struct {
 	Model               string                  `json:"model"`
 	Messages            []ChatCompletionMessage `json:"messages"`
 	Tools               []ChatCompletionTool    `json:"tools,omitempty"`
-	ToolChoice          interface{}             `json:"tool_choice,omitempty"`
+	ToolChoice          any                     `json:"tool_choice,omitempty"`
 	Temperature         *float64                `json:"temperature,omitempty"`
 	MaxTokens           *int                    `json:"max_tokens,omitempty"`
 	MaxCompletionTokens *int                    `json:"max_completion_tokens,omitempty"`
@@ -40,9 +40,9 @@ type ChatCompletionTool struct {
 
 // ChatCompletionFunction defines a callable function schema.
 type ChatCompletionFunction struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
 // ChatCompletionToolCall represents a tool call returned by the assistant.
@@ -106,11 +106,11 @@ type ChatChoiceStream struct {
 
 // EmbeddingRequest represents a request to the Embeddings API.
 type EmbeddingRequest struct {
-	Input          interface{} `json:"input"` // string or []string
-	Model          string      `json:"model"`
-	EncodingFormat string      `json:"encoding_format,omitempty"`
-	Dimensions     *int        `json:"dimensions,omitempty"`
-	User           string      `json:"user,omitempty"`
+	Input          any    `json:"input"` // string or []string
+	Model          string `json:"model"`
+	EncodingFormat string `json:"encoding_format,omitempty"`
+	Dimensions     *int   `json:"dimensions,omitempty"`
+	User           string `json:"user,omitempty"`
 }
 
 // EmbeddingResponse represents a response from the Embeddings API.

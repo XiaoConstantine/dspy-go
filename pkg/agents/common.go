@@ -75,7 +75,7 @@ func (n *XMLNormalizer) NormalizeXML(content string) (string, error) {
 		return "", &XMLError{
 			Code:    ErrNoTasksSection,
 			Message: "could not find complete <tasks> section",
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"content_length": len(content),
 				"start_found":    startIdx != -1,
 				"end_found":      endIdx != -1,
@@ -113,7 +113,7 @@ func (n *XMLNormalizer) normalizeWhitespace(content string) string {
 type XMLError struct {
 	Code    ErrorCode
 	Message string
-	Details map[string]interface{}
+	Details map[string]any
 }
 
 func (e *XMLError) Error() string {
@@ -129,7 +129,7 @@ const (
 	ErrMalformedTasks
 )
 
-func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, error) {
+func (p *XMLTaskParser) Parse(analyzerOutput map[string]any) ([]Task, error) {
 	tasksXML, ok := analyzerOutput["tasks"].(string)
 	if !ok {
 		return nil, errors.WithFields(
@@ -172,7 +172,7 @@ func (p *XMLTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, er
 		}
 
 		// Convert metadata to map
-		metadata := make(map[string]interface{})
+		metadata := make(map[string]any)
 		for _, item := range xmlTask.Metadata.Items {
 			metadata[item.Key] = item.Value
 		}

@@ -131,7 +131,7 @@ func TestProviderCache_CacheGenerateJSON(t *testing.T) {
 	ctx := context.Background()
 	modelID := "gpt-4"
 	prompt := "Test prompt"
-	schema := map[string]interface{}{"type": "object"}
+	schema := map[string]any{"type": "object"}
 	options := []core.GenerateOption{
 		core.WithTemperature(0.7),
 	}

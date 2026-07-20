@@ -27,7 +27,7 @@ func TestTaskPlanner_ComprehensiveTests(t *testing.T) {
 		ctx := context.Background()
 
 		task := "Analyze sales data and generate report"
-		input := map[string]interface{}{"task": task}
+		input := map[string]any{"task": task}
 		tools := []core.Tool{} // Empty for now, as we're testing the planning logic
 
 		plan, err := planner.CreatePlan(ctx, input, tools)
@@ -44,7 +44,7 @@ func TestTaskPlanner_ComprehensiveTests(t *testing.T) {
 		ctx := context.Background()
 
 		task := "research the latest AI trends"
-		input := map[string]interface{}{"task": task}
+		input := map[string]any{"task": task}
 		tools := []core.Tool{}
 
 		plan, err := planner.CreatePlan(ctx, input, tools)
@@ -58,7 +58,7 @@ func TestTaskPlanner_ComprehensiveTests(t *testing.T) {
 		ctx := context.Background()
 
 		task := "calculate quarterly revenue and analyze trends"
-		input := map[string]interface{}{"task": task}
+		input := map[string]any{"task": task}
 		tools := []core.Tool{}
 
 		plan, err := planner.CreatePlan(ctx, input, tools)
@@ -180,7 +180,7 @@ func TestPlanStep_Tests(t *testing.T) {
 			ID:          "step1",
 			Description: "Test step",
 			Tool:        "test_tool",
-			Arguments:   map[string]interface{}{"arg1": "value1"},
+			Arguments:   map[string]any{"arg1": "value1"},
 			Expected:    "Expected result",
 			Critical:    true,
 			Parallel:    false,
@@ -299,7 +299,7 @@ action: <action><tool_name>Finish</tool_name></action>`,
 
 		// Test ReWOO execution
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "complex analysis task requiring multiple steps"}
+		input := map[string]any{"task": "complex analysis task requiring multiple steps"}
 
 		// Register a test tool for the planner to use
 		testTool := &mockTool{
@@ -321,7 +321,7 @@ action: <action><tool_name>Finish</tool_name></action>`,
 		} else {
 			// If successful, result should contain step results
 			assert.NotNil(t, result, "Result should not be nil")
-			assert.IsType(t, map[string]interface{}{}, result, "Result should be a map")
+			assert.IsType(t, map[string]any{}, result, "Result should be a map")
 		}
 	})
 
@@ -329,12 +329,12 @@ action: <action><tool_name>Finish</tool_name></action>`,
 		agent := NewReActAgent("test-agent", "Test Agent")
 
 		// Test simple task
-		simpleTask := map[string]interface{}{"task": "add two numbers"}
+		simpleTask := map[string]any{"task": "add two numbers"}
 		complexity := agent.analyzeTaskComplexity(simpleTask)
 		assert.Less(t, complexity, 0.7) // Should be classified as simple
 
 		// Test complex task
-		complexTask := map[string]interface{}{"task": "analyze market trends, create detailed report with charts, and provide investment recommendations based on comprehensive financial modeling"}
+		complexTask := map[string]any{"task": "analyze market trends, create detailed report with charts, and provide investment recommendations based on comprehensive financial modeling"}
 		complexity = agent.analyzeTaskComplexity(complexTask)
 		assert.Greater(t, complexity, 0.5) // Should be classified as more complex than simple task
 	})
@@ -365,12 +365,12 @@ action: <action><tool_name>Finish</tool_name></action>`,
 		step := PlanStep{
 			ID:        "step1",
 			Tool:      "test_tool",
-			Arguments: map[string]interface{}{"arg1": "value1"},
+			Arguments: map[string]any{"arg1": "value1"},
 			Critical:  true,
 			Timeout:   5 * time.Second,
 		}
 
-		previousResults := map[string]interface{}{}
+		previousResults := map[string]any{}
 
 		result, err := agent.executePlanStep(ctx, step, previousResults)
 		require.NoError(t, err)
@@ -399,12 +399,12 @@ action: <action><tool_name>Finish</tool_name></action>`,
 		step := PlanStep{
 			ID:        "step2",
 			Tool:      "dependent_tool",
-			Arguments: map[string]interface{}{"base_arg": "value"},
+			Arguments: map[string]any{"base_arg": "value"},
 			DependsOn: []string{"step1"},
 			Critical:  false,
 		}
 
-		previousResults := map[string]interface{}{
+		previousResults := map[string]any{
 			"step1": "previous step result",
 		}
 
@@ -438,11 +438,11 @@ action: <action><tool_name>Finish</tool_name></action>`,
 			Critical: false, // Non-critical
 		}
 
-		result, err := agent.executePlanStep(ctx, step, map[string]interface{}{})
+		result, err := agent.executePlanStep(ctx, step, map[string]any{})
 		require.NoError(t, err) // Should not error for non-critical step
 
 		// Result should indicate failure
-		if resultMap, ok := result.(map[string]interface{}); ok {
+		if resultMap, ok := result.(map[string]any); ok {
 			assert.False(t, resultMap["success"].(bool))
 			assert.Contains(t, resultMap, "error")
 		}
@@ -473,7 +473,7 @@ action: <action><tool_name>Finish</tool_name></action>`,
 			Critical: true, // Critical step
 		}
 
-		_, err = agent.executePlanStep(ctx, step, map[string]interface{}{})
+		_, err = agent.executePlanStep(ctx, step, map[string]any{})
 		require.Error(t, err) // Should error for critical step failure
 		// The error message should indicate tool execution failure
 		assert.Contains(t, err.Error(), "assert.AnError")
@@ -508,12 +508,12 @@ func (m *mockLLM) ProviderName() string {
 	return "mock-provider"
 }
 
-func (m *mockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"result": "mock"}, nil
+func (m *mockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
+	return map[string]any{"result": "mock"}, nil
 }
 
-func (m *mockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"result": "mock"}, nil
+func (m *mockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
+	return map[string]any{"result": "mock"}, nil
 }
 
 func (m *mockLLM) CreateEmbedding(ctx context.Context, input string, options ...core.EmbeddingOption) (*core.EmbeddingResult, error) {
@@ -550,12 +550,12 @@ func (m *mockTool) Description() string {
 	return "Mock tool for testing"
 }
 
-func (m *mockTool) Validate(args map[string]interface{}) error {
+func (m *mockTool) Validate(args map[string]any) error {
 	// For non-critical step failure test, validation should pass but execution should fail
 	return nil
 }
 
-func (m *mockTool) Execute(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+func (m *mockTool) Execute(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 	if m.shouldFail {
 		return core.ToolResult{}, assert.AnError
 	}

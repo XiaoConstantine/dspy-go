@@ -45,7 +45,7 @@ func TestChainWorkflow(t *testing.T) {
 		require.NoError(t, err, "Failed to add step2")
 		// Execute workflow
 		ctx := context.Background()
-		result, err := workflow.Execute(ctx, map[string]interface{}{
+		result, err := workflow.Execute(ctx, map[string]any{
 			"input1": "initial",
 		})
 
@@ -73,7 +73,7 @@ func TestChainWorkflow(t *testing.T) {
 		err := workflow.AddStep(&Step{ID: "step1", Module: module})
 		require.NoError(t, err, "Failed to add step1")
 		ctx := context.Background()
-		_, err = workflow.Execute(ctx, map[string]interface{}{
+		_, err = workflow.Execute(ctx, map[string]any{
 			"input": "value",
 		})
 

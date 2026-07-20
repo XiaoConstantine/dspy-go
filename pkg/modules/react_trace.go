@@ -8,7 +8,7 @@ type ReActTraceStep struct {
 	Thought     string
 	ActionRaw   string
 	Tool        string
-	Arguments   map[string]interface{}
+	Arguments   map[string]any
 	Observation string
 	Duration    time.Duration
 	Success     bool
@@ -17,8 +17,8 @@ type ReActTraceStep struct {
 
 // ReActTrace captures the full execution trace of a ReAct run.
 type ReActTrace struct {
-	Input            map[string]interface{}
-	Output           map[string]interface{}
+	Input            map[string]any
+	Output           map[string]any
 	Steps            []ReActTraceStep
 	ProcessingTime   time.Duration
 	TerminationCause string

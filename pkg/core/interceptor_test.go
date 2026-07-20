@@ -34,11 +34,11 @@ func mockModuleHandler(ctx context.Context, inputs map[string]any, opts ...Optio
 	return map[string]any{"result": "module-processed"}, nil
 }
 
-func mockAgentHandler(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{"result": "agent-processed"}, nil
+func mockAgentHandler(ctx context.Context, input map[string]any) (map[string]any, error) {
+	return map[string]any{"result": "agent-processed"}, nil
 }
 
-func mockToolHandler(ctx context.Context, args map[string]interface{}) (ToolResult, error) {
+func mockToolHandler(ctx context.Context, args map[string]any) (ToolResult, error) {
 	return ToolResult{Data: "tool-processed"}, nil
 }
 
@@ -46,11 +46,11 @@ func errorModuleHandler(ctx context.Context, inputs map[string]any, opts ...Opti
 	return nil, errors.New("module error")
 }
 
-func errorAgentHandler(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func errorAgentHandler(ctx context.Context, input map[string]any) (map[string]any, error) {
 	return nil, errors.New("agent error")
 }
 
-func errorToolHandler(ctx context.Context, args map[string]interface{}) (ToolResult, error) {
+func errorToolHandler(ctx context.Context, args map[string]any) (ToolResult, error) {
 	return ToolResult{}, errors.New("tool error")
 }
 
@@ -205,10 +205,10 @@ func TestInterceptorChainMethods(t *testing.T) {
 	moduleInt := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {
 		return handler(ctx, inputs, opts...)
 	}
-	agentInt := func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+	agentInt := func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 		return handler(ctx, input)
 	}
-	toolInt := func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+	toolInt := func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 		return handler(ctx, args)
 	}
 
@@ -415,7 +415,7 @@ func TestChainModuleInterceptors(t *testing.T) {
 // Test ChainAgentInterceptors.
 func TestChainAgentInterceptors(t *testing.T) {
 	ctx := context.Background()
-	input := map[string]interface{}{"input": "test"}
+	input := map[string]any{"input": "test"}
 	info := createTestAgentInfo()
 
 	t.Run("no interceptors", func(t *testing.T) {
@@ -430,7 +430,7 @@ func TestChainAgentInterceptors(t *testing.T) {
 	})
 
 	t.Run("single interceptor", func(t *testing.T) {
-		interceptor := func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+		interceptor := func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 			result, err := handler(ctx, input)
 			if err != nil {
 				return nil, err
@@ -455,21 +455,21 @@ func TestChainAgentInterceptors(t *testing.T) {
 	t.Run("multiple interceptors", func(t *testing.T) {
 		var callOrder []string
 
-		interceptor1 := func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+		interceptor1 := func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 			callOrder = append(callOrder, "agent_interceptor1_before")
 			result, err := handler(ctx, input)
 			callOrder = append(callOrder, "agent_interceptor1_after")
 			return result, err
 		}
 
-		interceptor2 := func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+		interceptor2 := func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 			callOrder = append(callOrder, "agent_interceptor2_before")
 			result, err := handler(ctx, input)
 			callOrder = append(callOrder, "agent_interceptor2_after")
 			return result, err
 		}
 
-		handlerWithOrder := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+		handlerWithOrder := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 			callOrder = append(callOrder, "handler")
 			return mockAgentHandler(ctx, input)
 		}
@@ -498,7 +498,7 @@ func TestChainAgentInterceptors(t *testing.T) {
 	})
 
 	t.Run("error handling", func(t *testing.T) {
-		interceptor := func(ctx context.Context, input map[string]interface{}, info *AgentInfo, handler AgentHandler) (map[string]interface{}, error) {
+		interceptor := func(ctx context.Context, input map[string]any, info *AgentInfo, handler AgentHandler) (map[string]any, error) {
 			return handler(ctx, input)
 		}
 
@@ -516,7 +516,7 @@ func TestChainAgentInterceptors(t *testing.T) {
 // Test ChainToolInterceptors.
 func TestChainToolInterceptors(t *testing.T) {
 	ctx := context.Background()
-	args := map[string]interface{}{"arg": "test"}
+	args := map[string]any{"arg": "test"}
 	info := createTestToolInfo()
 
 	t.Run("no interceptors", func(t *testing.T) {
@@ -531,13 +531,13 @@ func TestChainToolInterceptors(t *testing.T) {
 	})
 
 	t.Run("single interceptor", func(t *testing.T) {
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 			result, err := handler(ctx, args)
 			if err != nil {
 				return ToolResult{}, err
 			}
 			if result.Metadata == nil {
-				result.Metadata = make(map[string]interface{})
+				result.Metadata = make(map[string]any)
 			}
 			result.Metadata["intercepted"] = true
 			return result, nil
@@ -559,21 +559,21 @@ func TestChainToolInterceptors(t *testing.T) {
 	t.Run("multiple interceptors", func(t *testing.T) {
 		var callOrder []string
 
-		interceptor1 := func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+		interceptor1 := func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 			callOrder = append(callOrder, "tool_interceptor1_before")
 			result, err := handler(ctx, args)
 			callOrder = append(callOrder, "tool_interceptor1_after")
 			return result, err
 		}
 
-		interceptor2 := func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+		interceptor2 := func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 			callOrder = append(callOrder, "tool_interceptor2_before")
 			result, err := handler(ctx, args)
 			callOrder = append(callOrder, "tool_interceptor2_after")
 			return result, err
 		}
 
-		handlerWithOrder := func(ctx context.Context, args map[string]interface{}) (ToolResult, error) {
+		handlerWithOrder := func(ctx context.Context, args map[string]any) (ToolResult, error) {
 			callOrder = append(callOrder, "handler")
 			return mockToolHandler(ctx, args)
 		}
@@ -602,7 +602,7 @@ func TestChainToolInterceptors(t *testing.T) {
 	})
 
 	t.Run("error handling", func(t *testing.T) {
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *ToolInfo, handler ToolHandler) (ToolResult, error) {
 			return handler(ctx, args)
 		}
 

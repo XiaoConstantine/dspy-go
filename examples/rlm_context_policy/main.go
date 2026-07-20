@@ -223,7 +223,7 @@ func runPolicy(
 	agent := agentrlm.NewAgent("rlm-context-"+policy.Name, module)
 
 	startedAt := time.Now()
-	output, err := agent.Execute(ctx, map[string]interface{}{
+	output, err := agent.Execute(ctx, map[string]any{
 		"context": document,
 		"query":   query,
 	})
@@ -235,7 +235,7 @@ func runPolicy(
 func summarizePolicyRun(
 	policy policySpec,
 	trace *agents.ExecutionTrace,
-	output map[string]interface{},
+	output map[string]any,
 	err error,
 	duration time.Duration,
 ) policySummary {
@@ -274,7 +274,7 @@ func summarizePolicyRun(
 	return summary
 }
 
-func intMetric(metadata map[string]interface{}, key string) int {
+func intMetric(metadata map[string]any, key string) int {
 	if metadata == nil {
 		return 0
 	}

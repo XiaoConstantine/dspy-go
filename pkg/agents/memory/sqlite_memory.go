@@ -83,7 +83,7 @@ func (s *SQLiteStore) ensureInitialized() error {
 }
 
 // Store implements the Memory interface Store method.
-func (s *SQLiteStore) Store(key string, value interface{}) error {
+func (s *SQLiteStore) Store(key string, value any) error {
 	if err := s.ensureInitialized(); err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func (s *SQLiteStore) Store(key string, value interface{}) error {
 }
 
 // Retrieve implements the Memory interface Retrieve method.
-func (s *SQLiteStore) Retrieve(key string) (interface{}, error) {
+func (s *SQLiteStore) Retrieve(key string) (any, error) {
 	if err := s.ensureInitialized(); err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (s *SQLiteStore) Retrieve(key string) (interface{}, error) {
 		)
 	}
 
-	var value interface{}
+	var value any
 	if err := json.Unmarshal([]byte(jsonValue), &value); err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal value from JSON"),
@@ -178,7 +178,7 @@ func (s *SQLiteStore) Retrieve(key string) (interface{}, error) {
 	}
 
 	switch v := value.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		// Check if all values are numbers for map[string]int
 		allInts := true
 		for _, val := range v {
@@ -194,7 +194,7 @@ func (s *SQLiteStore) Retrieve(key string) (interface{}, error) {
 			}
 			return intMap, nil
 		}
-	case []interface{}:
+	case []any:
 		// Check if it's a string array
 		allStrings := true
 		for _, item := range v {
@@ -278,7 +278,7 @@ func (s *SQLiteStore) Close() error {
 }
 
 // StoreWithTTL stores a value with a time-to-live duration.
-func (s *SQLiteStore) StoreWithTTL(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (s *SQLiteStore) StoreWithTTL(ctx context.Context, key string, value any, ttl time.Duration) error {
 	if err := s.ensureInitialized(); err != nil {
 		return err
 	}

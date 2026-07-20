@@ -24,17 +24,17 @@ func ExampleFromTask(task datasets.TBLiteTask) optimize.AgentExample {
 	task = task.Normalize()
 	return optimize.AgentExample{
 		ID: task.TaskName,
-		Inputs: map[string]interface{}{
+		Inputs: map[string]any{
 			"task_name":    task.TaskName,
 			"instruction":  task.Instruction,
 			"category":     task.Category,
 			"difficulty":   task.Difficulty,
 			"docker_image": task.DockerImage,
 		},
-		Outputs: map[string]interface{}{
+		Outputs: map[string]any{
 			"passed": true,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			exampleMetadataTBLiteTaskKey: task,
 		},
 	}
@@ -113,7 +113,7 @@ func (e *gepaEvaluator) Evaluate(ctx context.Context, agent optimize.Optimizable
 
 	sideInfo := &optimize.SideInfo{
 		Trace:       latestTrace(agent),
-		Diagnostics: map[string]interface{}{},
+		Diagnostics: map[string]any{},
 		Scores: map[string]float64{
 			"tblite_pass": score,
 		},

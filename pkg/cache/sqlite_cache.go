@@ -14,13 +14,13 @@ import (
 
 // SQLiteCache implements Cache interface using SQLite as storage.
 type SQLiteCache struct {
-	db         *sql.DB
-	config     CacheConfig
-	stats      CacheStats
-	mu         sync.RWMutex
-	closeChan  chan struct{}
-	cleanupWG  sync.WaitGroup
-	vacuumWG   sync.WaitGroup
+	db        *sql.DB
+	config    CacheConfig
+	stats     CacheStats
+	mu        sync.RWMutex
+	closeChan chan struct{}
+	cleanupWG sync.WaitGroup
+	vacuumWG  sync.WaitGroup
 }
 
 // NewSQLiteCache creates a new SQLite-based cache.

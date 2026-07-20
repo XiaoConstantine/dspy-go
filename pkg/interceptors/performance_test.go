@@ -202,13 +202,13 @@ func TestCachingToolInterceptor(t *testing.T) {
 	interceptor := CachingToolInterceptor(cache, time.Second)
 
 	ctx := context.Background()
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 	callCount := 0
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		callCount++
-		return core.ToolResult{Data: map[string]interface{}{"result": "success", "call_count": callCount}}, nil
+		return core.ToolResult{Data: map[string]any{"result": "success", "call_count": callCount}}, nil
 	}
 
 	// First call should execute handler
@@ -224,8 +224,8 @@ func TestCachingToolInterceptor(t *testing.T) {
 	}
 
 	// Results should be identical (from cache)
-	data1 := result1.Data.(map[string]interface{})
-	data2 := result2.Data.(map[string]interface{})
+	data1 := result1.Data.(map[string]any)
+	data2 := result2.Data.(map[string]any)
 	if data1["call_count"] != data2["call_count"] {
 		t.Error("Expected cached result to be identical")
 	}
@@ -279,12 +279,12 @@ func TestTimeoutAgentInterceptor(t *testing.T) {
 	interceptor := TimeoutAgentInterceptor(50 * time.Millisecond)
 
 	ctx := context.Background()
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		time.Sleep(100 * time.Millisecond) // Exceeds timeout
-		return map[string]interface{}{"result": "success"}, nil
+		return map[string]any{"result": "success"}, nil
 	}
 
 	_, err := interceptor(ctx, input, info, handler)
@@ -297,10 +297,10 @@ func TestTimeoutToolInterceptor(t *testing.T) {
 	interceptor := TimeoutToolInterceptor(50 * time.Millisecond)
 
 	ctx := context.Background()
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		time.Sleep(100 * time.Millisecond) // Exceeds timeout
 		return core.ToolResult{Data: "success"}, nil
 	}
@@ -362,10 +362,10 @@ func TestCircuitBreakerAgentInterceptor(t *testing.T) {
 	interceptor := CircuitBreakerAgentInterceptor(cb)
 
 	ctx := context.Background()
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
-	failingHandler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	failingHandler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		return nil, errors.New("handler error")
 	}
 
@@ -390,10 +390,10 @@ func TestCircuitBreakerToolInterceptor(t *testing.T) {
 	interceptor := CircuitBreakerToolInterceptor(cb)
 
 	ctx := context.Background()
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
-	successHandler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	successHandler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		return core.ToolResult{Data: "success"}, nil
 	}
 
@@ -484,16 +484,16 @@ func TestRetryAgentInterceptor(t *testing.T) {
 	interceptor := RetryAgentInterceptor(config)
 
 	ctx := context.Background()
-	input := map[string]interface{}{"test": "value"}
+	input := map[string]any{"test": "value"}
 	info := core.NewAgentInfo("TestAgent", "TestType", []core.Tool{})
 
 	attemptCount := 0
-	handler := func(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+	handler := func(ctx context.Context, input map[string]any) (map[string]any, error) {
 		attemptCount++
 		if attemptCount < 2 {
 			return nil, errors.New("temporary error")
 		}
-		return map[string]interface{}{"result": "success"}, nil
+		return map[string]any{"result": "success"}, nil
 	}
 
 	result, err := interceptor(ctx, input, info, handler)
@@ -514,11 +514,11 @@ func TestRetryToolInterceptor(t *testing.T) {
 	interceptor := RetryToolInterceptor(config)
 
 	ctx := context.Background()
-	args := map[string]interface{}{"test": "value"}
+	args := map[string]any{"test": "value"}
 	info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 	attemptCount := 0
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		attemptCount++
 		if attemptCount < 2 {
 			return core.ToolResult{}, errors.New("temporary error")
@@ -566,7 +566,7 @@ func TestPerformanceHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("generateToolCacheKey", func(t *testing.T) {
-		args := map[string]interface{}{"test": "value"}
+		args := map[string]any{"test": "value"}
 		info := core.NewToolInfo("TestTool", "Test tool", "TestType", models.InputSchema{})
 
 		key1 := generateToolCacheKey(args, info)

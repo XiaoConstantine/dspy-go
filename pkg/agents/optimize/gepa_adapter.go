@@ -133,7 +133,7 @@ func (o *GEPAAgentOptimizer) SeedCandidate(seed AgentArtifacts) (*optimizers.GEP
 	for _, spec := range specs {
 		componentTexts[spec.moduleName] = spec.instruction(seed)
 	}
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		gepaMetadataArtifactsKey:       serializeArtifacts(seed),
 		gepaMetadataArtifactKeysKey:    serializeArtifactKeys(artifactKeys),
 		gepaMetadataIntArtifactKeysKey: sortedIntArtifactKeys(o.config.normalizedIntMutationPlans()),
@@ -421,24 +421,24 @@ func containsArtifactKey(keys []ArtifactKey, want ArtifactKey) bool {
 	return false
 }
 
-func serializeArtifacts(artifacts AgentArtifacts) map[string]interface{} {
+func serializeArtifacts(artifacts AgentArtifacts) map[string]any {
 	text := make(map[string]string, len(artifacts.Text))
 	for key, value := range artifacts.Text {
 		text[string(key)] = value
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"text": text,
 		"int":  maps.Clone(artifacts.Int),
 		"bool": maps.Clone(artifacts.Bool),
 	}
 }
 
-func deserializeArtifacts(raw interface{}) (AgentArtifacts, error) {
+func deserializeArtifacts(raw any) (AgentArtifacts, error) {
 	switch value := raw.(type) {
 	case AgentArtifacts:
 		return value.Clone(), nil
-	case map[string]interface{}:
+	case map[string]any:
 		artifacts := AgentArtifacts{
 			Text: make(map[ArtifactKey]string),
 			Int:  make(map[string]int),
@@ -472,7 +472,7 @@ func deserializeArtifacts(raw interface{}) (AgentArtifacts, error) {
 	}
 }
 
-func decodeTextArtifacts(raw interface{}) (map[ArtifactKey]string, error) {
+func decodeTextArtifacts(raw any) (map[ArtifactKey]string, error) {
 	switch value := raw.(type) {
 	case map[ArtifactKey]string:
 		text := make(map[ArtifactKey]string, len(value))
@@ -486,7 +486,7 @@ func decodeTextArtifacts(raw interface{}) (map[ArtifactKey]string, error) {
 			text[ArtifactKey(key)] = v
 		}
 		return text, nil
-	case map[string]interface{}:
+	case map[string]any:
 		text := make(map[ArtifactKey]string, len(value))
 		for key, v := range value {
 			str, ok := v.(string)
@@ -501,11 +501,11 @@ func decodeTextArtifacts(raw interface{}) (map[ArtifactKey]string, error) {
 	}
 }
 
-func decodeIntArtifacts(raw interface{}) (map[string]int, error) {
+func decodeIntArtifacts(raw any) (map[string]int, error) {
 	switch value := raw.(type) {
 	case map[string]int:
 		return maps.Clone(value), nil
-	case map[string]interface{}:
+	case map[string]any:
 		ints := make(map[string]int, len(value))
 		for key, v := range value {
 			n, err := toInt(v)
@@ -520,11 +520,11 @@ func decodeIntArtifacts(raw interface{}) (map[string]int, error) {
 	}
 }
 
-func decodeBoolArtifacts(raw interface{}) (map[string]bool, error) {
+func decodeBoolArtifacts(raw any) (map[string]bool, error) {
 	switch value := raw.(type) {
 	case map[string]bool:
 		return maps.Clone(value), nil
-	case map[string]interface{}:
+	case map[string]any:
 		bools := make(map[string]bool, len(value))
 		for key, v := range value {
 			b, ok := v.(bool)
@@ -539,7 +539,7 @@ func decodeBoolArtifacts(raw interface{}) (map[string]bool, error) {
 	}
 }
 
-func toInt(v interface{}) (int, error) {
+func toInt(v any) (int, error) {
 	switch n := v.(type) {
 	case int:
 		return n, nil
@@ -663,7 +663,7 @@ func toolCallCount(sideInfo *SideInfo) int {
 				total += count
 			}
 			return total
-		case map[string]interface{}:
+		case map[string]any:
 			total := 0
 			for _, count := range value {
 				n, err := toInt(count)
@@ -735,7 +735,7 @@ func buildGEPATrace(candidate *optimizers.GEPACandidate, example AgentExample, r
 		Outputs:     nil,
 		Success:     false,
 		Timestamp:   time.Now(),
-		ContextData: map[string]interface{}{
+		ContextData: map[string]any{
 			"example_id": example.ID,
 		},
 	}
@@ -904,7 +904,7 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 					}
 				}
 			}
-			if mismatches, ok := sideInfo.Diagnostics["mismatches"].(map[string]interface{}); ok && len(mismatches) > 0 {
+			if mismatches, ok := sideInfo.Diagnostics["mismatches"].(map[string]any); ok && len(mismatches) > 0 {
 				keys := make([]string, 0, len(mismatches))
 				for key := range mismatches {
 					keys = append(keys, key)
@@ -918,7 +918,7 @@ func buildRichTraceEvidence(trace *agents.ExecutionTrace, sideInfo *SideInfo) []
 	return utils.DedupeStrings(evidence, maxTraceEvidenceItems)
 }
 
-func contextMetadataEvidence(metadata map[string]interface{}) []string {
+func contextMetadataEvidence(metadata map[string]any) []string {
 	if len(metadata) == 0 {
 		return nil
 	}
@@ -957,7 +957,7 @@ func contextMetadataEvidence(metadata map[string]interface{}) []string {
 	return evidence
 }
 
-func appendSummaryCount(builder *strings.Builder, label string, raw interface{}) {
+func appendSummaryCount(builder *strings.Builder, label string, raw any) {
 	if builder == nil {
 		return
 	}
@@ -973,7 +973,7 @@ func appendSummaryCount(builder *strings.Builder, label string, raw interface{})
 	builder.WriteString(strconv.Itoa(value))
 }
 
-func nonNegativeIntEvidence(label string, raw interface{}) string {
+func nonNegativeIntEvidence(label string, raw any) string {
 	value, ok := extractNonNegativeInt(raw)
 	if !ok {
 		return ""
@@ -981,7 +981,7 @@ func nonNegativeIntEvidence(label string, raw interface{}) string {
 	return fmt.Sprintf("%s=%d", label, value)
 }
 
-func extractNonNegativeInt(raw interface{}) (int, bool) {
+func extractNonNegativeInt(raw any) (int, bool) {
 	switch value := raw.(type) {
 	case int:
 		if value >= 0 {
@@ -999,7 +999,7 @@ func extractNonNegativeInt(raw interface{}) (int, bool) {
 	return 0, false
 }
 
-func extractPositiveInt(raw interface{}) (int, bool) {
+func extractPositiveInt(raw any) (int, bool) {
 	switch value := raw.(type) {
 	case int:
 		if value > 0 {

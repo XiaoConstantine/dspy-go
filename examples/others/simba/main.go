@@ -69,7 +69,7 @@ func RunSIMBAExample(apiKey string) {
 		map[string]core.Module{
 			"reasoner": reasoner,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			// Process the question through our reasoner
 			result, err := reasoner.Process(ctx, inputs)
 			if err != nil {
@@ -89,7 +89,7 @@ func RunSIMBAExample(apiKey string) {
 	)
 
 	// Define a metric function that evaluates both correctness and reasoning quality
-	metricFunc := func(expected, actual map[string]interface{}) float64 {
+	metricFunc := func(expected, actual map[string]any) float64 {
 		expectedAnswer, ok1 := expected["completion"].(string)
 		actualAnswer, ok2 := actual["answer"].(string)
 		if !ok1 || !ok2 {
@@ -192,10 +192,10 @@ func createDataset(examples []datasets.GSM8KExample) core.Dataset {
 	data := make([]core.Example, len(examples))
 	for i, ex := range examples {
 		data[i] = core.Example{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question": ex.Question,
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"completion": ex.Answer,
 			},
 		}
@@ -349,7 +349,7 @@ func runEvaluation(ctx context.Context, program core.Program, examples []dataset
 	logger.Info(ctx, "Evaluating %s program on %d test examples...", programType, len(examples))
 
 	for i, ex := range examples {
-		result, err := program.Execute(ctx, map[string]interface{}{"question": ex.Question})
+		result, err := program.Execute(ctx, map[string]any{"question": ex.Question})
 		if err != nil {
 			logger.Warn(ctx, "Error executing program on example %d: %v", i+1, err)
 			total++

@@ -168,11 +168,11 @@ func (m *scriptedLLM) Generate(ctx context.Context, prompt string, opts ...core.
 	return &core.LLMResponse{Content: response, Usage: &usage}, nil
 }
 
-func (m *scriptedLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *scriptedLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("JSON generation not implemented in scripted budget demo")
 }
 
-func (m *scriptedLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *scriptedLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("function calling not implemented in scripted budget demo")
 }
 

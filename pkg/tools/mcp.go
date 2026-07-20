@@ -77,12 +77,12 @@ func (t *MCPTool) CanHandle(ctx context.Context, intent string) bool {
 }
 
 // Call forwards the call to the MCP server and returns the result.
-func (t *MCPTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (t *MCPTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	return t.client.CallTool(ctx, t.toolName, args)
 }
 
 // Execute runs the tool with provided parameters and adapts the result to the core interface.
-func (t *MCPTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t *MCPTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 
 	convertedParams := convertMCPParams(ctx, t.schema, params) // Call the helper function
 	result, err := t.Call(ctx, convertedParams)
@@ -93,15 +93,15 @@ func (t *MCPTool) Execute(ctx context.Context, params map[string]interface{}) (c
 	// Convert MCP call result to core.ToolResult
 	toolResult := core.ToolResult{
 		Data:        extractContentText(result.Content),
-		Metadata:    map[string]interface{}{"isError": result.IsError},
-		Annotations: map[string]interface{}{},
+		Metadata:    map[string]any{"isError": result.IsError},
+		Annotations: map[string]any{},
 	}
 
 	return toolResult, nil
 }
 
 // Validate checks if the parameters match the expected schema.
-func (t *MCPTool) Validate(params map[string]interface{}) error {
+func (t *MCPTool) Validate(params map[string]any) error {
 	// Use the full InputSchema for validation
 	for name, param := range t.schema.Properties {
 		if param.Required {
@@ -121,9 +121,9 @@ func (t *MCPTool) Type() ToolType {
 
 // convertMCPParams attempts to convert parameter values based on the provided MCP schema.
 // It prioritizes converting strings to numbers/integers if the schema specifies.
-func convertMCPParams(ctx context.Context, schema models.InputSchema, params map[string]interface{}) map[string]interface{} {
+func convertMCPParams(ctx context.Context, schema models.InputSchema, params map[string]any) map[string]any {
 	logger := logging.GetLogger()
-	convertedParams := make(map[string]interface{})
+	convertedParams := make(map[string]any)
 
 	for key, value := range params {
 		convertedParams[key] = value // Default: keep original value

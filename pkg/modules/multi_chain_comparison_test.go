@@ -66,7 +66,7 @@ After analyzing all attempts, the correct answer is 42</rationale><answer>42</an
 	multiChain.SetLLM(mockLLM)
 
 	// Create test completions
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"rationale": "solve the math problem",
 			"answer":    "40",
@@ -85,7 +85,7 @@ After analyzing all attempts, the correct answer is 42</rationale><answer>42</an
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question":    "What is the meaning of life?",
 		"completions": completions,
 	}
@@ -115,7 +115,7 @@ func TestMultiChainComparison_Process_InvalidCompletions(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with missing completions
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question": "What is the meaning of life?",
 	}
 
@@ -125,7 +125,7 @@ func TestMultiChainComparison_Process_InvalidCompletions(t *testing.T) {
 	assert.Contains(t, err.Error(), "completions not found")
 
 	// Test with invalid completions type
-	inputs = map[string]interface{}{
+	inputs = map[string]any{
 		"question":    "What is the meaning of life?",
 		"completions": "invalid",
 	}
@@ -149,7 +149,7 @@ func TestMultiChainComparison_Process_WrongNumberOfCompletions(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with wrong number of completions (only 2 instead of 3)
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"rationale": "solve the math problem",
 			"answer":    "40",
@@ -160,7 +160,7 @@ func TestMultiChainComparison_Process_WrongNumberOfCompletions(t *testing.T) {
 		},
 	}
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question":    "What is the meaning of life?",
 		"completions": completions,
 	}
@@ -182,7 +182,7 @@ func TestMultiChainComparison_ProcessCompletions(t *testing.T) {
 	multiChain := NewMultiChainComparison(signature, 3, 0.7)
 
 	// Test completions with rationale
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"rationale": "solve the math problem step by step",
 			"answer":    "40",
@@ -217,7 +217,7 @@ func TestMultiChainComparison_ProcessCompletions_EmptyFields(t *testing.T) {
 	multiChain := NewMultiChainComparison(signature, 2, 0.7)
 
 	// Test completions with empty/missing fields
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"answer": "40",
 		},
@@ -296,7 +296,7 @@ func TestMultiChainComparison_WithLLMError(t *testing.T) {
 	multiChain.SetLLM(mockLLM)
 
 	// Create test completions
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{"rationale": "solve", "answer": "40"},
 		{"reasoning": "calculate", "answer": "42"},
 		{"rationale": "reason", "answer": "38"},
@@ -306,7 +306,7 @@ func TestMultiChainComparison_WithLLMError(t *testing.T) {
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question":    "What is the meaning of life?",
 		"completions": completions,
 	}
@@ -349,7 +349,7 @@ func TestMultiChainComparison_WithStreamHandler(t *testing.T) {
 	multiChain.SetLLM(mockLLM)
 
 	// Create test completions
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{"rationale": "solve", "answer": "40"},
 		{"reasoning": "calculate", "answer": "42"},
 	}
@@ -365,7 +365,7 @@ func TestMultiChainComparison_WithStreamHandler(t *testing.T) {
 
 	// Process with streaming
 	ctx := context.Background()
-	inputs := map[string]interface{}{
+	inputs := map[string]any{
 		"question":    "What is the meaning of life?",
 		"completions": completions,
 	}
@@ -384,10 +384,10 @@ func TestMultiChainComparison_WithStreamHandler(t *testing.T) {
 func TestMultiChainComparison_SignatureModification(t *testing.T) {
 	// Test signature modification with different M values
 	testCases := []struct {
-		name        string
-		M           int
-		inputFields int
-		expectedInputs int
+		name            string
+		M               int
+		inputFields     int
+		expectedInputs  int
 		expectedOutputs int
 	}{
 		{"M=1", 1, 2, 3, 3}, // 2 original + 1 reasoning attempt = 3 inputs, 2 original + 1 rationale = 3 outputs

@@ -45,13 +45,13 @@ func (m *mockTool) CanHandle(ctx context.Context, intent string) bool {
 	return strings.Contains(strings.ToLower(intent), strings.ToLower(m.name))
 }
 
-func (m *mockTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *mockTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	return core.ToolResult{
-		Data: map[string]interface{}{"result": "success"},
+		Data: map[string]any{"result": "success"},
 	}, nil
 }
 
-func (m *mockTool) Validate(params map[string]interface{}) error {
+func (m *mockTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -88,11 +88,11 @@ func (m *mockToolWithNilMetadata) CanHandle(ctx context.Context, intent string) 
 	return false
 }
 
-func (m *mockToolWithNilMetadata) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *mockToolWithNilMetadata) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	return core.ToolResult{}, nil
 }
 
-func (m *mockToolWithNilMetadata) Validate(params map[string]interface{}) error {
+func (m *mockToolWithNilMetadata) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -257,7 +257,7 @@ func TestSmartToolRegistry_ExecuteWithTracking(t *testing.T) {
 
 	// Execute the tool multiple times
 	ctx := context.Background()
-	params := map[string]interface{}{"input": "test"}
+	params := map[string]any{"input": "test"}
 
 	for i := 0; i < 5; i++ {
 		result, err := registry.ExecuteWithTracking(ctx, "test", params)
@@ -440,7 +440,7 @@ func TestSmartToolRegistry_PerformanceMetricsUpdate(t *testing.T) {
 	require.NoError(t, registry.Register(tool))
 
 	ctx := context.Background()
-	params := map[string]interface{}{"input": "test"}
+	params := map[string]any{"input": "test"}
 
 	// Execute successful operations
 	for i := 0; i < 3; i++ {

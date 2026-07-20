@@ -63,7 +63,7 @@ func computeF1Score(prediction, groundTruth string) float64 {
 	return 2 * precision * recall / (precision + recall)
 }
 
-func createHotpotQAProgram() (core.Program, *core.Signature, func(map[string]interface{}, map[string]interface{}) float64) {
+func createHotpotQAProgram() (core.Program, *core.Signature, func(map[string]any, map[string]any) float64) {
 	// Create signature optimized for multi-hop reasoning
 	signature := core.NewSignature(
 		[]core.InputField{
@@ -80,13 +80,13 @@ func createHotpotQAProgram() (core.Program, *core.Signature, func(map[string]int
 
 	program := core.NewProgram(
 		map[string]core.Module{"reasoner": module},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 			return module.Process(ctx, inputs)
 		},
 	)
 
 	// F1 metric function
-	metricFunc := func(expected, actual map[string]interface{}) float64 {
+	metricFunc := func(expected, actual map[string]any) float64 {
 		expectedAnswer := fmt.Sprintf("%v", expected["answer"])
 		actualAnswer := fmt.Sprintf("%v", actual["answer"])
 		return computeF1Score(actualAnswer, expectedAnswer)
@@ -116,10 +116,10 @@ func loadHotpotQAData(maxExamples int) ([]core.Example, []core.Example, error) {
 	examples := make([]core.Example, len(hotpotExamples))
 	for i, ex := range hotpotExamples {
 		examples[i] = core.Example{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"question": ex.Question,
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"answer": ex.Answer,
 			},
 		}
@@ -133,7 +133,7 @@ func loadHotpotQAData(maxExamples int) ([]core.Example, []core.Example, error) {
 	return trainExamples, testExamples, nil
 }
 
-func evaluateProgram(ctx context.Context, program core.Program, examples []core.Example, metricFunc func(map[string]interface{}, map[string]interface{}) float64, maxEval int) float64 {
+func evaluateProgram(ctx context.Context, program core.Program, examples []core.Example, metricFunc func(map[string]any, map[string]any) float64, maxEval int) float64 {
 	totalScore := 0.0
 	validCount := 0
 
@@ -241,7 +241,7 @@ func runMIPROExperiment(ctx context.Context, logger *logging.Logger, trainExampl
 	program, _, _ := createHotpotQAProgram()
 
 	// MIPRO metric function (different interface than GEPA)
-	miproMetricFunc := func(example, prediction map[string]interface{}, ctx context.Context) float64 {
+	miproMetricFunc := func(example, prediction map[string]any, ctx context.Context) float64 {
 		expectedAnswer := fmt.Sprintf("%v", example["answer"])
 		actualAnswer := fmt.Sprintf("%v", prediction["answer"])
 		return computeF1Score(actualAnswer, expectedAnswer)
@@ -328,7 +328,7 @@ func evaluateMIPROProgram(ctx context.Context, program core.Program, examples []
 	for i := 0; i < evalLimit; i++ {
 		example := examples[i]
 
-		result, err := program.Execute(ctx, map[string]interface{}{"question": example.Inputs["question"]})
+		result, err := program.Execute(ctx, map[string]any{"question": example.Inputs["question"]})
 		if err != nil {
 			continue
 		}

@@ -348,20 +348,20 @@ func TestManagerExportWithoutConfig(t *testing.T) {
 func TestManagerImport(t *testing.T) {
 	manager := &Manager{}
 
-	data := map[string]interface{}{
-		"llm": map[string]interface{}{
-			"default": map[string]interface{}{
+	data := map[string]any{
+		"llm": map[string]any{
+			"default": map[string]any{
 				"provider": "google",
 				"model_id": "gemini-2.5-flash",
-				"generation": map[string]interface{}{
+				"generation": map[string]any{
 					"max_tokens": 4096,
 				},
-				"endpoint": map[string]interface{}{
-					"retry": map[string]interface{}{
+				"endpoint": map[string]any{
+					"retry": map[string]any{
 						"backoff_multiplier": 1.5,
 					},
 				},
-				"embedding": map[string]interface{}{
+				"embedding": map[string]any{
 					"batch_size": 10,
 				},
 			},

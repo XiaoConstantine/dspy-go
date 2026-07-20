@@ -46,22 +46,22 @@ func NewLoggerAdapter(dspyLogger *dspyLogging.Logger) mcpLogging.Logger {
 }
 
 // Debug implements mcp-go/pkg/logging.Logger interface.
-func (a *LoggerAdapter) Debug(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Debug(msg string, args ...any) {
 	a.dspyLogger.Debug(a.ctx, msg, args...)
 }
 
 // Info implements mcp-go/pkg/logging.Logger interface.
-func (a *LoggerAdapter) Info(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Info(msg string, args ...any) {
 	a.dspyLogger.Info(a.ctx, msg, args...)
 }
 
 // Warn implements mcp-go/pkg/logging.Logger interface.
-func (a *LoggerAdapter) Warn(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Warn(msg string, args ...any) {
 	a.dspyLogger.Warn(a.ctx, msg, args...)
 }
 
 // Error implements mcp-go/pkg/logging.Logger interface.
-func (a *LoggerAdapter) Error(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Error(msg string, args ...any) {
 	a.dspyLogger.Error(a.ctx, msg, args...)
 }
 
@@ -126,7 +126,7 @@ func main() {
 
 	loggerAdapter := NewLoggerAdapter(logger)
 	// 1. Start MCP servers from configuration
-	var mcpClients []interface{} // Use interface{} until we fix the type issue
+	var mcpClients []any // Use interface{} until we fix the type issue
 	for _, serverCfg := range cfg.Tools.MCP.Servers {
 		logger.Info(ctx, "Starting MCP server: %s", serverCfg.Name)
 
@@ -238,7 +238,7 @@ func main() {
 	reactModule.SetLLM(core.GetDefaultLLM())
 
 	// 6. Execute query with ReAct
-	result, err := reactModule.Process(ctx, map[string]interface{}{
+	result, err := reactModule.Process(ctx, map[string]any{
 		"query": "Show me the details of latest 5 commit",
 	})
 

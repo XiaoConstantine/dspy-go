@@ -17,12 +17,12 @@ import (
 // MessageToAgentInput converts an a2a Message to dspy-go agent input format.
 // Text parts are extracted and mapped to input fields based on metadata or position.
 // The first text part without metadata defaults to the "question" field.
-func MessageToAgentInput(msg *Message) (map[string]interface{}, error) {
+func MessageToAgentInput(msg *Message) (map[string]any, error) {
 	if msg == nil {
 		return nil, fmt.Errorf("message cannot be nil")
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	textPartCount := 0
 
 	// Process each part
@@ -92,7 +92,7 @@ func extractFieldName(part Part, index int) string {
 // AgentOutputToMessage converts dspy-go agent output to an a2a Message.
 // Each output field becomes a text part with metadata indicating the field name.
 // Internal fields (prefixed with "_") are excluded from conversion.
-func AgentOutputToMessage(output map[string]interface{}) (*Message, error) {
+func AgentOutputToMessage(output map[string]any) (*Message, error) {
 	if output == nil {
 		return nil, fmt.Errorf("output cannot be nil")
 	}
@@ -113,7 +113,7 @@ func AgentOutputToMessage(output map[string]interface{}) (*Message, error) {
 		}
 
 		// Create part with field metadata
-		part := NewTextPartWithMetadata(text, map[string]interface{}{
+		part := NewTextPartWithMetadata(text, map[string]any{
 			"field": key,
 		})
 		parts = append(parts, part)
@@ -135,16 +135,16 @@ func AgentOutputToMessage(output map[string]interface{}) (*Message, error) {
 
 // AgentOutputToArtifact converts dspy-go agent output to an a2a Artifact.
 // Similar to AgentOutputToMessage but wraps the result in an Artifact structure.
-func AgentOutputToArtifact(output map[string]interface{}) (Artifact, error) {
+func AgentOutputToArtifact(output map[string]any) (Artifact, error) {
 	if output == nil {
 		return Artifact{}, fmt.Errorf("output cannot be nil")
 	}
 
 	parts := []Part{}
-	metadata := make(map[string]interface{})
+	metadata := make(map[string]any)
 
 	// Extract metadata if present
-	if meta, ok := output["_metadata"].(map[string]interface{}); ok {
+	if meta, ok := output["_metadata"].(map[string]any); ok {
 		metadata = meta
 	}
 
@@ -160,7 +160,7 @@ func AgentOutputToArtifact(output map[string]interface{}) (Artifact, error) {
 			continue
 		}
 
-		part := NewTextPartWithMetadata(text, map[string]interface{}{
+		part := NewTextPartWithMetadata(text, map[string]any{
 			"field": key,
 		})
 		parts = append(parts, part)
@@ -178,7 +178,7 @@ func AgentOutputToArtifact(output map[string]interface{}) (Artifact, error) {
 }
 
 // formatOutputValue converts any output value to a string representation.
-func formatOutputValue(value interface{}) string {
+func formatOutputValue(value any) string {
 	if value == nil {
 		return ""
 	}
@@ -228,7 +228,7 @@ func ToolsToCapabilities(tools []core.Tool) []Capability {
 		}
 
 		// Convert tool's InputSchema to JSON schema map for full discoverability
-		var schemaMap map[string]interface{}
+		var schemaMap map[string]any
 		schema := tool.InputSchema()
 		// Attempt to convert the tool's input schema to a map.
 		if schemaBytes, err := json.Marshal(schema); err == nil {
@@ -342,15 +342,15 @@ func ExtractTextFromArtifact(artifact Artifact) string {
 }
 
 // CreateSimpleInput creates agent input from a simple text question.
-func CreateSimpleInput(question string) map[string]interface{} {
-	return map[string]interface{}{
+func CreateSimpleInput(question string) map[string]any {
+	return map[string]any{
 		"question": question,
 	}
 }
 
 // CreateSimpleOutput creates agent output from a simple text answer.
-func CreateSimpleOutput(answer string) map[string]interface{} {
-	return map[string]interface{}{
+func CreateSimpleOutput(answer string) map[string]any {
+	return map[string]any{
 		"answer": answer,
 	}
 }

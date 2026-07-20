@@ -66,10 +66,10 @@ func (t runtimeStubTool) Metadata() *ToolMetadata { return t.metadata }
 
 func (t runtimeStubTool) CanHandle(context.Context, string) bool { return false }
 
-func (t runtimeStubTool) Execute(context.Context, map[string]interface{}) (ToolResult, error) {
+func (t runtimeStubTool) Execute(context.Context, map[string]any) (ToolResult, error) {
 	return ToolResult{}, nil
 }
 
-func (t runtimeStubTool) Validate(map[string]interface{}) error { return nil }
+func (t runtimeStubTool) Validate(map[string]any) error { return nil }
 
 func (t runtimeStubTool) InputSchema() models.InputSchema { return t.schema }

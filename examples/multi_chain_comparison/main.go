@@ -59,7 +59,7 @@ func runMathReasoningExample(ctx context.Context) {
 	multiChain := modules.NewMultiChainComparison(signature, 3, 0.7)
 
 	// Simulate three different reasoning attempts for the same problem
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"rationale": "use algebraic manipulation to solve for x",
 			"answer":    "12",
@@ -77,7 +77,7 @@ func runMathReasoningExample(ctx context.Context) {
 	start := time.Now()
 
 	// Process the multi-chain comparison
-	result, err := multiChain.Process(ctx, map[string]interface{}{
+	result, err := multiChain.Process(ctx, map[string]any{
 		"problem":     "Solve for x: x² - 7x - 30 = 0",
 		"completions": completions,
 	})
@@ -113,7 +113,7 @@ func runTextAnalysisExample(ctx context.Context) {
 	multiChain := modules.NewMultiChainComparison(signature, 4, 0.8)
 
 	// Simulate four different analysis perspectives
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"rationale":  "focus on positive keywords and emotional tone",
 			"sentiment":  "positive",
@@ -138,7 +138,7 @@ func runTextAnalysisExample(ctx context.Context) {
 
 	start := time.Now()
 
-	result, err := multiChain.Process(ctx, map[string]interface{}{
+	result, err := multiChain.Process(ctx, map[string]any{
 		"text":        "This product exceeded my expectations! The quality is fantastic and delivery was super quick. Highly recommend!",
 		"completions": completions,
 	})
@@ -175,7 +175,7 @@ func runProblemSolvingExample(ctx context.Context) {
 	multiChain := modules.NewMultiChainComparison(signature, 3, 0.6)
 
 	// Simulate three different problem-solving approaches
-	completions := []map[string]interface{}{
+	completions := []map[string]any{
 		{
 			"rationale": "prioritize immediate cost reduction and efficiency",
 			"strategy":  "Implement automated systems to reduce labor costs",
@@ -195,7 +195,7 @@ func runProblemSolvingExample(ctx context.Context) {
 
 	start := time.Now()
 
-	result, err := multiChain.Process(ctx, map[string]interface{}{
+	result, err := multiChain.Process(ctx, map[string]any{
 		"scenario":    "A small business is struggling with declining profits and needs to decide between cutting costs, investing in growth, or maintaining status quo.",
 		"completions": completions,
 	})

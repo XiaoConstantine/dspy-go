@@ -167,7 +167,7 @@ func (g *GEPA) formatReflectionCaseEvidence(input *gepaReflectionInput) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func summarizeReflectionMap(values map[string]interface{}) string {
+func summarizeReflectionMap(values map[string]any) string {
 	if len(values) == 0 {
 		return "{}"
 	}

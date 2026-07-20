@@ -38,7 +38,7 @@ func TestStep(t *testing.T) {
 
 		// Execute step
 		ctx := context.Background()
-		result, err := step.Execute(ctx, map[string]interface{}{
+		result, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 
@@ -53,7 +53,7 @@ func TestStep(t *testing.T) {
 		step, module := setupStep()
 
 		ctx := context.Background()
-		_, err := step.Execute(ctx, map[string]interface{}{
+		_, err := step.Execute(ctx, map[string]any{
 			"wrong_input": "test", // Missing required 'input' field
 		})
 
@@ -70,7 +70,7 @@ func TestStep(t *testing.T) {
 		)
 
 		ctx := context.Background()
-		_, err := step.Execute(ctx, map[string]interface{}{
+		_, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 
@@ -83,12 +83,12 @@ func TestStep(t *testing.T) {
 		step, module := setupStep()
 
 		// Add condition that always fails
-		step.Condition = func(state map[string]interface{}) bool {
+		step.Condition = func(state map[string]any) bool {
 			return false
 		}
 
 		ctx := context.Background()
-		_, err := step.Execute(ctx, map[string]interface{}{
+		_, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 
@@ -111,7 +111,7 @@ func TestStep(t *testing.T) {
 				current := atomic.AddInt32(&attempts, 1)
 				t.Logf("Attempt #%d", current)
 			}).
-			Return(make(map[string]interface{}), assert.AnError).
+			Return(make(map[string]any), assert.AnError).
 			Times(2)
 
 		// Third call will succeed
@@ -120,11 +120,11 @@ func TestStep(t *testing.T) {
 				atomic.AddInt32(&attempts, 1)
 				t.Logf("Final successful attempt")
 			}).
-			Return(map[string]interface{}{"output": "success"}, nil).
+			Return(map[string]any{"output": "success"}, nil).
 			Once()
 
 		ctx := context.Background()
-		result, err := step.Execute(ctx, map[string]interface{}{
+		result, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 
@@ -155,11 +155,11 @@ func TestStep(t *testing.T) {
 				attemptTimes = append(attemptTimes, time.Now())
 				mu.Unlock()
 			}).
-			Return(make(map[string]interface{}), assert.AnError).
+			Return(make(map[string]any), assert.AnError).
 			Times(2)
 
 		ctx := context.Background()
-		_, err := step.Execute(ctx, map[string]interface{}{
+		_, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 
@@ -205,7 +205,7 @@ func TestStep(t *testing.T) {
 			cancel()
 		}()
 
-		_, err := step.Execute(ctx, map[string]interface{}{
+		_, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 
@@ -224,7 +224,7 @@ func TestStep(t *testing.T) {
 		)
 
 		ctx := context.Background()
-		result, err := step.Execute(ctx, map[string]interface{}{
+		result, err := step.Execute(ctx, map[string]any{
 			"input": "test",
 		})
 

@@ -32,15 +32,15 @@ type ExecutorMetrics struct {
 
 // ParallelTask represents a task to be executed in parallel.
 type ParallelTask struct {
-	ID         string                 // Unique task identifier
-	ToolName   string                 // Tool to execute
-	Input      map[string]interface{} // Input parameters
-	Priority   int                    // Task priority (higher = more urgent)
-	Timeout    time.Duration          // Task-specific timeout
-	Retries    int                    // Number of retries on failure
-	Context    context.Context        // Task-specific context
-	ResultChan chan ParallelResult    // Channel to receive results
-	SubmitTime time.Time              // When the task was submitted
+	ID         string              // Unique task identifier
+	ToolName   string              // Tool to execute
+	Input      map[string]any      // Input parameters
+	Priority   int                 // Task priority (higher = more urgent)
+	Timeout    time.Duration       // Task-specific timeout
+	Retries    int                 // Number of retries on failure
+	Context    context.Context     // Task-specific context
+	ResultChan chan ParallelResult // Channel to receive results
+	SubmitTime time.Time           // When the task was submitted
 }
 
 // ParallelResult contains the result of parallel task execution.
@@ -331,7 +331,7 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 }
 
 // executeTool executes a single tool.
-func (pe *ParallelExecutor) executeTool(ctx context.Context, toolName string, input map[string]interface{}) (core.ToolResult, error) {
+func (pe *ParallelExecutor) executeTool(ctx context.Context, toolName string, input map[string]any) (core.ToolResult, error) {
 	tool, err := pe.registry.Get(toolName)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -438,7 +438,7 @@ type ToolCall struct {
 	// Deprecated: kept for backward compatibility with existing callers.
 	ToolName string `json:"tool_name,omitempty"`
 	// Deprecated: kept for backward compatibility with existing callers.
-	Input map[string]interface{} `json:"input,omitempty"`
+	Input map[string]any `json:"input,omitempty"`
 
 	Priority int           `json:"priority"`
 	Timeout  time.Duration `json:"timeout"`
@@ -452,7 +452,7 @@ func (c *ToolCall) effectiveName() string {
 	return c.ToolName
 }
 
-func (c *ToolCall) effectiveArguments() map[string]interface{} {
+func (c *ToolCall) effectiveArguments() map[string]any {
 	if c.Arguments != nil {
 		return c.Arguments
 	}
@@ -460,14 +460,14 @@ func (c *ToolCall) effectiveArguments() map[string]interface{} {
 }
 
 type toolCallJSON struct {
-	ID        string                 `json:"id"`
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
-	ToolName  string                 `json:"tool_name,omitempty"`
-	Input     map[string]interface{} `json:"input,omitempty"`
-	Priority  int                    `json:"priority"`
-	Timeout   time.Duration          `json:"timeout"`
-	Retries   int                    `json:"retries"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+	ToolName  string         `json:"tool_name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	Priority  int            `json:"priority"`
+	Timeout   time.Duration  `json:"timeout"`
+	Retries   int            `json:"retries"`
 }
 
 // MarshalJSON emits only the canonical core.ToolCall field names while still
@@ -527,7 +527,7 @@ func NewParallelPipelineExecutor(pipeline *ToolPipeline, executor *ParallelExecu
 }
 
 // ExecuteWithParallelSteps executes pipeline with parallel step execution where possible.
-func (ppe *ParallelPipelineExecutor) ExecuteWithParallelSteps(ctx context.Context, input map[string]interface{}) (*PipelineResult, error) {
+func (ppe *ParallelPipelineExecutor) ExecuteWithParallelSteps(ctx context.Context, input map[string]any) (*PipelineResult, error) {
 	// This is a simplified implementation that identifies independent steps
 	// In a full implementation, you would analyze step dependencies
 

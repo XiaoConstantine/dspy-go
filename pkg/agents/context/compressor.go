@@ -38,32 +38,32 @@ type Compressor struct {
 
 // CompressionResult provides detailed information about compression operations.
 type CompressionResult struct {
-	OriginalSize     int64   `json:"original_size"`
-	CompressedSize   int64   `json:"compressed_size"`
-	CompressionRatio float64 `json:"compression_ratio"`
-	Method           string  `json:"method"`
-	Summary          string  `json:"summary,omitempty"`
-	Checksum         string  `json:"checksum"`
-	Timestamp        time.Time `json:"timestamp"`
-	Metadata         map[string]interface{} `json:"metadata"`
+	OriginalSize     int64          `json:"original_size"`
+	CompressedSize   int64          `json:"compressed_size"`
+	CompressionRatio float64        `json:"compression_ratio"`
+	Method           string         `json:"method"`
+	Summary          string         `json:"summary,omitempty"`
+	Checksum         string         `json:"checksum"`
+	Timestamp        time.Time      `json:"timestamp"`
+	Metadata         map[string]any `json:"metadata"`
 }
 
 // CompressibleContent represents content that can be compressed or summarized.
 type CompressibleContent struct {
-	Content     string                 `json:"content"`
-	ContentType string                 `json:"content_type"`
-	Priority    CompressionPriority    `json:"priority"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	PreserveKey bool                   `json:"preserve_key"` // Keep even if large
+	Content     string              `json:"content"`
+	ContentType string              `json:"content_type"`
+	Priority    CompressionPriority `json:"priority"`
+	Metadata    map[string]any      `json:"metadata"`
+	PreserveKey bool                `json:"preserve_key"` // Keep even if large
 }
 
 // CompressionPriority determines how aggressively content should be compressed.
 type CompressionPriority string
 
 const (
-	PriorityHigh   CompressionPriority = "high"   // Most important, compress minimally
-	PriorityMedium CompressionPriority = "medium" // Balanced compression
-	PriorityLow    CompressionPriority = "low"    // Aggressive compression/summarization
+	PriorityHigh    CompressionPriority = "high"    // Most important, compress minimally
+	PriorityMedium  CompressionPriority = "medium"  // Balanced compression
+	PriorityLow     CompressionPriority = "low"     // Aggressive compression/summarization
 	PriorityMinimal CompressionPriority = "minimal" // Only keep essential summary
 )
 
@@ -143,13 +143,13 @@ func (c *Compressor) CompressAndStore(ctx context.Context, id string, content Co
 
 	// Store compressed content if it's still large
 	if result.CompressedSize > c.compressionThreshold {
-		reference, err := c.memory.StoreFile(ctx, "compressed", id, []byte(compressed), map[string]interface{}{
+		reference, err := c.memory.StoreFile(ctx, "compressed", id, []byte(compressed), map[string]any{
 			"original_size":     result.OriginalSize,
 			"compressed_size":   result.CompressedSize,
 			"compression_ratio": result.CompressionRatio,
-			"method":           result.Method,
-			"content_type":     content.ContentType,
-			"priority":         content.Priority,
+			"method":            result.Method,
+			"content_type":      content.ContentType,
+			"priority":          content.Priority,
 		})
 
 		if err != nil {
@@ -180,7 +180,7 @@ func (c *Compressor) DecompressContent(ctx context.Context, compressedContent st
 }
 
 // GetCompressionStats returns detailed compression performance metrics.
-func (c *Compressor) GetCompressionStats() map[string]interface{} {
+func (c *Compressor) GetCompressionStats() map[string]any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -189,14 +189,14 @@ func (c *Compressor) GetCompressionStats() map[string]interface{} {
 		avgRatio = float64(c.totalBytesCompressed) / float64(c.totalBytesOriginal)
 	}
 
-	return map[string]interface{}{
-		"total_compressions":     c.totalCompressions,
-		"total_bytes_original":   c.totalBytesOriginal,
-		"total_bytes_compressed": c.totalBytesCompressed,
-		"total_bytes_saved":      c.totalBytesSaved,
+	return map[string]any{
+		"total_compressions":        c.totalCompressions,
+		"total_bytes_original":      c.totalBytesOriginal,
+		"total_bytes_compressed":    c.totalBytesCompressed,
+		"total_bytes_saved":         c.totalBytesSaved,
 		"average_compression_ratio": avgRatio,
-		"total_savings_percent":  (1.0 - avgRatio) * 100,
-		"threshold_bytes":        c.compressionThreshold,
+		"total_savings_percent":     (1.0 - avgRatio) * 100,
+		"threshold_bytes":           c.compressionThreshold,
 	}
 }
 
@@ -256,7 +256,7 @@ func (c *Compressor) compressJSON(content CompressibleContent) (string, Compress
 	originalSize := int64(len(jsonContent))
 
 	// Parse and reformat JSON compactly
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(jsonContent), &data); err != nil {
 		// If not valid JSON, treat as text
 		return c.compressText(content)
@@ -647,12 +647,12 @@ func (c *Compressor) createTextSummary(text string) string {
 }
 
 // Additional helper methods would be implemented similarly...
-func (c *Compressor) removeNullFields(data interface{}) interface{} {
+func (c *Compressor) removeNullFields(data any) any {
 	// Simplified implementation - remove null/empty fields from JSON
 	return data // Placeholder - would implement actual null field removal
 }
 
-func (c *Compressor) createJSONSummary(data interface{}) string {
+func (c *Compressor) createJSONSummary(data any) string {
 	return fmt.Sprintf("JSON Summary: %d bytes of structured data", len(fmt.Sprintf("%v", data)))
 }
 

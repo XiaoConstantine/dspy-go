@@ -49,7 +49,7 @@ func (g *GEPA) reflectionGuidedMutation(ctx context.Context, candidate *GEPACand
 		return nil
 	}
 
-	metadata := mergeCandidateMetadata(map[string]interface{}{
+	metadata := mergeCandidateMetadata(map[string]any{
 		"mutation_type":          "reflection_guided",
 		"parent_fitness":         candidate.Fitness,
 		"guidance_candidate_id":  sourceCandidateID,

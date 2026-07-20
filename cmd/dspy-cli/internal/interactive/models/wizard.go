@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 )
 
 // WizardModel represents the AI-powered recommendation wizard
 type WizardModel struct {
 	currentQuestion int
 	selectedOption  int
-	answers         map[string]interface{}
+	answers         map[string]any
 	questions       []Question
 	recommendation  *Recommendation
 	width           int
@@ -45,14 +45,14 @@ type Recommendation struct {
 	Confidence    int
 	Reasoning     string
 	Alternatives  []string
-	Configuration map[string]interface{}
+	Configuration map[string]any
 }
 
 // NewWizardModel creates a new wizard model
 func NewWizardModel() WizardModel {
 	return WizardModel{
 		currentQuestion: 0,
-		answers:         make(map[string]interface{}),
+		answers:         make(map[string]any),
 		width:           80,
 		height:          24,
 		completed:       false,
@@ -416,8 +416,8 @@ func (m *WizardModel) generateRecommendation() {
 }
 
 // generateOptimalConfig creates optimized configuration based on user profile
-func (m *WizardModel) generateOptimalConfig(optimizer, expertise, priority string) map[string]interface{} {
-	config := make(map[string]interface{})
+func (m *WizardModel) generateOptimalConfig(optimizer, expertise, priority string) map[string]any {
+	config := make(map[string]any)
 
 	// Base configuration based on optimizer
 	switch optimizer {

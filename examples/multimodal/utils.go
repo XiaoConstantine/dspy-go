@@ -166,7 +166,7 @@ type ImageInput struct {
 	ID       string
 	Data     []byte
 	MimeType string
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // ImageAnalysisResult represents the result of image analysis.
@@ -174,7 +174,7 @@ type ImageAnalysisResult struct {
 	ImageID     string          `json:"image_id"`
 	Analysis    string          `json:"analysis"`
 	TokenUsage  *core.TokenInfo `json:"token_usage,omitempty"`
-	ProcessedAt interface{}     `json:"processed_at,omitempty"`
+	ProcessedAt any             `json:"processed_at,omitempty"`
 	Error       string          `json:"error,omitempty"`
 }
 
@@ -370,13 +370,13 @@ func BatchProcessingExample(ctx context.Context, llm core.LLM) error {
 			ID:       "image1",
 			Data:     sampleImage,
 			MimeType: "image/jpeg",
-			Metadata: map[string]interface{}{"timestamp": "2024-01-01T00:00:00Z"},
+			Metadata: map[string]any{"timestamp": "2024-01-01T00:00:00Z"},
 		},
 		{
 			ID:       "image2",
 			Data:     sampleImage,
 			MimeType: "image/jpeg",
-			Metadata: map[string]interface{}{"timestamp": "2024-01-01T00:01:00Z"},
+			Metadata: map[string]any{"timestamp": "2024-01-01T00:01:00Z"},
 		},
 	}
 

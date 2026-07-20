@@ -295,7 +295,7 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 	return &core.LLMResponse{
 		Content: response.Choices[0].Message.Content,
 		Usage:   usage,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"finish_reason": response.Choices[0].FinishReason,
 			"id":            response.ID,
 			"model":         response.Model,
@@ -304,7 +304,7 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 }
 
 // GenerateWithJSON implements the core.LLM interface.
-func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -337,7 +337,7 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 }
 
 // GenerateWithFunctions implements the core.LLM interface.
-func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	if len(functions) == 0 {
 		return nil, errors.New(errors.InvalidInput, "at least one function schema is required")
 	}
@@ -378,7 +378,7 @@ func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 }
 
 // GenerateWithTools implements native multi-turn tool calling for OpenAI.
-func (o *OpenAILLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (o *OpenAILLM) GenerateWithTools(ctx context.Context, messages []core.ChatMessage, tools []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	if len(tools) == 0 {
 		return nil, errors.New(errors.InvalidInput, "at least one tool schema is required")
 	}
@@ -418,7 +418,7 @@ func (o *OpenAILLM) GenerateWithTools(ctx context.Context, messages []core.ChatM
 	return buildOpenAIToolResult(response.Choices[0], response.Usage, "tools")
 }
 
-func convertOpenAIFunctionSchemas(functions []map[string]interface{}) ([]openai.ChatCompletionTool, error) {
+func convertOpenAIFunctionSchemas(functions []map[string]any) ([]openai.ChatCompletionTool, error) {
 	tools := make([]openai.ChatCompletionTool, 0, len(functions))
 
 	for _, function := range functions {
@@ -429,9 +429,9 @@ func convertOpenAIFunctionSchemas(functions []map[string]interface{}) ([]openai.
 
 		description, _ := function["description"].(string)
 
-		parameters := map[string]interface{}{"type": "object"}
+		parameters := map[string]any{"type": "object"}
 		if rawParameters, hasParameters := function["parameters"]; hasParameters && rawParameters != nil {
-			paramMap, ok := rawParameters.(map[string]interface{})
+			paramMap, ok := rawParameters.(map[string]any)
 			if !ok {
 				return nil, errors.WithFields(
 					errors.New(errors.InvalidInput, "function schema 'parameters' must be an object"),
@@ -459,25 +459,25 @@ func convertOpenAIFunctionSchemas(functions []map[string]interface{}) ([]openai.
 }
 
 func convertOpenAIAnyToolSchemas(functions []map[string]any) ([]openai.ChatCompletionTool, error) {
-	converted := make([]map[string]interface{}, 0, len(functions))
+	converted := make([]map[string]any, 0, len(functions))
 	for _, function := range functions {
 		converted = append(converted, anyMapToInterfaceMap(function))
 	}
 	return convertOpenAIFunctionSchemas(converted)
 }
 
-func parseOpenAIFunctionArguments(raw string) (map[string]interface{}, error) {
+func parseOpenAIFunctionArguments(raw string) (map[string]any, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
 		return nil, err
 	}
 
-	arguments, ok := parsed.(map[string]interface{})
+	arguments, ok := parsed.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("function arguments must decode to a JSON object")
 	}
@@ -485,16 +485,16 @@ func parseOpenAIFunctionArguments(raw string) (map[string]interface{}, error) {
 	return arguments, nil
 }
 
-func cloneMap(in map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(in))
+func cloneMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
 	for k, v := range in {
 		out[k] = v
 	}
 	return out
 }
 
-func anyMapToInterfaceMap(in map[string]any) map[string]interface{} {
-	out := make(map[string]interface{}, len(in))
+func anyMapToInterfaceMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
 	for k, v := range in {
 		out[k] = v
 	}
@@ -600,8 +600,8 @@ func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
 	return strings.Join(parts, "\n")
 }
 
-func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsage, mode string) (map[string]interface{}, error) {
-	result := map[string]interface{}{}
+func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsage, mode string) (map[string]any, error) {
+	result := map[string]any{}
 
 	if content := strings.TrimSpace(choice.Message.Content); content != "" {
 		result["content"] = content
@@ -624,7 +624,7 @@ func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsag
 			})
 		}
 		result["tool_calls"] = toolCalls
-		result["function_call"] = map[string]interface{}{
+		result["function_call"] = map[string]any{
 			"name":      toolCalls[0].Name,
 			"arguments": toolCalls[0].Arguments,
 		}
@@ -636,7 +636,7 @@ func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsag
 				errors.Fields{"tool_name": choice.Message.FunctionCall.Name},
 			)
 		}
-		result["function_call"] = map[string]interface{}{
+		result["function_call"] = map[string]any{
 			"name":      choice.Message.FunctionCall.Name,
 			"arguments": args,
 		}
@@ -697,7 +697,7 @@ func (o *OpenAILLM) CreateEmbedding(ctx context.Context, input string, options .
 	return &core.EmbeddingResult{
 		Vector:     embedding,
 		TokenCount: response.Usage.TotalTokens,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"model": response.Model,
 		},
 	}, nil
@@ -737,7 +737,7 @@ func (o *OpenAILLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		results[i] = core.EmbeddingResult{
 			Vector:     embedding,
 			TokenCount: response.Usage.TotalTokens / len(inputs), // Approximate per input
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"model": response.Model,
 				"index": data.Index,
 			},

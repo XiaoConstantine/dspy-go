@@ -21,8 +21,8 @@ const (
 
 // GEPAStopDecision records why a GEPA run should stop.
 type GEPAStopDecision struct {
-	Reason   string                 `json:"reason"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Reason   string         `json:"reason"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // GEPAStopper allows callers to plug additional stopping logic into GEPA.
@@ -121,7 +121,7 @@ func (g *GEPA) evaluateStopDecision(ctx context.Context) *GEPAStopDecision {
 	if g.hasConverged() {
 		return &GEPAStopDecision{
 			Reason: gepaStopReasonConverged,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"generation":       g.state.CurrentGeneration,
 				"stagnation_count": g.state.ConvergenceStatus.StagnationCount,
 			},
@@ -143,7 +143,7 @@ func (g *GEPA) metricBudgetStopDecision() *GEPAStopDecision {
 
 	return &GEPAStopDecision{
 		Reason: gepaStopReasonMetricBudget,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"metric_calls":     metricCalls,
 			"max_metric_calls": g.config.MaxMetricCalls,
 		},
@@ -162,7 +162,7 @@ func (g *GEPA) maxRuntimeStopDecision() *GEPAStopDecision {
 
 	return &GEPAStopDecision{
 		Reason: gepaStopReasonMaxRuntime,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"elapsed":     elapsed.String(),
 			"max_runtime": g.config.MaxRuntime.String(),
 		},
@@ -182,7 +182,7 @@ func (g *GEPA) scoreThresholdStopDecision() *GEPAStopDecision {
 
 	return &GEPAStopDecision{
 		Reason: gepaStopReasonScoreThreshold,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"best_score":      bestScore,
 			"score_threshold": g.config.ScoreThreshold,
 			"score_source":    scoreSource,

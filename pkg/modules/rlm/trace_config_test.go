@@ -104,11 +104,11 @@ func (m *concurrentTraceLLM) Generate(ctx context.Context, prompt string, opts .
 	return &core.LLMResponse{Content: m.response, Usage: &usage}, nil
 }
 
-func (m *concurrentTraceLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *concurrentTraceLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("JSON generation not implemented in test LLM")
 }
 
-func (m *concurrentTraceLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *concurrentTraceLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("function calling not implemented in test LLM")
 }
 

@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
+	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
-	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 )
 
 // Optimization phases for progress tracking
@@ -25,9 +25,9 @@ const (
 // LiveOptimizationModel represents the live optimization screen state
 type LiveOptimizationModel struct {
 	// Basic info
-	optimizer       string
-	dataset         string
-	config          runner.OptimizerConfig
+	optimizer string
+	dataset   string
+	config    runner.OptimizerConfig
 
 	// Progress tracking
 	phase           string
@@ -39,30 +39,30 @@ type LiveOptimizationModel struct {
 	improvementRate float64
 
 	// Log streaming
-	logViewport     viewport.Model
-	logMessages     []string
-	maxLogMessages  int
+	logViewport    viewport.Model
+	logMessages    []string
+	maxLogMessages int
 
 	// Timing
-	startTime       time.Time
-	elapsedTime     time.Duration
-	estimatedTime   time.Duration
+	startTime     time.Time
+	elapsedTime   time.Duration
+	estimatedTime time.Duration
 
 	// Results
-	finalResult     *runner.RunResult
-	errorMessage    string
+	finalResult  *runner.RunResult
+	errorMessage string
 
 	// UI state
-	width           int
-	height          int
-	spinner         spinner.Model
-	isComplete      bool
-	nextScreen      string
+	width      int
+	height     int
+	spinner    spinner.Model
+	isComplete bool
+	nextScreen string
 
 	// Channels for async updates
-	progressChan    chan ProgressUpdate
-	logChan         chan string
-	resultChan      chan ResultUpdate
+	progressChan chan ProgressUpdate
+	logChan      chan string
+	resultChan   chan ResultUpdate
 }
 
 // ProgressUpdate represents an optimization progress update
@@ -94,22 +94,22 @@ func NewLiveOptimizationModel(optimizer, dataset string, config runner.Optimizer
 		BorderForeground(lipgloss.Color(styles.MediumGray))
 
 	return LiveOptimizationModel{
-		optimizer:       optimizer,
-		dataset:         dataset,
-		config:          config,
-		phase:           PhaseInitializing,
-		progress:        0.0,
-		currentTrial:    0,
-		totalTrials:     config.MaxExamples,
-		logViewport:     vp,
-		logMessages:     []string{},
-		maxLogMessages:  100,
-		spinner:         s,
-		progressChan:    make(chan ProgressUpdate, 100),
-		logChan:         make(chan string, 100),
-		resultChan:      make(chan ResultUpdate, 1),
-		width:           80,
-		height:          24,
+		optimizer:      optimizer,
+		dataset:        dataset,
+		config:         config,
+		phase:          PhaseInitializing,
+		progress:       0.0,
+		currentTrial:   0,
+		totalTrials:    config.MaxExamples,
+		logViewport:    vp,
+		logMessages:    []string{},
+		maxLogMessages: 100,
+		spinner:        s,
+		progressChan:   make(chan ProgressUpdate, 100),
+		logChan:        make(chan string, 100),
+		resultChan:     make(chan ResultUpdate, 1),
+		width:          80,
+		height:         24,
 	}
 }
 
@@ -388,22 +388,22 @@ func (m *LiveOptimizationModel) startOptimization() tea.Cmd {
 func (m *LiveOptimizationModel) runOptimizationWithStreaming() {
 	// Send initial progress update
 	m.progressChan <- ProgressUpdate{
-		Phase:        PhaseInitializing,
-		Progress:     0.0,
-		Trial:        0,
-		TotalTrials:  m.config.MaxExamples,
-		Message:      "Starting optimization...",
+		Phase:       PhaseInitializing,
+		Progress:    0.0,
+		Trial:       0,
+		TotalTrials: m.config.MaxExamples,
+		Message:     "Starting optimization...",
 	}
 	m.logChan <- "🚀 Optimization process started"
 
 	// Phase 1: Initializing
 	time.Sleep(500 * time.Millisecond)
 	m.progressChan <- ProgressUpdate{
-		Phase:        PhaseInitializing,
-		Progress:     0.1,
-		Trial:        0,
-		TotalTrials:  m.config.MaxExamples,
-		Message:      "Setting up optimizer configuration...",
+		Phase:       PhaseInitializing,
+		Progress:    0.1,
+		Trial:       0,
+		TotalTrials: m.config.MaxExamples,
+		Message:     "Setting up optimizer configuration...",
 	}
 	m.logChan <- fmt.Sprintf("📋 Optimizer: %s", m.optimizer)
 	m.logChan <- fmt.Sprintf("📊 Dataset: %s", m.dataset)
@@ -412,22 +412,22 @@ func (m *LiveOptimizationModel) runOptimizationWithStreaming() {
 	// Phase 2: Data Loading
 	time.Sleep(800 * time.Millisecond)
 	m.progressChan <- ProgressUpdate{
-		Phase:        PhaseDataLoading,
-		Progress:     0.2,
-		Trial:        0,
-		TotalTrials:  m.config.MaxExamples,
-		Message:      "Loading dataset and preparing examples...",
+		Phase:       PhaseDataLoading,
+		Progress:    0.2,
+		Trial:       0,
+		TotalTrials: m.config.MaxExamples,
+		Message:     "Loading dataset and preparing examples...",
 	}
 	m.logChan <- "📥 Loading dataset samples..."
 	m.logChan <- fmt.Sprintf("✅ Loaded %d examples for optimization", m.config.MaxExamples)
 
 	// Phase 3: Optimization - Run the actual optimizer
 	m.progressChan <- ProgressUpdate{
-		Phase:        PhaseOptimizing,
-		Progress:     0.3,
-		Trial:        1,
-		TotalTrials:  m.config.MaxExamples,
-		Message:      "Running optimization algorithm...",
+		Phase:       PhaseOptimizing,
+		Progress:    0.3,
+		Trial:       1,
+		TotalTrials: m.config.MaxExamples,
+		Message:     "Running optimization algorithm...",
 	}
 	m.logChan <- "🧠 Starting optimization trials..."
 
@@ -524,13 +524,13 @@ func (m *LiveOptimizationModel) simulateOptimization() {
 
 		progress := float64(i+1) / float64(len(phases))
 		m.progressChan <- ProgressUpdate{
-			Phase:    phase,
-			Progress: progress,
-			Trial:    i + 1,
-			TotalTrials: 5,
-			BestScore: 0.75 + (progress * 0.15),
+			Phase:        phase,
+			Progress:     progress,
+			Trial:        i + 1,
+			TotalTrials:  5,
+			BestScore:    0.75 + (progress * 0.15),
 			CurrentScore: 0.70 + (progress * 0.15),
-			Message: fmt.Sprintf("Processing %s...", phase),
+			Message:      fmt.Sprintf("Processing %s...", phase),
 		}
 
 		m.logChan <- fmt.Sprintf("[%s] %s started", time.Now().Format("15:04:05"), phase)

@@ -15,17 +15,17 @@ import (
 // Mock module for testing advanced patterns.
 type advancedMockModule struct {
 	id      string
-	outputs map[string]interface{}
+	outputs map[string]any
 }
 
 func NewAdvancedMockModule(id string) *advancedMockModule {
 	return &advancedMockModule{
 		id:      id,
-		outputs: map[string]interface{}{"output": "processed_" + id},
+		outputs: map[string]any{"output": "processed_" + id},
 	}
 }
 
-func (m *advancedMockModule) WithOutputs(outputs map[string]interface{}) *advancedMockModule {
+func (m *advancedMockModule) WithOutputs(outputs map[string]any) *advancedMockModule {
 	m.outputs = outputs
 	return m
 }
@@ -69,8 +69,8 @@ func TestWorkflowBuilder_ForEach(t *testing.T) {
 	}{
 		{
 			name: "valid forEach with items",
-			iteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-				return []interface{}{"item1", "item2", "item3"}, nil
+			iteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
+				return []any{"item1", "item2", "item3"}, nil
 			},
 			expectError: false,
 			expectedLen: 3,
@@ -109,7 +109,7 @@ func TestWorkflowBuilder_While(t *testing.T) {
 	}{
 		{
 			name: "valid while condition",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return iteration < 3, nil
 			},
 			expectError: false,
@@ -148,7 +148,7 @@ func TestWorkflowBuilder_Until(t *testing.T) {
 	}{
 		{
 			name: "valid until condition",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return iteration >= 3, nil
 			},
 			expectError: false,
@@ -187,8 +187,8 @@ func TestWorkflowBuilder_Template(t *testing.T) {
 	}{
 		{
 			name: "valid template",
-			parameterFunc: func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
-				return map[string]interface{}{"template_param": "value"}, nil
+			parameterFunc: func(ctx context.Context, params map[string]any) (map[string]any, error) {
+				return map[string]any{"template_param": "value"}, nil
 			},
 			expectError: false,
 		},
@@ -233,7 +233,7 @@ func TestWorkflowBuilder_WithMaxIterations(t *testing.T) {
 
 	// Test with loop stage
 	builder = NewBuilder(nil)
-	builder.While("while_stage", func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+	builder.While("while_stage", func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 		return iteration < 5, nil
 	}, nil)
 	result = builder.WithMaxIterations(10)
@@ -262,12 +262,12 @@ func TestCompositeWorkflow_ForEachExecution(t *testing.T) {
 	// Create a forEach workflow
 	workflow, err := builder.
 		ForEach("process_items",
-			func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-				return []interface{}{"apple", "banana", "cherry"}, nil
+			func(ctx context.Context, state map[string]any) ([]any, error) {
+				return []any{"apple", "banana", "cherry"}, nil
 			},
 			func(bodyBuilder *WorkflowBuilder) *WorkflowBuilder {
 				return bodyBuilder.Stage("process_item",
-					NewAdvancedMockModule("item_processor").WithOutputs(map[string]interface{}{
+					NewAdvancedMockModule("item_processor").WithOutputs(map[string]any{
 						"output":    "processed_item",
 						"processed": true,
 					}))
@@ -278,7 +278,7 @@ func TestCompositeWorkflow_ForEachExecution(t *testing.T) {
 	require.NotNil(t, workflow)
 
 	// Execute the workflow
-	result, err := workflow.Execute(context.Background(), map[string]interface{}{
+	result, err := workflow.Execute(context.Background(), map[string]any{
 		"input": "test_input",
 	})
 
@@ -288,9 +288,9 @@ func TestCompositeWorkflow_ForEachExecution(t *testing.T) {
 	// Check that forEach results are present
 	forEachResults, exists := result["forEach_results"]
 	assert.True(t, exists)
-	assert.IsType(t, []map[string]interface{}{}, forEachResults)
+	assert.IsType(t, []map[string]any{}, forEachResults)
 
-	results := forEachResults.([]map[string]interface{})
+	results := forEachResults.([]map[string]any)
 	assert.Equal(t, 3, len(results)) // Should have processed 3 items
 }
 
@@ -300,12 +300,12 @@ func TestCompositeWorkflow_WhileExecution(t *testing.T) {
 	// Create a while workflow that runs 3 times
 	workflow, err := builder.
 		While("count_loop",
-			func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return iteration < 3, nil
 			},
 			func(bodyBuilder *WorkflowBuilder) *WorkflowBuilder {
 				return bodyBuilder.Stage("increment",
-					NewAdvancedMockModule("counter").WithOutputs(map[string]interface{}{
+					NewAdvancedMockModule("counter").WithOutputs(map[string]any{
 						"output": "incremented",
 						"count":  1,
 					}))
@@ -316,7 +316,7 @@ func TestCompositeWorkflow_WhileExecution(t *testing.T) {
 	require.NotNil(t, workflow)
 
 	// Execute the workflow
-	result, err := workflow.Execute(context.Background(), map[string]interface{}{
+	result, err := workflow.Execute(context.Background(), map[string]any{
 		"input": "test_input",
 	})
 
@@ -335,15 +335,15 @@ func TestCompositeWorkflow_TemplateExecution(t *testing.T) {
 	// Create a template workflow
 	workflow, err := builder.
 		Template("process_template",
-			func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
-				return map[string]interface{}{
+			func(ctx context.Context, params map[string]any) (map[string]any, error) {
+				return map[string]any{
 					"template_param": "resolved_value",
 					"multiplier":     2,
 				}, nil
 			},
 			func(templateBuilder *WorkflowBuilder) *WorkflowBuilder {
 				return templateBuilder.Stage("apply_template",
-					NewAdvancedMockModule("template_applier").WithOutputs(map[string]interface{}{
+					NewAdvancedMockModule("template_applier").WithOutputs(map[string]any{
 						"output":          "template_applied",
 						"template_result": "applied",
 					}))
@@ -354,7 +354,7 @@ func TestCompositeWorkflow_TemplateExecution(t *testing.T) {
 	require.NotNil(t, workflow)
 
 	// Execute the workflow
-	result, err := workflow.Execute(context.Background(), map[string]interface{}{
+	result, err := workflow.Execute(context.Background(), map[string]any{
 		"input": "test_input",
 	})
 
@@ -373,18 +373,18 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 	// Create a conditional workflow
 	workflow, err := builder.
 		Conditional("route_decision",
-			func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			func(ctx context.Context, state map[string]any) (bool, error) {
 				confidence, ok := state["confidence"].(float64)
 				if !ok {
 					return false, nil
 				}
 				return confidence > 0.8, nil
 			}).
-		If(NewAdvancedMockModule("high_confidence").WithOutputs(map[string]interface{}{
+		If(NewAdvancedMockModule("high_confidence").WithOutputs(map[string]any{
 			"output":      "processed_high",
 			"route_taken": "high_confidence",
 		})).
-		Else(NewAdvancedMockModule("low_confidence").WithOutputs(map[string]interface{}{
+		Else(NewAdvancedMockModule("low_confidence").WithOutputs(map[string]any{
 			"output":      "processed_low",
 			"route_taken": "low_confidence",
 		})).
@@ -395,7 +395,7 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 	require.NotNil(t, workflow)
 
 	// Test high confidence routing
-	result, err := workflow.Execute(context.Background(), map[string]interface{}{
+	result, err := workflow.Execute(context.Background(), map[string]any{
 		"input":      "test_data",
 		"confidence": 0.9,
 	})
@@ -404,7 +404,7 @@ func TestRouterWorkflow_ConditionalRouting(t *testing.T) {
 	assert.Equal(t, "high_confidence", result["route_taken"])
 
 	// Test low confidence routing
-	result, err = workflow.Execute(context.Background(), map[string]interface{}{
+	result, err = workflow.Execute(context.Background(), map[string]any{
 		"input":      "test_data",
 		"confidence": 0.5,
 	})
@@ -471,7 +471,7 @@ func TestCompositeWorkflow_ExecuteStageFailures(t *testing.T) {
 	tests := []struct {
 		name          string
 		stage         *BuilderStage
-		state         map[string]interface{}
+		state         map[string]any
 		expectError   bool
 		errorContains string
 	}{
@@ -482,7 +482,7 @@ func TestCompositeWorkflow_ExecuteStageFailures(t *testing.T) {
 				Type:   StageTypeSequential,
 				Module: nil,
 			},
-			state:         map[string]interface{}{"input": "test"},
+			state:         map[string]any{"input": "test"},
 			expectError:   true,
 			errorContains: "sequential stage must have a module",
 		},
@@ -492,7 +492,7 @@ func TestCompositeWorkflow_ExecuteStageFailures(t *testing.T) {
 				ID:   "unsupported",
 				Type: StageType(999), // Invalid stage type
 			},
-			state:         map[string]interface{}{"input": "test"},
+			state:         map[string]any{"input": "test"},
 			expectError:   true,
 			errorContains: "unsupported stage type",
 		},
@@ -503,7 +503,7 @@ func TestCompositeWorkflow_ExecuteStageFailures(t *testing.T) {
 				Type:  StageTypeParallel,
 				Steps: []*BuilderStep{},
 			},
-			state:       map[string]interface{}{"input": "test"},
+			state:       map[string]any{"input": "test"},
 			expectError: false, // Should not error, just return empty result
 		},
 	}
@@ -528,14 +528,14 @@ func TestCompositeWorkflow_ExecuteStageFailures(t *testing.T) {
 // slowMockModule for timeout testing.
 type slowMockModule struct {
 	id      string
-	outputs map[string]interface{}
+	outputs map[string]any
 	delay   time.Duration
 }
 
 func NewSlowMockModule(id string, delay time.Duration) *slowMockModule {
 	return &slowMockModule{
 		id:      id,
-		outputs: map[string]interface{}{"output": "processed_" + id},
+		outputs: map[string]any{"output": "processed_" + id},
 		delay:   delay,
 	}
 }
@@ -671,7 +671,7 @@ func TestCompositeWorkflow_TimeoutHandling(t *testing.T) {
 		TimeoutMs: 50, // Very short timeout
 	}
 
-	result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+	result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 	// Should timeout
 	assert.Error(t, err)
@@ -684,7 +684,7 @@ func TestCompositeWorkflow_ParallelExecutionErrors(t *testing.T) {
 	// Create modules that will fail
 	failingModule := NewErrorMockModule("failing")
 
-	successModule := NewAdvancedMockModule("success").WithOutputs(map[string]interface{}{
+	successModule := NewAdvancedMockModule("success").WithOutputs(map[string]any{
 		"output": "success_result",
 	})
 
@@ -697,7 +697,7 @@ func TestCompositeWorkflow_ParallelExecutionErrors(t *testing.T) {
 		},
 	}
 
-	result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+	result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 	// Should fail because one module failed
 	assert.Error(t, err)
@@ -716,7 +716,7 @@ func TestCompositeWorkflow_ConditionalExecutionErrors(t *testing.T) {
 	}{
 		{
 			name: "condition function fails",
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return false, fmt.Errorf("condition failed")
 			},
 			branches:      make(map[string]*BuilderStage),
@@ -725,7 +725,7 @@ func TestCompositeWorkflow_ConditionalExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "no matching branch",
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return true, nil
 			},
 			branches:    make(map[string]*BuilderStage), // No branches
@@ -733,7 +733,7 @@ func TestCompositeWorkflow_ConditionalExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "branch execution fails",
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return true, nil
 			},
 			branches: map[string]*BuilderStage{
@@ -757,7 +757,7 @@ func TestCompositeWorkflow_ConditionalExecutionErrors(t *testing.T) {
 				Branches:  tt.branches,
 			}
 
-			result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+			result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -785,7 +785,7 @@ func TestCompositeWorkflow_ForEachExecutionErrors(t *testing.T) {
 	}{
 		{
 			name: "iterator function fails",
-			iteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
+			iteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
 				return nil, fmt.Errorf("iterator failed")
 			},
 			loopBody:      NewBuilder(nil),
@@ -795,8 +795,8 @@ func TestCompositeWorkflow_ForEachExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "empty items list",
-			iteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-				return []interface{}{}, nil
+			iteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
+				return []any{}, nil
 			},
 			loopBody:      NewBuilder(nil),
 			maxIterations: 10,
@@ -804,8 +804,8 @@ func TestCompositeWorkflow_ForEachExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "max iterations exceeded",
-			iteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-				return []interface{}{"item1", "item2", "item3", "item4", "item5"}, nil
+			iteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
+				return []any{"item1", "item2", "item3", "item4", "item5"}, nil
 			},
 			loopBody:      NewBuilder(nil).Stage("process", NewAdvancedMockModule("processor")),
 			maxIterations: 3, // Will stop at 3 iterations
@@ -813,8 +813,8 @@ func TestCompositeWorkflow_ForEachExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "nested workflow execution fails",
-			iteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-				return []interface{}{"item1"}, nil
+			iteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
+				return []any{"item1"}, nil
 			},
 			loopBody: func() *WorkflowBuilder {
 				// Create a workflow that will fail
@@ -837,7 +837,7 @@ func TestCompositeWorkflow_ForEachExecutionErrors(t *testing.T) {
 				MaxIterations: tt.maxIterations,
 			}
 
-			result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+			result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -849,7 +849,7 @@ func TestCompositeWorkflow_ForEachExecutionErrors(t *testing.T) {
 				assert.NotNil(t, result)
 				if tt.name == "max iterations exceeded" {
 					// Should have stopped at maxIterations
-					results := result["forEach_results"].([]map[string]interface{})
+					results := result["forEach_results"].([]map[string]any)
 					assert.Equal(t, tt.maxIterations, len(results))
 				}
 			}
@@ -870,7 +870,7 @@ func TestCompositeWorkflow_WhileExecutionErrors(t *testing.T) {
 	}{
 		{
 			name: "condition function fails",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return false, fmt.Errorf("condition failed")
 			},
 			loopBody:      NewBuilder(nil),
@@ -880,7 +880,7 @@ func TestCompositeWorkflow_WhileExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "max iterations reached",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return true, nil // Always true, will hit max iterations
 			},
 			loopBody:      NewBuilder(nil).Stage("process", NewAdvancedMockModule("processor")),
@@ -889,7 +889,7 @@ func TestCompositeWorkflow_WhileExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "nested workflow fails",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return iteration == 0, nil // Run once
 			},
 			loopBody: func() *WorkflowBuilder {
@@ -912,7 +912,7 @@ func TestCompositeWorkflow_WhileExecutionErrors(t *testing.T) {
 				MaxIterations: tt.maxIterations,
 			}
 
-			result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+			result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -943,7 +943,7 @@ func TestCompositeWorkflow_UntilExecutionErrors(t *testing.T) {
 	}{
 		{
 			name: "condition function fails",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return false, fmt.Errorf("condition failed")
 			},
 			loopBody:      NewBuilder(nil),
@@ -953,7 +953,7 @@ func TestCompositeWorkflow_UntilExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "max iterations reached",
-			condition: func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 				return false, nil // Never true, will hit max iterations
 			},
 			loopBody:      NewBuilder(nil).Stage("process", NewAdvancedMockModule("processor")),
@@ -972,7 +972,7 @@ func TestCompositeWorkflow_UntilExecutionErrors(t *testing.T) {
 				MaxIterations: tt.maxIterations,
 			}
 
-			result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+			result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -1002,7 +1002,7 @@ func TestCompositeWorkflow_TemplateExecutionErrors(t *testing.T) {
 	}{
 		{
 			name: "template parameter resolution fails",
-			templateParams: func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+			templateParams: func(ctx context.Context, params map[string]any) (map[string]any, error) {
 				return nil, fmt.Errorf("parameter resolution failed")
 			},
 			templateWorkflow: NewBuilder(nil),
@@ -1011,8 +1011,8 @@ func TestCompositeWorkflow_TemplateExecutionErrors(t *testing.T) {
 		},
 		{
 			name: "template workflow execution fails",
-			templateParams: func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
-				return map[string]interface{}{"param": "value"}, nil
+			templateParams: func(ctx context.Context, params map[string]any) (map[string]any, error) {
+				return map[string]any{"param": "value"}, nil
 			},
 			templateWorkflow: func() *WorkflowBuilder {
 				failingModule := NewErrorMockModule("failing")
@@ -1032,7 +1032,7 @@ func TestCompositeWorkflow_TemplateExecutionErrors(t *testing.T) {
 				TemplateWorkflow: tt.templateWorkflow,
 			}
 
-			result, err := cw.executeStage(context.Background(), stage, map[string]interface{}{"input": "test"})
+			result, err := cw.executeStage(context.Background(), stage, map[string]any{"input": "test"})
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -1053,14 +1053,14 @@ func TestCompositeWorkflow_ExecuteNestedWorkflow(t *testing.T) {
 	tests := []struct {
 		name          string
 		nestedBuilder *WorkflowBuilder
-		state         map[string]interface{}
+		state         map[string]any
 		expectError   bool
 		errorContains string
 	}{
 		{
 			name:          "nil nested builder",
 			nestedBuilder: nil,
-			state:         map[string]interface{}{"input": "test"},
+			state:         map[string]any{"input": "test"},
 			expectError:   false, // Should return state unchanged
 		},
 		{
@@ -1071,7 +1071,7 @@ func TestCompositeWorkflow_ExecuteNestedWorkflow(t *testing.T) {
 				builder.addError(fmt.Errorf("forced build error"))
 				return builder
 			}(),
-			state:         map[string]interface{}{"input": "test"},
+			state:         map[string]any{"input": "test"},
 			expectError:   true,
 			errorContains: "failed to build nested workflow",
 		},
@@ -1096,7 +1096,7 @@ func TestCompositeWorkflow_ExecuteNestedWorkflow(t *testing.T) {
 
 func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 	classifier := &conditionalClassifierModule{
-		condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+		condition: func(ctx context.Context, state map[string]any) (bool, error) {
 			return true, nil
 		},
 	}
@@ -1117,13 +1117,13 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 
 	t.Run("classifier failure", func(t *testing.T) {
 		failingClassifier := &conditionalClassifierModule{
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return false, fmt.Errorf("classifier failed")
 			},
 		}
 		failingWorkflow := NewConditionalRouterWorkflow(agents.NewInMemoryStore(), failingClassifier)
 
-		result, err := failingWorkflow.Execute(context.Background(), map[string]interface{}{"input": "test"})
+		result, err := failingWorkflow.Execute(context.Background(), map[string]any{"input": "test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "classification failed")
 		assert.Nil(t, result)
@@ -1134,7 +1134,7 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 
 		badWorkflow := NewConditionalRouterWorkflow(agents.NewInMemoryStore(), badClassifier)
 
-		result, err := badWorkflow.Execute(context.Background(), map[string]interface{}{"input": "test"})
+		result, err := badWorkflow.Execute(context.Background(), map[string]any{"input": "test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "did not return 'classification' field")
 		assert.Nil(t, result)
@@ -1145,7 +1145,7 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 
 		intWorkflow := NewConditionalRouterWorkflow(agents.NewInMemoryStore(), intClassifier)
 
-		result, err := intWorkflow.Execute(context.Background(), map[string]interface{}{"input": "test"})
+		result, err := intWorkflow.Execute(context.Background(), map[string]any{"input": "test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "classification must be a string")
 		assert.Nil(t, result)
@@ -1154,7 +1154,7 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 	t.Run("no matching route and no default", func(t *testing.T) {
 		workflow := NewConditionalRouterWorkflow(agents.NewInMemoryStore(), classifier)
 
-		result, err := workflow.Execute(context.Background(), map[string]interface{}{"input": "test"})
+		result, err := workflow.Execute(context.Background(), map[string]any{"input": "test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no route found")
 		assert.Nil(t, result)
@@ -1168,7 +1168,7 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 		err := workflow.AddRoute("true", failingStep)
 		require.NoError(t, err)
 
-		result, err := workflow.Execute(context.Background(), map[string]interface{}{"input": "test"})
+		result, err := workflow.Execute(context.Background(), map[string]any{"input": "test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "route 'true' execution failed")
 		assert.Nil(t, result)
@@ -1181,7 +1181,7 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 		workflow := NewConditionalRouterWorkflow(agents.NewInMemoryStore(), classifier)
 		workflow.SetDefaultRoute(failingStep)
 
-		result, err := workflow.Execute(context.Background(), map[string]interface{}{"input": "test"})
+		result, err := workflow.Execute(context.Background(), map[string]any{"input": "test"})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "default route execution failed")
 		assert.Nil(t, result)
@@ -1191,7 +1191,7 @@ func TestConditionalRouterWorkflow_EdgeCases(t *testing.T) {
 func TestConditionalClassifierModule(t *testing.T) {
 	t.Run("condition function failure", func(t *testing.T) {
 		ccm := &conditionalClassifierModule{
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return false, fmt.Errorf("condition error")
 			},
 		}
@@ -1204,7 +1204,7 @@ func TestConditionalClassifierModule(t *testing.T) {
 
 	t.Run("successful true condition", func(t *testing.T) {
 		ccm := &conditionalClassifierModule{
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return true, nil
 			},
 		}
@@ -1216,7 +1216,7 @@ func TestConditionalClassifierModule(t *testing.T) {
 
 	t.Run("successful false condition", func(t *testing.T) {
 		ccm := &conditionalClassifierModule{
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return false, nil
 			},
 		}
@@ -1228,7 +1228,7 @@ func TestConditionalClassifierModule(t *testing.T) {
 
 	t.Run("clone functionality", func(t *testing.T) {
 		original := &conditionalClassifierModule{
-			condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+			condition: func(ctx context.Context, state map[string]any) (bool, error) {
 				return true, nil
 			},
 		}
@@ -1244,7 +1244,7 @@ func TestConditionalClassifierModule(t *testing.T) {
 	})
 
 	t.Run("signature and interface methods", func(t *testing.T) {
-		ccm := &conditionalClassifierModule{condition: func(ctx context.Context, state map[string]interface{}) (bool, error) { return true, nil }}
+		ccm := &conditionalClassifierModule{condition: func(ctx context.Context, state map[string]any) (bool, error) { return true, nil }}
 
 		// Test GetSignature
 		sig := ccm.GetSignature()
@@ -1313,7 +1313,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					Module:   nil, // Missing module
 					Branches: make(map[string]*BuilderStage),
 					Next:     make([]string, 0),
-					Metadata: make(map[string]interface{}),
+					Metadata: make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1332,7 +1332,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					Steps:    []*BuilderStep{}, // Empty steps
 					Branches: make(map[string]*BuilderStage),
 					Next:     make([]string, 0),
-					Metadata: make(map[string]interface{}),
+					Metadata: make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1353,7 +1353,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					},
 					Branches: make(map[string]*BuilderStage),
 					Next:     make([]string, 0),
-					Metadata: make(map[string]interface{}),
+					Metadata: make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1372,7 +1372,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					Condition: nil, // Missing condition
 					Branches:  make(map[string]*BuilderStage),
 					Next:      make([]string, 0),
-					Metadata:  make(map[string]interface{}),
+					Metadata:  make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1388,12 +1388,12 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 				stage := &BuilderStage{
 					ID:   "test",
 					Type: StageTypeConditional,
-					Condition: func(ctx context.Context, state map[string]interface{}) (bool, error) {
+					Condition: func(ctx context.Context, state map[string]any) (bool, error) {
 						return true, nil
 					},
 					Branches: make(map[string]*BuilderStage), // Empty branches
 					Next:     make([]string, 0),
-					Metadata: make(map[string]interface{}),
+					Metadata: make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1414,7 +1414,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					MaxIterations: 10,
 					Branches:      make(map[string]*BuilderStage),
 					Next:          make([]string, 0),
-					Metadata:      make(map[string]interface{}),
+					Metadata:      make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1430,14 +1430,14 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 				stage := &BuilderStage{
 					ID:   "test",
 					Type: StageTypeForEach,
-					IteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-						return []interface{}{"item"}, nil
+					IteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
+						return []any{"item"}, nil
 					},
 					LoopBody:      nil, // Missing loop body
 					MaxIterations: 10,
 					Branches:      make(map[string]*BuilderStage),
 					Next:          make([]string, 0),
-					Metadata:      make(map[string]interface{}),
+					Metadata:      make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1453,14 +1453,14 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 				stage := &BuilderStage{
 					ID:   "test",
 					Type: StageTypeForEach,
-					IteratorFunc: func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-						return []interface{}{"item"}, nil
+					IteratorFunc: func(ctx context.Context, state map[string]any) ([]any, error) {
+						return []any{"item"}, nil
 					},
 					LoopBody:      NewBuilder(nil),
 					MaxIterations: 0, // Invalid max iterations
 					Branches:      make(map[string]*BuilderStage),
 					Next:          make([]string, 0),
-					Metadata:      make(map[string]interface{}),
+					Metadata:      make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1481,7 +1481,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					MaxIterations: 10,
 					Branches:      make(map[string]*BuilderStage),
 					Next:          make([]string, 0),
-					Metadata:      make(map[string]interface{}),
+					Metadata:      make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1502,7 +1502,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					MaxIterations: 10,
 					Branches:      make(map[string]*BuilderStage),
 					Next:          make([]string, 0),
-					Metadata:      make(map[string]interface{}),
+					Metadata:      make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1522,7 +1522,7 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 					TemplateWorkflow: NewBuilder(nil),
 					Branches:         make(map[string]*BuilderStage),
 					Next:             make([]string, 0),
-					Metadata:         make(map[string]interface{}),
+					Metadata:         make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1538,13 +1538,13 @@ func TestWorkflowBuilder_BuildValidationStageTypes(t *testing.T) {
 				stage := &BuilderStage{
 					ID:   "test",
 					Type: StageTypeTemplate,
-					TemplateParams: func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
-						return map[string]interface{}{}, nil
+					TemplateParams: func(ctx context.Context, params map[string]any) (map[string]any, error) {
+						return map[string]any{}, nil
 					},
 					TemplateWorkflow: nil, // Missing template workflow
 					Branches:         make(map[string]*BuilderStage),
 					Next:             make([]string, 0),
-					Metadata:         make(map[string]interface{}),
+					Metadata:         make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["test"] = stage
@@ -1582,8 +1582,8 @@ func TestWorkflowBuilder_DetermineWorkflowType(t *testing.T) {
 			name: "composite workflow with forEach",
 			setupBuilder: func() *WorkflowBuilder {
 				builder := NewBuilder(nil)
-				builder.ForEach("test", func(ctx context.Context, state map[string]interface{}) ([]interface{}, error) {
-					return []interface{}{}, nil
+				builder.ForEach("test", func(ctx context.Context, state map[string]any) ([]any, error) {
+					return []any{}, nil
 				}, nil)
 				return builder
 			},
@@ -1593,7 +1593,7 @@ func TestWorkflowBuilder_DetermineWorkflowType(t *testing.T) {
 			name: "composite workflow with while",
 			setupBuilder: func() *WorkflowBuilder {
 				builder := NewBuilder(nil)
-				builder.While("test", func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+				builder.While("test", func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 					return false, nil
 				}, nil)
 				return builder
@@ -1604,7 +1604,7 @@ func TestWorkflowBuilder_DetermineWorkflowType(t *testing.T) {
 			name: "composite workflow with until",
 			setupBuilder: func() *WorkflowBuilder {
 				builder := NewBuilder(nil)
-				builder.Until("test", func(ctx context.Context, state map[string]interface{}, iteration int) (bool, error) {
+				builder.Until("test", func(ctx context.Context, state map[string]any, iteration int) (bool, error) {
 					return false, nil
 				}, nil)
 				return builder
@@ -1615,8 +1615,8 @@ func TestWorkflowBuilder_DetermineWorkflowType(t *testing.T) {
 			name: "composite workflow with template",
 			setupBuilder: func() *WorkflowBuilder {
 				builder := NewBuilder(nil)
-				builder.Template("test", func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
-					return map[string]interface{}{}, nil
+				builder.Template("test", func(ctx context.Context, params map[string]any) (map[string]any, error) {
+					return map[string]any{}, nil
 				}, nil)
 				return builder
 			},
@@ -1626,7 +1626,7 @@ func TestWorkflowBuilder_DetermineWorkflowType(t *testing.T) {
 			name: "router workflow with conditional",
 			setupBuilder: func() *WorkflowBuilder {
 				builder := NewBuilder(nil)
-				builder.Conditional("test", func(ctx context.Context, state map[string]interface{}) (bool, error) {
+				builder.Conditional("test", func(ctx context.Context, state map[string]any) (bool, error) {
 					return true, nil
 				}).If(NewAdvancedMockModule("test")).End()
 				return builder
@@ -1691,7 +1691,7 @@ func TestWorkflowBuilder_BuildChainWorkflowEdgeCases(t *testing.T) {
 					Type:     StageType(999), // Invalid stage type
 					Branches: make(map[string]*BuilderStage),
 					Next:     make([]string, 0),
-					Metadata: make(map[string]interface{}),
+					Metadata: make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["unsupported"] = stage
@@ -1711,7 +1711,7 @@ func TestWorkflowBuilder_BuildChainWorkflowEdgeCases(t *testing.T) {
 					Steps:    []*BuilderStep{},
 					Branches: make(map[string]*BuilderStage),
 					Next:     make([]string, 0),
-					Metadata: make(map[string]interface{}),
+					Metadata: make(map[string]any),
 				}
 				builder.stages = append(builder.stages, stage)
 				builder.stepIndex["empty_parallel"] = stage
@@ -1769,7 +1769,7 @@ func TestWorkflowBuilder_BuildParallelWorkflowValidation(t *testing.T) {
 		},
 		Branches: make(map[string]*BuilderStage),
 		Next:     make([]string, 0),
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	// Test with multiple stages (should fail)
@@ -1820,7 +1820,7 @@ func TestWorkflowBuilder_BuildRouterWorkflowValidation(t *testing.T) {
 			name: "conditional stage with branches containing nil modules",
 			setupBuilder: func() *WorkflowBuilder {
 				builder := NewBuilder(nil)
-				conditional := builder.Conditional("test", func(ctx context.Context, state map[string]interface{}) (bool, error) {
+				conditional := builder.Conditional("test", func(ctx context.Context, state map[string]any) (bool, error) {
 					return true, nil
 				})
 				// Add a branch with nil module
@@ -1995,7 +1995,7 @@ func TestWorkflowBuilder_ConditionalBuilderErrorHandling(t *testing.T) {
 	assert.Equal(t, conditionalBuilder, result2)
 	assert.True(t, result2.hasError)
 
-	result3 := conditionalBuilder.ElseIf(func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	result3 := conditionalBuilder.ElseIf(func(ctx context.Context, state map[string]any) (bool, error) {
 		return true, nil
 	}, NewAdvancedMockModule("test"))
 	assert.Equal(t, conditionalBuilder, result3)
@@ -2009,16 +2009,16 @@ func TestWorkflowBuilder_ConditionalBuilderErrorHandling(t *testing.T) {
 func TestWorkflowBuilder_ElseIfBranchNaming(t *testing.T) {
 	builder := NewBuilder(nil)
 
-	conditional := builder.Conditional("test", func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	conditional := builder.Conditional("test", func(ctx context.Context, state map[string]any) (bool, error) {
 		return true, nil
 	})
 
 	// Add multiple ElseIf branches
-	conditional.ElseIf(func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	conditional.ElseIf(func(ctx context.Context, state map[string]any) (bool, error) {
 		return false, nil
 	}, NewAdvancedMockModule("elseif1"))
 
-	conditional.ElseIf(func(ctx context.Context, state map[string]interface{}) (bool, error) {
+	conditional.ElseIf(func(ctx context.Context, state map[string]any) (bool, error) {
 		return false, nil
 	}, NewAdvancedMockModule("elseif2"))
 

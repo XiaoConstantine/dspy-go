@@ -18,11 +18,11 @@ func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...Genera
 	return &LLMResponse{Content: "mock response"}, nil
 }
 
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]interface{}, error) {
-	return map[string]interface{}{"response": "mock response"}, nil
+func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...GenerateOption) (map[string]any, error) {
+	return map[string]any{"response": "mock response"}, nil
 }
 
-func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -33,7 +33,7 @@ func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...
 		// Include token count to simulate real embedding behavior
 		TokenCount: len(strings.Fields(input)),
 		// Add metadata to simulate real response
-		Metadata: map[string]interface{}{},
+		Metadata: map[string]any{},
 	}, nil
 }
 
@@ -50,7 +50,7 @@ func (m *MockLLM) CreateEmbeddings(ctx context.Context, inputs []string, options
 			// Each embedding gets slightly different values to simulate real behavior
 			Vector:     []float32{0.1 * float32(i+1), 0.2 * float32(i+1), 0.3 * float32(i+1)},
 			TokenCount: len(strings.Fields(input)),
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"model":        opts.Model,
 				"input_length": len(input),
 				"batch_index":  i,

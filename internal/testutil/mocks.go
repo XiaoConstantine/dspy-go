@@ -97,16 +97,16 @@ func (m *MockLLM) Generate(ctx context.Context, prompt string, opts ...core.Gene
 	return &core.LLMResponse{Content: args.String(0)}, args.Error(1)
 }
 
-func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
 	args := m.Called(ctx, prompt, opts)
 	result := args.Get(0)
 	if result == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(map[string]interface{}), args.Error(1)
+	return args.Get(0).(map[string]any), args.Error(1)
 }
 
-func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, options ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *MockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -130,7 +130,7 @@ func (m *MockLLM) CreateEmbedding(ctx context.Context, input string, options ...
 	return &core.EmbeddingResult{
 		Vector:     []float32{0.1, 0.2, 0.3}, // Default vector
 		TokenCount: len(input),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"fallback": true,
 		},
 	}, args.Error(1)
@@ -157,7 +157,7 @@ func (m *MockLLM) CreateEmbeddings(ctx context.Context, inputs []string, options
 		embeddings[i] = core.EmbeddingResult{
 			Vector:     []float32{0.1, 0.2, 0.3},
 			TokenCount: len(inputs[i]),
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"fallback": true,
 				"index":    i,
 			},
@@ -499,7 +499,7 @@ func (m *MockTool) CanHandle(ctx context.Context, intent string) bool {
 }
 
 // Execute implements the Tool interface.
-func (m *MockTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *MockTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	args := m.Called(ctx, params)
 
 	// Handle the case where the mock is configured to return an error
@@ -515,14 +515,14 @@ func (m *MockTool) Execute(ctx context.Context, params map[string]interface{}) (
 		// Convert string results to ToolResult for backward compatibility
 		return core.ToolResult{
 			Data: result,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"source": "mock_tool",
 			},
 		}, nil
 	default:
 		return core.ToolResult{
 			Data: result,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"source": "mock_tool",
 			},
 		}, nil
@@ -530,7 +530,7 @@ func (m *MockTool) Execute(ctx context.Context, params map[string]interface{}) (
 }
 
 // Validate implements the Tool interface.
-func (m *MockTool) Validate(params map[string]interface{}) error {
+func (m *MockTool) Validate(params map[string]any) error {
 	args := m.Called(params)
 	return args.Error(0)
 }
@@ -561,14 +561,14 @@ type MockCoreTool struct {
 	description string
 	schema      models.InputSchema
 	metadata    *core.ToolMetadata
-	executeFunc func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error)
+	executeFunc func(ctx context.Context, args map[string]any) (core.ToolResult, error)
 }
 
 // NewMockCoreTool creates a new MockCoreTool instance.
-func NewMockCoreTool(name, description string, executeFunc func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error)) *MockCoreTool {
+func NewMockCoreTool(name, description string, executeFunc func(ctx context.Context, args map[string]any) (core.ToolResult, error)) *MockCoreTool {
 	// Provide a default execute func if none is given
 	if executeFunc == nil {
-		executeFunc = func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+		executeFunc = func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 			return core.ToolResult{Data: fmt.Sprintf("Executed %s", name)}, nil
 		}
 	}
@@ -612,12 +612,12 @@ func (m *MockCoreTool) CanHandle(ctx context.Context, intent string) bool {
 	return intent == m.name
 }
 
-func (m *MockCoreTool) Validate(params map[string]interface{}) error {
+func (m *MockCoreTool) Validate(params map[string]any) error {
 	// Simple default implementation for testing - always valid
 	return nil
 }
 
-func (m *MockCoreTool) Execute(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+func (m *MockCoreTool) Execute(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 	if m.executeFunc != nil {
 		return m.executeFunc(ctx, args)
 	}
@@ -787,7 +787,7 @@ var _ core.Module = (*MockModule)(nil)
 type MockMCPClient struct {
 	ListToolsFunc func(ctx context.Context, cursor *models.Cursor) (*models.ListToolsResult, error)
 	// Corrected CallToolFunc signature again to match MCPClientInterface
-	CallToolFunc func(ctx context.Context, toolName string, arguments map[string]interface{}) (*models.CallToolResult, error)
+	CallToolFunc func(ctx context.Context, toolName string, arguments map[string]any) (*models.CallToolResult, error)
 }
 
 // ListTools calls the underlying ListToolsFunc.
@@ -800,7 +800,7 @@ func (m *MockMCPClient) ListTools(ctx context.Context, cursor *models.Cursor) (*
 }
 
 // Corrected CallTool signature again to match MCPClientInterface.
-func (m *MockMCPClient) CallTool(ctx context.Context, toolName string, arguments map[string]interface{}) (*models.CallToolResult, error) {
+func (m *MockMCPClient) CallTool(ctx context.Context, toolName string, arguments map[string]any) (*models.CallToolResult, error) {
 	if m.CallToolFunc != nil {
 		return m.CallToolFunc(ctx, toolName, arguments)
 	}

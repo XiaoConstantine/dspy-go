@@ -55,12 +55,12 @@ func GetTraceSession(ctx context.Context) *TraceSession {
 }
 
 type TraceEvent struct {
-	Type      TraceEventType         `json:"type"`
-	Timestamp time.Time              `json:"timestamp"`
-	TraceID   string                 `json:"trace_id"`
-	SpanID    string                 `json:"span_id,omitempty"`
-	ParentID  string                 `json:"parent_id,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
+	Type      TraceEventType `json:"type"`
+	Timestamp time.Time      `json:"timestamp"`
+	TraceID   string         `json:"trace_id"`
+	SpanID    string         `json:"span_id,omitempty"`
+	ParentID  string         `json:"parent_id,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
 type TraceOutput struct {
@@ -254,7 +254,7 @@ func (s *TraceSession) TraceID() string {
 }
 
 func (s *TraceSession) emitSessionStart(metadata map[string]any) error {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"start_time": s.startTime,
 	}
 	for k, v := range metadata {
@@ -273,7 +273,7 @@ func (s *TraceSession) EmitSpanStart(spanID, parentID, operation string, inputs 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"event":     "start",
 		"operation": operation,
 	}
@@ -295,7 +295,7 @@ func (s *TraceSession) EmitSpanEnd(spanID string, outputs map[string]any, err er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"event":       "end",
 		"duration_ms": durationMs,
 	}
@@ -319,7 +319,7 @@ func (s *TraceSession) EmitLLMCall(spanID, provider, model, prompt, response str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"provider":   provider,
 		"model":      model,
 		"prompt":     prompt,
@@ -328,7 +328,7 @@ func (s *TraceSession) EmitLLMCall(spanID, provider, model, prompt, response str
 	}
 
 	if usage != nil {
-		data["usage"] = map[string]interface{}{
+		data["usage"] = map[string]any{
 			"prompt_tokens":     usage.PromptTokens,
 			"completion_tokens": usage.CompletionTokens,
 			"total_tokens":      usage.TotalTokens,
@@ -349,7 +349,7 @@ func (s *TraceSession) EmitModule(spanID, moduleType, moduleName, signature stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"module_type":  moduleType,
 		"module_name":  moduleName,
 		"signature":    signature,
@@ -378,7 +378,7 @@ func (s *TraceSession) EmitCodeExec(spanID string, iteration int, code, stdout, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"iteration":   iteration,
 		"code":        code,
 		"stdout":      stdout,
@@ -405,7 +405,7 @@ func (s *TraceSession) EmitToolCall(spanID, toolName string, input, output any, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"tool_name":   toolName,
 		"input":       input,
 		"output":      output,
@@ -429,7 +429,7 @@ func (s *TraceSession) EmitError(spanID, errorType, message string, recoverable 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"error_type":  errorType,
 		"message":     message,
 		"recoverable": recoverable,
@@ -513,14 +513,14 @@ type RLMMetadataEntry struct {
 
 // RLMIterationEntry is compatible with rlm-go's IterationEntry for viewer support.
 type RLMIterationEntry struct {
-	Type          string           `json:"type"`
-	Iteration     int              `json:"iteration"`
-	Timestamp     string           `json:"timestamp"`
-	Prompt        []RLMMessage     `json:"prompt"`
-	Response      string           `json:"response"`
-	CodeBlocks    []RLMCodeBlock   `json:"code_blocks"`
-	FinalAnswer   any              `json:"final_answer"`
-	IterationTime float64          `json:"iteration_time"`
+	Type          string         `json:"type"`
+	Iteration     int            `json:"iteration"`
+	Timestamp     string         `json:"timestamp"`
+	Prompt        []RLMMessage   `json:"prompt"`
+	Response      string         `json:"response"`
+	CodeBlocks    []RLMCodeBlock `json:"code_blocks"`
+	FinalAnswer   any            `json:"final_answer"`
+	IterationTime float64        `json:"iteration_time"`
 }
 
 // RLMMessage represents a chat message in RLM format.
@@ -531,8 +531,8 @@ type RLMMessage struct {
 
 // RLMCodeBlock represents an executed code block in RLM format.
 type RLMCodeBlock struct {
-	Code   string          `json:"code"`
-	Result RLMCodeResult   `json:"result"`
+	Code   string        `json:"code"`
+	Result RLMCodeResult `json:"result"`
 }
 
 // RLMCodeResult represents code execution results in RLM format.

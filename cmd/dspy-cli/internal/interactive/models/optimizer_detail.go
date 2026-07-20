@@ -5,20 +5,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/optimizers"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // OptimizerDetailModel represents the optimizer detail screen state
 type OptimizerDetailModel struct {
-	optimizer        string
-	optimizerInfo    optimizers.OptimizerInfo
-	selectedDataset  int
-	datasets         []string
+	optimizer       string
+	optimizerInfo   optimizers.OptimizerInfo
+	selectedDataset int
+	datasets        []string
 	width           int
 	height          int
 	isRunning       bool
@@ -46,8 +46,8 @@ func NewOptimizerDetailModel(optimizerName string) OptimizerDetailModel {
 		selectedDataset: 0,
 		datasets:        samples.ListAvailableDatasets(),
 		isRunning:       false,
-		width:          80,  // Default width to prevent loading screen
-		height:         24,  // Default height to prevent loading screen
+		width:           80, // Default width to prevent loading screen
+		height:          24, // Default height to prevent loading screen
 	}
 }
 

@@ -41,7 +41,7 @@ func (m *mockProcessingTool) CanHandle(ctx context.Context, intent string) bool 
 	return true
 }
 
-func (m *mockProcessingTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (m *mockProcessingTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	if m.delay > 0 {
 		// Use context-aware delay that can be interrupted
 		select {
@@ -56,7 +56,7 @@ func (m *mockProcessingTool) Execute(ctx context.Context, params map[string]inte
 	}
 
 	// Process input and add tool name
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range params {
 		result[k] = v
 	}
@@ -65,13 +65,13 @@ func (m *mockProcessingTool) Execute(ctx context.Context, params map[string]inte
 
 	return core.ToolResult{
 		Data: result,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"tool": m.name,
 		},
 	}, nil
 }
 
-func (m *mockProcessingTool) Validate(params map[string]interface{}) error {
+func (m *mockProcessingTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -119,7 +119,7 @@ func TestToolPipeline_Basic(t *testing.T) {
 
 	// Execute pipeline
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -141,9 +141,9 @@ func TestToolPipeline_WithTransformer(t *testing.T) {
 	pipeline := NewToolPipeline("transform-pipeline", registry, options)
 
 	// Add step with transformer
-	transformer := func(input interface{}) (map[string]interface{}, error) {
-		if inputMap, ok := input.(map[string]interface{}); ok {
-			return map[string]interface{}{
+	transformer := func(input any) (map[string]any, error) {
+		if inputMap, ok := input.(map[string]any); ok {
+			return map[string]any{
 				"transformed_data": inputMap,
 				"transformation":   "applied",
 			}, nil
@@ -164,7 +164,7 @@ func TestToolPipeline_WithTransformer(t *testing.T) {
 
 	// Execute pipeline
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -175,7 +175,7 @@ func TestToolPipeline_WithTransformer(t *testing.T) {
 
 	// Check if transformation was applied
 	secondResult := result.Results[1]
-	resultData, ok := secondResult.Data.(map[string]interface{})
+	resultData, ok := secondResult.Data.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "applied", resultData["transformation"])
 }
@@ -215,7 +215,7 @@ func TestToolPipeline_ConditionalExecution(t *testing.T) {
 
 	// Execute pipeline
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -245,7 +245,7 @@ func TestToolPipeline_ErrorHandling(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
-		input := map[string]interface{}{"data": "test"}
+		input := map[string]any{"data": "test"}
 
 		result, err := pipeline.Execute(ctx, input)
 		assert.Error(t, err)
@@ -271,7 +271,7 @@ func TestToolPipeline_ErrorHandling(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
-		input := map[string]interface{}{"data": "test"}
+		input := map[string]any{"data": "test"}
 
 		result, err := pipeline.Execute(ctx, input)
 		assert.NoError(t, err)          // Should not return error with ContinueOnError
@@ -294,7 +294,7 @@ func TestToolPipeline_Caching(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -357,7 +357,7 @@ func TestDataTransformers(t *testing.T) {
 	t.Run("TransformExtractField", func(t *testing.T) {
 		transformer := TransformExtractField("test_field")
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"test_field":  "extracted_value",
 			"other_field": "ignored",
 		}
@@ -372,7 +372,7 @@ func TestDataTransformers(t *testing.T) {
 			"old_name": "new_name",
 		})
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"old_name":  "value",
 			"keep_name": "keep_value",
 		}
@@ -387,7 +387,7 @@ func TestDataTransformers(t *testing.T) {
 	t.Run("TransformFilter", func(t *testing.T) {
 		transformer := TransformFilter([]string{"keep1", "keep2"})
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"keep1":  "value1",
 			"keep2":  "value2",
 			"remove": "removed_value",
@@ -401,12 +401,12 @@ func TestDataTransformers(t *testing.T) {
 	})
 
 	t.Run("TransformAddConstant", func(t *testing.T) {
-		transformer := TransformAddConstant(map[string]interface{}{
+		transformer := TransformAddConstant(map[string]any{
 			"constant":  "constant_value",
 			"timestamp": 12345,
 		})
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"input_field": "input_value",
 		}
 
@@ -420,11 +420,11 @@ func TestDataTransformers(t *testing.T) {
 	t.Run("TransformChain", func(t *testing.T) {
 		transformer := TransformChain(
 			TransformRename(map[string]string{"old": "new"}),
-			TransformAddConstant(map[string]interface{}{"added": "value"}),
+			TransformAddConstant(map[string]any{"added": "value"}),
 			TransformFilter([]string{"new", "added"}),
 		)
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"old":    "renamed_value",
 			"remove": "will_be_removed",
 		}
@@ -441,7 +441,7 @@ func TestDataTransformers(t *testing.T) {
 func TestConditionEvaluation(t *testing.T) {
 	pipeline := NewToolPipeline("test", createTestRegistry(), PipelineOptions{})
 
-	testData := map[string]interface{}{
+	testData := map[string]any{
 		"field1": "value1",
 		"field2": 42,
 		"field3": "contains_test",
@@ -474,7 +474,7 @@ func TestPipeline_EdgeCases(t *testing.T) {
 		pipeline := NewToolPipeline("empty", registry, PipelineOptions{})
 
 		ctx := context.Background()
-		_, err := pipeline.Execute(ctx, map[string]interface{}{})
+		_, err := pipeline.Execute(ctx, map[string]any{})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no steps")
 	})
@@ -496,7 +496,7 @@ func TestPipeline_EdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
-		_, err = pipeline.Execute(ctx, map[string]interface{}{})
+		_, err = pipeline.Execute(ctx, map[string]any{})
 		assert.Error(t, err)
 	})
 }
@@ -518,7 +518,7 @@ func TestPipeline_ParallelExecution(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -535,7 +535,7 @@ func TestPipeline_ParallelExecution(t *testing.T) {
 	toolsExecuted := make(map[string]bool)
 
 	for _, result := range result.Results {
-		if resultData, ok := result.Data.(map[string]interface{}); ok {
+		if resultData, ok := result.Data.(map[string]any); ok {
 			if processedBy, ok := resultData["processed_by"].(string); ok {
 				toolsExecuted[processedBy] = true
 			}

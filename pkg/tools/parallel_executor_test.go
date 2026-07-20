@@ -21,7 +21,7 @@ func TestParallelExecutor_Basic(t *testing.T) {
 		{
 			ID:         "task1",
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": "test1"},
+			Input:      map[string]any{"data": "test1"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -29,7 +29,7 @@ func TestParallelExecutor_Basic(t *testing.T) {
 		{
 			ID:         "task2",
 			ToolName:   "validator",
-			Input:      map[string]interface{}{"data": "test2"},
+			Input:      map[string]any{"data": "test2"},
 			Priority:   2,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -59,7 +59,7 @@ func TestParallelExecutor_PriorityScheduling(t *testing.T) {
 		{
 			ID:         "low_priority",
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": "low"},
+			Input:      map[string]any{"data": "low"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -67,7 +67,7 @@ func TestParallelExecutor_PriorityScheduling(t *testing.T) {
 		{
 			ID:         "high_priority",
 			ToolName:   "validator",
-			Input:      map[string]interface{}{"data": "high"},
+			Input:      map[string]any{"data": "high"},
 			Priority:   5,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -75,7 +75,7 @@ func TestParallelExecutor_PriorityScheduling(t *testing.T) {
 		{
 			ID:         "medium_priority",
 			ToolName:   "transformer",
-			Input:      map[string]interface{}{"data": "medium"},
+			Input:      map[string]any{"data": "medium"},
 			Priority:   3,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -109,7 +109,7 @@ func TestParallelExecutor_FairShareScheduling(t *testing.T) {
 		{
 			ID:         "parser1",
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": "test1"},
+			Input:      map[string]any{"data": "test1"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -117,7 +117,7 @@ func TestParallelExecutor_FairShareScheduling(t *testing.T) {
 		{
 			ID:         "parser2",
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": "test2"},
+			Input:      map[string]any{"data": "test2"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -125,7 +125,7 @@ func TestParallelExecutor_FairShareScheduling(t *testing.T) {
 		{
 			ID:         "validator1",
 			ToolName:   "validator",
-			Input:      map[string]interface{}{"data": "test1"},
+			Input:      map[string]any{"data": "test1"},
 			Priority:   1,
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
@@ -151,14 +151,14 @@ func TestParallelExecutor_ErrorHandling(t *testing.T) {
 		{
 			ID:         "success_task",
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": "test"},
+			Input:      map[string]any{"data": "test"},
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
 		},
 		{
 			ID:         "error_task",
 			ToolName:   "error_tool",
-			Input:      map[string]interface{}{"data": "test"},
+			Input:      map[string]any{"data": "test"},
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
 		},
@@ -192,7 +192,7 @@ func TestParallelExecutor_Retries(t *testing.T) {
 	task := &ParallelTask{
 		ID:         "retry_task",
 		ToolName:   "error_tool",
-		Input:      map[string]interface{}{"data": "test"},
+		Input:      map[string]any{"data": "test"},
 		Retries:    3,
 		Context:    context.Background(),
 		SubmitTime: time.Now(),
@@ -223,7 +223,7 @@ func TestParallelExecutor_Timeout(t *testing.T) {
 	task := &ParallelTask{
 		ID:         "timeout_task",
 		ToolName:   "slow_tool",
-		Input:      map[string]interface{}{"data": "test"},
+		Input:      map[string]any{"data": "test"},
 		Timeout:    5 * time.Millisecond, // Much shorter than tool delay
 		Context:    context.Background(),
 		SubmitTime: time.Now(),
@@ -258,7 +258,7 @@ func TestParallelExecutor_ContextCancellation(t *testing.T) {
 	task := &ParallelTask{
 		ID:         "cancel_task",
 		ToolName:   "very_slow_tool",
-		Input:      map[string]interface{}{"data": "test"},
+		Input:      map[string]any{"data": "test"},
 		Context:    context.Background(),
 		SubmitTime: time.Now(),
 	}
@@ -298,7 +298,7 @@ func TestParallelExecutor_WorkerPoolManagement(t *testing.T) {
 		tasks[i] = &ParallelTask{
 			ID:         fmt.Sprintf("task_%d", i),
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": fmt.Sprintf("test%d", i)},
+			Input:      map[string]any{"data": fmt.Sprintf("test%d", i)},
 			Context:    context.Background(),
 			SubmitTime: time.Now(),
 		}
@@ -330,7 +330,7 @@ func TestParallelExecutor_Metrics(t *testing.T) {
 	task := &ParallelTask{
 		ID:         "metrics_task",
 		ToolName:   "parser",
-		Input:      map[string]interface{}{"data": "test"},
+		Input:      map[string]any{"data": "test"},
 		Context:    context.Background(),
 		SubmitTime: time.Now(),
 	}
@@ -353,17 +353,17 @@ func TestBatchExecutor(t *testing.T) {
 
 	calls := []ToolCall{
 		{
-			ToolCall: core.ToolCall{Name: "parser", Arguments: map[string]interface{}{"data": "test1"}},
+			ToolCall: core.ToolCall{Name: "parser", Arguments: map[string]any{"data": "test1"}},
 			Priority: 1,
 			Timeout:  1 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "validator", Arguments: map[string]interface{}{"data": "test2"}},
+			ToolCall: core.ToolCall{Name: "validator", Arguments: map[string]any{"data": "test2"}},
 			Priority: 2,
 			Timeout:  1 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "transformer", Arguments: map[string]interface{}{"data": "test3"}},
+			ToolCall: core.ToolCall{Name: "transformer", Arguments: map[string]any{"data": "test3"}},
 			Priority: 3,
 			Timeout:  1 * time.Second,
 		},
@@ -390,7 +390,7 @@ func TestBatchExecutor_LegacyToolCallFields(t *testing.T) {
 	calls := []ToolCall{
 		{
 			ToolName: "parser",
-			Input:    map[string]interface{}{"data": "legacy"},
+			Input:    map[string]any{"data": "legacy"},
 			Priority: 1,
 			Timeout:  1 * time.Second,
 		},
@@ -413,10 +413,10 @@ func TestBatchExecutor_PrefersEmbeddedCoreToolCallFields(t *testing.T) {
 		{
 			ToolCall: core.ToolCall{
 				Name:      "parser",
-				Arguments: map[string]interface{}{"data": "preferred"},
+				Arguments: map[string]any{"data": "preferred"},
 			},
 			ToolName: "error_tool",
-			Input:    map[string]interface{}{"data": "deprecated"},
+			Input:    map[string]any{"data": "deprecated"},
 			Priority: 1,
 			Timeout:  1 * time.Second,
 		},
@@ -428,7 +428,7 @@ func TestBatchExecutor_PrefersEmbeddedCoreToolCallFields(t *testing.T) {
 	require.Len(t, results, 1)
 	require.NoError(t, results[0].Error)
 
-	data, ok := results[0].Result.Data.(map[string]interface{})
+	data, ok := results[0].Result.Data.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "parser", data["processed_by"])
 	assert.Equal(t, "preferred", data["data"])
@@ -439,10 +439,10 @@ func TestToolCallJSONRoundTripUsesCanonicalFields(t *testing.T) {
 		ToolCall: core.ToolCall{
 			ID:        "call-1",
 			Name:      "parser",
-			Arguments: map[string]interface{}{"data": "preferred"},
+			Arguments: map[string]any{"data": "preferred"},
 		},
 		ToolName: "validator",
-		Input:    map[string]interface{}{"data": "deprecated"},
+		Input:    map[string]any{"data": "deprecated"},
 		Priority: 2,
 		Timeout:  time.Second,
 		Retries:  3,
@@ -455,7 +455,7 @@ func TestToolCallJSONRoundTripUsesCanonicalFields(t *testing.T) {
 	assert.Contains(t, string(encoded), "\"name\":\"parser\"")
 	assert.Contains(t, string(encoded), "\"arguments\":{\"data\":\"preferred\"}")
 
-	var roundTripped map[string]interface{}
+	var roundTripped map[string]any
 	require.NoError(t, json.Unmarshal(encoded, &roundTripped))
 	assert.Equal(t, "parser", roundTripped["name"])
 	assert.NotContains(t, roundTripped, "tool_name")
@@ -500,7 +500,7 @@ func TestParallelPipelineExecutor(t *testing.T) {
 	pipelineExecutor := NewParallelPipelineExecutor(pipeline, parallelExecutor)
 
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"data": "test input",
 	}
 
@@ -528,7 +528,7 @@ func TestParallelExecutor_ConcurrentSafety(t *testing.T) {
 				{
 					ID:         fmt.Sprintf("concurrent_task_%d", id),
 					ToolName:   "parser",
-					Input:      map[string]interface{}{"data": fmt.Sprintf("test%d", id)},
+					Input:      map[string]any{"data": fmt.Sprintf("test%d", id)},
 					Context:    context.Background(),
 					SubmitTime: time.Now(),
 				},
@@ -582,7 +582,7 @@ func TestParallelExecutor_LargeTaskLoad(t *testing.T) {
 		tasks[i] = &ParallelTask{
 			ID:         fmt.Sprintf("load_task_%d", i),
 			ToolName:   "parser",
-			Input:      map[string]interface{}{"data": fmt.Sprintf("test%d", i)},
+			Input:      map[string]any{"data": fmt.Sprintf("test%d", i)},
 			Priority:   i % 5, // Vary priorities
 			Context:    context.Background(),
 			SubmitTime: time.Now(),

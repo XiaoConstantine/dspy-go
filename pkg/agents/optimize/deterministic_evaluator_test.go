@@ -15,7 +15,7 @@ import (
 
 type mockOptimizableAgent struct {
 	artifacts    AgentArtifacts
-	outputs      map[string]map[string]interface{}
+	outputs      map[string]map[string]any
 	errs         map[string]error
 	lastTrace    *agents.ExecutionTrace
 	executeCount int
@@ -29,19 +29,19 @@ func newMockOptimizableAgent() *mockOptimizableAgent {
 			Int:  make(map[string]int),
 			Bool: make(map[string]bool),
 		},
-		outputs: make(map[string]map[string]interface{}),
+		outputs: make(map[string]map[string]any),
 		errs:    make(map[string]error),
 		memory:  agents.NewInMemoryStore(),
 	}
 }
 
-func (m *mockOptimizableAgent) Execute(_ context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (m *mockOptimizableAgent) Execute(_ context.Context, input map[string]any) (map[string]any, error) {
 	m.executeCount++
 	key, _ := input["id"].(string)
 
 	output := maps.Clone(m.outputs[key])
 	if output == nil {
-		output = map[string]interface{}{}
+		output = map[string]any{}
 	}
 	if _, ok := output["count"]; !ok {
 		output["count"] = m.executeCount
@@ -102,17 +102,17 @@ func (m *mockOptimizableAgent) LastExecutionTrace() *agents.ExecutionTrace {
 
 func TestDeterministicEvaluator_Evaluate_ExactMatch(t *testing.T) {
 	agent := newMockOptimizableAgent()
-	agent.outputs["case-1"] = map[string]interface{}{
+	agent.outputs["case-1"] = map[string]any{
 		"answer": "42",
 	}
 
 	evaluator := NewDeterministicEvaluator(nil)
 	result, err := evaluator.Evaluate(context.Background(), agent, AgentExample{
 		ID: "case-1",
-		Inputs: map[string]interface{}{
+		Inputs: map[string]any{
 			"id": "case-1",
 		},
-		Outputs: map[string]interface{}{
+		Outputs: map[string]any{
 			"answer": "42",
 		},
 	})
@@ -145,10 +145,10 @@ func TestDeterministicEvaluator_Evaluate_ExecutionErrorReturnsZeroScore(t *testi
 	evaluator := NewDeterministicEvaluator(nil)
 	result, err := evaluator.Evaluate(context.Background(), agent, AgentExample{
 		ID: "broken",
-		Inputs: map[string]interface{}{
+		Inputs: map[string]any{
 			"id": "broken",
 		},
-		Outputs: map[string]interface{}{
+		Outputs: map[string]any{
 			"answer": "never",
 		},
 	})
@@ -165,7 +165,7 @@ func TestDeterministicEvaluator_Evaluate_ExecutionErrorReturnsZeroScore(t *testi
 
 func TestDeterministicEvaluator_Evaluate_PartialMatchTracksMismatches(t *testing.T) {
 	agent := newMockOptimizableAgent()
-	agent.outputs["partial"] = map[string]interface{}{
+	agent.outputs["partial"] = map[string]any{
 		"answer": "42",
 		"count":  float64(1),
 	}
@@ -173,10 +173,10 @@ func TestDeterministicEvaluator_Evaluate_PartialMatchTracksMismatches(t *testing
 	evaluator := NewDeterministicEvaluator(nil)
 	result, err := evaluator.Evaluate(context.Background(), agent, AgentExample{
 		ID: "partial",
-		Inputs: map[string]interface{}{
+		Inputs: map[string]any{
 			"id": "partial",
 		},
-		Outputs: map[string]interface{}{
+		Outputs: map[string]any{
 			"answer": "42",
 			"count":  1,
 			"extra":  "expected",
@@ -194,26 +194,26 @@ func TestDeterministicEvaluator_Evaluate_PartialMatchTracksMismatches(t *testing
 	assert.Contains(t, result.SideInfo.PassedTests, "output:answer")
 	assert.ElementsMatch(t, []string{"output:count", "output:extra"}, result.SideInfo.FailedTests)
 
-	mismatches, ok := result.SideInfo.Diagnostics["mismatches"].(map[string]interface{})
+	mismatches, ok := result.SideInfo.Diagnostics["mismatches"].(map[string]any)
 	require.True(t, ok)
-	countMismatch, ok := mismatches["count"].(map[string]interface{})
+	countMismatch, ok := mismatches["count"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, 1, countMismatch["expected"])
 	assert.Equal(t, float64(1), countMismatch["actual"])
-	extraMismatch, ok := mismatches["extra"].(map[string]interface{})
+	extraMismatch, ok := mismatches["extra"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, true, extraMismatch["missing"])
 }
 
 func TestDeterministicEvaluator_Evaluate_ComparatorErrorReturnsZeroScore(t *testing.T) {
 	agent := newMockOptimizableAgent()
-	evaluator := NewDeterministicEvaluator(OutputComparatorFunc(func(ex AgentExample, actual map[string]interface{}) (*ComparisonResult, error) {
+	evaluator := NewDeterministicEvaluator(OutputComparatorFunc(func(ex AgentExample, actual map[string]any) (*ComparisonResult, error) {
 		return nil, errors.New("compare failed")
 	}))
 
 	result, err := evaluator.Evaluate(context.Background(), agent, AgentExample{
 		ID: "compare-error",
-		Inputs: map[string]interface{}{
+		Inputs: map[string]any{
 			"id": "compare-error",
 		},
 	})
@@ -237,19 +237,19 @@ func TestHarness_Run_ClonesAgentPerExample(t *testing.T) {
 	runResult, err := harness.Run(context.Background(), baseAgent, []AgentExample{
 		{
 			ID: "first",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "first",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"count": 1,
 			},
 		},
 		{
 			ID: "second",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "second",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"count": 1,
 			},
 		},
@@ -270,7 +270,7 @@ func TestHarness_Run_ClonesAgentPerExample(t *testing.T) {
 
 func TestHarness_Run_UsesConfigurablePassThreshold(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
-	baseAgent.outputs["threshold"] = map[string]interface{}{
+	baseAgent.outputs["threshold"] = map[string]any{
 		"a": "match",
 		"b": "match",
 		"c": "wrong",
@@ -284,10 +284,10 @@ func TestHarness_Run_UsesConfigurablePassThreshold(t *testing.T) {
 	runResult, err := harness.Run(context.Background(), baseAgent, []AgentExample{
 		{
 			ID: "threshold",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "threshold",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"a": "match",
 				"b": "match",
 				"c": "expected",
@@ -306,7 +306,7 @@ func TestHarness_Run_UsesConfigurablePassThreshold(t *testing.T) {
 
 func TestHarness_Run_ContinuesAfterEvaluatorError(t *testing.T) {
 	baseAgent := newMockOptimizableAgent()
-	comparator := OutputComparatorFunc(func(ex AgentExample, actual map[string]interface{}) (*ComparisonResult, error) {
+	comparator := OutputComparatorFunc(func(ex AgentExample, actual map[string]any) (*ComparisonResult, error) {
 		if ex.ID == "bad" {
 			return nil, errors.New("bad comparison")
 		}
@@ -325,13 +325,13 @@ func TestHarness_Run_ContinuesAfterEvaluatorError(t *testing.T) {
 	runResult, err := harness.Run(context.Background(), baseAgent, []AgentExample{
 		{
 			ID: "bad",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "bad",
 			},
 		},
 		{
 			ID: "good",
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"id": "good",
 			},
 		},
@@ -401,12 +401,12 @@ func (f agentEvaluatorFunc) Evaluate(ctx context.Context, agent OptimizableAgent
 	return f(ctx, agent, ex)
 }
 
-func cloneOutputFixtures(input map[string]map[string]interface{}) map[string]map[string]interface{} {
+func cloneOutputFixtures(input map[string]map[string]any) map[string]map[string]any {
 	if input == nil {
 		return nil
 	}
 
-	cloned := make(map[string]map[string]interface{}, len(input))
+	cloned := make(map[string]map[string]any, len(input))
 	for key, value := range input {
 		cloned[key] = maps.Clone(value)
 	}

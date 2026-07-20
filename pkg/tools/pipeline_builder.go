@@ -209,10 +209,10 @@ func (pb *PipelineBuilder) Build() (*ToolPipeline, error) {
 
 // TransformExtractField creates a transformer that extracts a specific field.
 func TransformExtractField(fieldName string) DataTransformer {
-	return func(input interface{}) (map[string]interface{}, error) {
-		if inputMap, ok := input.(map[string]interface{}); ok {
+	return func(input any) (map[string]any, error) {
+		if inputMap, ok := input.(map[string]any); ok {
 			if value, exists := inputMap[fieldName]; exists {
-				return map[string]interface{}{
+				return map[string]any{
 					"value": value,
 				}, nil
 			}
@@ -227,13 +227,13 @@ func TransformExtractField(fieldName string) DataTransformer {
 
 // TransformRename creates a transformer that renames fields.
 func TransformRename(fieldMappings map[string]string) DataTransformer {
-	return func(input interface{}) (map[string]interface{}, error) {
-		inputMap, ok := input.(map[string]interface{})
+	return func(input any) (map[string]any, error) {
+		inputMap, ok := input.(map[string]any)
 		if !ok {
 			return nil, errors.New(errors.InvalidInput, "input is not a map")
 		}
 
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 
 		// Copy all fields, renaming as specified
 		for oldName, value := range inputMap {
@@ -255,13 +255,13 @@ func TransformFilter(allowedFields []string) DataTransformer {
 		allowedMap[field] = true
 	}
 
-	return func(input interface{}) (map[string]interface{}, error) {
-		inputMap, ok := input.(map[string]interface{})
+	return func(input any) (map[string]any, error) {
+		inputMap, ok := input.(map[string]any)
 		if !ok {
 			return nil, errors.New(errors.InvalidInput, "input is not a map")
 		}
 
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for field, value := range inputMap {
 			if allowedMap[field] {
 				result[field] = value
@@ -273,14 +273,14 @@ func TransformFilter(allowedFields []string) DataTransformer {
 }
 
 // TransformAddConstant creates a transformer that adds constant fields.
-func TransformAddConstant(constantFields map[string]interface{}) DataTransformer {
-	return func(input interface{}) (map[string]interface{}, error) {
-		inputMap, ok := input.(map[string]interface{})
+func TransformAddConstant(constantFields map[string]any) DataTransformer {
+	return func(input any) (map[string]any, error) {
+		inputMap, ok := input.(map[string]any)
 		if !ok {
 			return nil, errors.New(errors.InvalidInput, "input is not a map")
 		}
 
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 
 		// Copy input fields
 		for key, value := range inputMap {
@@ -298,7 +298,7 @@ func TransformAddConstant(constantFields map[string]interface{}) DataTransformer
 
 // TransformChain creates a transformer that applies multiple transformers in sequence.
 func TransformChain(transformers ...DataTransformer) DataTransformer {
-	return func(input interface{}) (map[string]interface{}, error) {
+	return func(input any) (map[string]any, error) {
 		current := input
 		var err error
 
@@ -309,7 +309,7 @@ func TransformChain(transformers ...DataTransformer) DataTransformer {
 			}
 		}
 
-		if result, ok := current.(map[string]interface{}); ok {
+		if result, ok := current.(map[string]any); ok {
 			return result, nil
 		}
 
@@ -328,7 +328,7 @@ func ConditionExists(field string) Condition {
 }
 
 // ConditionEquals creates a condition that checks if a field equals a value.
-func ConditionEquals(field string, value interface{}) Condition {
+func ConditionEquals(field string, value any) Condition {
 	return Condition{
 		Field:    field,
 		Operator: "eq",
@@ -337,7 +337,7 @@ func ConditionEquals(field string, value interface{}) Condition {
 }
 
 // ConditionNotEquals creates a condition that checks if a field does not equal a value.
-func ConditionNotEquals(field string, value interface{}) Condition {
+func ConditionNotEquals(field string, value any) Condition {
 	return Condition{
 		Field:    field,
 		Operator: "ne",

@@ -35,14 +35,14 @@ type ContextDiversifier struct {
 
 // ContextTemplate defines different ways to present the same information.
 type ContextTemplate struct {
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	Structure     TemplateStructure      `json:"structure"`
-	Style         PresentationStyle      `json:"style"`
-	UsageCount    int64                  `json:"usage_count"`
-	LastUsed      time.Time              `json:"last_used"`
-	Effectiveness float64                `json:"effectiveness"`
-	Metadata      map[string]interface{} `json:"metadata"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Structure     TemplateStructure `json:"structure"`
+	Style         PresentationStyle `json:"style"`
+	UsageCount    int64             `json:"usage_count"`
+	LastUsed      time.Time         `json:"last_used"`
+	Effectiveness float64           `json:"effectiveness"`
+	Metadata      map[string]any    `json:"metadata"`
 }
 
 // TemplateStructure defines how content is organized in the template.
@@ -91,12 +91,12 @@ type DiversityMetrics struct {
 
 // DiversificationResult provides information about context transformation.
 type DiversificationResult struct {
-	OriginalTemplate string                 `json:"original_template"`
-	NewTemplate      string                 `json:"new_template"`
-	Transformation   string                 `json:"transformation"`
-	DiversityGain    float64                `json:"diversity_gain"`
-	EstimatedImpact  string                 `json:"estimated_impact"`
-	Metadata         map[string]interface{} `json:"metadata"`
+	OriginalTemplate string         `json:"original_template"`
+	NewTemplate      string         `json:"new_template"`
+	Transformation   string         `json:"transformation"`
+	DiversityGain    float64        `json:"diversity_gain"`
+	EstimatedImpact  string         `json:"estimated_impact"`
+	Metadata         map[string]any `json:"metadata"`
 }
 
 // NewContextDiversifier creates a diversifier to prevent few-shot pattern traps.
@@ -164,7 +164,7 @@ func (cd *ContextDiversifier) DiversifyContext(ctx context.Context, content stri
 		Transformation:   cd.describeTransformation(currentTemplate, newTemplate),
 		DiversityGain:    cd.calculateDiversityGain(currentTemplate, newTemplate),
 		EstimatedImpact:  cd.estimateImpact(currentTemplate, newTemplate),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"rotation_reason": reason,
 			"content_type":    contentType,
 			"timestamp":       time.Now(),

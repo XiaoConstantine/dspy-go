@@ -45,19 +45,19 @@ func NewLoggerAdapter(dspyLogger *logging.Logger) mcpLogging.Logger {
 	}
 }
 
-func (a *LoggerAdapter) Debug(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Debug(msg string, args ...any) {
 	a.dspyLogger.Debug(a.ctx, msg, args...)
 }
 
-func (a *LoggerAdapter) Info(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Info(msg string, args ...any) {
 	a.dspyLogger.Info(a.ctx, msg, args...)
 }
 
-func (a *LoggerAdapter) Warn(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Warn(msg string, args ...any) {
 	a.dspyLogger.Warn(a.ctx, msg, args...)
 }
 
-func (a *LoggerAdapter) Error(msg string, args ...interface{}) {
+func (a *LoggerAdapter) Error(msg string, args ...any) {
 	a.dspyLogger.Error(a.ctx, msg, args...)
 }
 
@@ -81,7 +81,7 @@ func NewRealMCPToolSelectionProgram(llm core.LLM, registry core.ToolRegistry, op
 }
 
 // Execute the program to select and execute the best tool for a git task.
-func (p *RealMCPToolSelectionProgram) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+func (p *RealMCPToolSelectionProgram) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 	task, ok := inputs["task"].(string)
 	if !ok {
 		return nil, fmt.Errorf("task input required")
@@ -183,7 +183,7 @@ Choose the MOST APPROPRIATE tool from the list above. Consider what the user act
 	}
 
 	// Execute the tool with empty parameters (git tools mostly don't need complex params for demo)
-	toolResult, err := tool.Execute(ctx, map[string]interface{}{})
+	toolResult, err := tool.Execute(ctx, map[string]any{})
 
 	var executionSuccess bool
 	var executionError string
@@ -196,7 +196,7 @@ Choose the MOST APPROPRIATE tool from the list above. Consider what the user act
 		p.logger.Debug(ctx, "Tool executed successfully")
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"selected_tool":     selectedTool,
 		"llm_response":      content,
 		"task":              task,
@@ -208,8 +208,8 @@ Choose the MOST APPROPRIATE tool from the list above. Consider what the user act
 }
 
 // Create challenging git scenarios where small models struggle.
-func getChallengingGitScenarios() []map[string]interface{} {
-	return []map[string]interface{}{
+func getChallengingGitScenarios() []map[string]any {
+	return []map[string]any{
 		{
 			"task":          "I want to see which lines of code in the main.go file were last modified by whom",
 			"expected_tool": "git_blame",
@@ -257,46 +257,46 @@ func getChallengingGitScenarios() []map[string]interface{} {
 func createGitTrainingExamples() []core.Example {
 	return []core.Example{
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"task": "Show me which lines were modified by whom in a specific file",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"selected_tool": "git_blame",
 				"success":       true,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"task": "I want to see the working directory status",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"selected_tool": "git_status",
 				"success":       true,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"task": "Show me details of a specific commit",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"selected_tool": "git_show",
 				"success":       true,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"task": "Display the commit history",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"selected_tool": "git_log",
 				"success":       true,
 			},
 		},
 		{
-			Inputs: map[string]interface{}{
+			Inputs: map[string]any{
 				"task": "List all branches",
 			},
-			Outputs: map[string]interface{}{
+			Outputs: map[string]any{
 				"selected_tool": "git_branch",
 				"success":       true,
 			},
@@ -316,7 +316,7 @@ func main() {
 	logger := logging.NewLogger(logging.Config{
 		Severity: logging.INFO,
 		Outputs:  []logging.Output{logging.NewConsoleOutput(false)},
-		DefaultFields: map[string]interface{}{
+		DefaultFields: map[string]any{
 			"component": "real_mcp_optimizer_demo",
 			"version":   "1.0",
 		},
@@ -421,10 +421,10 @@ func main() {
 			Timestamp:     time.Now(),
 			Context:       task,
 			ToolName:      correctTool,
-			Parameters:    map[string]interface{}{"task": task},
+			Parameters:    map[string]any{"task": task},
 			Success:       true,
 			ExecutionTime: 150 * time.Millisecond,
-			Metadata:      make(map[string]interface{}),
+			Metadata:      make(map[string]any),
 		}
 
 		err := optimizer.LearnFromInteraction(ctx, interaction)

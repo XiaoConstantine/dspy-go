@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Helper methods for the comparison model
@@ -101,13 +101,13 @@ func (m *ComparisonModel) updateLeaderboard() {
 		if result != nil && result.Success {
 			entries = append(entries, LeaderboardEntry{
 				OptimizerName: optimizer,
-				Icon:         m.getOptimizerIcon(optimizer),
-				DisplayName:  m.getOptimizerDisplayName(optimizer),
-				Accuracy:     result.FinalAccuracy,
-				Improvement:  result.ImprovementPct,
-				Duration:     result.Duration,
-				Status:       "completed",
-				TrendIcon:    m.getTrendIcon(result.ImprovementPct),
+				Icon:          m.getOptimizerIcon(optimizer),
+				DisplayName:   m.getOptimizerDisplayName(optimizer),
+				Accuracy:      result.FinalAccuracy,
+				Improvement:   result.ImprovementPct,
+				Duration:      result.Duration,
+				Status:        "completed",
+				TrendIcon:     m.getTrendIcon(result.ImprovementPct),
 			})
 		}
 	}

@@ -31,10 +31,10 @@ func TestMessage_ToChatMessage_InternalRoleIsSanitized(t *testing.T) {
 func TestNewToolResultMessage_PreservesRawPayload(t *testing.T) {
 	result := core.ToolResult{
 		Data: map[string]any{"answer": 42},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"latency_ms": 123,
 		},
-		Annotations: map[string]interface{}{
+		Annotations: map[string]any{
 			"is_error": true,
 			"source":   "unit-test",
 		},
@@ -50,4 +50,3 @@ func TestNewToolResultMessage_PreservesRawPayload(t *testing.T) {
 	assert.Equal(t, result.Metadata, raw["metadata"])
 	assert.Equal(t, result.Annotations, raw["annotations"])
 }
-

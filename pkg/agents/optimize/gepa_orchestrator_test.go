@@ -25,7 +25,7 @@ func TestGEPAAgentOptimizer_Optimize_UsesMainlineGEPACompile(t *testing.T) {
 					Scores: map[string]float64{
 						"output_match": 1.0,
 					},
-					Diagnostics: map[string]interface{}{},
+					Diagnostics: map[string]any{},
 				},
 			}, nil
 		}),
@@ -132,7 +132,7 @@ func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T)
 					Scores: map[string]float64{
 						"artifact_score": score,
 					},
-					Diagnostics: map[string]interface{}{},
+					Diagnostics: map[string]any{},
 				},
 			}, nil
 		}),
@@ -216,7 +216,7 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 					Scores: map[string]float64{
 						"artifact_score": score,
 					},
-					Diagnostics: map[string]interface{}{
+					Diagnostics: map[string]any{
 						"skill_pack":  artifacts.Text[ArtifactSkillPack],
 						"tool_policy": artifacts.Text[ArtifactToolPolicy],
 						"max_turns":   maxTurns,
@@ -323,7 +323,7 @@ func TestGEPAAgentOptimizer_CachedValidationEvaluation_DoesNotMutateInputCandida
 					Scores: map[string]float64{
 						"artifact_score": score,
 					},
-					Diagnostics: map[string]interface{}{},
+					Diagnostics: map[string]any{},
 				},
 			}, nil
 		}),
@@ -391,7 +391,7 @@ func TestGEPAAgentOptimizer_EvaluateBestCandidateOnValidation_UsesStateBestValid
 				Score: score,
 				SideInfo: &SideInfo{
 					Scores:      map[string]float64{"artifact_score": score},
-					Diagnostics: map[string]interface{}{},
+					Diagnostics: map[string]any{},
 				},
 			}, nil
 		}),
@@ -494,7 +494,7 @@ func TestGEPAAgentOptimizer_Optimize_StoresAggregateCandidateFitnessForSynthetic
 				Score: score,
 				SideInfo: &SideInfo{
 					Scores:      map[string]float64{"artifact_score": score},
-					Diagnostics: map[string]interface{}{},
+					Diagnostics: map[string]any{},
 				},
 			}, nil
 		}),
@@ -591,11 +591,11 @@ func (f *agentMultiArtifactFixtureLLM) Generate(_ context.Context, prompt string
 	}
 }
 
-func (f *agentMultiArtifactFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *agentMultiArtifactFixtureLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 
-func (f *agentMultiArtifactFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (f *agentMultiArtifactFixtureLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, nil
 }
 

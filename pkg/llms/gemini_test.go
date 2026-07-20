@@ -253,13 +253,13 @@ func TestGeminiLLM_GenerateWithJSON(t *testing.T) {
 		name           string
 		serverResponse geminiResponse
 		expectError    bool
-		expectedJSON   map[string]interface{}
+		expectedJSON   map[string]any
 	}{
 		{
 			name:           "Valid JSON response",
 			serverResponse: testGeminiTextResponse(`{"key": "value"}`),
 			expectError:    false,
-			expectedJSON:   map[string]interface{}{"key": "value"},
+			expectedJSON:   map[string]any{"key": "value"},
 		},
 		{
 			name:           "Invalid JSON response",
@@ -715,18 +715,18 @@ func TestGeminiLLM_GenerateWithFunctions(t *testing.T) {
 	}
 
 	// Define function schema
-	functions := []map[string]interface{}{
+	functions := []map[string]any{
 		{
 			"name":        "get_weather",
 			"description": "Get weather information for a location",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"location": map[string]interface{}{
+				"properties": map[string]any{
+					"location": map[string]any{
 						"type":        "string",
 						"description": "The city and state",
 					},
-					"unit": map[string]interface{}{
+					"unit": map[string]any{
 						"type":        "string",
 						"enum":        []string{"celsius", "fahrenheit"},
 						"description": "The temperature unit to use",
@@ -743,11 +743,11 @@ func TestGeminiLLM_GenerateWithFunctions(t *testing.T) {
 	assert.NotNil(t, result)
 
 	// Check function call information
-	functionCall, ok := result["function_call"].(map[string]interface{})
+	functionCall, ok := result["function_call"].(map[string]any)
 	require.True(t, ok, "Expected function_call in result")
 	assert.Equal(t, "get_weather", functionCall["name"])
 
-	arguments, ok := functionCall["arguments"].(map[string]interface{})
+	arguments, ok := functionCall["arguments"].(map[string]any)
 	require.True(t, ok, "Expected arguments in function_call")
 	assert.Equal(t, "New York", arguments["location"])
 	assert.Equal(t, "celsius", arguments["unit"])
@@ -798,10 +798,10 @@ func TestGeminiLLM_GenerateWithFunctions_EmptyResponseDiagnostics(t *testing.T) 
 		),
 	}
 
-	result, err := llm.GenerateWithFunctions(context.Background(), "Test prompt", []map[string]interface{}{{
+	result, err := llm.GenerateWithFunctions(context.Background(), "Test prompt", []map[string]any{{
 		"name":        "finish",
 		"description": "Finish the task",
-		"parameters": map[string]interface{}{
+		"parameters": map[string]any{
 			"type": "object",
 		},
 	}})
@@ -1277,21 +1277,21 @@ func TestGeminiLLM_Implementation(t *testing.T) {
 func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 	testCases := []struct {
 		name           string
-		functions      []map[string]interface{}
+		functions      []map[string]any
 		serverStatus   int
 		serverResponse string
 		expectedErrMsg string
 	}{
 		{
 			name: "Missing name in function schema",
-			functions: []map[string]interface{}{
+			functions: []map[string]any{
 				{
 					// Name field missing
 					"description": "Get weather information",
-					"parameters": map[string]interface{}{
+					"parameters": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"location": map[string]interface{}{
+						"properties": map[string]any{
+							"location": map[string]any{
 								"type": "string",
 							},
 						},
@@ -1302,7 +1302,7 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "Missing parameters in function schema",
-			functions: []map[string]interface{}{
+			functions: []map[string]any{
 				{
 					"name":        "get_weather",
 					"description": "Get weather information",
@@ -1313,14 +1313,14 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "Server error",
-			functions: []map[string]interface{}{
+			functions: []map[string]any{
 				{
 					"name":        "get_weather",
 					"description": "Get weather information",
-					"parameters": map[string]interface{}{
+					"parameters": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"location": map[string]interface{}{
+						"properties": map[string]any{
+							"location": map[string]any{
 								"type": "string",
 							},
 						},
@@ -1333,14 +1333,14 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "Invalid response format",
-			functions: []map[string]interface{}{
+			functions: []map[string]any{
 				{
 					"name":        "get_weather",
 					"description": "Get weather information",
-					"parameters": map[string]interface{}{
+					"parameters": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"location": map[string]interface{}{
+						"properties": map[string]any{
+							"location": map[string]any{
 								"type": "string",
 							},
 						},
@@ -1353,14 +1353,14 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 		},
 		{
 			name: "Empty candidates in response",
-			functions: []map[string]interface{}{
+			functions: []map[string]any{
 				{
 					"name":        "get_weather",
 					"description": "Get weather information",
-					"parameters": map[string]interface{}{
+					"parameters": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"location": map[string]interface{}{
+						"properties": map[string]any{
+							"location": map[string]any{
 								"type": "string",
 							},
 						},
@@ -1381,17 +1381,17 @@ func TestGeminiLLM_GenerateWithFunctions_ErrorCases(t *testing.T) {
 				server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					// Validate request contains expected function info if applicable
 					if strings.Contains(tc.name, "Server error") || strings.Contains(tc.name, "Invalid response") {
-						var reqBody map[string]interface{}
+						var reqBody map[string]any
 						err := json.NewDecoder(r.Body).Decode(&reqBody)
 						require.NoError(t, err)
 
 						// Verify tools array exists and has expected structure
-						tools, ok := reqBody["tools"].([]interface{})
+						tools, ok := reqBody["tools"].([]any)
 						assert.True(t, ok, "Request should include tools array")
 
 						if ok && len(tools) > 0 {
-							tool := tools[0].(map[string]interface{})
-							functionDecls, ok := tool["functionDeclarations"].([]interface{})
+							tool := tools[0].(map[string]any)
+							functionDecls, ok := tool["functionDeclarations"].([]any)
 							assert.True(t, ok, "Tool should include functionDeclarations")
 							assert.True(t, len(functionDecls) > 0, "Should have at least one function declaration")
 						}
@@ -1448,7 +1448,7 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 		expectTextOnly bool
 		expectedText   string
 		expectedFunc   string
-		expectedArgs   map[string]interface{}
+		expectedArgs   map[string]any
 	}{
 		{
 			name: "Text response with no function call",
@@ -1493,7 +1493,7 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 			}`,
 			expectTextOnly: false,
 			expectedFunc:   "get_weather",
-			expectedArgs: map[string]interface{}{
+			expectedArgs: map[string]any{
 				"location": "New York",
 				"unit":     "celsius",
 			},
@@ -1528,7 +1528,7 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 			expectTextOnly: false,
 			expectedText:   "I'll get the weather for you",
 			expectedFunc:   "get_weather",
-			expectedArgs: map[string]interface{}{
+			expectedArgs: map[string]any{
 				"location": "London",
 				"unit":     "fahrenheit",
 			},
@@ -1576,18 +1576,18 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 			}
 
 			// Define standard function schema
-			functions := []map[string]interface{}{
+			functions := []map[string]any{
 				{
 					"name":        "get_weather",
 					"description": "Get weather information for a location",
-					"parameters": map[string]interface{}{
+					"parameters": map[string]any{
 						"type": "object",
-						"properties": map[string]interface{}{
-							"location": map[string]interface{}{
+						"properties": map[string]any{
+							"location": map[string]any{
 								"type":        "string",
 								"description": "The city and state",
 							},
-							"unit": map[string]interface{}{
+							"unit": map[string]any{
 								"type":        "string",
 								"enum":        []string{"celsius", "fahrenheit"},
 								"description": "The temperature unit to use",
@@ -1619,12 +1619,12 @@ func TestGeminiLLM_GenerateWithFunctions_ResponseVariations(t *testing.T) {
 				assert.False(t, hasFuncCall, "Should not have function_call in text-only response")
 			} else {
 				// Check function call exists
-				funcCall, ok := result["function_call"].(map[string]interface{})
+				funcCall, ok := result["function_call"].(map[string]any)
 				assert.True(t, ok, "Should have function_call field")
 
 				// Check function name and arguments
 				assert.Equal(t, tc.expectedFunc, funcCall["name"])
-				args, ok := funcCall["arguments"].(map[string]interface{})
+				args, ok := funcCall["arguments"].(map[string]any)
 				assert.True(t, ok, "Should have arguments in function call")
 				assert.Equal(t, tc.expectedArgs, args)
 
@@ -1689,14 +1689,14 @@ func TestGeminiLLM_GenerateWithFunctions_OptionsHandling(t *testing.T) {
 	}
 
 	// Define function schema
-	functions := []map[string]interface{}{
+	functions := []map[string]any{
 		{
 			"name":        "test_function",
 			"description": "Test function",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"test": map[string]interface{}{
+				"properties": map[string]any{
+					"test": map[string]any{
 						"type": "string",
 					},
 				},
@@ -1716,7 +1716,7 @@ func TestGeminiLLM_GenerateWithFunctions_OptionsHandling(t *testing.T) {
 	assert.NotNil(t, result)
 
 	// Function call should be returned
-	funcCall, ok := result["function_call"].(map[string]interface{})
+	funcCall, ok := result["function_call"].(map[string]any)
 	assert.True(t, ok)
 	assert.Equal(t, "test_function", funcCall["name"])
 }
@@ -1779,18 +1779,18 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 		name         string
 		input        string
 		options      []core.EmbeddingOption
-		expectedReq  map[string]interface{}
+		expectedReq  map[string]any
 		validRequest bool
 	}{
 		{
 			name:    "Default options",
 			input:   "Test input",
 			options: []core.EmbeddingOption{},
-			expectedReq: map[string]interface{}{
+			expectedReq: map[string]any{
 				"model": "models/gemini-embedding-2",
-				"content": map[string]interface{}{
-					"parts": []interface{}{
-						map[string]interface{}{
+				"content": map[string]any{
+					"parts": []any{
+						map[string]any{
 							"text": "Test input",
 						},
 					},
@@ -1804,11 +1804,11 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 			options: []core.EmbeddingOption{
 				core.WithModel("gemini-embedding-001"),
 			},
-			expectedReq: map[string]interface{}{
+			expectedReq: map[string]any{
 				"model": "models/gemini-embedding-001",
-				"content": map[string]interface{}{
-					"parts": []interface{}{
-						map[string]interface{}{
+				"content": map[string]any{
+					"parts": []any{
+						map[string]any{
 							"text": "Test input",
 						},
 					},
@@ -1828,21 +1828,21 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 			name:  "With task type",
 			input: "Test input",
 			options: []core.EmbeddingOption{
-				core.WithParams(map[string]interface{}{
+				core.WithParams(map[string]any{
 					"task_type": "retrieval_query",
 				}),
 			},
-			expectedReq: map[string]interface{}{
+			expectedReq: map[string]any{
 				"model": "models/gemini-embedding-2",
-				"content": map[string]interface{}{
-					"parts": []interface{}{
-						map[string]interface{}{
+				"content": map[string]any{
+					"parts": []any{
+						map[string]any{
 							"text": "Test input",
 						},
 					},
 				},
 				"taskType": "retrieval_query",
-				"parameters": map[string]interface{}{
+				"parameters": map[string]any{
 					"task_type": "retrieval_query",
 				},
 			},
@@ -1852,21 +1852,21 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 			name:  "With additional parameters",
 			input: "Test input",
 			options: []core.EmbeddingOption{
-				core.WithParams(map[string]interface{}{
+				core.WithParams(map[string]any{
 					"dimension":        768,
 					"truncateStrategy": "START",
 				}),
 			},
-			expectedReq: map[string]interface{}{
+			expectedReq: map[string]any{
 				"model": "models/gemini-embedding-2",
-				"content": map[string]interface{}{
-					"parts": []interface{}{
-						map[string]interface{}{
+				"content": map[string]any{
+					"parts": []any{
+						map[string]any{
 							"text": "Test input",
 						},
 					},
 				},
-				"parameters": map[string]interface{}{
+				"parameters": map[string]any{
 					"dimension":        float64(768),
 					"truncateStrategy": "START",
 				},
@@ -1886,7 +1886,7 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 				body, err := io.ReadAll(r.Body)
 				assert.NoError(t, err)
 
-				var reqMap map[string]interface{}
+				var reqMap map[string]any
 				err = json.Unmarshal(body, &reqMap)
 				assert.NoError(t, err)
 
@@ -1897,8 +1897,8 @@ func TestGeminiLLM_CreateEmbedding_Options(t *testing.T) {
 
 					// For maps, check individual fields
 					switch expectedMap := expectedValue.(type) {
-					case map[string]interface{}:
-						actualMap, ok := actualValue.(map[string]interface{})
+					case map[string]any:
+						actualMap, ok := actualValue.(map[string]any)
 						assert.True(t, ok, "Expected %s to be a map", key)
 
 						for subKey, subVal := range expectedMap {
@@ -2024,7 +2024,7 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 				body, err := io.ReadAll(r.Body)
 				require.NoError(t, err)
 
-				var reqMap map[string]interface{}
+				var reqMap map[string]any
 				err = json.Unmarshal(body, &reqMap)
 				require.NoError(t, err)
 
@@ -2038,7 +2038,7 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 					assert.Contains(t, r.URL.Path, "/models/"+expectedModel+":batchEmbedContents")
 
 					// Verify batch size
-					requests, ok := reqMap["requests"].([]interface{})
+					requests, ok := reqMap["requests"].([]any)
 					assert.True(t, ok, "Expected requests array in batch request")
 
 					// For first batch, check exact size
@@ -2056,20 +2056,20 @@ func TestGeminiLLM_CreateEmbeddings_BatchProcessing(t *testing.T) {
 					}
 
 					// Create mock batch response with a result for each input
-					responseObj := map[string]interface{}{
-						"embeddings": make([]interface{}, len(requests)),
+					responseObj := map[string]any{
+						"embeddings": make([]any, len(requests)),
 					}
 
 					for i := range requests {
-						responseObj["embeddings"].([]interface{})[i] = map[string]interface{}{
-							"embedding": map[string]interface{}{
+						responseObj["embeddings"].([]any)[i] = map[string]any{
+							"embedding": map[string]any{
 								"values": []float64{0.1, 0.2, 0.3},
-								"statistics": map[string]interface{}{
+								"statistics": map[string]any{
 									"truncatedInputTokenCount": 0,
 									"tokenCount":               2,
 								},
 							},
-							"usageMetadata": map[string]interface{}{
+							"usageMetadata": map[string]any{
 								"promptTokenCount": 2,
 								"totalTokenCount":  2,
 							},

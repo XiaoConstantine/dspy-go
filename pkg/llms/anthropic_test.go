@@ -127,7 +127,7 @@ func TestAnthropicLLM_GenerateWithJSON(t *testing.T) {
 	// Setup
 	mockLLM := new(testutil.MockLLM)
 	prompt := "Generate JSON: {\"name\": \"John\", \"age\": 30}"
-	expectedJSON := map[string]interface{}{
+	expectedJSON := map[string]any{
 		"name": "John",
 		"age":  float64(30),
 	}
@@ -247,19 +247,19 @@ func TestAnthropicLLM_Embeddings(t *testing.T) {
 }
 
 func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
-	var capturedRequest map[string]interface{}
+	var capturedRequest map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "POST", r.Method)
 		require.Equal(t, "/v1/messages", r.URL.Path)
 
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
 
-		response := map[string]interface{}{
+		response := map[string]any{
 			"id":    "msg_123",
 			"type":  "message",
 			"role":  "assistant",
 			"model": "claude-sonnet-4-5",
-			"content": []map[string]interface{}{
+			"content": []map[string]any{
 				{
 					"type": "text",
 					"text": "I'll use a tool to check that.",
@@ -268,12 +268,12 @@ func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
 					"type":  "tool_use",
 					"id":    "toolu_123",
 					"name":  "get_weather",
-					"input": map[string]interface{}{"location": "New York", "unit": "celsius"},
+					"input": map[string]any{"location": "New York", "unit": "celsius"},
 				},
 			},
 			"stop_reason":   "tool_use",
 			"stop_sequence": "",
-			"usage": map[string]interface{}{
+			"usage": map[string]any{
 				"input_tokens":  14,
 				"output_tokens": 9,
 			},
@@ -293,17 +293,17 @@ func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
 	}, core.ModelID("claude-sonnet-4-5"))
 	require.NoError(t, err)
 
-	functions := []map[string]interface{}{
+	functions := []map[string]any{
 		{
 			"name":        "get_weather",
 			"description": "Get weather by city",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"location": map[string]interface{}{"type": "string"},
-					"unit":     map[string]interface{}{"type": "string"},
+				"properties": map[string]any{
+					"location": map[string]any{"type": "string"},
+					"unit":     map[string]any{"type": "string"},
 				},
-				"required": []interface{}{"location"},
+				"required": []any{"location"},
 			},
 		},
 	}
@@ -311,11 +311,11 @@ func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
 	result, err := llm.GenerateWithFunctions(context.Background(), "What's the weather?", functions)
 	require.NoError(t, err)
 
-	toolCall, ok := result["function_call"].(map[string]interface{})
+	toolCall, ok := result["function_call"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "get_weather", toolCall["name"])
 
-	arguments, ok := toolCall["arguments"].(map[string]interface{})
+	arguments, ok := toolCall["arguments"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "New York", arguments["location"])
 	assert.Equal(t, "celsius", arguments["unit"])
@@ -325,24 +325,24 @@ func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
 	assert.Equal(t, 14, usage.PromptTokens)
 	assert.Equal(t, 9, usage.CompletionTokens)
 
-	tools, ok := capturedRequest["tools"].([]interface{})
+	tools, ok := capturedRequest["tools"].([]any)
 	require.True(t, ok)
 	require.Len(t, tools, 1)
-	toolDef, ok := tools[0].(map[string]interface{})
+	toolDef, ok := tools[0].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "get_weather", toolDef["name"])
 	assert.Equal(t, "Get weather by city", toolDef["description"])
 
-	toolSchema, ok := toolDef["input_schema"].(map[string]interface{})
+	toolSchema, ok := toolDef["input_schema"].(map[string]any)
 	require.True(t, ok)
-	properties, ok := toolSchema["properties"].(map[string]interface{})
+	properties, ok := toolSchema["properties"].(map[string]any)
 	require.True(t, ok)
 	_, hasLocation := properties["location"]
 	assert.True(t, hasLocation)
 	_, hasUnit := properties["unit"]
 	assert.True(t, hasUnit)
 
-	toolChoice, ok := capturedRequest["tool_choice"].(map[string]interface{})
+	toolChoice, ok := capturedRequest["tool_choice"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "auto", toolChoice["type"])
 }
@@ -351,14 +351,14 @@ func TestAnthropicLLM_GenerateWithFunctions_Validation(t *testing.T) {
 	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
 	require.NoError(t, err)
 
-	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]interface{}{})
+	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]any{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one function schema is required")
 
-	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]interface{}{
+	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]any{
 		{
 			"name": "bad_tool",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "array",
 			},
 		},

@@ -12,11 +12,11 @@ import (
 // TestFuncTool is a variation of FuncTool that allows us to mock the Call function.
 type TestFuncTool struct {
 	*FuncTool
-	mockCallFunc func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error)
+	mockCallFunc func(ctx context.Context, args map[string]any) (*models.CallToolResult, error)
 }
 
 // Call overrides the FuncTool.Call method for testing.
-func (t *TestFuncTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (t *TestFuncTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	if t.mockCallFunc != nil {
 		return t.mockCallFunc(ctx, args)
 	}
@@ -45,7 +45,7 @@ func (t *TestFuncTool) CanHandle(ctx context.Context, intent string) bool {
 }
 
 // Override the Execute method for testing.
-func (t *TestFuncTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t *TestFuncTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	if t.mockCallFunc != nil {
 		// Use the mock call function to get the result
 		result, err := t.mockCallFunc(ctx, params)
@@ -56,15 +56,15 @@ func (t *TestFuncTool) Execute(ctx context.Context, params map[string]interface{
 		// Convert to core.ToolResult
 		toolResult := core.ToolResult{
 			Data:        extractContentText(result.Content),
-			Metadata:    map[string]interface{}{"isError": result.IsError},
-			Annotations: map[string]interface{}{},
+			Metadata:    map[string]any{"isError": result.IsError},
+			Annotations: map[string]any{},
 		}
 		return toolResult, nil
 	}
 	return t.FuncTool.Execute(ctx, params)
 }
 
-func (t *TestFuncTool) Validate(params map[string]interface{}) error {
+func (t *TestFuncTool) Validate(params map[string]any) error {
 	return t.FuncTool.Validate(params)
 }
 
@@ -86,7 +86,7 @@ func TestNewFuncTool(t *testing.T) {
 	}
 
 	// Create a test function
-	fn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+	fn := func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		return &models.CallToolResult{}, nil
 	}
 
@@ -229,7 +229,7 @@ func TestFuncToolCall(t *testing.T) {
 	mockError := errors.New("test error")
 
 	// Test successful call
-	successFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+	successFn := func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		return mockResult, nil
 	}
 	successTool := &FuncTool{fn: successFn}
@@ -243,7 +243,7 @@ func TestFuncToolCall(t *testing.T) {
 	}
 
 	// Test failing call
-	errorFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+	errorFn := func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		return nil, mockError
 	}
 	errorTool := &FuncTool{fn: errorFn}
@@ -271,7 +271,7 @@ func TestFuncToolExecute(t *testing.T) {
 	mockError := errors.New("test error")
 
 	// Test successful execution
-	successFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+	successFn := func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		return mockResult, nil
 	}
 	successTool := &FuncTool{fn: successFn}
@@ -288,7 +288,7 @@ func TestFuncToolExecute(t *testing.T) {
 	}
 
 	// Test execution with error
-	errorFn := func(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+	errorFn := func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		return nil, mockError
 	}
 	errorTool := &FuncTool{fn: errorFn}
@@ -319,7 +319,7 @@ func TestFuncToolValidate(t *testing.T) {
 	tool := &FuncTool{schema: schema}
 
 	// Test valid parameters
-	validParams := map[string]interface{}{
+	validParams := map[string]any{
 		"required_param": "value",
 		"optional_param": 42,
 	}
@@ -329,7 +329,7 @@ func TestFuncToolValidate(t *testing.T) {
 	}
 
 	// Test missing required parameter
-	invalidParams := map[string]interface{}{
+	invalidParams := map[string]any{
 		"optional_param": 42,
 	}
 	err = tool.Validate(invalidParams)
@@ -338,7 +338,7 @@ func TestFuncToolValidate(t *testing.T) {
 	}
 
 	// Test with only required parameter
-	requiredOnlyParams := map[string]interface{}{
+	requiredOnlyParams := map[string]any{
 		"required_param": "value",
 	}
 	err = tool.Validate(requiredOnlyParams)

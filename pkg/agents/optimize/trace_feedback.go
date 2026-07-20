@@ -58,12 +58,12 @@ func (o *GEPAAgentOptimizer) defaultFeedbackEvaluator(seed AgentArtifacts) optim
 		return nil
 	}
 
-	return optimizers.GEPAFeedbackEvaluatorFunc(func(ctx context.Context, expected, actual map[string]interface{}, info *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
+	return optimizers.GEPAFeedbackEvaluatorFunc(func(ctx context.Context, expected, actual map[string]any, info *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
 		return deterministicTraceFeedback(ctx, targetIDs, expected, actual, info)
 	})
 }
 
-func deterministicTraceFeedback(_ context.Context, targetIDs map[string]string, _ map[string]interface{}, actual map[string]interface{}, info *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
+func deterministicTraceFeedback(_ context.Context, targetIDs map[string]string, _ map[string]any, actual map[string]any, info *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
 	if info == nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func deterministicTraceFeedback(_ context.Context, targetIDs map[string]string, 
 		lines = append(lines, "trace="+truncateTraceFeedback(traceSummary))
 	}
 
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"source": "deterministic_trace_feedback",
 	}
 	if target != "" {
@@ -149,18 +149,18 @@ func feedbackTargetComponent(candidate *optimizers.GEPACandidate, fallback map[s
 	return strings.TrimSpace(candidate.ModuleName)
 }
 
-func metadataValue(metadata map[string]interface{}, key string) interface{} {
+func metadataValue(metadata map[string]any, key string) any {
 	if len(metadata) == 0 {
 		return nil
 	}
 	return metadata[key]
 }
 
-func stringMapValue(raw interface{}) map[string]string {
+func stringMapValue(raw any) map[string]string {
 	switch value := raw.(type) {
 	case map[string]string:
 		return maps.Clone(value)
-	case map[string]interface{}:
+	case map[string]any:
 		converted := make(map[string]string, len(value))
 		for key, entry := range value {
 			if text := stringValue(entry); text != "" {
@@ -174,7 +174,7 @@ func stringMapValue(raw interface{}) map[string]string {
 	return nil
 }
 
-func stringValue(raw interface{}) string {
+func stringValue(raw any) string {
 	if text, ok := raw.(string); ok {
 		return strings.TrimSpace(text)
 	}
@@ -197,7 +197,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func numericValue(raw interface{}) (float64, bool) {
+func numericValue(raw any) (float64, bool) {
 	value, err := metricScoreValue(raw)
 	if err != nil {
 		return 0, false
@@ -205,11 +205,11 @@ func numericValue(raw interface{}) (float64, bool) {
 	return value, true
 }
 
-func stringSliceValue(raw interface{}) []string {
+func stringSliceValue(raw any) []string {
 	switch value := raw.(type) {
 	case []string:
 		return cleanStrings(value)
-	case []interface{}:
+	case []any:
 		items := make([]string, 0, len(value))
 		for _, item := range value {
 			if text := stringValue(item); text != "" {

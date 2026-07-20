@@ -3,14 +3,14 @@ package optimizers
 import "fmt"
 
 type OptimizerInfo struct {
-	Name          string
-	Description   string
-	UseCase       string
-	Complexity    string
-	ComputeCost   string
-	Convergence   string
-	BestFor       []string
-	Example       string
+	Name        string
+	Description string
+	UseCase     string
+	Complexity  string
+	ComputeCost string
+	Convergence string
+	BestFor     []string
+	Example     string
 }
 
 var Registry = map[string]OptimizerInfo{

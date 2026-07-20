@@ -16,14 +16,14 @@ import (
 
 // CacheEntry represents a cached result with expiration.
 type CacheEntry struct {
-	Result    interface{}
+	Result    any
 	ExpiresAt time.Time
 }
 
 // Cache interface allows for different caching implementations.
 type Cache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{}, ttl time.Duration)
+	Get(key string) (any, bool)
+	Set(key string, value any, ttl time.Duration)
 	Delete(key string)
 	Clear()
 }
@@ -51,7 +51,7 @@ func NewMemoryCache() *MemoryCache {
 }
 
 // Get retrieves a value from the cache.
-func (mc *MemoryCache) Get(key string) (interface{}, bool) {
+func (mc *MemoryCache) Get(key string) (any, bool) {
 	mc.mu.RLock()
 	entry, exists := mc.items[key]
 	if !exists {
@@ -77,7 +77,7 @@ func (mc *MemoryCache) Get(key string) (interface{}, bool) {
 }
 
 // Set stores a value in the cache with TTL.
-func (mc *MemoryCache) Set(key string, value interface{}, ttl time.Duration) {
+func (mc *MemoryCache) Set(key string, value any, ttl time.Duration) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
@@ -259,7 +259,7 @@ func CachingModuleInterceptor(cache Cache, ttl time.Duration) core.ModuleInterce
 
 // CachingToolInterceptor creates an interceptor that caches tool results.
 func CachingToolInterceptor(cache Cache, ttl time.Duration) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		// Generate cache key from args and tool info
 		cacheKey := generateToolCacheKey(args, info)
 
@@ -336,14 +336,14 @@ func TimeoutModuleInterceptor(timeout time.Duration) core.ModuleInterceptor {
 
 // TimeoutAgentInterceptor creates an interceptor that enforces timeouts on agent execution.
 func TimeoutAgentInterceptor(timeout time.Duration) core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		// Create context with timeout
 		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		// Channel to receive result
 		type result struct {
-			output map[string]interface{}
+			output map[string]any
 			err    error
 		}
 		resultChan := make(chan result, 1)
@@ -388,7 +388,7 @@ func TimeoutAgentInterceptor(timeout time.Duration) core.AgentInterceptor {
 
 // TimeoutToolInterceptor creates an interceptor that enforces timeouts on tool execution.
 func TimeoutToolInterceptor(timeout time.Duration) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		// Create context with timeout
 		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -459,7 +459,7 @@ func CircuitBreakerModuleInterceptor(cb *CircuitBreaker) core.ModuleInterceptor 
 
 // CircuitBreakerAgentInterceptor creates an interceptor that implements circuit breaker pattern for agents.
 func CircuitBreakerAgentInterceptor(cb *CircuitBreaker) core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		if !cb.Allow() {
 			return nil, fmt.Errorf("circuit breaker is open for agent %s", info.AgentID)
 		}
@@ -478,7 +478,7 @@ func CircuitBreakerAgentInterceptor(cb *CircuitBreaker) core.AgentInterceptor {
 
 // CircuitBreakerToolInterceptor creates an interceptor that implements circuit breaker pattern for tools.
 func CircuitBreakerToolInterceptor(cb *CircuitBreaker) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		if !cb.Allow() {
 			return core.ToolResult{}, fmt.Errorf("circuit breaker is open for tool %s", info.Name)
 		}
@@ -537,7 +537,7 @@ func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string
 }
 
 // generateToolCacheKey creates a cache key for tool results.
-func generateToolCacheKey(args map[string]interface{}, info *core.ToolInfo) string {
+func generateToolCacheKey(args map[string]any, info *core.ToolInfo) string {
 	hasher := sha256.New()
 
 	// Add tool info
@@ -605,7 +605,7 @@ func RetryModuleInterceptor(config RetryConfig) core.ModuleInterceptor {
 
 // RetryAgentInterceptor creates an interceptor that retries failed agent executions.
 func RetryAgentInterceptor(config RetryConfig) core.AgentInterceptor {
-	return func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		var lastErr error
 		delay := config.Delay
 
@@ -642,7 +642,7 @@ func RetryAgentInterceptor(config RetryConfig) core.AgentInterceptor {
 
 // RetryToolInterceptor creates an interceptor that retries failed tool executions.
 func RetryToolInterceptor(config RetryConfig) core.ToolInterceptor {
-	return func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	return func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		var lastErr error
 		delay := config.Delay
 
@@ -701,7 +701,7 @@ func mapToDeterministicString(m map[string]any) string {
 }
 
 // mapToDeterministicStringGeneric converts a map[string]interface{} to a deterministic string representation.
-func mapToDeterministicStringGeneric(m map[string]interface{}) string {
+func mapToDeterministicStringGeneric(m map[string]any) string {
 	if m == nil {
 		return "nil"
 	}
@@ -723,15 +723,15 @@ func mapToDeterministicStringGeneric(m map[string]interface{}) string {
 }
 
 // valueToDeterministicString converts any value to a deterministic string representation.
-func valueToDeterministicString(v interface{}) string {
+func valueToDeterministicString(v any) string {
 	switch val := v.(type) {
 	case nil:
 		return "nil"
 	case string:
 		return fmt.Sprintf("\"%s\"", val)
-	case map[string]interface{}:
+	case map[string]any:
 		return mapToDeterministicStringGeneric(val)
-	case []interface{}:
+	case []any:
 		parts := make([]string, len(val))
 		for i, item := range val {
 			parts[i] = valueToDeterministicString(item)

@@ -13,12 +13,12 @@ import (
 
 // DependencyNode represents a tool with its dependencies.
 type DependencyNode struct {
-	ToolName     string                 // Name of the tool
-	Dependencies []string               // Names of tools this depends on
-	Outputs      []string               // Output fields this tool produces
-	Inputs       []string               // Required input fields
-	Config       map[string]interface{} // Tool-specific configuration
-	Priority     int                    // Execution priority (higher = earlier)
+	ToolName     string         // Name of the tool
+	Dependencies []string       // Names of tools this depends on
+	Outputs      []string       // Output fields this tool produces
+	Inputs       []string       // Required input fields
+	Config       map[string]any // Tool-specific configuration
+	Priority     int            // Execution priority (higher = earlier)
 }
 
 // ExecutionPlan represents the optimized execution plan for tools.
@@ -36,17 +36,17 @@ type ExecutionPhase struct {
 
 // DependencyGraph manages tool dependencies and execution planning.
 type DependencyGraph struct {
-	nodes       map[string]*DependencyNode
-	edges       map[string][]string // adjacency list: tool -> dependencies
+	nodes        map[string]*DependencyNode
+	edges        map[string][]string // adjacency list: tool -> dependencies
 	reverseEdges map[string][]string // reverse adjacency list: tool -> dependents
-	mu          sync.RWMutex
+	mu           sync.RWMutex
 }
 
 // NewDependencyGraph creates a new dependency graph.
 func NewDependencyGraph() *DependencyGraph {
 	return &DependencyGraph{
-		nodes:       make(map[string]*DependencyNode),
-		edges:       make(map[string][]string),
+		nodes:        make(map[string]*DependencyNode),
+		edges:        make(map[string][]string),
 		reverseEdges: make(map[string][]string),
 	}
 }
@@ -189,7 +189,7 @@ func (dg *DependencyGraph) topologicalSortByPhases() ([]ExecutionPhase, error) {
 		// Add phase
 		phases = append(phases, ExecutionPhase{
 			Tools:       currentPhase,
-			ParallelOk:  true, // Tools in same phase can run in parallel
+			ParallelOk:  true,              // Tools in same phase can run in parallel
 			MaxParallel: len(currentPhase), // No limit by default
 		})
 
@@ -336,13 +336,13 @@ func NewDependencyPipeline(name string, registry core.ToolRegistry, graph *Depen
 
 	return &DependencyPipeline{
 		ToolPipeline: basePipeline,
-		graph:       graph,
-		plan:        plan,
+		graph:        graph,
+		plan:         plan,
 	}, nil
 }
 
 // ExecuteWithDependencies executes the pipeline using the dependency graph.
-func (dp *DependencyPipeline) ExecuteWithDependencies(ctx context.Context, initialInput map[string]interface{}) (*PipelineResult, error) {
+func (dp *DependencyPipeline) ExecuteWithDependencies(ctx context.Context, initialInput map[string]any) (*PipelineResult, error) {
 	start := time.Now()
 	result := &PipelineResult{
 		Results:      make([]core.ToolResult, 0),
@@ -534,13 +534,13 @@ func (dp *DependencyPipeline) executePhaseSequential(ctx context.Context, phase 
 }
 
 // prepareToolInput prepares input for a tool based on its dependencies.
-func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[string]core.ToolResult, mu *sync.Mutex) (map[string]interface{}, error) {
+func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[string]core.ToolResult, mu *sync.Mutex) (map[string]any, error) {
 	node, err := dp.graph.GetNode(toolName)
 	if err != nil {
 		return nil, err
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 
 	// If no dependencies, use initial input
 	if len(node.Dependencies) == 0 {
@@ -552,7 +552,7 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 			mu.Unlock()
 		}
 		if exists {
-			if initialData, ok := initialResult.Data.(map[string]interface{}); ok {
+			if initialData, ok := initialResult.Data.(map[string]any); ok {
 				return initialData, nil
 			}
 		}
@@ -565,7 +565,7 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 	}
 	for _, dep := range node.Dependencies {
 		if depResult, exists := toolResults[dep]; exists {
-			if depData, ok := depResult.Data.(map[string]interface{}); ok {
+			if depData, ok := depResult.Data.(map[string]any); ok {
 				// Merge dependency output into input
 				for key, value := range depData {
 					input[key] = value
@@ -589,7 +589,7 @@ func (dp *DependencyPipeline) prepareToolInput(toolName string, toolResults map[
 }
 
 // executeToolStep executes a single tool step.
-func (dp *DependencyPipeline) executeToolStep(ctx context.Context, toolName string, input map[string]interface{}) (core.ToolResult, error) {
+func (dp *DependencyPipeline) executeToolStep(ctx context.Context, toolName string, input map[string]any) (core.ToolResult, error) {
 	tool, err := dp.registry.Get(toolName)
 	if err != nil {
 		return core.ToolResult{}, err

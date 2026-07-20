@@ -14,11 +14,11 @@ import (
 )
 
 type BootstrapFewShot struct {
-	Metric          func(example map[string]interface{}, prediction map[string]interface{}, ctx context.Context) bool
+	Metric          func(example map[string]any, prediction map[string]any, ctx context.Context) bool
 	MaxBootstrapped int
 }
 
-func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction map[string]interface{}, ctx context.Context) bool, maxBootstrapped int) *BootstrapFewShot {
+func NewBootstrapFewShot(metric func(example map[string]any, prediction map[string]any, ctx context.Context) bool, maxBootstrapped int) *BootstrapFewShot {
 	return &BootstrapFewShot{
 		Metric:          metric,
 		MaxBootstrapped: maxBootstrapped,
@@ -28,7 +28,7 @@ func NewBootstrapFewShot(metric func(example map[string]interface{}, prediction 
 // Compile implements the core.Optimizer interface.
 func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
 	// Convert core.Dataset to trainset format
-	var trainset []map[string]interface{}
+	var trainset []map[string]any
 	dataset.Reset()
 	for {
 		example, hasNext := dataset.Next()
@@ -36,7 +36,7 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, da
 			break
 		}
 		// Combine inputs and outputs into a single map for compatibility
-		trainExample := make(map[string]interface{})
+		trainExample := make(map[string]any)
 		for k, v := range example.Inputs {
 			trainExample[k] = v
 		}
@@ -51,12 +51,12 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, da
 }
 
 // CompileLegacy provides backward compatibility for the old interface.
-func (b *BootstrapFewShot) CompileLegacy(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
+func (b *BootstrapFewShot) CompileLegacy(ctx context.Context, student, teacher core.Program, trainset []map[string]any) (core.Program, error) {
 	return b.compileInternal(ctx, student, teacher, trainset)
 }
 
 // compileInternal contains the original implementation logic.
-func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]interface{}) (core.Program, error) {
+func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]any) (core.Program, error) {
 	compiledStudent := student.Clone()
 	teacherLLM := core.GetTeacherLLM()
 	if teacherLLM == nil {
@@ -156,7 +156,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 	return compiledStudent, nil
 }
 
-func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]interface{}) (map[string]interface{}, error) {
+func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]any) (map[string]any, error) {
 	// Clone the teacher program and set its LLM to the teacher LLM
 	teacherClone := teacher.Clone()
 	for _, module := range teacherClone.Modules {

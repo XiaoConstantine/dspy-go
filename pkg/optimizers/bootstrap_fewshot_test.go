@@ -22,8 +22,8 @@ func createProgram() core.Program {
 
 	return core.NewProgramWithForwardFactory(
 		map[string]core.Module{"predict": predict},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				ctx, span := core.StartSpan(ctx, "Forward")
 				defer core.EndSpan(ctx)
 				span.WithAnnotation("inputs", inputs)
@@ -45,16 +45,16 @@ func TestBootstrapFewShot(t *testing.T) {
 	// Create training set as core.Examples
 	trainExamples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "What is the capital of France?"},
-			Outputs: map[string]interface{}{"answer": "Paris"},
+			Inputs:  map[string]any{"question": "What is the capital of France?"},
+			Outputs: map[string]any{"answer": "Paris"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "What is the capital of Germany?"},
-			Outputs: map[string]interface{}{"answer": "Berlin"},
+			Inputs:  map[string]any{"question": "What is the capital of Germany?"},
+			Outputs: map[string]any{"answer": "Berlin"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "What is the capital of Italy?"},
-			Outputs: map[string]interface{}{"answer": "Rome"},
+			Inputs:  map[string]any{"question": "What is the capital of Italy?"},
+			Outputs: map[string]any{"answer": "Rome"},
 		},
 	}
 
@@ -62,10 +62,10 @@ func TestBootstrapFewShot(t *testing.T) {
 	trainDataset := datasets.NewSimpleDataset(trainExamples)
 
 	// Define metric functions
-	boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+	boolMetric := func(example, prediction map[string]any, ctx context.Context) bool {
 		return true // Always return true for this test
 	}
-	floatMetric := func(expected, actual map[string]interface{}) float64 {
+	floatMetric := func(expected, actual map[string]any) float64 {
 		return 1.0 // Always return 1.0 for this test
 	}
 
@@ -125,23 +125,23 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 
 	trainExamples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "Q1"},
-			Outputs: map[string]interface{}{"answer": "A1"},
+			Inputs:  map[string]any{"question": "Q1"},
+			Outputs: map[string]any{"answer": "A1"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "Q2"},
-			Outputs: map[string]interface{}{"answer": "A2"},
+			Inputs:  map[string]any{"question": "Q2"},
+			Outputs: map[string]any{"answer": "A2"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "Q3"},
-			Outputs: map[string]interface{}{"answer": "A3"},
+			Inputs:  map[string]any{"question": "Q3"},
+			Outputs: map[string]any{"answer": "A3"},
 		},
 	}
 	trainDataset := datasets.NewSimpleDataset(trainExamples)
-	dummyMetric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+	dummyMetric := func(expected, actual map[string]any) float64 { return 1.0 }
 
 	t.Run("MaxBootstrapped Zero", func(t *testing.T) {
-		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ context.Context) bool { return true }, 0)
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]any, _ context.Context) bool { return true }, 0)
 		ctx := context.Background()
 
 		optimized, err := optimizer.Compile(ctx, createProgram(), trainDataset, dummyMetric)
@@ -150,7 +150,7 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 	})
 
 	t.Run("MaxBootstrapped Large", func(t *testing.T) {
-		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ context.Context) bool {
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]any, _ context.Context) bool {
 			return true
 		}, 100)
 		ctx := context.Background()
@@ -164,7 +164,7 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Metric Rejects All", func(t *testing.T) {
-		optimizer := NewBootstrapFewShot(func(_, _ map[string]interface{}, _ context.Context) bool { return false }, 2)
+		optimizer := NewBootstrapFewShot(func(_, _ map[string]any, _ context.Context) bool { return false }, 2)
 		ctx := context.Background()
 		optimized, _ := optimizer.Compile(ctx, createProgram(), trainDataset, dummyMetric)
 		assert.Equal(t, 0, len(optimized.Modules["predict"].(*modules.Predict).Demos))
@@ -204,7 +204,7 @@ func BenchmarkBootstrapFewShot(b *testing.B) {
 			program := testutil.CreateBenchmarkProgram(predictor)
 
 			// Create BootstrapFewShot optimizer with config
-			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+			boolMetric := func(example, prediction map[string]any, ctx context.Context) bool {
 				// Convert to float64 metric for compatibility
 				score := testutil.BenchmarkAccuracyMetric(example, prediction)
 				return score > 0.5 // Accept if accuracy > 50%
@@ -246,7 +246,7 @@ func BenchmarkBootstrapFewShotDatasetScaling(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+			boolMetric := func(example, prediction map[string]any, ctx context.Context) bool {
 				score := testutil.BenchmarkAccuracyMetric(example, prediction)
 				return score > 0.5
 			}
@@ -297,7 +297,7 @@ func BenchmarkBootstrapFewShotParameterTuning(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+			boolMetric := func(example, prediction map[string]any, ctx context.Context) bool {
 				score := testutil.BenchmarkAccuracyMetric(example, prediction)
 				return score > pt.metricThreshold
 			}
@@ -329,22 +329,22 @@ func BenchmarkBootstrapFewShotMetricVariations(b *testing.B) {
 
 	metricTests := []struct {
 		name        string
-		metricFunc  func(example, prediction map[string]interface{}, ctx context.Context) bool
+		metricFunc  func(example, prediction map[string]any, ctx context.Context) bool
 		description string
 	}{
 		{
 			"AlwaysAccept",
-			func(example, prediction map[string]interface{}, ctx context.Context) bool { return true },
+			func(example, prediction map[string]any, ctx context.Context) bool { return true },
 			"Metric that always accepts predictions",
 		},
 		{
 			"AlwaysReject",
-			func(example, prediction map[string]interface{}, ctx context.Context) bool { return false },
+			func(example, prediction map[string]any, ctx context.Context) bool { return false },
 			"Metric that always rejects predictions",
 		},
 		{
 			"Selective50",
-			func(example, prediction map[string]interface{}, ctx context.Context) bool {
+			func(example, prediction map[string]any, ctx context.Context) bool {
 				score := testutil.BenchmarkAccuracyMetric(example, prediction)
 				return score > 0.5
 			},
@@ -352,7 +352,7 @@ func BenchmarkBootstrapFewShotMetricVariations(b *testing.B) {
 		},
 		{
 			"Selective80",
-			func(example, prediction map[string]interface{}, ctx context.Context) bool {
+			func(example, prediction map[string]any, ctx context.Context) bool {
 				score := testutil.BenchmarkAccuracyMetric(example, prediction)
 				return score > 0.8
 			},
@@ -419,7 +419,7 @@ func BenchmarkBootstrapFewShotConcurrency(b *testing.B) {
 			predictor := modules.NewPredict(signature)
 			program := testutil.CreateBenchmarkProgram(predictor)
 
-			boolMetric := func(example, prediction map[string]interface{}, ctx context.Context) bool {
+			boolMetric := func(example, prediction map[string]any, ctx context.Context) bool {
 				score := testutil.BenchmarkAccuracyMetric(example, prediction)
 				return score > 0.5
 			}

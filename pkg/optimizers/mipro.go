@@ -30,25 +30,25 @@ var AutoRunSettings = map[RunMode]struct {
 
 // SearchStrategy defines the interface for optimization search algorithms.
 type SearchStrategy interface {
-	SuggestParams(ctx context.Context) (map[string]interface{}, error)
-	UpdateResults(params map[string]interface{}, score float64) error
-	GetBestParams() (map[string]interface{}, float64)
+	SuggestParams(ctx context.Context) (map[string]any, error)
+	UpdateResults(params map[string]any, score float64) error
+	GetBestParams() (map[string]any, float64)
 	Initialize(config SearchConfig) error
 }
 
 // SearchConfig contains configuration for search strategies.
 type SearchConfig struct {
-	ParamSpace  map[string][]interface{}
+	ParamSpace  map[string][]any
 	MaxTrials   int
 	Seed        int64
-	Constraints map[string]interface{}
+	Constraints map[string]any
 }
 
 // TeacherStudentOptimizer handles the teacher-student learning dynamic.
 type TeacherStudentOptimizer struct {
 	Teacher         core.LLM
 	Student         core.LLM
-	TeacherSettings map[string]interface{}
+	TeacherSettings map[string]any
 	MaxExamples     int
 
 	state struct {
@@ -79,7 +79,7 @@ func (t *TeacherStudentOptimizer) GenerateDemonstration(ctx context.Context, inp
 
 	return core.Example{
 		Inputs:  input.Inputs,
-		Outputs: map[string]interface{}{"completion": response.Content},
+		Outputs: map[string]any{"completion": response.Content},
 	}, nil
 }
 
@@ -153,7 +153,7 @@ type MIPROConfig struct {
 		TrialsPerVariable float64
 		BatchSizeScaling  float64
 	}
-	TeacherSettings map[string]interface{}
+	TeacherSettings map[string]any
 
 	// TPE specific configuration
 	TPEGamma        float64
@@ -207,7 +207,7 @@ type OptimizationStep struct {
 // MIPRO is the main optimizer implementing multi-step interactive prompt optimization.
 type MIPRO struct {
 	// Core components
-	metric               func(example, prediction map[string]interface{}, ctx context.Context) float64
+	metric               func(example, prediction map[string]any, ctx context.Context) float64
 	searchStrategy       SearchStrategy
 	teacherStudent       *TeacherStudentOptimizer
 	instructionGenerator *InstructionGenerator
@@ -248,7 +248,7 @@ func WithNumTrials(trials int) MIPROOption {
 }
 
 // WithTeacherSettings configures the teacher model settings.
-func WithTeacherSettings(settings map[string]interface{}) MIPROOption {
+func WithTeacherSettings(settings map[string]any) MIPROOption {
 	return func(m *MIPRO) {
 		m.config.TeacherSettings = settings
 	}
@@ -319,7 +319,7 @@ func WithModels(promptModel, taskModel core.LLM) MIPROOption {
 
 // NewMIPRO creates a new MIPRO optimizer instance.
 func NewMIPRO(
-	metric func(example, prediction map[string]interface{}, ctx context.Context) float64,
+	metric func(example, prediction map[string]any, ctx context.Context) float64,
 	opts ...MIPROOption,
 ) *MIPRO {
 	m := &MIPRO{
@@ -394,7 +394,7 @@ func (m *MIPRO) initComponents() {
 	}
 	// Initialize search strategy if not provided via option
 	if m.searchStrategy == nil {
-		paramSpace := make(map[string][]interface{})
+		paramSpace := make(map[string][]any)
 
 		// We need to determine how many modules we'll be optimizing
 		// This would typically come from the program structure or configuration
@@ -406,7 +406,7 @@ func (m *MIPRO) initComponents() {
 		// For each module, create a parameter for selecting an instruction
 		for i := 0; i < numModules; i++ {
 			// Create a parameter that can select among numCandidates instruction options
-			values := make([]interface{}, m.numCandidates)
+			values := make([]any, m.numCandidates)
 			for j := 0; j < m.numCandidates; j++ {
 				values[j] = float64(j) // Use float64 for consistency
 			}
@@ -416,7 +416,7 @@ func (m *MIPRO) initComponents() {
 		// If we also have demo sets, create parameters for those
 		if m.maxBootstrappedDemos > 0 || m.config.MaxLabeledDemos > 0 {
 			demoSets := 5 // Default to 5 sets of demos
-			values := make([]interface{}, demoSets)
+			values := make([]any, demoSets)
 			for j := 0; j < demoSets; j++ {
 				values[j] = float64(j)
 			}
@@ -583,12 +583,12 @@ func (m *MIPRO) teacherDemonstration(ctx context.Context, example core.Example) 
 	// Create a new example with the teacher's output
 	return core.Example{
 		Inputs:  example.Inputs,
-		Outputs: map[string]interface{}{"completion": teacherResult.Content},
+		Outputs: map[string]any{"completion": teacherResult.Content},
 	}, nil
 }
 
 // Methods for tracking and analyzing performance.
-func (m *MIPRO) updateOptimizationState(params map[string]interface{}, score float64, program core.Program) {
+func (m *MIPRO) updateOptimizationState(params map[string]any, score float64, program core.Program) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -669,7 +669,7 @@ func (m *MIPRO) generateDemonstrations(
 // createCandidateProgram creates a new program with the given parameters.
 func (m *MIPRO) createCandidateProgram(
 	baseProgram core.Program,
-	params map[string]interface{},
+	params map[string]any,
 	demos []core.Example,
 	instructions map[int][]string,
 ) core.Program {

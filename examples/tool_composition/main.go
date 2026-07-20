@@ -45,7 +45,7 @@ func (c *CompositeTool) CanHandle(ctx context.Context, intent string) bool {
 	return true
 }
 
-func (c *CompositeTool) Validate(params map[string]interface{}) error {
+func (c *CompositeTool) Validate(params map[string]any) error {
 	return nil
 }
 
@@ -53,7 +53,7 @@ func (c *CompositeTool) InputSchema() models.InputSchema {
 	return models.InputSchema{}
 }
 
-func (c *CompositeTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (c *CompositeTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	result, err := c.pipeline.Execute(ctx, params)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -66,7 +66,7 @@ func (c *CompositeTool) Execute(ctx context.Context, params map[string]interface
 	}
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"composite_result": "completed",
 			"steps_executed":   len(result.Results),
 		},
@@ -103,10 +103,10 @@ func (t *TextProcessorTool) Metadata() *core.ToolMetadata {
 	}
 }
 func (t *TextProcessorTool) CanHandle(ctx context.Context, intent string) bool { return true }
-func (t *TextProcessorTool) Validate(params map[string]interface{}) error      { return nil }
+func (t *TextProcessorTool) Validate(params map[string]any) error              { return nil }
 func (t *TextProcessorTool) InputSchema() models.InputSchema                   { return models.InputSchema{} }
 
-func (t *TextProcessorTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+func (t *TextProcessorTool) Execute(ctx context.Context, params map[string]any) (core.ToolResult, error) {
 	text, ok := params["text"].(string)
 	if !ok {
 		text = "sample text"
@@ -134,12 +134,12 @@ func (t *TextProcessorTool) Execute(ctx context.Context, params map[string]inter
 	}
 
 	return core.ToolResult{
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"text":      processedText,
 			"operation": t.operation,
 			"timestamp": time.Now().Unix(),
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"tool":      t.Name(),
 			"operation": t.operation,
 		},
@@ -192,7 +192,7 @@ func demonstrateBasicComposition(registry core.ToolRegistry) {
 
 	// Use the composite tool
 	ctx := context.Background()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"text": "Hello World",
 	}
 
@@ -204,7 +204,7 @@ func demonstrateBasicComposition(registry core.ToolRegistry) {
 	}
 
 	fmt.Printf("✅ Composite processing completed\n")
-	if data, ok := result.Data.(map[string]interface{}); ok {
+	if data, ok := result.Data.(map[string]any); ok {
 		if finalText, ok := data["text"].(string); ok {
 			fmt.Printf("🎯 Final result: %s\n", finalText)
 		}

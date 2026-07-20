@@ -38,7 +38,7 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("call without interceptors", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
 		result, err := wrapper.Call(ctx, args)
 		require.NoError(t, err)
@@ -52,9 +52,9 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("call with interceptors", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			// Modify args
 			args["intercepted"] = true
 			result, err := handler(ctx, args)
@@ -63,7 +63,7 @@ func TestInterceptorToolWrapper(t *testing.T) {
 			}
 			// Modify result metadata
 			if result.Metadata == nil {
-				result.Metadata = make(map[string]interface{})
+				result.Metadata = make(map[string]any)
 			}
 			result.Metadata["interceptor_applied"] = true
 			return result, nil
@@ -79,17 +79,17 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("multiple interceptors execution order", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 		var executionOrder []string
 
-		interceptor1 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor1 := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			executionOrder = append(executionOrder, "interceptor1_start")
 			result, err := handler(ctx, args)
 			executionOrder = append(executionOrder, "interceptor1_end")
 			return result, err
 		}
 
-		interceptor2 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor2 := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			executionOrder = append(executionOrder, "interceptor2_start")
 			result, err := handler(ctx, args)
 			executionOrder = append(executionOrder, "interceptor2_end")
@@ -105,10 +105,10 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("interceptor receives correct tool info", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 		var receivedInfo *core.ToolInfo
 
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			receivedInfo = info
 			return handler(ctx, args)
 		}
@@ -127,10 +127,10 @@ func TestInterceptorToolWrapper(t *testing.T) {
 		assert.Empty(t, wrapper.GetInterceptors())
 
 		// Test setting interceptors
-		interceptor1 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor1 := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			return handler(ctx, args)
 		}
-		interceptor2 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor2 := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			return handler(ctx, args)
 		}
 
@@ -144,15 +144,15 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("use default interceptors", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
-		defaultInterceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		defaultInterceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			result, err := handler(ctx, args)
 			if err != nil {
 				return core.ToolResult{}, err
 			}
 			if result.Metadata == nil {
-				result.Metadata = make(map[string]interface{})
+				result.Metadata = make(map[string]any)
 			}
 			result.Metadata["default_interceptor"] = true
 			return result, err
@@ -173,10 +173,10 @@ func TestInterceptorToolWrapper(t *testing.T) {
 		errorWrapper := NewInterceptorToolWrapper(errorTool, "error", "1.0.0")
 
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
 		var interceptorCalled bool
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			interceptorCalled = true
 			result, err := handler(ctx, args)
 			if err != nil {
@@ -194,16 +194,16 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("result conversion", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
 		// Interceptor that returns a different core.ToolResult
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			return core.ToolResult{
 				Data: "custom data",
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"custom": true,
 				},
-				Annotations: map[string]interface{}{
+				Annotations: map[string]any{
 					"note": "custom result",
 				},
 			}, nil
@@ -221,10 +221,10 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("metadata preservation", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
 		// Interceptor that adds metadata and annotations
-		interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			result, err := handler(ctx, args)
 			if err != nil {
 				return core.ToolResult{}, err
@@ -232,7 +232,7 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 			// Add rich metadata
 			if result.Metadata == nil {
-				result.Metadata = make(map[string]interface{})
+				result.Metadata = make(map[string]any)
 			}
 			result.Metadata["execution_time_ms"] = 150
 			result.Metadata["interceptor_id"] = "test-interceptor"
@@ -240,7 +240,7 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 			// Add annotations
 			if result.Annotations == nil {
-				result.Annotations = make(map[string]interface{})
+				result.Annotations = make(map[string]any)
 			}
 			result.Annotations["trace_id"] = "trace-12345"
 			result.Annotations["debug_info"] = "interceptor executed successfully"
@@ -271,25 +271,25 @@ func TestInterceptorToolWrapper(t *testing.T) {
 
 	t.Run("metadata isolation between calls", func(t *testing.T) {
 		ctx := context.Background()
-		args := map[string]interface{}{"input": "test"}
+		args := map[string]any{"input": "test"}
 
 		// First interceptor
-		interceptor1 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor1 := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			result, err := handler(ctx, args)
 			if err != nil {
 				return core.ToolResult{}, err
 			}
-			result.Metadata = map[string]interface{}{"call": "first"}
+			result.Metadata = map[string]any{"call": "first"}
 			return result, nil
 		}
 
 		// Second interceptor
-		interceptor2 := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+		interceptor2 := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 			result, err := handler(ctx, args)
 			if err != nil {
 				return core.ToolResult{}, err
 			}
-			result.Metadata = map[string]interface{}{"call": "second"}
+			result.Metadata = map[string]any{"call": "second"}
 			return result, nil
 		}
 
@@ -316,13 +316,13 @@ func TestWrapToolWithInterceptors(t *testing.T) {
 		description: "A test tool",
 	}
 
-	interceptor := func(ctx context.Context, args map[string]interface{}, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
+	interceptor := func(ctx context.Context, args map[string]any, info *core.ToolInfo, handler core.ToolHandler) (core.ToolResult, error) {
 		result, err := handler(ctx, args)
 		if err != nil {
 			return core.ToolResult{}, err
 		}
 		if result.Metadata == nil {
-			result.Metadata = make(map[string]interface{})
+			result.Metadata = make(map[string]any)
 		}
 		result.Metadata["wrapped"] = true
 		return result, nil
@@ -332,7 +332,7 @@ func TestWrapToolWithInterceptors(t *testing.T) {
 	wrapped := WrapToolWithInterceptors(originalTool, "function", "1.0.0", interceptor)
 
 	ctx := context.Background()
-	args := map[string]interface{}{"input": "test"}
+	args := map[string]any{"input": "test"}
 
 	t.Run("wrapper function creates proper wrapper", func(t *testing.T) {
 		assert.Equal(t, "test_tool", wrapped.Name())
@@ -387,7 +387,7 @@ func (mtt *MockTestTool) InputSchema() models.InputSchema {
 	}
 }
 
-func (mtt *MockTestTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (mtt *MockTestTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	input := args["input"].(string)
 	return &models.CallToolResult{
 		Content: []models.Content{
@@ -418,6 +418,6 @@ func (ett *ErrorTestTool) InputSchema() models.InputSchema {
 	}
 }
 
-func (ett *ErrorTestTool) Call(ctx context.Context, args map[string]interface{}) (*models.CallToolResult, error) {
+func (ett *ErrorTestTool) Call(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	return nil, fmt.Errorf("tool error")
 }

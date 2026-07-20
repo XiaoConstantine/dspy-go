@@ -74,8 +74,8 @@ func (m *targetAwareMockAgent) OptimizationAgentType() string {
 	return "mock"
 }
 
-func (a *updateTrackingAgent) Execute(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+func (a *updateTrackingAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 
 func (a *updateTrackingAgent) GetCapabilities() []core.Tool { return nil }
@@ -146,7 +146,7 @@ func (artifactScoringEvaluator) Evaluate(_ context.Context, agent OptimizableAge
 		ToolUsageCount: map[string]int{
 			"lookup": 1,
 		},
-		ContextMetadata: map[string]interface{}{
+		ContextMetadata: map[string]any{
 			"artifact_skill_pack": artifacts.Text[ArtifactSkillPack],
 		},
 		TerminationCause: "score",
@@ -159,7 +159,7 @@ func (artifactScoringEvaluator) Evaluate(_ context.Context, agent OptimizableAge
 			Scores: map[string]float64{
 				"artifact_score": score,
 			},
-			Diagnostics: map[string]interface{}{
+			Diagnostics: map[string]any{
 				"skill_pack":  artifacts.Text[ArtifactSkillPack],
 				"tool_policy": artifacts.Text[ArtifactToolPolicy],
 				"max_turns":   artifacts.Int["max_turns"],

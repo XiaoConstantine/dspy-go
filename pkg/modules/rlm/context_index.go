@@ -10,25 +10,25 @@ import (
 
 // Chunk represents a segment of the context with metadata.
 type Chunk struct {
-	ID        int      // Unique identifier
-	Content   string   // The actual text content
-	StartLine int      // Starting line number (1-indexed)
-	EndLine   int      // Ending line number (1-indexed)
-	Summary   string   // Optional summary of the chunk
+	ID        int       // Unique identifier
+	Content   string    // The actual text content
+	StartLine int       // Starting line number (1-indexed)
+	EndLine   int       // Ending line number (1-indexed)
+	Summary   string    // Optional summary of the chunk
 	Embedding []float32 // Embedding vector for semantic search
 }
 
 // ContextIndex provides efficient access to context slices.
 // It supports both line-based access and semantic search via embeddings.
 type ContextIndex struct {
-	mu         sync.RWMutex
-	rawContent string            // Original full content
-	lines      []string          // Content split by lines
-	chunks     []Chunk           // Chunked segments
-	embeddings [][]float32       // Chunk embeddings (parallel to chunks)
-	summaries  map[int]string    // Chunk ID -> summary
-	indexed    bool              // Whether embeddings have been computed
-	embeddingFn EmbeddingFunc    // Function to compute embeddings
+	mu          sync.RWMutex
+	rawContent  string         // Original full content
+	lines       []string       // Content split by lines
+	chunks      []Chunk        // Chunked segments
+	embeddings  [][]float32    // Chunk embeddings (parallel to chunks)
+	summaries   map[int]string // Chunk ID -> summary
+	indexed     bool           // Whether embeddings have been computed
+	embeddingFn EmbeddingFunc  // Function to compute embeddings
 }
 
 // EmbeddingFunc computes embeddings for text inputs.
@@ -49,8 +49,8 @@ type ChunkConfig struct {
 // DefaultChunkConfig returns sensible defaults for chunking.
 func DefaultChunkConfig() ChunkConfig {
 	return ChunkConfig{
-		MaxChunkSize:  4000,  // ~1000 tokens
-		OverlapSize:   200,   // ~50 tokens overlap
+		MaxChunkSize:  4000, // ~1000 tokens
+		OverlapSize:   200,  // ~50 tokens overlap
 		ChunkByLines:  false,
 		LinesPerChunk: 50,
 	}

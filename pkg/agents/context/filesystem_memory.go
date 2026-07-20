@@ -33,22 +33,22 @@ type FileSystemMemory struct {
 	config MemoryConfig
 
 	// Metrics
-	totalFiles    int64
-	totalSize     int64
-	accessCount   int64
+	totalFiles         int64
+	totalSize          int64
+	accessCount        int64
 	compressionSavings int64
 }
 
 // MemoryReference represents a reference to externally stored content.
 type MemoryReference struct {
-	ID          string                 `json:"id"`
-	Type        string                 `json:"type"`
-	Path        string                 `json:"path"`
-	Size        int64                  `json:"size"`
-	Checksum    string                 `json:"checksum"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Compressed  bool                   `json:"compressed"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	Path       string         `json:"path"`
+	Size       int64          `json:"size"`
+	Checksum   string         `json:"checksum"`
+	Timestamp  time.Time      `json:"timestamp"`
+	Compressed bool           `json:"compressed"`
+	Metadata   map[string]any `json:"metadata"`
 }
 
 // MemoryContent represents content stored in filesystem memory.
@@ -90,7 +90,7 @@ func NewFileSystemMemory(baseDir, sessionID, agentID string, config MemoryConfig
 // StoreLargeObservation stores large observations externally and returns a short reference.
 // This is the core pattern from Manus - instead of including huge content in context,
 // store it externally and include only a reference.
-func (fsm *FileSystemMemory) StoreLargeObservation(ctx context.Context, id string, content []byte, metadata map[string]interface{}) (string, error) {
+func (fsm *FileSystemMemory) StoreLargeObservation(ctx context.Context, id string, content []byte, metadata map[string]any) (string, error) {
 	fsm.mu.Lock()
 	defer fsm.mu.Unlock()
 
@@ -108,14 +108,14 @@ func (fsm *FileSystemMemory) StoreLargeObservation(ctx context.Context, id strin
 	// Store metadata separately for quick access
 	metaPath := fullPath + ".meta.json"
 	reference := MemoryReference{
-		ID:        id,
-		Type:      "observation",
-		Path:      filename,
-		Size:      int64(len(content)),
-		Checksum:  checksum,
-		Timestamp: time.Now(),
+		ID:         id,
+		Type:       "observation",
+		Path:       filename,
+		Size:       int64(len(content)),
+		Checksum:   checksum,
+		Timestamp:  time.Now(),
 		Compressed: false,
-		Metadata:  metadata,
+		Metadata:   metadata,
 	}
 
 	metaBytes, err := json.MarshalIndent(reference, "", "  ")
@@ -144,7 +144,7 @@ func (fsm *FileSystemMemory) StoreLargeObservation(ctx context.Context, id strin
 }
 
 // StoreContext stores agent context data for later retrieval.
-func (fsm *FileSystemMemory) StoreContext(ctx context.Context, contextID string, data map[string]interface{}) (string, error) {
+func (fsm *FileSystemMemory) StoreContext(ctx context.Context, contextID string, data map[string]any) (string, error) {
 	fsm.mu.Lock()
 	defer fsm.mu.Unlock()
 
@@ -169,7 +169,7 @@ func (fsm *FileSystemMemory) StoreContext(ctx context.Context, contextID string,
 		Size:      int64(len(contentBytes)),
 		Checksum:  checksum,
 		Timestamp: time.Now(),
-		Metadata:  map[string]interface{}{"context_id": contextID},
+		Metadata:  map[string]any{"context_id": contextID},
 	}
 
 	// Store reference metadata
@@ -243,7 +243,7 @@ func (fsm *FileSystemMemory) RetrieveObservation(ctx context.Context, reference 
 }
 
 // StoreFile stores arbitrary file content with a specific type.
-func (fsm *FileSystemMemory) StoreFile(ctx context.Context, contentType, id string, content []byte, metadata map[string]interface{}) (string, error) {
+func (fsm *FileSystemMemory) StoreFile(ctx context.Context, contentType, id string, content []byte, metadata map[string]any) (string, error) {
 	fsm.mu.Lock()
 	defer fsm.mu.Unlock()
 
@@ -399,11 +399,11 @@ func (fsm *FileSystemMemory) CleanExpired(ctx context.Context) (int64, error) {
 }
 
 // GetMetrics returns filesystem memory usage metrics.
-func (fsm *FileSystemMemory) GetMetrics() map[string]interface{} {
+func (fsm *FileSystemMemory) GetMetrics() map[string]any {
 	fsm.mu.RLock()
 	defer fsm.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_files":         fsm.totalFiles,
 		"total_size_bytes":    fsm.totalSize,
 		"access_count":        fsm.accessCount,

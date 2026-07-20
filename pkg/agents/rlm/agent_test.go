@@ -35,11 +35,11 @@ func (m *testLLM) Generate(ctx context.Context, prompt string, opts ...core.Gene
 	}, nil
 }
 
-func (m *testLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *testLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *testLLM) GenerateWithFunctions(context.Context, string, []map[string]interface{}, ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *testLLM) GenerateWithFunctions(context.Context, string, []map[string]any, ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -107,7 +107,7 @@ func TestAgentExecute_RecordsTraceAndOutput(t *testing.T) {
 	}, modrlm.WithMaxIterations(1))
 
 	agent := NewAgent("adaptive-rlm", module)
-	output, err := agent.Execute(context.Background(), map[string]interface{}{
+	output, err := agent.Execute(context.Background(), map[string]any{
 		"context": "ctx",
 		"query":   "what is the answer?",
 	})
@@ -137,7 +137,7 @@ func TestAgentExecute_RecordsRLMNativeMetadata(t *testing.T) {
 	)
 
 	agent := NewAgent("adaptive-rlm", module)
-	output, err := agent.Execute(context.Background(), map[string]interface{}{
+	output, err := agent.Execute(context.Background(), map[string]any{
 		"context": "ctx",
 		"query":   "what is the answer?",
 	})
@@ -157,7 +157,7 @@ func TestAgentExecute_RecordsRLMNativeMetadata(t *testing.T) {
 
 func TestAgentExecute_NilReceiverReturnsError(t *testing.T) {
 	var agent *Agent
-	_, err := agent.Execute(context.Background(), map[string]interface{}{
+	_, err := agent.Execute(context.Background(), map[string]any{
 		"context": "ctx",
 		"query":   "what is the answer?",
 	})
@@ -243,7 +243,7 @@ func TestGEPAAgentOptimizer_Optimize_RLMIterationPrompt(t *testing.T) {
 				Score: score,
 				SideInfo: &optimize.SideInfo{
 					Scores: map[string]float64{"prompt_fit": score},
-					Diagnostics: map[string]interface{}{
+					Diagnostics: map[string]any{
 						"artifact": "rlm_iteration_prompt",
 					},
 				},

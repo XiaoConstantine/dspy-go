@@ -12,9 +12,9 @@ import (
 // content, so evaluators should derive it from those inputs rather than
 // candidate identity or generation-local state.
 type GEPAFeedback struct {
-	Feedback        string                 `json:"feedback,omitempty"`
-	TargetComponent string                 `json:"target_component,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	Feedback        string         `json:"feedback,omitempty"`
+	TargetComponent string         `json:"target_component,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 // GEPAFeedbackContext provides per-example execution context for optional
@@ -22,20 +22,20 @@ type GEPAFeedback struct {
 type GEPAFeedbackContext struct {
 	Candidate *GEPACandidate
 	Example   core.Example
-	Outputs   map[string]interface{}
+	Outputs   map[string]any
 	Err       error
 }
 
 // GEPAFeedbackEvaluator optionally augments scalar scoring with example-level
 // textual guidance that reflection and proposal prompts can consume.
 type GEPAFeedbackEvaluator interface {
-	EvaluateFeedback(ctx context.Context, expected, actual map[string]interface{}, info *GEPAFeedbackContext) *GEPAFeedback
+	EvaluateFeedback(ctx context.Context, expected, actual map[string]any, info *GEPAFeedbackContext) *GEPAFeedback
 }
 
 // GEPAFeedbackEvaluatorFunc adapts a function into a GEPAFeedbackEvaluator.
-type GEPAFeedbackEvaluatorFunc func(ctx context.Context, expected, actual map[string]interface{}, info *GEPAFeedbackContext) *GEPAFeedback
+type GEPAFeedbackEvaluatorFunc func(ctx context.Context, expected, actual map[string]any, info *GEPAFeedbackContext) *GEPAFeedback
 
-func (fn GEPAFeedbackEvaluatorFunc) EvaluateFeedback(ctx context.Context, expected, actual map[string]interface{}, info *GEPAFeedbackContext) *GEPAFeedback {
+func (fn GEPAFeedbackEvaluatorFunc) EvaluateFeedback(ctx context.Context, expected, actual map[string]any, info *GEPAFeedbackContext) *GEPAFeedback {
 	if fn == nil {
 		return nil
 	}

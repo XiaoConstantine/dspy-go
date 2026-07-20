@@ -15,8 +15,8 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 		optimizer := NewMemoryOptimizer(24*time.Hour, 0.5)
 		ctx := context.Background()
 
-		input := map[string]interface{}{"task": "test task"}
-		output := map[string]interface{}{"result": "test result"}
+		input := map[string]any{"task": "test task"}
+		output := map[string]any{"result": "test result"}
 
 		err := optimizer.Store(ctx, input, output, true)
 		require.NoError(t, err)
@@ -32,8 +32,8 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 		ctx := context.Background()
 		// Add items to trigger compression
 		for i := 0; i < 10; i++ {
-			input := map[string]interface{}{"task": fmt.Sprintf("task %d", i)}
-			output := map[string]interface{}{"result": fmt.Sprintf("result %d", i)}
+			input := map[string]any{"task": fmt.Sprintf("task %d", i)}
+			output := map[string]any{"result": fmt.Sprintf("result %d", i)}
 			err := optimizer.Store(ctx, input, output, true)
 			require.NoError(t, err)
 		}
@@ -68,7 +68,7 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			input := map[string]interface{}{"task": tc.task}
+			input := map[string]any{"task": tc.task}
 			category := optimizer.categorize(input)
 			assert.Equal(t, tc.expected, category)
 		}
@@ -77,8 +77,8 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 	t.Run("Importance Calculation", func(t *testing.T) {
 		optimizer := NewMemoryOptimizer(24*time.Hour, 0.5)
 
-		input := map[string]interface{}{"task": "test"}
-		output := map[string]interface{}{"result1": "value1", "result2": "value2", "result3": "value3", "result4": "value4"}
+		input := map[string]any{"task": "test"}
+		output := map[string]any{"result1": "value1", "result2": "value2", "result3": "value3", "result4": "value4"}
 
 		importance := optimizer.calculateImportance(input, output, true)
 		assert.Greater(t, importance, 0.0)
@@ -92,7 +92,7 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 	t.Run("Embedding Generation", func(t *testing.T) {
 		optimizer := NewMemoryOptimizer(24*time.Hour, 0.5)
 
-		input := map[string]interface{}{"task": "analyze the data"}
+		input := map[string]any{"task": "analyze the data"}
 		embedding := optimizer.generateEmbedding(input)
 
 		assert.NotNil(t, embedding)
@@ -103,8 +103,8 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 		optimizer := NewMemoryOptimizer(1*time.Millisecond, 0.9) // Very short retention
 		ctx := context.Background()
 
-		input := map[string]interface{}{"task": "test task"}
-		output := map[string]interface{}{"result": "test result"}
+		input := map[string]any{"task": "test task"}
+		output := map[string]any{"result": "test result"}
 
 		err := optimizer.Store(ctx, input, output, true)
 		require.NoError(t, err)
@@ -125,8 +125,8 @@ func TestMemoryOptimizer_ComprehensiveTests(t *testing.T) {
 
 		// Store some memories
 		for i := 0; i < 3; i++ {
-			input := map[string]interface{}{"task": fmt.Sprintf("research task %d", i)}
-			output := map[string]interface{}{"result": fmt.Sprintf("result %d", i)}
+			input := map[string]any{"task": fmt.Sprintf("research task %d", i)}
+			output := map[string]any{"result": fmt.Sprintf("result %d", i)}
 			err := optimizer.Store(ctx, input, output, i%2 == 0) // Alternate success/failure
 			require.NoError(t, err)
 		}
@@ -224,8 +224,8 @@ func TestMemoryOptimizer_CompressionStrategies(t *testing.T) {
 
 		// Add many items in the same category to trigger summarization
 		for i := 0; i < 8; i++ {
-			input := map[string]interface{}{"task": fmt.Sprintf("research task %d", i)}
-			output := map[string]interface{}{"result": fmt.Sprintf("result %d", i)}
+			input := map[string]any{"task": fmt.Sprintf("research task %d", i)}
+			output := map[string]any{"result": fmt.Sprintf("result %d", i)}
 			err := optimizer.Store(ctx, input, output, true)
 			require.NoError(t, err)
 		}
@@ -300,7 +300,7 @@ func TestMemoryOptimizer_CompressionStrategies(t *testing.T) {
 		optimizer := NewMemoryOptimizer(24*time.Hour, 0.5)
 
 		item := &MemoryItem{
-			Created:      time.Now().Add(-2*time.Hour),
+			Created:      time.Now().Add(-2 * time.Hour),
 			LastAccessed: time.Now().Add(-time.Hour),
 			Importance:   0.8,
 			AccessCount:  5,
@@ -310,7 +310,7 @@ func TestMemoryOptimizer_CompressionStrategies(t *testing.T) {
 		assert.Greater(t, score, 0.0)
 
 		// Recently accessed item should have significantly higher score
-		item.LastAccessed = time.Now().Add(-10*time.Minute)
+		item.LastAccessed = time.Now().Add(-10 * time.Minute)
 		item.AccessCount = 10 // Also increase access count to make difference more significant
 		recentScore := optimizer.calculateRetentionScore(item)
 		assert.Greater(t, recentScore, score)

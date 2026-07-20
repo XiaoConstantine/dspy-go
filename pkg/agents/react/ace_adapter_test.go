@@ -26,8 +26,8 @@ func TestSelfReflectorACEAdapter(t *testing.T) {
 		// Add some reflections by simulating executions
 		record := ExecutionRecord{
 			Timestamp: time.Now(),
-			Input:     map[string]interface{}{"task": "test"},
-			Output:    map[string]interface{}{"result": "done"},
+			Input:     map[string]any{"task": "test"},
+			Output:    map[string]any{"result": "done"},
 			Success:   true,
 			Actions: []ActionRecord{
 				{Tool: "search", Success: true},
@@ -49,14 +49,14 @@ func TestReActAgentWithACE(t *testing.T) {
 
 	t.Run("creates agent with ACE enabled", func(t *testing.T) {
 		config := ace.Config{
-			Enabled:           true,
-			LearningsPath:     learningsPath,
-			AsyncReflection:   false,
-			CurationFrequency: 1,
-			MinConfidence:     0.5,
-			MaxTokens:         10000,
-			PruneMinRatio:     0.3,
-			PruneMinUsage:     3,
+			Enabled:             true,
+			LearningsPath:       learningsPath,
+			AsyncReflection:     false,
+			CurationFrequency:   1,
+			MinConfidence:       0.5,
+			MaxTokens:           10000,
+			PruneMinRatio:       0.3,
+			PruneMinUsage:       3,
 			SimilarityThreshold: 0.85,
 		}
 

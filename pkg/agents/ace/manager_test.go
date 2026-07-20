@@ -391,8 +391,8 @@ func TestManagerRecordStepWithToolInput(t *testing.T) {
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
 
 	// Record step with tool input and output
-	toolInput := map[string]interface{}{"query": "test"}
-	toolOutput := map[string]interface{}{"results": []string{"a", "b"}}
+	toolInput := map[string]any{"query": "test"}
+	toolOutput := map[string]any{"results": []string{"a", "b"}}
 	recorder.RecordStep("tool", "search", "Search operation", toolInput, toolOutput, nil)
 
 	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
@@ -416,7 +416,7 @@ func TestManagerSyncProcessing(t *testing.T) {
 	// Process trajectory synchronously
 	recorder := m.StartTrajectory("agent-1", "test", "Query")
 	recorder.RecordStep("think", "", "Planning step", nil, nil, nil)
-	recorder.RecordStep("tool", "read", "Reading file", map[string]interface{}{"path": "/test"}, nil, nil)
+	recorder.RecordStep("tool", "read", "Reading file", map[string]any{"path": "/test"}, nil, nil)
 	m.EndTrajectory(context.Background(), recorder, OutcomeSuccess)
 
 	metrics := m.Metrics()

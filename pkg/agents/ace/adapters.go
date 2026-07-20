@@ -11,16 +11,16 @@ const (
 	DefaultMinSuccessRate = 0.7
 
 	// Error pattern confidence calculation.
-	ErrorConfidenceBase       = 0.5
-	ErrorConfidencePerCount   = 0.1
-	ErrorConfidenceMax        = 0.9
-	ErrorMinCount             = 2
+	ErrorConfidenceBase     = 0.5
+	ErrorConfidencePerCount = 0.1
+	ErrorConfidenceMax      = 0.9
+	ErrorMinCount           = 2
 
 	// ErrorRetainer confidence calculation.
-	RetainerConfidenceBase    = 0.6
-	RetainerConfidenceMulti   = 0.7
+	RetainerConfidenceBase     = 0.6
+	RetainerConfidenceMulti    = 0.7
 	RetainerConfidencePerCount = 0.05
-	RetainerConfidenceMax     = 0.95
+	RetainerConfidenceMax      = 0.95
 )
 
 // PatternSource provides patterns for adaptation to ACE learnings.

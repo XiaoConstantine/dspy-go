@@ -33,7 +33,7 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 
 	t.Run("execute without interceptors", func(t *testing.T) {
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test"}
+		input := map[string]any{"task": "test"}
 
 		result, err := adapter.Execute(ctx, input)
 		require.NoError(t, err)
@@ -42,9 +42,9 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 
 	t.Run("execute with interceptors", func(t *testing.T) {
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test"}
+		input := map[string]any{"task": "test"}
 
-		interceptor := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			// Modify input
 			input["intercepted"] = true
 			result, err := handler(ctx, input)
@@ -64,17 +64,17 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 
 	t.Run("multiple interceptors execution order", func(t *testing.T) {
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test"}
+		input := map[string]any{"task": "test"}
 		var executionOrder []string
 
-		interceptor1 := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor1 := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			executionOrder = append(executionOrder, "interceptor1_start")
 			result, err := handler(ctx, input)
 			executionOrder = append(executionOrder, "interceptor1_end")
 			return result, err
 		}
 
-		interceptor2 := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor2 := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			executionOrder = append(executionOrder, "interceptor2_start")
 			result, err := handler(ctx, input)
 			executionOrder = append(executionOrder, "interceptor2_end")
@@ -90,10 +90,10 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 
 	t.Run("interceptor receives correct agent info", func(t *testing.T) {
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test"}
+		input := map[string]any{"task": "test"}
 		var receivedInfo *core.AgentInfo
 
-		interceptor := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			receivedInfo = info
 			return handler(ctx, input)
 		}
@@ -111,10 +111,10 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 		assert.Empty(t, adapter.GetInterceptors())
 
 		// Test setting interceptors
-		interceptor1 := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor1 := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			return handler(ctx, input)
 		}
-		interceptor2 := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor2 := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			return handler(ctx, input)
 		}
 
@@ -128,9 +128,9 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 
 	t.Run("use default interceptors", func(t *testing.T) {
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test"}
+		input := map[string]any{"task": "test"}
 
-		defaultInterceptor := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		defaultInterceptor := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			result, err := handler(ctx, input)
 			if err != nil {
 				return nil, err
@@ -150,10 +150,10 @@ func TestInterceptorAgentAdapter(t *testing.T) {
 		errorAdapter := NewInterceptorAgentAdapter(errorAgent, "error-agent", "ErrorAgent")
 
 		ctx := context.Background()
-		input := map[string]interface{}{"task": "test"}
+		input := map[string]any{"task": "test"}
 
 		var interceptorCalled bool
-		interceptor := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+		interceptor := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 			interceptorCalled = true
 			result, err := handler(ctx, input)
 			if err != nil {
@@ -177,7 +177,7 @@ func TestWrapAgentWithInterceptors(t *testing.T) {
 		capabilities: []core.Tool{},
 	}
 
-	interceptor := func(ctx context.Context, input map[string]interface{}, info *core.AgentInfo, handler core.AgentHandler) (map[string]interface{}, error) {
+	interceptor := func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		result, err := handler(ctx, input)
 		if err != nil {
 			return nil, err
@@ -190,7 +190,7 @@ func TestWrapAgentWithInterceptors(t *testing.T) {
 	wrapped := WrapAgentWithInterceptors(originalAgent, "wrapped-agent", "WrappedAgent", interceptor)
 
 	ctx := context.Background()
-	input := map[string]interface{}{"task": "test"}
+	input := map[string]any{"task": "test"}
 
 	t.Run("wrapper function creates proper adapter", func(t *testing.T) {
 		assert.Equal(t, "wrapped-agent", wrapped.GetAgentID())
@@ -218,9 +218,9 @@ type MockTestAgent struct {
 	capabilities []core.Tool
 }
 
-func (mta *MockTestAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (mta *MockTestAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	task := input["task"].(string)
-	return map[string]interface{}{"result": "executed: " + task}, nil
+	return map[string]any{"result": "executed: " + task}, nil
 }
 
 func (mta *MockTestAgent) GetCapabilities() []core.Tool {
@@ -234,7 +234,7 @@ func (mta *MockTestAgent) GetMemory() Memory {
 // ErrorTestAgent is a test agent that always returns an error.
 type ErrorTestAgent struct{}
 
-func (eta *ErrorTestAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (eta *ErrorTestAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("agent error")
 }
 

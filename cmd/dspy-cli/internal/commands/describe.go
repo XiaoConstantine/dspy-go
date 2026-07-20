@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/display"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/optimizers"
+	"github.com/spf13/cobra"
 )
 
 func NewDescribeCommand() *cobra.Command {

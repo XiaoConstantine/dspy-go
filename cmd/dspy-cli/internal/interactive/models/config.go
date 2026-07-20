@@ -5,36 +5,36 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ConfigModel represents the configuration screen state
 type ConfigModel struct {
-	optimizer     string
-	selectedField int
-	config        runner.OptimizerConfig
-	fields        []ConfigField
-	width         int
-	height        int
-	nextScreen    string
-	editing       bool
-	editValue     string
-	presets       []Preset
+	optimizer      string
+	selectedField  int
+	config         runner.OptimizerConfig
+	fields         []ConfigField
+	width          int
+	height         int
+	nextScreen     string
+	editing        bool
+	editValue      string
+	presets        []Preset
 	selectedPreset int
-	showPresets   bool
-	advancedMode  bool
+	showPresets    bool
+	advancedMode   bool
 }
 
 // ConfigField represents a configurable parameter
 type ConfigField struct {
 	Name        string
 	Description string
-	Value       interface{}
-	Type        string // "int", "bool", "string", "select", "float", "slider"
+	Value       any
+	Type        string   // "int", "bool", "string", "select", "float", "slider"
 	Options     []string // For select type
 	Min         int
 	Max         int
@@ -48,7 +48,7 @@ type Preset struct {
 	Name        string
 	Description string
 	Icon        string
-	Values      map[string]interface{}
+	Values      map[string]any
 }
 
 // NewConfigModel creates a new configuration model
@@ -60,7 +60,7 @@ func NewConfigModel(optimizerName string) ConfigModel {
 		MaxExamples:   5,
 		Verbose:       false,
 		SuppressLogs:  true,
-		Parameters:    make(map[string]interface{}),
+		Parameters:    make(map[string]any),
 	}
 
 	fields := getFieldsForOptimizer(optimizerName)
@@ -75,8 +75,8 @@ func NewConfigModel(optimizerName string) ConfigModel {
 		editing:       false,
 		advancedMode:  false,
 		showPresets:   false,
-		width:         80,  // Default width to prevent loading screen
-		height:        24,  // Default height to prevent loading screen
+		width:         80, // Default width to prevent loading screen
+		height:        24, // Default height to prevent loading screen
 	}
 }
 
@@ -87,9 +87,9 @@ func getPresetsForOptimizer(optimizer string) []Preset {
 			Name:        "Quick Test",
 			Description: "Fast testing with minimal examples",
 			Icon:        "⚡",
-			Values: map[string]interface{}{
-				"Max Examples": 3,
-				"Temperature":  float64(0.5),
+			Values: map[string]any{
+				"Max Examples":  3,
+				"Temperature":   float64(0.5),
 				"Cache Results": true,
 			},
 		},
@@ -97,9 +97,9 @@ func getPresetsForOptimizer(optimizer string) []Preset {
 			Name:        "Balanced",
 			Description: "Good balance of speed and accuracy",
 			Icon:        "⚖️",
-			Values: map[string]interface{}{
-				"Max Examples": 10,
-				"Temperature":  float64(0.7),
+			Values: map[string]any{
+				"Max Examples":  10,
+				"Temperature":   float64(0.7),
 				"Cache Results": true,
 			},
 		},
@@ -107,9 +107,9 @@ func getPresetsForOptimizer(optimizer string) []Preset {
 			Name:        "High Quality",
 			Description: "Maximum accuracy, slower execution",
 			Icon:        "🎯",
-			Values: map[string]interface{}{
-				"Max Examples": 20,
-				"Temperature":  float64(0.3),
+			Values: map[string]any{
+				"Max Examples":  20,
+				"Temperature":   float64(0.3),
 				"Cache Results": false,
 			},
 		},
@@ -122,11 +122,11 @@ func getPresetsForOptimizer(optimizer string) []Preset {
 			Name:        "Research Mode",
 			Description: "Thorough exploration for research",
 			Icon:        "🔬",
-			Values: map[string]interface{}{
+			Values: map[string]any{
 				"Number of Trials": 10,
-				"Mini Batch Size": 5,
-				"Learning Rate": float64(0.001),
-				"Max Examples": 15,
+				"Mini Batch Size":  5,
+				"Learning Rate":    float64(0.001),
+				"Max Examples":     15,
 			},
 		})
 	case "gepa":
@@ -134,11 +134,11 @@ func getPresetsForOptimizer(optimizer string) []Preset {
 			Name:        "Evolution Max",
 			Description: "Maximum evolutionary exploration",
 			Icon:        "🧬",
-			Values: map[string]interface{}{
+			Values: map[string]any{
 				"Population Size": 20,
 				"Max Generations": 10,
-				"Mutation Rate": float64(0.2),
-				"Crossover Rate": float64(0.9),
+				"Mutation Rate":   float64(0.2),
+				"Crossover Rate":  float64(0.9),
 			},
 		})
 	}
@@ -510,7 +510,7 @@ func (m *ConfigModel) updateFieldValue() {
 func (m *ConfigModel) updateConfig() {
 	// Initialize parameters map if not exists
 	if m.config.Parameters == nil {
-		m.config.Parameters = make(map[string]interface{})
+		m.config.Parameters = make(map[string]any)
 	}
 
 	for _, field := range m.fields {
@@ -571,8 +571,8 @@ func (m ConfigModel) View() string {
 	}
 
 	// Calculate column widths
-	leftWidth := (m.width * 2) / 3  // 66% for main content
-	rightWidth := m.width - leftWidth - 2  // 33% for info panel
+	leftWidth := (m.width * 2) / 3        // 66% for main content
+	rightWidth := m.width - leftWidth - 2 // 33% for info panel
 
 	// Build left column (main content)
 	var leftContent []string
@@ -666,7 +666,7 @@ func (m ConfigModel) renderPresets() string {
 			var changes []string
 			for key, value := range preset.Values {
 				changeStr := fmt.Sprintf("%s: %v", key, value)
-				changes = append(changes, styles.CaptionStyle.Render("  • " + changeStr))
+				changes = append(changes, styles.CaptionStyle.Render("  • "+changeStr))
 			}
 			if len(changes) > 0 {
 				presetStr += "\n" + strings.Join(changes, "\n")
@@ -744,7 +744,7 @@ func (m ConfigModel) renderField(idx int) string {
 	lines = append(lines, nameStr)
 
 	// Field description
-	lines = append(lines, "  " + styles.CaptionStyle.Render(field.Description))
+	lines = append(lines, "  "+styles.CaptionStyle.Render(field.Description))
 
 	// Field value
 	var valueStr string
@@ -753,7 +753,7 @@ func (m ConfigModel) renderField(idx int) string {
 	} else {
 		valueStr = m.renderFieldValue(field)
 	}
-	lines = append(lines, "  " + valueStr)
+	lines = append(lines, "  "+valueStr)
 
 	return strings.Join(lines, "\n")
 }
@@ -848,7 +848,7 @@ func (m ConfigModel) renderFooter() string {
 		controls = append(controls, "[↑↓] Select", "[Enter] Apply", "[Tab] Parameters", "[b] Back")
 	} else {
 		controls = append(controls, "[↑↓] Navigate", "[Enter] Edit", "[p] Presets")
-		controls = append(controls, "[a] " + m.getAdvancedToggleText())
+		controls = append(controls, "[a] "+m.getAdvancedToggleText())
 		controls = append(controls, "[r] Run", "[b] Back")
 	}
 

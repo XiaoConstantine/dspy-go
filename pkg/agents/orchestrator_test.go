@@ -18,7 +18,7 @@ type MockTaskProcessor struct {
 	mock.Mock
 }
 
-func (m *MockTaskProcessor) Process(ctx context.Context, task Task, context map[string]interface{}) (interface{}, error) {
+func (m *MockTaskProcessor) Process(ctx context.Context, task Task, context map[string]any) (any, error) {
 	args := m.Called(ctx, task, context)
 	return args.Get(0), args.Error(1)
 }
@@ -27,7 +27,7 @@ type MockTaskParser struct {
 	mock.Mock
 }
 
-func (m *MockTaskParser) Parse(analyzerOutput map[string]interface{}) ([]Task, error) {
+func (m *MockTaskParser) Parse(analyzerOutput map[string]any) ([]Task, error) {
 	args := m.Called(analyzerOutput)
 	if tasks, ok := args.Get(0).([]Task); ok {
 		return tasks, args.Error(1)
@@ -97,7 +97,7 @@ func TestFlexibleOrchestrator(t *testing.T) {
 				Type:          "test",
 				ProcessorType: "test",
 				Priority:      1,
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"key": "value",
 				},
 			},
@@ -427,9 +427,9 @@ func TestFlexibleOrchestrator(t *testing.T) {
 
 		task := Task{ID: "task1", Type: "test", ProcessorType: "test"}
 		result := &OrchestratorResult{
-			CompletedTasks: make(map[string]interface{}),
+			CompletedTasks: make(map[string]any),
 			FailedTasks:    make(map[string]error),
-			Metadata:       make(map[string]interface{}),
+			Metadata:       make(map[string]any),
 		}
 
 		mockProcessor.On("Process", mock.Anything, task, mock.Anything).Return("ok", nil).Once()
@@ -451,9 +451,9 @@ func TestFlexibleOrchestrator(t *testing.T) {
 
 		task := Task{ID: "task1", Type: "test", ProcessorType: "test"}
 		result := &OrchestratorResult{
-			CompletedTasks: make(map[string]interface{}),
+			CompletedTasks: make(map[string]any),
 			FailedTasks:    make(map[string]error),
-			Metadata:       make(map[string]interface{}),
+			Metadata:       make(map[string]any),
 		}
 
 		ctx, cancel := context.WithCancel(setupTestContext())

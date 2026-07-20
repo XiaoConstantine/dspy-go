@@ -37,9 +37,9 @@ type TPEOptimizer struct {
 
 	// Internal state
 	rng           *rand.Rand
-	paramSpace    map[string][]interface{}
+	paramSpace    map[string][]any
 	observations  []observation
-	bestParams    map[string]interface{}
+	bestParams    map[string]any
 	bestScore     float64
 	maxTrials     int
 	currentTrials int
@@ -47,7 +47,7 @@ type TPEOptimizer struct {
 
 // observation represents a single observation of parameters and resulting score.
 type observation struct {
-	params map[string]interface{}
+	params map[string]any
 	score  float64
 }
 
@@ -86,7 +86,7 @@ func NewTPEOptimizer(config TPEConfig) SearchStrategy {
 		bandwidthFactor:  config.BandwidthFactor,
 		rng:              rand.New(rand.NewSource(seed)),
 		observations:     make([]observation, 0),
-		bestParams:       make(map[string]interface{}),
+		bestParams:       make(map[string]any),
 		bestScore:        -math.MaxFloat64,
 	}
 }
@@ -110,11 +110,11 @@ func (t *TPEOptimizer) Initialize(config SearchConfig) error {
 }
 
 // SuggestParams suggests the next set of parameters to try.
-func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{}, error) {
+func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]any, error) {
 	logger := logging.GetLogger()
 	t.currentTrials++
 
-	var params map[string]interface{}
+	var params map[string]any
 
 	// Generate parameters
 	if len(t.observations) < max(5, int(float64(t.maxTrials)*0.1)) {
@@ -138,7 +138,7 @@ func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]interface{
 }
 
 // UpdateResults updates the internal state with the results of the last trial.
-func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float64) error {
+func (t *TPEOptimizer) UpdateResults(params map[string]any, score float64) error {
 	logger := logging.GetLogger()
 
 	t.observations = append(t.observations, observation{
@@ -161,13 +161,13 @@ func (t *TPEOptimizer) UpdateResults(params map[string]interface{}, score float6
 }
 
 // GetBestParams returns the best parameters found so far and their score.
-func (t *TPEOptimizer) GetBestParams() (map[string]interface{}, float64) {
+func (t *TPEOptimizer) GetBestParams() (map[string]any, float64) {
 	return t.bestParams, t.bestScore
 }
 
 // randomSample generates a random set of parameters.
-func (t *TPEOptimizer) randomSample() map[string]interface{} {
-	params := make(map[string]interface{})
+func (t *TPEOptimizer) randomSample() map[string]any {
+	params := make(map[string]any)
 
 	for param, values := range t.paramSpace {
 		if len(values) > 0 {
@@ -181,7 +181,7 @@ func (t *TPEOptimizer) randomSample() map[string]interface{} {
 }
 
 // suggestTPE generates parameters using the TPE algorithm.
-func (t *TPEOptimizer) suggestTPE() map[string]interface{} {
+func (t *TPEOptimizer) suggestTPE() map[string]any {
 	// Sort observations by score
 	sort.Slice(t.observations, func(i, j int) bool {
 		return t.observations[i].score > t.observations[j].score
@@ -191,8 +191,8 @@ func (t *TPEOptimizer) suggestTPE() map[string]interface{} {
 	nGood := max(1, int(float64(len(t.observations))*t.gamma))
 
 	// Create lists of good and bad parameters
-	goodParams := make([]map[string]interface{}, nGood)
-	badParams := make([]map[string]interface{}, len(t.observations)-nGood)
+	goodParams := make([]map[string]any, nGood)
+	badParams := make([]map[string]any, len(t.observations)-nGood)
 
 	for i := 0; i < nGood; i++ {
 		goodParams[i] = t.observations[i].params
@@ -222,10 +222,10 @@ func (t *TPEOptimizer) suggestTPE() map[string]interface{} {
 
 // generateTPECandidate generates a candidate using the TPE approach.
 func (t *TPEOptimizer) generateTPECandidate(
-	goodParams []map[string]interface{},
-	badParams []map[string]interface{},
-) map[string]interface{} {
-	candidate := make(map[string]interface{})
+	goodParams []map[string]any,
+	badParams []map[string]any,
+) map[string]any {
+	candidate := make(map[string]any)
 
 	// For each parameter, sample from the KDE of the good parameters
 	for param, values := range t.paramSpace {
@@ -277,9 +277,9 @@ func (t *TPEOptimizer) generateTPECandidate(
 
 // countValues counts the occurrences of each value for a given parameter.
 func (t *TPEOptimizer) countValues(
-	params []map[string]interface{},
+	params []map[string]any,
 	param string,
-	possibleValues []interface{},
+	possibleValues []any,
 ) []float64 {
 	counts := make([]float64, len(possibleValues))
 
@@ -317,9 +317,9 @@ func (t *TPEOptimizer) smoothCounts(counts []float64, numValues int) []float64 {
 
 // expectedImprovement computes the expected improvement for a candidate.
 func (t *TPEOptimizer) expectedImprovement(
-	candidate map[string]interface{},
-	goodParams []map[string]interface{},
-	badParams []map[string]interface{},
+	candidate map[string]any,
+	goodParams []map[string]any,
+	badParams []map[string]any,
 ) float64 {
 	// Compute the likelihood under the good and bad distributions
 	goodLikelihood := t.computeLikelihood(candidate, goodParams)
@@ -336,8 +336,8 @@ func (t *TPEOptimizer) expectedImprovement(
 
 // computeLikelihood computes the likelihood of a candidate under a set of parameters.
 func (t *TPEOptimizer) computeLikelihood(
-	candidate map[string]interface{},
-	params []map[string]interface{},
+	candidate map[string]any,
+	params []map[string]any,
 ) float64 {
 	if len(params) == 0 {
 		return 0
@@ -370,6 +370,6 @@ func max(a, b int) int {
 }
 
 // cloneParams delegates to the utils.cloneParams function.
-func cloneParams(params map[string]interface{}) map[string]interface{} {
+func cloneParams(params map[string]any) map[string]any {
 	return utils.CloneParams(params)
 }

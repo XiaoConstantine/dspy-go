@@ -3,8 +3,8 @@ package commands
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/viewer"
+	"github.com/spf13/cobra"
 )
 
 // NewViewerCommand creates a new viewer command for viewing dspy-go JSONL session logs.

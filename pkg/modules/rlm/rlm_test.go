@@ -45,11 +45,11 @@ func (m *mockLLM) Generate(ctx context.Context, prompt string, opts ...core.Gene
 	}, nil
 }
 
-func (m *mockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("JSON generation not implemented in mock")
 }
 
-func (m *mockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, opts ...core.GenerateOption) (map[string]interface{}, error) {
+func (m *mockLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, opts ...core.GenerateOption) (map[string]any, error) {
 	return nil, fmt.Errorf("function calling not implemented in mock")
 }
 

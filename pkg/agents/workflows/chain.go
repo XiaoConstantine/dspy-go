@@ -22,9 +22,9 @@ func NewChainWorkflow(memory agents.Memory) *ChainWorkflow {
 }
 
 // Execute runs steps sequentially, passing state from one step to the next.
-func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 	// Initialize workflow state with input values
-	state := make(map[string]interface{})
+	state := make(map[string]any)
 	for k, v := range inputs {
 		state[k] = v
 	}
@@ -35,7 +35,7 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 
 		stepCtx, stepSpan := core.StartSpan(ctx, fmt.Sprintf("ChainStep_%d", i))
 
-		stepSpan.WithAnnotation("chain_step", map[string]interface{}{
+		stepSpan.WithAnnotation("chain_step", map[string]any{
 			"name":  step.ID,
 			"index": i,
 			"total": totalSteps,
@@ -44,7 +44,7 @@ func (w *ChainWorkflow) Execute(ctx context.Context, inputs map[string]interface
 		signature := step.Module.GetSignature()
 
 		// Create subset of state containing only the fields this step needs
-		stepInputs := make(map[string]interface{})
+		stepInputs := make(map[string]any)
 		for _, field := range signature.Inputs {
 			if val, ok := state[field.Name]; ok {
 				stepInputs[field.Name] = val

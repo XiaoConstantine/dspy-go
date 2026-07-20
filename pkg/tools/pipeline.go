@@ -12,7 +12,7 @@ import (
 )
 
 // DataTransformer defines a function that transforms data between tools in a pipeline.
-type DataTransformer func(input interface{}) (map[string]interface{}, error)
+type DataTransformer func(input any) (map[string]any, error)
 
 // PipelineStep represents a single step in a tool pipeline.
 type PipelineStep struct {
@@ -25,9 +25,9 @@ type PipelineStep struct {
 
 // Condition defines when a pipeline step should execute.
 type Condition struct {
-	Field    string      // Field to check in previous step result
-	Operator string      // eq, ne, gt, lt, contains, exists
-	Value    interface{} // Value to compare against
+	Field    string // Field to check in previous step result
+	Operator string // eq, ne, gt, lt, contains, exists
+	Value    any    // Value to compare against
 }
 
 // PipelineOptions configures pipeline execution.
@@ -113,7 +113,7 @@ func (tp *ToolPipeline) AddStep(step PipelineStep) error {
 }
 
 // Execute runs the pipeline with the given initial input.
-func (tp *ToolPipeline) Execute(ctx context.Context, initialInput map[string]interface{}) (*PipelineResult, error) {
+func (tp *ToolPipeline) Execute(ctx context.Context, initialInput map[string]any) (*PipelineResult, error) {
 	if len(tp.steps) == 0 {
 		return nil, errors.New(errors.InvalidInput, "pipeline has no steps")
 	}
@@ -144,7 +144,7 @@ func (tp *ToolPipeline) Execute(ctx context.Context, initialInput map[string]int
 }
 
 // executeSequential executes pipeline steps one after another.
-func (tp *ToolPipeline) executeSequential(ctx context.Context, initialInput map[string]interface{}, result *PipelineResult, start time.Time) (*PipelineResult, error) {
+func (tp *ToolPipeline) executeSequential(ctx context.Context, initialInput map[string]any, result *PipelineResult, start time.Time) (*PipelineResult, error) {
 	currentInput := initialInput
 
 	for i, step := range tp.steps {
@@ -217,11 +217,11 @@ func (tp *ToolPipeline) executeSequential(ctx context.Context, initialInput map[
 			currentInput = transformed
 		} else {
 			// Default transformation: use the result data as next input
-			if resultMap, ok := stepResult.Data.(map[string]interface{}); ok {
+			if resultMap, ok := stepResult.Data.(map[string]any); ok {
 				currentInput = resultMap
 			} else {
 				// Wrap non-map results
-				currentInput = map[string]interface{}{
+				currentInput = map[string]any{
 					"result": stepResult.Data,
 				}
 			}
@@ -233,7 +233,7 @@ func (tp *ToolPipeline) executeSequential(ctx context.Context, initialInput map[
 }
 
 // executeParallel executes independent steps in parallel.
-func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[string]interface{}, result *PipelineResult, start time.Time) (*PipelineResult, error) {
+func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[string]any, result *PipelineResult, start time.Time) (*PipelineResult, error) {
 	// For now, implement a simple parallel execution for independent steps
 	// In a more sophisticated implementation, we would analyze dependencies
 
@@ -354,7 +354,7 @@ func (tp *ToolPipeline) executeParallel(ctx context.Context, initialInput map[st
 }
 
 // executeStep executes a single pipeline step with retries.
-func (tp *ToolPipeline) executeStep(ctx context.Context, step PipelineStep, input map[string]interface{}) (core.ToolResult, error) {
+func (tp *ToolPipeline) executeStep(ctx context.Context, step PipelineStep, input map[string]any) (core.ToolResult, error) {
 	tool, err := tp.registry.Get(step.ToolName)
 	if err != nil {
 		return core.ToolResult{}, err
@@ -408,7 +408,7 @@ func (tp *ToolPipeline) evaluateConditions(conditions []Condition, previousResul
 
 	// Use the last result for condition evaluation
 	lastResult := previousResults[len(previousResults)-1]
-	resultData, ok := lastResult.Data.(map[string]interface{})
+	resultData, ok := lastResult.Data.(map[string]any)
 	if !ok {
 		return false // Can't evaluate conditions on non-map data
 	}
@@ -423,7 +423,7 @@ func (tp *ToolPipeline) evaluateConditions(conditions []Condition, previousResul
 }
 
 // evaluateCondition evaluates a single condition.
-func (tp *ToolPipeline) evaluateCondition(condition Condition, data map[string]interface{}) bool {
+func (tp *ToolPipeline) evaluateCondition(condition Condition, data map[string]any) bool {
 	value, exists := data[condition.Field]
 
 	switch condition.Operator {
@@ -450,7 +450,7 @@ func (tp *ToolPipeline) evaluateCondition(condition Condition, data map[string]i
 // Cache management methods
 
 // getCachedResult retrieves a cached result if available.
-func (tp *ToolPipeline) getCachedResult(toolName string, input map[string]interface{}) (core.ToolResult, bool) {
+func (tp *ToolPipeline) getCachedResult(toolName string, input map[string]any) (core.ToolResult, bool) {
 	tp.mu.RLock()
 	defer tp.mu.RUnlock()
 
@@ -460,7 +460,7 @@ func (tp *ToolPipeline) getCachedResult(toolName string, input map[string]interf
 }
 
 // setCachedResult stores a result in the cache.
-func (tp *ToolPipeline) setCachedResult(toolName string, input map[string]interface{}, result core.ToolResult) {
+func (tp *ToolPipeline) setCachedResult(toolName string, input map[string]any, result core.ToolResult) {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
@@ -469,7 +469,7 @@ func (tp *ToolPipeline) setCachedResult(toolName string, input map[string]interf
 }
 
 // generateCacheKey creates a cache key for the given tool and input.
-func (tp *ToolPipeline) generateCacheKey(toolName string, input map[string]interface{}) string {
+func (tp *ToolPipeline) generateCacheKey(toolName string, input map[string]any) string {
 	// Simple key generation - in production, you might want a more sophisticated approach
 	return fmt.Sprintf("%s:%v", toolName, input)
 }

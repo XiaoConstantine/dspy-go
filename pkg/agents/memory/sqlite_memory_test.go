@@ -20,7 +20,7 @@ func TestSQLiteStore(t *testing.T) {
 	defer store.Close()
 
 	t.Run("Basic Store and Retrieve", func(t *testing.T) {
-		testData := map[string]interface{}{
+		testData := map[string]any{
 			"string": "test value",
 			"number": 42,
 			"bool":   true,

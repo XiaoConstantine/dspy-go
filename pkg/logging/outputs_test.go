@@ -152,7 +152,7 @@ func TestFileOutput(t *testing.T) {
 			File:     "file_output_test.go",
 			Line:     50,
 			TraceID:  "json-trace-id",
-			Fields: map[string]interface{}{
+			Fields: map[string]any{
 				"user_id": "user123",
 				"action":  "login",
 				"status":  "success",
@@ -168,7 +168,7 @@ func TestFileOutput(t *testing.T) {
 		require.NoError(t, err, "Failed to read JSON log file")
 
 		// Try to parse the content as JSON
-		var logData map[string]interface{}
+		var logData map[string]any
 		err = json.Unmarshal(content, &logData)
 		assert.NoError(t, err, "Log file doesn't contain valid JSON")
 
@@ -497,7 +497,7 @@ func (m *mockFileInfo) Size() int64        { return m.size }
 func (m *mockFileInfo) Mode() os.FileMode  { return 0644 }
 func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
 func (m *mockFileInfo) IsDir() bool        { return false }
-func (m *mockFileInfo) Sys() interface{}   { return nil }
+func (m *mockFileInfo) Sys() any           { return nil }
 
 // Additional test for error handling with a mock file.
 func TestFileOutputWithMockFile(t *testing.T) {
@@ -629,7 +629,7 @@ func TestTextFormatter(t *testing.T) {
 			Time:     time.Now().UnixNano(),
 			Severity: INFO,
 			Message:  "Test message",
-			Fields: map[string]interface{}{
+			Fields: map[string]any{
 				"user":   "test-user",
 				"action": "login",
 			},
@@ -656,7 +656,7 @@ func TestJSONFormatter(t *testing.T) {
 		}
 
 		formatted := formatter.Format(entry)
-		var data map[string]interface{}
+		var data map[string]any
 		err := json.Unmarshal([]byte(formatted), &data)
 		require.NoError(t, err, "Formatter should produce valid JSON")
 
@@ -682,7 +682,7 @@ func TestJSONFormatter(t *testing.T) {
 				CompletionTokens: 50,
 				TotalTokens:      150,
 			},
-			Fields: map[string]interface{}{
+			Fields: map[string]any{
 				"user":   "test-user",
 				"action": "login",
 				"count":  42,
@@ -690,7 +690,7 @@ func TestJSONFormatter(t *testing.T) {
 		}
 
 		formatted := formatter.Format(entry)
-		var data map[string]interface{}
+		var data map[string]any
 		err := json.Unmarshal([]byte(formatted), &data)
 		require.NoError(t, err, "Formatter should produce valid JSON")
 
@@ -702,7 +702,7 @@ func TestJSONFormatter(t *testing.T) {
 		assert.Equal(t, "login", data["action"])
 		assert.Equal(t, float64(42), data["count"])
 
-		tokenInfo, ok := data["tokenInfo"].(map[string]interface{})
+		tokenInfo, ok := data["tokenInfo"].(map[string]any)
 		require.True(t, ok, "tokenInfo should be a map")
 		assert.Equal(t, float64(100), tokenInfo["promptTokens"])
 		assert.Equal(t, float64(50), tokenInfo["completionTokens"])
@@ -712,7 +712,7 @@ func TestJSONFormatter(t *testing.T) {
 	// Test error case in JSON marshal
 	t.Run("JSON marshal error", func(t *testing.T) {
 		// Create a circular reference to cause JSON marshal to fail
-		circular := make(map[string]interface{})
+		circular := make(map[string]any)
 		circular["self"] = circular
 
 		entry := LogEntry{
@@ -800,8 +800,8 @@ func TestConsoleOutputWithLLMInfo(t *testing.T) {
 				Operation: "llm-call",
 				StartTime: time.Now().Add(-500 * time.Millisecond),
 				EndTime:   time.Now(),
-				Annotations: map[string]interface{}{
-					"chain_step": map[string]interface{}{
+				Annotations: map[string]any{
+					"chain_step": map[string]any{
 						"name":  "generate",
 						"index": 0,
 						"total": 2,
@@ -823,7 +823,7 @@ func TestConsoleOutputWithLLMInfo(t *testing.T) {
 			Message:  "Debug with spans",
 			File:     "test.go",
 			Line:     123,
-			Fields: map[string]interface{}{
+			Fields: map[string]any{
 				"spans": spans,
 			},
 		}
@@ -957,12 +957,12 @@ func TestExtractModelName(t *testing.T) {
 // Test formatFields function.
 func TestFormatFields(t *testing.T) {
 	t.Run("Empty fields", func(t *testing.T) {
-		result := formatFields(map[string]interface{}{})
+		result := formatFields(map[string]any{})
 		assert.Equal(t, "", result)
 	})
 
 	t.Run("Simple fields", func(t *testing.T) {
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"user":  "test-user",
 			"count": 42,
 		}
@@ -973,7 +973,7 @@ func TestFormatFields(t *testing.T) {
 
 	t.Run("Long prompt/completion", func(t *testing.T) {
 		longText := strings.Repeat("a", 200)
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"prompt":     longText,
 			"completion": longText,
 		}
@@ -985,7 +985,7 @@ func TestFormatFields(t *testing.T) {
 	})
 
 	t.Run("Mixed fields", func(t *testing.T) {
-		fields := map[string]interface{}{
+		fields := map[string]any{
 			"user":       "test-user",
 			"count":      42,
 			"prompt":     "Tell me a joke",
@@ -1056,8 +1056,8 @@ func TestFormatSpans(t *testing.T) {
 				Operation: "llm-call",
 				StartTime: now.Add(-200 * time.Millisecond),
 				EndTime:   now,
-				Annotations: map[string]interface{}{
-					"chain_step": map[string]interface{}{
+				Annotations: map[string]any{
+					"chain_step": map[string]any{
 						"name":  "generate",
 						"index": 0,
 						"total": 2,
@@ -1072,8 +1072,8 @@ func TestFormatSpans(t *testing.T) {
 				StartTime: now.Add(-150 * time.Millisecond),
 				EndTime:   now.Add(-50 * time.Millisecond),
 				Error:     fmt.Errorf("test error"),
-				Annotations: map[string]interface{}{
-					"task": map[string]interface{}{
+				Annotations: map[string]any{
+					"task": map[string]any{
 						"processor": "llm",
 						"id":        "task-123",
 						"type":      "generation",
@@ -1202,12 +1202,12 @@ func TestFormatSpanDuration(t *testing.T) {
 // Test annotation formatting.
 func TestFormatAnnotations(t *testing.T) {
 	t.Run("Empty annotations", func(t *testing.T) {
-		result := formatAnnotations(map[string]interface{}{})
+		result := formatAnnotations(map[string]any{})
 		assert.Equal(t, "", result)
 	})
 
 	t.Run("Simple annotations", func(t *testing.T) {
-		annotations := map[string]interface{}{
+		annotations := map[string]any{
 			"status": "completed",
 			"score":  0.95,
 			"count":  42,
@@ -1223,7 +1223,7 @@ func TestFormatAnnotationValue(t *testing.T) {
 	tests := []struct {
 		name     string
 		key      string
-		value    interface{}
+		value    any
 		expected string
 	}{
 		{"Nil value", "key", nil, ""},
@@ -1234,9 +1234,9 @@ func TestFormatAnnotationValue(t *testing.T) {
 		{"String", "status", "completed", "status=completed"},
 		{"Long string", "desc", strings.Repeat("a", 100), "desc='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...'"},
 		{"Duration", "time", 500 * time.Millisecond, "time=500.00ms"},
-		{"Array", "tags", []interface{}{"tag1", "tag2"}, "tags=[tag1,tag2]"},
-		{"Large array", "items", make([]interface{}, 10), "items=[10 items]"},
-		{"Map", "config", map[string]interface{}{"a": 1, "b": 2}, "config={2 keys}"},
+		{"Array", "tags", []any{"tag1", "tag2"}, "tags=[tag1,tag2]"},
+		{"Large array", "items", make([]any, 10), "items=[10 items]"},
+		{"Map", "config", map[string]any{"a": 1, "b": 2}, "config={2 keys}"},
 		{"Error", "error", fmt.Errorf("test error"), "error=error('test error')"},
 	}
 
@@ -1337,7 +1337,7 @@ func TestHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("filterRelevantAnnotations", func(t *testing.T) {
-		annotations := map[string]interface{}{
+		annotations := map[string]any{
 			"status":      "completed",
 			"result":      "success",
 			"error":       nil,

@@ -16,14 +16,16 @@ import (
 // It supports sub-agents for hierarchical agent composition without HTTP.
 //
 // Similar to ADK Python's LLMAgent with sub_agents parameter:
-//   parent = LLMAgent(model=llm, sub_agents=[agent1, agent2])
+//
+//	parent = LLMAgent(model=llm, sub_agents=[agent1, agent2])
 //
 // Usage:
-//   executor := a2a.NewExecutor(myAgent).
-//       WithSubAgent("search", searchExecutor).
-//       WithSubAgent("reasoning", reasoningExecutor)
 //
-//   result := executor.SendMessage(ctx, message)
+//	executor := a2a.NewExecutor(myAgent).
+//	    WithSubAgent("search", searchExecutor).
+//	    WithSubAgent("reasoning", reasoningExecutor)
+//
+//	result := executor.SendMessage(ctx, message)
 type A2AExecutor struct {
 	agent     agents.Agent
 	subAgents map[string]*A2AExecutor
@@ -171,8 +173,8 @@ func (e *A2AExecutor) Execute(ctx context.Context, msg *Message) (Artifact, erro
 // CallSubAgent calls a registered sub-agent with an a2a message.
 // This enables hierarchical agent composition:
 //
-//   parent.CallSubAgent("search", userMessage)
-//   parent.CallSubAgent("reasoning", searchResults)
+//	parent.CallSubAgent("search", userMessage)
+//	parent.CallSubAgent("reasoning", searchResults)
 //
 // The communication uses a2a protocol but happens in-process (no HTTP).
 func (e *A2AExecutor) CallSubAgent(ctx context.Context, name string, msg *Message) (Artifact, error) {
@@ -268,10 +270,11 @@ func (e *A2AExecutor) UnwrapAgent() agents.Agent {
 // NewExecutorWithSubAgents creates an executor with multiple sub-agents at once.
 //
 // Example:
-//   executor := a2a.NewExecutorWithSubAgents(parent, map[string]*A2AExecutor{
-//       "search": searchExecutor,
-//       "reasoning": reasoningExecutor,
-//   })
+//
+//	executor := a2a.NewExecutorWithSubAgents(parent, map[string]*A2AExecutor{
+//	    "search": searchExecutor,
+//	    "reasoning": reasoningExecutor,
+//	})
 func NewExecutorWithSubAgents(agent agents.Agent, subAgents map[string]*A2AExecutor) *A2AExecutor {
 	executor := NewExecutor(agent)
 	for name, subAgent := range subAgents {

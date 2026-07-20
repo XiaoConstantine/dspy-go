@@ -2,34 +2,34 @@ package ace
 
 // QualityWeights configures the relative importance of quality signals.
 type QualityWeights struct {
-	Outcome    float64
-	Efficiency float64
+	Outcome     float64
+	Efficiency  float64
 	ToolSuccess float64
-	ErrorFree  float64
+	ErrorFree   float64
 }
 
 // DefaultWeights returns balanced quality weights.
 func DefaultWeights() QualityWeights {
 	return QualityWeights{
-		Outcome:    0.4,
-		Efficiency: 0.2,
+		Outcome:     0.4,
+		Efficiency:  0.2,
 		ToolSuccess: 0.2,
-		ErrorFree:  0.2,
+		ErrorFree:   0.2,
 	}
 }
 
 // QualityCalculator computes trajectory quality from multiple signals.
 type QualityCalculator struct {
-	weights           QualityWeights
-	expectedSteps     int
+	weights            QualityWeights
+	expectedSteps      int
 	maxReasonableSteps int
 }
 
 // NewQualityCalculator creates a calculator with default parameters.
 func NewQualityCalculator() *QualityCalculator {
 	return &QualityCalculator{
-		weights:           DefaultWeights(),
-		expectedSteps:     5,
+		weights:            DefaultWeights(),
+		expectedSteps:      5,
 		maxReasonableSteps: 15,
 	}
 }

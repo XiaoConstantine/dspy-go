@@ -125,14 +125,14 @@ func TestTraceOutputJSONLFormat(t *testing.T) {
 			Type:      TraceEventSession,
 			Timestamp: time.Now(),
 			TraceID:   "trace-123",
-			Data:      map[string]interface{}{"key": "value"},
+			Data:      map[string]any{"key": "value"},
 		},
 		{
 			Type:      TraceEventSpan,
 			Timestamp: time.Now(),
 			TraceID:   "trace-123",
 			SpanID:    "span-1",
-			Data:      map[string]interface{}{"operation": "test"},
+			Data:      map[string]any{"operation": "test"},
 		},
 	}
 
@@ -177,7 +177,7 @@ func TestTraceOutputRotation(t *testing.T) {
 			Timestamp: time.Now(),
 			TraceID:   "trace-123",
 			SpanID:    "span-1",
-			Data:      map[string]interface{}{"iteration": i, "padding": "some longer data to fill up the file"},
+			Data:      map[string]any{"iteration": i, "padding": "some longer data to fill up the file"},
 		}
 		if err := output.Write(event); err != nil {
 			t.Errorf("Failed to write event: %v", err)

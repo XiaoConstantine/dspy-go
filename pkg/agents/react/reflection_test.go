@@ -41,7 +41,7 @@ func TestSelfReflector_ComprehensiveTests(t *testing.T) {
 			Success:   true,
 			Actions:   []ActionRecord{{Tool: "test_tool", Success: true, Duration: 100 * time.Millisecond}},
 			Timestamp: time.Now(),
-			Input:     map[string]interface{}{"task": "simple task"},
+			Input:     map[string]any{"task": "simple task"},
 		}
 
 		reflections := reflector.Reflect(ctx, record)
@@ -63,7 +63,7 @@ func TestSelfReflector_ComprehensiveTests(t *testing.T) {
 				{Tool: "search_tool", Success: true, Duration: 100 * time.Millisecond},
 			},
 			Timestamp: time.Now(),
-			Input:     map[string]interface{}{"task": "research task"},
+			Input:     map[string]any{"task": "research task"},
 		}
 
 		reflections := reflector.Reflect(ctx, record)
@@ -157,7 +157,7 @@ func TestSelfReflector_ComprehensiveTests(t *testing.T) {
 				Success:   true,
 				Actions:   actions,
 				Timestamp: time.Now(),
-				Input:     map[string]interface{}{"task": "research task"},
+				Input:     map[string]any{"task": "research task"},
 			}
 			reflector.Reflect(ctx, record)
 		}
@@ -170,7 +170,7 @@ func TestSelfReflector_ComprehensiveTests(t *testing.T) {
 				{Tool: "analyze_tool", Success: true, Duration: 100 * time.Millisecond},
 			},
 			Timestamp: time.Now(),
-			Input:     map[string]interface{}{"task": "research task"},
+			Input:     map[string]any{"task": "research task"},
 		}
 
 		reflections := reflector.Reflect(ctx, record)

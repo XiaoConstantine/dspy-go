@@ -232,7 +232,7 @@ func (a *Agent) RegisterTool(tool core.Tool) error {
 }
 
 // Execute runs one native tool-calling task.
-func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	if a == nil {
 		return nil, fmt.Errorf("tool-calling agent is nil")
 	}
@@ -380,7 +380,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 				"tool_calls": countExecutedTools(trace.Steps),
 				"error":      trace.Error,
 			})
-			return map[string]interface{}{
+			return map[string]any{
 				"completed":   false,
 				"error":       trace.Error,
 				"tool_calls":  countExecutedTools(trace.Steps),
@@ -427,7 +427,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 					"tool_calls": countExecutedTools(trace.Steps),
 					"error":      trace.Error,
 				})
-				return map[string]interface{}{
+				return map[string]any{
 					"completed":   false,
 					"error":       trace.Error,
 					"tool_calls":  countExecutedTools(trace.Steps),
@@ -479,7 +479,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 					"tool_calls":   countExecutedTools(trace.Steps),
 					"final_answer": finalAnswer,
 				})
-				return map[string]interface{}{
+				return map[string]any{
 					"completed":    true,
 					"final_answer": finalAnswer,
 					"tool_calls":   countExecutedTools(trace.Steps),
@@ -601,7 +601,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]interface{}) (map[
 		"tool_calls": countExecutedTools(trace.Steps),
 		"error":      trace.Error,
 	})
-	return map[string]interface{}{
+	return map[string]any{
 		"completed":   false,
 		"error":       trace.Error,
 		"tool_calls":  countExecutedTools(trace.Steps),
@@ -809,7 +809,7 @@ func (a *Agent) LastNativeTrace() *Trace {
 	return a.lastNativeTrace.Clone()
 }
 
-func (a *Agent) maxTurns(input map[string]interface{}) int {
+func (a *Agent) maxTurns(input map[string]any) int {
 	if override := agentutil.IntValue(input["max_turns"]); override > 0 {
 		return override
 	}
@@ -841,7 +841,7 @@ func enrichSubagentEventData(tool core.Tool, data map[string]any, details map[st
 }
 
 func (a *Agent) executeTool(ctx context.Context, tool core.Tool, arguments map[string]any) (agents.ToolObservation, error) {
-	handler := func(ctx context.Context, args map[string]interface{}) (core.ToolResult, error) {
+	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
 		return tool.Execute(ctx, args)
 	}
 	info := core.NewToolInfoFromTool(tool)
@@ -1018,7 +1018,7 @@ func turnBudgetReminder(currentTurn int, maxTurns int) string {
 	}
 }
 
-func (a *Agent) storeTraces(ctx context.Context, input map[string]interface{}, trace *Trace) {
+func (a *Agent) storeTraces(ctx context.Context, input map[string]any, trace *Trace) {
 	execTrace := nativeTraceToExecutionTrace(a, input, trace)
 	a.traceMu.Lock()
 	a.lastNativeTrace = trace.Clone()
@@ -1027,7 +1027,7 @@ func (a *Agent) storeTraces(ctx context.Context, input map[string]interface{}, t
 	a.persistSessionRecord(ctx, input, trace)
 }
 
-func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *Trace) *agents.ExecutionTrace {
+func nativeTraceToExecutionTrace(a *Agent, input map[string]any, trace *Trace) *agents.ExecutionTrace {
 	if trace == nil {
 		return nil
 	}
@@ -1062,7 +1062,7 @@ func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *
 		status = agents.TraceStatusPartial
 	}
 
-	contextMetadata := map[string]interface{}{
+	contextMetadata := map[string]any{
 		"turns": len(trace.Steps),
 	}
 	if sessionID := a.sessionID(input); sessionID != "" {
@@ -1074,7 +1074,7 @@ func nativeTraceToExecutionTrace(a *Agent, input map[string]interface{}, trace *
 		AgentType:      "native",
 		Task:           firstNonEmpty(trace.TaskID, trace.Task),
 		Input:          maps.Clone(input),
-		Output:         map[string]interface{}{"completed": trace.Completed, "final_answer": trace.FinalAnswer},
+		Output:         map[string]any{"completed": trace.Completed, "final_answer": trace.FinalAnswer},
 		Steps:          steps,
 		Status:         status,
 		Error:          trace.Error,

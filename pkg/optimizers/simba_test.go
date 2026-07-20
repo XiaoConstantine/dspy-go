@@ -111,7 +111,7 @@ func setupMockLLM() {
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(
 		&core.LLMResponse{Content: "test response"}, nil).Maybe()
 	mockLLM.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).Return(
-		map[string]interface{}{"answer": "test"}, nil).Maybe()
+		map[string]any{"answer": "test"}, nil).Maybe()
 
 	core.GlobalConfig.DefaultLLM = mockLLM
 	core.GlobalConfig.TeacherLLM = mockLLM
@@ -200,7 +200,7 @@ func testSIMBAPythonCompatibility(t *testing.T) {
 		ctx := core.WithExecutionState(context.Background())
 
 		// Define metric function
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+		metric := func(expected, actual map[string]any) float64 { return 1.0 }
 
 		// Should be able to call Compile with context, program, dataset, and metric
 		// This matches the pattern: compile(student, trainset, seed=0) in Python
@@ -516,7 +516,7 @@ func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 // testSIMBAOptimizationWorkflow tests the complete optimization workflow.
 func testSIMBAOptimizationWorkflow(t *testing.T) {
 	t.Run("Completes full optimization cycle", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			// Simple metric that always returns 0.8
 			return 0.8
 		}
@@ -540,7 +540,7 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 	})
 
 	t.Run("Records optimization metrics", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.75 }
+		metric := func(expected, actual map[string]any) float64 { return 0.75 }
 		simba := NewSIMBA(WithSIMBAMaxSteps(3))
 
 		program := createSIMBATestProgram()
@@ -566,7 +566,7 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 	})
 
 	t.Run("Performs introspection at configured intervals", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.6 }
+		metric := func(expected, actual map[string]any) float64 { return 0.6 }
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(5),
 		)
@@ -601,7 +601,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 		dataset := createSIMBATestDataset()
 
 		// Define metric function
-		metric := func(expected, actual map[string]interface{}) float64 { return 1.0 }
+		metric := func(expected, actual map[string]any) float64 { return 1.0 }
 
 		// Pass nil context - should be handled gracefully
 		result, err := simba.Compile(context.TODO(), program, dataset, metric)
@@ -634,7 +634,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 		// Create a program that fails during Forward
 		failingProgram := core.NewProgram(
 			map[string]core.Module{},
-			func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return nil, fmt.Errorf("program evaluation failed")
 			},
 		)
@@ -699,7 +699,7 @@ func testSIMBAConvergence(t *testing.T) {
 	})
 
 	t.Run("Completes optimization within reasonable time", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.9 }
+		metric := func(expected, actual map[string]any) float64 { return 0.9 }
 		simba := NewSIMBA(WithSIMBAMaxSteps(3)) // Small number for fast test
 
 		program := createSIMBATestProgram()
@@ -813,15 +813,15 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		simba := NewSIMBA()
 
 		// Initialize the metric function
-		simba.metric = func(expected, actual map[string]interface{}) float64 {
+		simba.metric = func(expected, actual map[string]any) float64 {
 			return 0.8 // Return a fixed score for testing
 		}
 
 		program := createSIMBATestProgram()
 		batch := []core.Example{
 			{
-				Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-				Outputs: map[string]interface{}{"answer": "4"},
+				Inputs:  map[string]any{"question": "What is 2+2?"},
+				Outputs: map[string]any{"answer": "4"},
 			},
 		}
 
@@ -847,15 +847,15 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		simba := NewSIMBA()
 
 		// Initialize the metric function
-		simba.metric = func(expected, actual map[string]interface{}) float64 {
+		simba.metric = func(expected, actual map[string]any) float64 {
 			return 0.7 // Return a fixed score for testing
 		}
 
 		program := createSIMBATestProgram()
 		batch := []core.Example{
 			{
-				Inputs:  map[string]interface{}{"question": "Test question"},
-				Outputs: map[string]interface{}{"answer": "Test answer"},
+				Inputs:  map[string]any{"question": "Test question"},
+				Outputs: map[string]any{"answer": "Test answer"},
 			},
 		}
 
@@ -874,7 +874,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		simba := NewSIMBA()
 
 		// Mock metric to control success/failure
-		simba.metric = func(expected, actual map[string]interface{}) float64 {
+		simba.metric = func(expected, actual map[string]any) float64 {
 			if actual != nil {
 				return 0.8 // Success (> 0.5)
 			}
@@ -884,8 +884,8 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		program := createSIMBATestProgram()
 		batch := []core.Example{
 			{
-				Inputs:  map[string]interface{}{"question": "Test question"},
-				Outputs: map[string]interface{}{"answer": "Test answer"},
+				Inputs:  map[string]any{"question": "Test question"},
+				Outputs: map[string]any{"answer": "Test answer"},
 			},
 		}
 
@@ -906,22 +906,22 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		simba := NewSIMBA()
 
 		// Initialize the metric function
-		simba.metric = func(expected, actual map[string]interface{}) float64 {
+		simba.metric = func(expected, actual map[string]any) float64 {
 			return 0.5 // Return a fixed score for testing
 		}
 
 		// Create a program that fails during evaluation
 		failingProgram := core.NewProgram(
 			map[string]core.Module{},
-			func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+			func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return nil, fmt.Errorf("evaluation failed")
 			},
 		)
 
 		batch := []core.Example{
 			{
-				Inputs:  map[string]interface{}{"question": "Test question"},
-				Outputs: map[string]interface{}{"answer": "Test answer"},
+				Inputs:  map[string]any{"question": "Test question"},
+				Outputs: map[string]any{"answer": "Test answer"},
 			},
 		}
 
@@ -974,10 +974,10 @@ func testSIMBARuleGeneration(t *testing.T) {
 		successfulTrajectories := []Trajectory{
 			{
 				Example: core.Example{
-					Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-					Outputs: map[string]interface{}{"answer": "4"},
+					Inputs:  map[string]any{"question": "What is 2+2?"},
+					Outputs: map[string]any{"answer": "4"},
 				},
-				Prediction: map[string]interface{}{"answer": "4"},
+				Prediction: map[string]any{"answer": "4"},
 				Score:      0.9,
 				Success:    true,
 			},
@@ -1137,7 +1137,7 @@ func testSIMBAStrategyConfiguration(t *testing.T) {
 // testSIMBAIntegration tests integration scenarios.
 func testSIMBAIntegration(t *testing.T) {
 	t.Run("Full optimization with dual strategy", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			if actual != nil && expected != nil {
 				return 0.8 // Good score
 			}
@@ -1169,7 +1169,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Optimization with rule-only strategy", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.7 }
+		metric := func(expected, actual map[string]any) float64 { return 0.7 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(2),
@@ -1192,7 +1192,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Performance comparison between strategies", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.75 }
+		metric := func(expected, actual map[string]any) float64 { return 0.75 }
 
 		// Test instruction-only strategy
 		simba1 := NewSIMBA(
@@ -1234,7 +1234,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Trajectory accumulation across optimization steps", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.6 }
+		metric := func(expected, actual map[string]any) float64 { return 0.6 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(3),
@@ -1263,7 +1263,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Error handling preserves dual strategy functionality", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.5 }
+		metric := func(expected, actual map[string]any) float64 { return 0.5 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(2),
@@ -1290,7 +1290,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Full optimization with bucket sorting", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			if actual != nil && expected != nil {
 				return 0.85 // Good score
 			}
@@ -1336,7 +1336,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Bucket sorting vs temperature sampling performance comparison", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			return 0.75 + 0.1*float64(len(actual)) // Varies by response complexity
 		}
 
@@ -1391,7 +1391,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Bucket sorting with different criteria combinations", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.8 }
+		metric := func(expected, actual map[string]any) float64 { return 0.8 }
 
 		testCases := []struct {
 			name     string
@@ -1448,7 +1448,7 @@ func testSIMBAIntegration(t *testing.T) {
 	})
 
 	t.Run("Bucket sorting error handling and robustness", func(t *testing.T) {
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.5 }
+		metric := func(expected, actual map[string]any) float64 { return 0.5 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(2),
@@ -1479,40 +1479,40 @@ func addMockTrajectories(simba *SIMBA) {
 	mockTrajectories := []Trajectory{
 		{
 			Example: core.Example{
-				Inputs:  map[string]interface{}{"question": "What is 2+2?"},
-				Outputs: map[string]interface{}{"answer": "4"},
+				Inputs:  map[string]any{"question": "What is 2+2?"},
+				Outputs: map[string]any{"answer": "4"},
 			},
-			Prediction: map[string]interface{}{"answer": "4"},
+			Prediction: map[string]any{"answer": "4"},
 			Score:      0.9,
 			Success:    true,
 			ProgramID:  "prog_success_1",
 		},
 		{
 			Example: core.Example{
-				Inputs:  map[string]interface{}{"question": "What is 3+3?"},
-				Outputs: map[string]interface{}{"answer": "6"},
+				Inputs:  map[string]any{"question": "What is 3+3?"},
+				Outputs: map[string]any{"answer": "6"},
 			},
-			Prediction: map[string]interface{}{"answer": "6"},
+			Prediction: map[string]any{"answer": "6"},
 			Score:      0.8,
 			Success:    true,
 			ProgramID:  "prog_success_2",
 		},
 		{
 			Example: core.Example{
-				Inputs:  map[string]interface{}{"question": "What is the capital of Mars?"},
-				Outputs: map[string]interface{}{"answer": "Unknown"},
+				Inputs:  map[string]any{"question": "What is the capital of Mars?"},
+				Outputs: map[string]any{"answer": "Unknown"},
 			},
-			Prediction: map[string]interface{}{"answer": "New York"},
+			Prediction: map[string]any{"answer": "New York"},
 			Score:      0.1,
 			Success:    false,
 			ProgramID:  "prog_fail_1",
 		},
 		{
 			Example: core.Example{
-				Inputs:  map[string]interface{}{"question": "What is 5+5?"},
-				Outputs: map[string]interface{}{"answer": "10"},
+				Inputs:  map[string]any{"question": "What is 5+5?"},
+				Outputs: map[string]any{"answer": "10"},
 			},
-			Prediction: map[string]interface{}{"answer": "11"},
+			Prediction: map[string]any{"answer": "11"},
 			Score:      0.2,
 			Success:    false,
 			ProgramID:  "prog_fail_2",
@@ -1534,8 +1534,8 @@ func createSIMBATestProgram() core.Program {
 
 	return core.NewProgramWithForwardFactory(
 		map[string]core.Module{"predict": predict},
-		func(modules map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
-			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				return modules["predict"].Process(ctx, inputs)
 			}
 		},
@@ -1545,16 +1545,16 @@ func createSIMBATestProgram() core.Program {
 func createSIMBATestDataset() core.Dataset {
 	examples := []core.Example{
 		{
-			Inputs:  map[string]interface{}{"question": "What is the capital of France?"},
-			Outputs: map[string]interface{}{"answer": "Paris"},
+			Inputs:  map[string]any{"question": "What is the capital of France?"},
+			Outputs: map[string]any{"answer": "Paris"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "What is the capital of Germany?"},
-			Outputs: map[string]interface{}{"answer": "Berlin"},
+			Inputs:  map[string]any{"question": "What is the capital of Germany?"},
+			Outputs: map[string]any{"answer": "Berlin"},
 		},
 		{
-			Inputs:  map[string]interface{}{"question": "What is the capital of Italy?"},
-			Outputs: map[string]interface{}{"answer": "Rome"},
+			Inputs:  map[string]any{"question": "What is the capital of Italy?"},
+			Outputs: map[string]any{"answer": "Rome"},
 		},
 	}
 
@@ -2026,7 +2026,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		// Create test components
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.8 }
+		metric := func(expected, actual map[string]any) float64 { return 0.8 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(3),
@@ -2053,7 +2053,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		// Create test components
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.75 }
+		metric := func(expected, actual map[string]any) float64 { return 0.75 }
 
 		// Test sequential processing
 		simbaSequential := NewSIMBA(
@@ -2092,7 +2092,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		// Create test components with potential for errors
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.6 }
+		metric := func(expected, actual map[string]any) float64 { return 0.6 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(2),
@@ -2116,7 +2116,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		stage := &PipelineStage{
 			StepIndex:  1,
 			Candidates: []core.Program{createSIMBATestProgram()},
-			Batch:      []core.Example{{Inputs: map[string]interface{}{"input": "test"}, Outputs: map[string]interface{}{"output": "result"}}},
+			Batch:      []core.Example{{Inputs: map[string]any{"input": "test"}, Outputs: map[string]any{"output": "result"}}},
 			Scores:     []float64{0.8},
 			Timestamp:  time.Now(),
 			Error:      nil,
@@ -2133,7 +2133,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 	t.Run("Pipeline context cancellation", func(t *testing.T) {
 		program := createSIMBATestProgram()
 		dataset := createSIMBATestDataset()
-		metric := func(expected, actual map[string]interface{}) float64 { return 0.5 }
+		metric := func(expected, actual map[string]any) float64 { return 0.5 }
 
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(5), // Longer optimization

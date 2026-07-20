@@ -45,7 +45,7 @@ func TestSelfReflectorAdapter(t *testing.T) {
 	t.Run("extracts error patterns", func(t *testing.T) {
 		metrics := &mockMetricsSource{
 			errorPatterns: map[string]int{
-				"timeout error":    3,
+				"timeout error":     3,
 				"single occurrence": 1, // Not enough occurrences
 			},
 		}

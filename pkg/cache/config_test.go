@@ -252,16 +252,16 @@ func TestExpandPath(t *testing.T) {
 			expected: "./cache.db",
 		},
 		{
-			name:     "Home directory expansion",
-			input:    "~/cache.db",
+			name:  "Home directory expansion",
+			input: "~/cache.db",
 			expected: func() string {
 				homeDir, _ := os.UserHomeDir()
 				return filepath.Join(homeDir, "cache.db")
 			}(),
 		},
 		{
-			name:     "Home directory with nested path",
-			input:    "~/.dspy/cache.db",
+			name:  "Home directory with nested path",
+			input: "~/.dspy/cache.db",
 			expected: func() string {
 				homeDir, _ := os.UserHomeDir()
 				return filepath.Join(homeDir, ".dspy", "cache.db")
@@ -393,7 +393,7 @@ func TestApplyFileConfig(t *testing.T) {
 		applyFileConfig(&cfg, fileConfig)
 
 		assert.Equal(t, "memory", cfg.Type)
-		assert.Equal(t, time.Hour, cfg.DefaultTTL)  // Should keep default
-		assert.Equal(t, int64(100*1024*1024), cfg.MaxSize)  // Should keep default
+		assert.Equal(t, time.Hour, cfg.DefaultTTL)         // Should keep default
+		assert.Equal(t, int64(100*1024*1024), cfg.MaxSize) // Should keep default
 	})
 }

@@ -48,7 +48,7 @@ func (g *KeyGenerator) GenerateKey(modelID string, prompt string, options []core
 }
 
 // GenerateJSONKey creates a cache key for JSON-structured requests.
-func (g *KeyGenerator) GenerateJSONKey(modelID string, prompt string, schema interface{}, options []core.GenerateOption) string {
+func (g *KeyGenerator) GenerateJSONKey(modelID string, prompt string, schema any, options []core.GenerateOption) string {
 	// Merge options
 	opts := g.mergeOptions(options)
 

@@ -51,10 +51,10 @@ func TestPredict(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 
-	inputsMap, _ := span.Annotations["inputs"].(map[string]interface{})
+	inputsMap, _ := span.Annotations["inputs"].(map[string]any)
 	question, _ := inputsMap["question"].(string)
 
-	outputsMap, _ := span.Annotations["outputs"].(map[string]interface{})
+	outputsMap, _ := span.Annotations["outputs"].(map[string]any)
 	answer, _ := outputsMap["answer"].(string)
 
 	assert.Contains(t, question, "What is the meaning of life?")
@@ -821,7 +821,7 @@ func TestPredict_XMLOutputIntegration(t *testing.T) {
 	ctx := context.Background()
 	ctx = core.WithExecutionState(ctx)
 
-	input := map[string]interface{}{"task": "Test XML output integration"}
+	input := map[string]any{"task": "Test XML output integration"}
 	result, err := predict.Process(ctx, input)
 
 	assert.NoError(t, err)
@@ -1069,7 +1069,7 @@ func TestPredict_AnalyzerTasksParsing(t *testing.T) {
 		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
 			Return(&core.LLMResponse{Content: xmlResp}, nil)
 
-		outputs, err := predict.Process(ctx, map[string]interface{}{"task": "check"})
+		outputs, err := predict.Process(ctx, map[string]any{"task": "check"})
 		require.NoError(t, err)
 
 		// analysis field should be parsed exactly
@@ -1097,7 +1097,7 @@ func TestPredict_AnalyzerTasksParsing(t *testing.T) {
 		mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
 			Return(&core.LLMResponse{Content: xmlResp}, nil)
 
-		outputs, err := predict.Process(ctx, map[string]interface{}{"task": "check"})
+		outputs, err := predict.Process(ctx, map[string]any{"task": "check"})
 		require.NoError(t, err)
 
 		analysis, ok := outputs["analysis"]

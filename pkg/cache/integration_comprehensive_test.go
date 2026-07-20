@@ -134,14 +134,14 @@ func TestCachedLLM_GenerateWithFunctions(t *testing.T) {
 
 	ctx := context.Background()
 	prompt := "test prompt"
-	functions := []map[string]interface{}{
+	functions := []map[string]any{
 		{
-			"name": "test_function",
+			"name":        "test_function",
 			"description": "A test function",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"param1": map[string]interface{}{
+				"properties": map[string]any{
+					"param1": map[string]any{
 						"type": "string",
 					},
 				},
@@ -150,9 +150,9 @@ func TestCachedLLM_GenerateWithFunctions(t *testing.T) {
 	}
 
 	t.Run("Cache miss", func(t *testing.T) {
-		expectedResult := map[string]interface{}{
-			"function_call": map[string]interface{}{
-				"name": "test_function",
+		expectedResult := map[string]any{
+			"function_call": map[string]any{
+				"name":      "test_function",
 				"arguments": `{"param1": "value1"}`,
 			},
 		}
@@ -196,9 +196,9 @@ func TestCachedLLM_GenerateWithFunctions(t *testing.T) {
 			enabled:      false,
 		}
 
-		expectedResult := map[string]interface{}{
-			"function_call": map[string]interface{}{
-				"name": "test_function",
+		expectedResult := map[string]any{
+			"function_call": map[string]any{
+				"name":      "test_function",
 				"arguments": `{"param1": "value1"}`,
 			},
 		}

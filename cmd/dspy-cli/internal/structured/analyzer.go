@@ -294,11 +294,11 @@ func (pa *PromptAnalyzer) ConvertToSignature(components []PromptComponent) core.
 		"Task Context":         "role_context",
 		"Tone Context":         "tone_guidelines",
 		"Background Data":      "background_info",
-		"Task Rules":          "constraints",
-		"Examples":            "demonstrations",
+		"Task Rules":           "constraints",
+		"Examples":             "demonstrations",
 		"Conversation History": "chat_history",
-		"User Request":        "user_query",
-		"Thinking Steps":      "reasoning_steps",
+		"User Request":         "user_query",
+		"Thinking Steps":       "reasoning_steps",
 	}
 
 	for componentType, fieldName := range componentToField {
@@ -408,15 +408,15 @@ func (pa *PromptAnalyzer) analyzeSignatureComponents(sig core.Signature) map[str
 	// Check instruction for output format and prefilled response indicators
 	instruction := sig.Instruction
 	if strings.Contains(strings.ToLower(instruction), "format") ||
-	   strings.Contains(strings.ToLower(instruction), "structure") ||
-	   strings.Contains(strings.ToLower(instruction), "json") ||
-	   strings.Contains(strings.ToLower(instruction), "xml") {
+		strings.Contains(strings.ToLower(instruction), "structure") ||
+		strings.Contains(strings.ToLower(instruction), "json") ||
+		strings.Contains(strings.ToLower(instruction), "xml") {
 		components["Output Format"] = true
 	}
 
 	if strings.Contains(strings.ToLower(instruction), "start with") ||
-	   strings.Contains(strings.ToLower(instruction), "begin by") ||
-	   strings.Contains(strings.ToLower(instruction), "response:") {
+		strings.Contains(strings.ToLower(instruction), "begin by") ||
+		strings.Contains(strings.ToLower(instruction), "response:") {
 		components["Prefilled Response"] = true
 	}
 
@@ -549,19 +549,19 @@ func (pa *PromptAnalyzer) detectDomain(sig core.Signature) string {
 	}
 
 	if strings.Contains(content, "code") || strings.Contains(content, "programming") ||
-	   strings.Contains(content, "developer") || strings.Contains(content, "technical") {
+		strings.Contains(content, "developer") || strings.Contains(content, "technical") {
 		return "technical"
 	}
 	if strings.Contains(content, "creative") || strings.Contains(content, "writing") ||
-	   strings.Contains(content, "story") || strings.Contains(content, "design") {
+		strings.Contains(content, "story") || strings.Contains(content, "design") {
 		return "creative"
 	}
 	if strings.Contains(content, "business") || strings.Contains(content, "analysis") ||
-	   strings.Contains(content, "strategy") || strings.Contains(content, "finance") {
+		strings.Contains(content, "strategy") || strings.Contains(content, "finance") {
 		return "business"
 	}
 	if strings.Contains(content, "education") || strings.Contains(content, "teaching") ||
-	   strings.Contains(content, "learning") || strings.Contains(content, "explain") {
+		strings.Contains(content, "learning") || strings.Contains(content, "explain") {
 		return "educational"
 	}
 	return "general"
@@ -795,12 +795,12 @@ func truncateString(s string, maxLen int) string {
 
 // OptimizerRecommendation represents a recommended optimizer with reasoning
 type OptimizerRecommendation struct {
-	Name        string
-	Confidence  float64
-	Reasoning   string
-	BestFor     []string
-	Complexity  string
-	Cost        string
+	Name       string
+	Confidence float64
+	Reasoning  string
+	BestFor    []string
+	Complexity string
+	Cost       string
 }
 
 // RecommendOptimizers suggests optimizers based on prompt structure analysis

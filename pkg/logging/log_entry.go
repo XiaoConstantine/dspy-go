@@ -35,7 +35,7 @@ type LogEntry struct {
 	Cost      float64         // Operation cost in dollars
 
 	// General structured data
-	Fields map[string]interface{}
+	Fields map[string]any
 }
 
 // WithModelID adds a ModelID to the context.

@@ -68,8 +68,8 @@ const (
 
 // LoopResult holds the result of a RunLoop execution.
 type LoopResult struct {
-	Messages   []Message
-	Output     map[string]any
+	Messages []Message
+	Output   map[string]any
 	// StopReason is one of the StopReason* constants.
 	StopReason string
 	Iterations int
@@ -88,7 +88,7 @@ type LoopAction struct {
 type LLMRequest struct {
 	Prompt       string
 	Content      []core.ContentBlock
-	Functions    []map[string]interface{}
+	Functions    []map[string]any
 	ChatMessages []core.ChatMessage
 	Options      []core.GenerateOption
 }
@@ -96,6 +96,6 @@ type LLMRequest struct {
 // LLMResult is returned by CallLLM and consumed by ParseResponse.
 type LLMResult struct {
 	TextResponse     *core.LLMResponse
-	FunctionResponse map[string]interface{}
+	FunctionResponse map[string]any
 	ModuleResponse   map[string]any
 }

@@ -187,7 +187,7 @@ func getJSONType(fieldType core.FieldType) string {
 }
 
 // transformJSONResult maps the JSON response to the expected output format.
-func transformJSONResult(result map[string]interface{}, signature core.Signature, config StructuredOutputConfig) (map[string]any, error) {
+func transformJSONResult(result map[string]any, signature core.Signature, config StructuredOutputConfig) (map[string]any, error) {
 	output := make(map[string]any)
 
 	// Map each output field from the JSON result

@@ -21,13 +21,13 @@ import (
 // testAgent is a simple agent for server testing.
 type testAgent struct {
 	name     string
-	response map[string]interface{}
+	response map[string]any
 	tools    []core.Tool
 	delay    time.Duration
 	err      error
 }
 
-func (a *testAgent) Execute(ctx context.Context, input map[string]interface{}) (map[string]interface{}, error) {
+func (a *testAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	if a.delay > 0 {
 		time.Sleep(a.delay)
 	}
@@ -50,7 +50,7 @@ func createTestServer(t *testing.T, agent agents.Agent) *Server {
 	if agent == nil {
 		agent = &testAgent{
 			name: "test-agent",
-			response: map[string]interface{}{
+			response: map[string]any{
 				"answer": "Test response",
 			},
 		}
@@ -75,7 +75,7 @@ func createTestServer(t *testing.T, agent agents.Agent) *Server {
 // ============================================================================
 
 func TestNewServer(t *testing.T) {
-	agent := &testAgent{name: "test", response: map[string]interface{}{"answer": "ok"}}
+	agent := &testAgent{name: "test", response: map[string]any{"answer": "ok"}}
 
 	server, err := NewServer(agent, ServerConfig{
 		Host: "localhost",
@@ -105,7 +105,7 @@ func TestNewServer_NilAgent(t *testing.T) {
 }
 
 func TestNewServer_Defaults(t *testing.T) {
-	agent := &testAgent{name: "test", response: map[string]interface{}{"answer": "ok"}}
+	agent := &testAgent{name: "test", response: map[string]any{"answer": "ok"}}
 
 	server, err := NewServer(agent, ServerConfig{})
 
@@ -133,7 +133,7 @@ func TestNewServer_WithTools(t *testing.T) {
 
 	agent := &testAgent{
 		name:     "test",
-		response: map[string]interface{}{"answer": "ok"},
+		response: map[string]any{"answer": "ok"},
 		tools:    []core.Tool{tool},
 	}
 
@@ -223,7 +223,7 @@ func TestHandleSendMessage(t *testing.T) {
 	reqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "sendMessage",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"message": msg,
 		},
 		ID: "test-1",
@@ -249,7 +249,7 @@ func TestHandleSendMessage(t *testing.T) {
 	}
 
 	// Verify we got a task ID
-	result, ok := response.Result.(map[string]interface{})
+	result, ok := response.Result.(map[string]any)
 	if !ok {
 		t.Fatal("expected result to be map")
 	}
@@ -272,7 +272,7 @@ func TestHandleGetTask(t *testing.T) {
 	reqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "getTask",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"taskId": task.ID,
 		},
 		ID: "test-1",
@@ -304,7 +304,7 @@ func TestHandleGetTask_NotFound(t *testing.T) {
 	reqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "getTask",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"taskId": "nonexistent",
 		},
 		ID: "test-1",
@@ -332,7 +332,7 @@ func TestHandleGetTask_NotFound(t *testing.T) {
 func TestHandleCancelTask(t *testing.T) {
 	agent := &testAgent{
 		name:     "slow-agent",
-		response: map[string]interface{}{"answer": "done"},
+		response: map[string]any{"answer": "done"},
 		delay:    100 * time.Millisecond,
 	}
 	server := createTestServer(t, agent)
@@ -346,7 +346,7 @@ func TestHandleCancelTask(t *testing.T) {
 	reqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "cancelTask",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"taskId": task.ID,
 		},
 		ID: "test-1",
@@ -380,7 +380,7 @@ func TestHandleRPC_InvalidMethod(t *testing.T) {
 	reqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "unknownMethod",
-		Params:  map[string]interface{}{},
+		Params:  map[string]any{},
 		ID:      "test-1",
 	}
 
@@ -444,7 +444,7 @@ func TestHandleRPC_WrongMethod(t *testing.T) {
 func TestProcessTask_Success(t *testing.T) {
 	agent := &testAgent{
 		name:     "test",
-		response: map[string]interface{}{"answer": "42"},
+		response: map[string]any{"answer": "42"},
 	}
 	server := createTestServer(t, agent)
 
@@ -735,7 +735,7 @@ func TestCleanupOldTasks_OnlyTerminalTasks(t *testing.T) {
 func TestServerFullFlow(t *testing.T) {
 	agent := &testAgent{
 		name:     "test",
-		response: map[string]interface{}{"answer": "The capital is Paris"},
+		response: map[string]any{"answer": "The capital is Paris"},
 	}
 	server := createTestServer(t, agent)
 
@@ -760,7 +760,7 @@ func TestServerFullFlow(t *testing.T) {
 	reqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "sendMessage",
-		Params:  map[string]interface{}{"message": msg},
+		Params:  map[string]any{"message": msg},
 		ID:      "test-1",
 	}
 	body, _ := json.Marshal(reqBody)
@@ -772,7 +772,7 @@ func TestServerFullFlow(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&sendResp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	result := sendResp.Result.(map[string]interface{})
+	result := sendResp.Result.(map[string]any)
 	taskID := result["taskId"].(string)
 
 	// Wait for processing
@@ -782,7 +782,7 @@ func TestServerFullFlow(t *testing.T) {
 	getReqBody := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  "getTask",
-		Params:  map[string]interface{}{"taskId": taskID},
+		Params:  map[string]any{"taskId": taskID},
 		ID:      "test-2",
 	}
 	body, _ = json.Marshal(getReqBody)

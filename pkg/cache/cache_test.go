@@ -12,9 +12,9 @@ func TestCacheEntry_IsExpired(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
-		name      string
-		entry     CacheEntry
-		expected  bool
+		name     string
+		entry    CacheEntry
+		expected bool
 	}{
 		{
 			name: "Entry not expired",
@@ -68,10 +68,10 @@ func TestCacheEntry_IsExpired(t *testing.T) {
 
 func TestNewCache(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         CacheConfig
-		expectedType   string
-		expectError    bool
+		name         string
+		config       CacheConfig
+		expectedType string
+		expectError  bool
 	}{
 		{
 			name: "Memory cache",
