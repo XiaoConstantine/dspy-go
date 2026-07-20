@@ -6,7 +6,7 @@ require (
 	github.com/XiaoConstantine/mcp-go v0.3.1
 	github.com/anthropics/anthropic-sdk-go v1.38.0
 	github.com/apache/arrow/go/v13 v13.0.0
-	github.com/go-playground/validator/v10 v10.30.2
+	github.com/go-playground/validator/v10 v10.30.3
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.48
 	github.com/sourcegraph/conc v0.3.0
