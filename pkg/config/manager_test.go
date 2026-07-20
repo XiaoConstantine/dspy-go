@@ -678,6 +678,47 @@ func TestManagerWatcherCanCallGetters(t *testing.T) {
 	assert.Equal(t, "google", notified[0])
 }
 
+func TestManagerChangesHoldNotificationOrderLock(t *testing.T) {
+	importData, err := (&Manager{config: GetDefaultConfig()}).Export()
+	require.NoError(t, err)
+
+	tests := map[string]func(*Manager) error{
+		"Update": func(manager *Manager) error {
+			return manager.Update(func(config *Config) error {
+				config.LLM.Default.Provider = "google"
+				return nil
+			})
+		},
+		"Reset": func(manager *Manager) error {
+			return manager.Reset()
+		},
+		"Merge": func(manager *Manager) error {
+			return manager.Merge(GetDefaultConfig())
+		},
+		"Import": func(manager *Manager) error {
+			return manager.Import(importData)
+		},
+	}
+
+	for name, change := range tests {
+		t.Run(name, func(t *testing.T) {
+			manager := &Manager{config: GetDefaultConfig()}
+			orderLockHeld := false
+			manager.watchers = []ConfigWatcher{func(*Config) error {
+				orderLockHeld = !manager.changeMu.TryLock()
+				if !orderLockHeld {
+					manager.changeMu.Unlock()
+				}
+				return nil
+			}}
+
+			require.NoError(t, change(manager))
+			assert.True(t, orderLockHeld,
+				"configuration changes must remain serialized through watcher notification")
+		})
+	}
+}
+
 // TestManagerUpdateDeepCopies verifies the updater receives a deep copy, so
 // mutating nested maps cannot race with readers holding the old config.
 func TestManagerUpdateDeepCopies(t *testing.T) {

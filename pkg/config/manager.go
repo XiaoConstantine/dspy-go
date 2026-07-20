@@ -14,9 +14,13 @@ import (
 
 // Manager handles configuration loading, validation, and management.
 type Manager struct {
-	config      *Config
-	configPath  string
-	mu          sync.RWMutex
+	config     *Config
+	configPath string
+	mu         sync.RWMutex
+	// changeMu keeps configuration installation and watcher notification in
+	// commit order. Read accessors intentionally do not acquire it, so watchers
+	// can call them while a change is being delivered.
+	changeMu    sync.Mutex
 	watchers    []ConfigWatcher
 	discovery   *Discovery
 	sources     []Source
@@ -235,6 +239,9 @@ func (m *Manager) GetOptimizersConfig() *OptimizersConfig {
 
 // Reload reloads the configuration from sources.
 func (m *Manager) Reload() error {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
+
 	oldConfig := m.Get()
 
 	if err := m.Load(); err != nil {
@@ -361,6 +368,9 @@ func (m *Manager) SaveToFile(path string) error {
 // Watchers are notified after the lock is released, so they may safely call
 // Get and the other accessor methods.
 func (m *Manager) Update(updater func(*Config) error) error {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
+
 	m.mu.Lock()
 
 	if m.config == nil {
@@ -402,6 +412,9 @@ func (m *Manager) Update(updater func(*Config) error) error {
 
 // Reset resets the configuration to defaults.
 func (m *Manager) Reset() error {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
+
 	defaults := GetDefaultConfig()
 	if err := defaults.Validate(); err != nil {
 		return fmt.Errorf("default configuration validation failed: %w", err)
@@ -462,6 +475,9 @@ func cloneConfig(config *Config) (*Config, error) {
 
 // Merge merges another configuration into the current one.
 func (m *Manager) Merge(other *Config) error {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
+
 	m.mu.Lock()
 
 	if m.config == nil {
@@ -541,6 +557,9 @@ func (m *Manager) Export() (map[string]any, error) {
 
 // Import imports configuration from a map.
 func (m *Manager) Import(data map[string]any) error {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
+
 	// Convert map to YAML and back to Config
 	yamlData, err := yaml.Marshal(data)
 	if err != nil {

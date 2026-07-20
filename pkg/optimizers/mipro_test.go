@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 type instructionModule struct {
@@ -59,6 +61,7 @@ func TestMIPRO(t *testing.T) {
 			assert.NotNil(t, mipro)
 			assert.Equal(t, MediumMode, mipro.config.Mode)
 			assert.NotNil(t, mipro.state)
+			assert.True(t, math.IsInf(mipro.state.BestScore, -1))
 			assert.NotNil(t, mipro.metrics)
 		})
 
@@ -295,6 +298,48 @@ func TestMIPRO(t *testing.T) {
 			mockStrategy.AssertExpectations(t)
 			mockMod.AssertExpectations(t)
 			mockDataset.AssertExpectations(t)
+		})
+
+		t.Run("Tracks and returns the best negative-scoring candidate", func(t *testing.T) {
+			mipro := createTestMIPRO(t)
+			mipro.metric = func(example, prediction map[string]any, ctx context.Context) float64 {
+				return -0.5
+			}
+
+			strategy := new(MockSearchStrategy)
+			strategy.On("SuggestParams", mock.Anything).Return(
+				map[string]any{"module_0_instruction": float64(0)}, nil).Once()
+			strategy.On("UpdateResults", mock.Anything, -0.5).Return(nil).Once()
+			strategy.On("GetBestParams").Return(map[string]any(nil), math.Inf(-1)).Once()
+			mipro.searchStrategy = strategy
+
+			module := newInstructionModule("test", "original")
+			program := core.NewProgramWithForwardFactory(
+				map[string]core.Module{"test": module},
+				func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+					return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+						return modules["test"].Process(ctx, inputs)
+					}
+				},
+			)
+			dataset := testutil.NewMockDataset([]core.Example{{
+				Inputs:  map[string]any{"input": "value"},
+				Outputs: map[string]any{"output": "expected"},
+			}})
+
+			best, err := mipro.runOptimizationLoop(
+				context.Background(),
+				program,
+				dataset,
+				nil,
+				map[int][]string{0: {"negative candidate"}},
+			)
+
+			require.NoError(t, err)
+			require.Contains(t, best.Modules, "test")
+			assert.Equal(t, "negative candidate", best.Modules["test"].GetSignature().Instruction)
+			assert.Equal(t, -0.5, mipro.state.BestScore)
+			strategy.AssertExpectations(t)
 		})
 	})
 

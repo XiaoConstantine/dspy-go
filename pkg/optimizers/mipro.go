@@ -350,6 +350,7 @@ func NewMIPRO(
 		},
 		state: &OptimizationState{
 			TeacherScores: make(map[string]float64),
+			BestScore:     math.Inf(-1),
 		},
 		metrics: &MIPROMetrics{
 			PromptEffectiveness: make(map[string]float64),

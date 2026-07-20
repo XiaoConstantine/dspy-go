@@ -94,7 +94,7 @@ func TestParallelWorkflow(t *testing.T) {
 		}
 	})
 
-	t.Run("Cancellation while waiting on semaphore keeps the concurrency bound", func(t *testing.T) {
+	t.Run("Cancellation while waiting on semaphore returns promptly", func(t *testing.T) {
 		const limit = 2
 		const steps = 6
 
@@ -134,10 +134,8 @@ func TestParallelWorkflow(t *testing.T) {
 			done <- err
 		}()
 
-		// Wait until the semaphore is saturated: `limit` steps are running
-		// and the rest are blocked acquiring a permit. Then cancel, which
-		// previously could steal a running step's permit via the deferred
-		// non-blocking drain.
+		// Wait until the semaphore is saturated and the remaining steps are
+		// waiting for a permit, then verify cancellation unblocks Execute.
 		for i := 0; i < limit; i++ {
 			<-entered
 		}
@@ -203,4 +201,30 @@ func TestParallelWorkflow(t *testing.T) {
 		assert.Contains(t, err.Error(), "step failed")
 		failingModule.AssertExpectations(t)
 	})
+}
+
+func TestAcquireSemaphoreCanceledWaiterDoesNotReleaseHolder(t *testing.T) {
+	const limit = 2
+	sem := make(chan struct{}, limit)
+	sem <- struct{}{}
+	sem <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		release, err := acquireSemaphore(ctx, sem, time.Minute)
+		if release != nil {
+			release()
+		}
+		done <- err
+	}()
+
+	// The channel is full before the waiter starts, so it cannot acquire a
+	// permit. Canceling it must leave both holders' permits untouched.
+	<-started
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	assert.Equal(t, limit, len(sem), "a canceled waiter must not release a holder's permit")
 }

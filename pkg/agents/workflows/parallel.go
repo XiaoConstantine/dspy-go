@@ -16,6 +16,21 @@ type ParallelWorkflow struct {
 	maxConcurrent int
 }
 
+// acquireSemaphore waits for a semaphore permit and returns the corresponding
+// release function. A failed acquisition never changes the semaphore, which is
+// important when cancellation races with existing permit holders.
+func acquireSemaphore(ctx context.Context, sem chan struct{}, timeout time.Duration) (func(), error) {
+	semCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-semCtx.Done():
+		return nil, semCtx.Err()
+	}
+}
+
 // NewParallelWorkflow creates a workflow that runs its steps concurrently.
 // A non-positive maxConcurrent means no concurrency limit.
 func NewParallelWorkflow(memory agents.Memory, maxConcurrent int) *ParallelWorkflow {
@@ -67,14 +82,10 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 			default:
 			}
 
-			// Acquire semaphore with timeout to prevent deadlock
-			semCtx, semCancel := context.WithTimeout(ctx, 30*time.Second)
-			defer semCancel()
-
-			select {
-			case sem <- struct{}{}:
-			case <-semCtx.Done():
-				if semCtx.Err() == context.DeadlineExceeded {
+			// Acquire semaphore with timeout to prevent deadlock.
+			release, err := acquireSemaphore(ctx, sem, 30*time.Second)
+			if err != nil {
+				if err == context.DeadlineExceeded {
 					errors <- fmt.Errorf("semaphore acquire timeout for step %s", s.ID)
 				} else {
 					errors <- ctx.Err() // Original context was cancelled
@@ -83,7 +94,7 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 			}
 			// Release only after a successful acquire; releasing on every
 			// exit path could steal a permit another goroutine holds.
-			defer func() { <-sem }()
+			defer release()
 
 			// Prepare inputs for this step
 			stepInputs := make(map[string]any)
