@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/XiaoConstantine/mcp-go v0.3.1
-	github.com/anthropics/anthropic-sdk-go v1.38.0
+	github.com/anthropics/anthropic-sdk-go v1.59.0
 	github.com/apache/arrow/go/v13 v13.0.0
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/google/uuid v1.6.0
@@ -31,24 +31,25 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.9.23+incompatible // indirect
-	github.com/invopop/jsonschema v0.13.0 // indirect
+	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
+	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20251009144603-d2f985daa21b // indirect
 	golang.org/x/mod v0.37.0 // indirect
