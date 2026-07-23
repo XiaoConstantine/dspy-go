@@ -361,6 +361,23 @@ func (p *Predict) Clone() core.Module {
 	return cloned
 }
 
+// InstructionArtifacts explicitly exposes the subset of Predict state that can
+// initialize an agent Harness without executing the module. Predict instances
+// with runtime-only generation or interceptor behavior must be passed as tools
+// or reduced to an explicit signature instead.
+func (p *Predict) InstructionArtifacts() (core.Signature, []core.Example, error) {
+	if p == nil {
+		return core.Signature{}, nil, fmt.Errorf("Predict module is nil")
+	}
+	if p.defaultOptions != nil {
+		return core.Signature{}, nil, fmt.Errorf("default generation options are not representable as instruction artifacts")
+	}
+	if p.enableXMLMode || len(p.GetInterceptors()) > 0 {
+		return core.Signature{}, nil, fmt.Errorf("output/interceptor behavior is not representable as instruction artifacts")
+	}
+	return p.GetSignature(), p.GetDemos(), nil
+}
+
 func (p *Predict) GetDemos() []core.Example {
 	return p.Demos
 }

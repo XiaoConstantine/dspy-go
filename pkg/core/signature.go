@@ -115,6 +115,12 @@ func NewSignature(inputs []InputField, outputs []OutputField) Signature {
 	}
 }
 
+// GetSignature returns the signature itself, allowing signatures and modules to
+// satisfy consumer-owned signature-provider interfaces uniformly.
+func (s Signature) GetSignature() Signature {
+	return s
+}
+
 // WithInstruction adds an instruction to the Signature.
 func (s Signature) WithInstruction(instruction string) Signature {
 	s.Instruction = instruction
