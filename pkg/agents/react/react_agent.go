@@ -508,13 +508,15 @@ func (r *ReActAgent) EnableNativeFunctionCalling(config *interceptors.FunctionCa
 	}
 
 	r.config.EnableNativeFunctionCalling = true
+	effective := interceptors.DefaultFunctionCallingConfig()
+	effective.ToolRegistry = r.toolRegistry
 	if config != nil {
-		r.config.FunctionCallingConfig = config
-		r.module.WithNativeFunctionCallingConfig(*config)
-	} else {
-		// Use default config - the module will set up with its own registry
-		r.module.WithNativeFunctionCalling()
+		effective = *config
+		if effective.ToolRegistry == nil {
+			effective.ToolRegistry = r.toolRegistry
+		}
 	}
+	r.config.FunctionCallingConfig = &effective
 
 	return nil
 }
@@ -766,23 +768,41 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 	// STEP 3: Execute using standard ReAct flow but with optimized context
 	var result map[string]any
 	var reactTrace *modules.ReActTrace
+	var canonicalTrace *agents.ExecutionTrace
 	var executionActions []ActionRecord
 	var err error
 
 	switch mode {
 	case ModeReAct:
-		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
+		result, reactTrace, canonicalTrace, err = r.executeReAct(ctx, optimizedInput)
 	case ModeReWOO:
 		result, executionActions, err = r.executeReWOOWithActions(ctx, optimizedInput)
 	case ModeHybrid:
-		result, reactTrace, executionActions, err = r.executeHybridWithTrace(ctx, optimizedInput)
+		result, reactTrace, canonicalTrace, executionActions, err = r.executeHybridWithTrace(ctx, optimizedInput)
 	default:
-		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
+		result, reactTrace, canonicalTrace, err = r.executeReAct(ctx, optimizedInput)
 	}
 
 	// STEP 4: Create enhanced execution record
 	processingTime := time.Since(startTime)
 	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, reactTrace, executionActions, processingTime)
+	if canonicalTrace != nil {
+		if canonicalTrace.ContextMetadata == nil {
+			canonicalTrace.ContextMetadata = map[string]any{}
+		}
+		if record.Trace != nil {
+			for key, value := range record.Trace.ContextMetadata {
+				canonicalTrace.ContextMetadata[key] = value
+			}
+		}
+		canonicalTrace.AgentID = r.id
+		canonicalTrace.AgentType = "react"
+		canonicalTrace.Task = r.extractCurrentTask(input)
+		canonicalTrace.Input = maps.Clone(input)
+		canonicalTrace.Output = maps.Clone(result)
+		record.Trace = canonicalTrace.Clone()
+		record.Success = canonicalTrace.Status == agents.TraceStatusSuccess
+	}
 	agents.PublishExecutionTrace(ctx, record.Trace)
 
 	// ACE: Record steps from execution record using the recorder handle
@@ -803,7 +823,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 
 	// STEP 5: Update context management systems with results
 	if r.config.EnableContextEngineering && r.contextManager != nil {
-		r.updateContextSystems(ctx, executionID, input, result, err)
+		r.updateContextSystems(ctx, executionID, input, result, record.Success, err)
 	}
 
 	// STEP 6: Perform reflection with context awareness
@@ -827,7 +847,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 
 	// STEP 7: Update legacy memory system
 	if r.config.EnableMemoryOpt && r.Optimizer != nil {
-		_ = r.Optimizer.Store(ctx, input, result, err == nil)
+		_ = r.Optimizer.Store(ctx, input, result, record.Success)
 	}
 
 	// STEP 8: Update performance metrics
@@ -838,7 +858,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 	}
 
 	span.WithAnnotation("execution_mode", r.config.ExecutionMode)
-	span.WithAnnotation("success", err == nil)
+	span.WithAnnotation("success", record.Success)
 	span.WithAnnotation("context_engineering", r.config.EnableContextEngineering)
 	if contextResponse != nil {
 		span.WithAnnotation("cache_hit_rate", contextResponse.CacheHitRate)
@@ -852,13 +872,181 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 }
 
 // executeReAct performs classic ReAct execution.
-func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, error) {
-	if r.module == nil {
-		return nil, nil, fmt.Errorf("agent not initialized")
+func (r *ReActAgent) executeReAct(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, *agents.ExecutionTrace, error) {
+	r.mu.RLock()
+	module := r.module
+	nativeFunctionCalling := r.config.EnableNativeFunctionCalling
+	llm := r.llm
+	r.mu.RUnlock()
+	if module == nil {
+		return nil, nil, nil, fmt.Errorf("agent not initialized")
+	}
+	if nativeFunctionCalling {
+		adapter, err := agents.NewLLMAdapter(llm)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		supported, err := adapter.SupportsCapability(core.CapabilityToolCalling)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if supported {
+			return r.executeNativeReAct(ctx, input)
+		}
 	}
 
-	// Use the traced ReAct path so agent reflection and ACE can consume structured actions.
-	return r.module.ProcessWithTrace(ctx, input)
+	// Preserve the traced text/XML ReAct path, including fallback for providers
+	// without native tool-calling capability.
+	result, trace, err := module.ProcessWithTrace(ctx, input)
+	return result, trace, nil, err
+}
+
+func (r *ReActAgent) executeNativeReAct(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, *agents.ExecutionTrace, error) {
+	r.mu.RLock()
+	llm := r.llm
+	signature := r.taskSignature
+	signature.Instruction = composeArtifactInstruction(signature.Instruction, r.artifacts)
+	maxIterations := r.config.MaxIterations
+	var functionConfig *interceptors.FunctionCallingConfig
+	if r.config.FunctionCallingConfig != nil {
+		copied := *r.config.FunctionCallingConfig
+		functionConfig = &copied
+	}
+	r.mu.RUnlock()
+	if llm == nil {
+		return nil, nil, nil, fmt.Errorf("agent not initialized")
+	}
+	if err := validateNativeReActOutputs(signature); err != nil {
+		return nil, nil, nil, err
+	}
+
+	model, err := agents.NewLLMAdapter(llm)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	completion := agents.FinishCompletion("Call this tool when the task is complete and pass the final answer.")
+	if functionConfig != nil {
+		if strings.TrimSpace(functionConfig.FinishToolDescription) != "" {
+			completion = agents.FinishCompletion(functionConfig.FinishToolDescription)
+		}
+		if !functionConfig.IncludeFinishTool {
+			completion = agents.TextCompletion()
+		} else if !functionConfig.StrictMode {
+			completion = agents.FinishOrTextCompletion(completion.FinishDescription)
+		}
+	}
+	if maxIterations <= 0 {
+		maxIterations = 1
+	}
+
+	startedAt := time.Now()
+	registry := r.toolRegistry
+	if functionConfig != nil && functionConfig.ToolRegistry != nil {
+		registry = functionConfig.ToolRegistry
+	}
+	events := make([]agents.ExecutionEvent, 0, maxIterations*6)
+	harness, err := agents.NewHarness(model, registry.List(),
+		agents.WithInstructions(signature),
+		agents.WithHarnessMaxTurns(maxIterations),
+		agents.WithHarnessCompletion(completion),
+		agents.WithHarnessEventSink(agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
+			events = append(events, event)
+		})),
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fields := make(map[string]any, len(signature.Inputs))
+	for _, field := range signature.Inputs {
+		value, exists := input[field.Name]
+		if !exists {
+			return nil, nil, nil, fmt.Errorf("missing ReAct input %q", field.Name)
+		}
+		fields[field.Name] = value
+	}
+	loopResult, runErr := harness.Prompt(ctx, agents.Prompt{Fields: fields})
+	output := nativeReActOutput(signature, loopResult)
+	trace, canonicalTrace, traceErr := nativeReActTrace(input, output, events, startedAt)
+	if traceErr != nil {
+		return nil, trace, canonicalTrace, traceErr
+	}
+	if runErr != nil {
+		return nil, trace, canonicalTrace, runErr
+	}
+	return output, trace, canonicalTrace, nil
+}
+
+func nativeReActOutput(signature core.Signature, result agents.LoopResult) map[string]any {
+	output := make(map[string]any, len(signature.Outputs)+2)
+	answerAssigned := false
+	for _, field := range signature.Outputs {
+		switch strings.ToLower(strings.TrimSpace(field.Name)) {
+		case "completed":
+			output[field.Name] = result.StopReason == agents.StopReasonFinish || result.StopReason == agents.StopReasonText
+		case "stop_reason":
+			output[field.Name] = string(result.StopReason)
+		default:
+			if !answerAssigned {
+				output[field.Name] = result.FinalAnswer
+				answerAssigned = true
+			}
+		}
+	}
+	output["completed"] = result.StopReason == agents.StopReasonFinish || result.StopReason == agents.StopReasonText
+	output["stop_reason"] = string(result.StopReason)
+	return output
+}
+
+func nativeReActTrace(input, output map[string]any, events []agents.ExecutionEvent, startedAt time.Time) (*modules.ReActTrace, *agents.ExecutionTrace, error) {
+	executionTrace, err := agents.ExecutionTraceFromEvents(events, agents.ExecutionTraceConfig{AgentType: "react_native", Input: input})
+	trace := &modules.ReActTrace{
+		Input: maps.Clone(input), Output: maps.Clone(output), ProcessingTime: time.Since(startedAt),
+		Steps: make([]modules.ReActTraceStep, 0),
+	}
+	if err != nil {
+		trace.Error = err.Error()
+		return trace, nil, err
+	}
+	if executionTrace == nil {
+		return trace, nil, fmt.Errorf("native ReAct emitted no execution trace")
+	}
+	trace.TerminationCause = executionTrace.TerminationCause
+	trace.Error = executionTrace.Error
+	trace.Steps = make([]modules.ReActTraceStep, len(executionTrace.Steps))
+	for index, step := range executionTrace.Steps {
+		actionRaw := fmt.Sprintf("%s(%v)", step.Tool, step.Arguments)
+		executionTrace.Steps[index].ActionRaw = actionRaw
+		trace.Steps[index] = modules.ReActTraceStep{
+			Index: step.Index, Thought: step.Thought, ActionRaw: actionRaw, Tool: step.Tool,
+			Arguments: maps.Clone(step.Arguments), Observation: step.Observation,
+			ObservationDisplay: step.ObservationDisplay, ObservationDetails: maps.Clone(step.ObservationDetails),
+			Duration: step.Duration, Success: step.Success, Error: step.Error,
+			Synthetic: step.Synthetic, Redacted: step.Redacted, Truncated: step.Truncated,
+		}
+	}
+	return trace, executionTrace, nil
+}
+
+func validateNativeReActOutputs(signature core.Signature) error {
+	answerFields := 0
+	for _, field := range signature.Outputs {
+		switch strings.ToLower(strings.TrimSpace(field.Name)) {
+		case "completed", "stop_reason":
+		default:
+			fieldType := field.Type
+			if fieldType == "" {
+				fieldType = core.FieldTypeText
+			}
+			if fieldType != core.FieldTypeText {
+				return fmt.Errorf("native ReAct answer output %q must be text, got %s", field.Name, fieldType)
+			}
+			answerFields++
+		}
+	}
+	if answerFields != 1 {
+		return fmt.Errorf("native ReAct requires exactly one answer output, got %d", answerFields)
+	}
+	return nil
 }
 
 // executeReWOO performs plan-then-execute execution.
@@ -916,19 +1104,19 @@ func (r *ReActAgent) executeReWOOWithActions(ctx context.Context, input map[stri
 	return results, actions, nil
 }
 
-func (r *ReActAgent) executeHybridWithTrace(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, []ActionRecord, error) {
+func (r *ReActAgent) executeHybridWithTrace(ctx context.Context, input map[string]any) (map[string]any, *modules.ReActTrace, *agents.ExecutionTrace, []ActionRecord, error) {
 	// Analyze task complexity to choose mode
 	complexity := r.analyzeTaskComplexity(input)
 
 	if complexity > 0.7 {
 		// Complex task: use ReWOO for efficiency
 		result, actions, err := r.executeReWOOWithActions(ctx, input)
-		return result, nil, actions, err
+		return result, nil, nil, actions, err
 	}
 
 	// Simple or interactive task: use ReAct for flexibility
-	result, trace, err := r.executeReAct(ctx, input)
-	return result, trace, nil, err
+	result, trace, canonical, err := r.executeReAct(ctx, input)
+	return result, trace, canonical, nil, err
 }
 
 // analyzeTaskComplexity estimates task complexity.
@@ -1303,36 +1491,30 @@ func (r *ReActAgent) buildOptimizedContext(ctx context.Context, input map[string
 }
 
 // updateContextSystems updates context management systems based on execution results.
-func (r *ReActAgent) updateContextSystems(ctx context.Context, executionID string, input map[string]any, result map[string]any, err error) {
+func (r *ReActAgent) updateContextSystems(ctx context.Context, executionID string, input map[string]any, result map[string]any, success bool, err error) {
 	logger := logging.GetLogger()
 
-	// Update todo management (thread-safe)
+	// A stopped run leaves its todo active; only completed runs close it and
+	// actual failures enter the error-learning channel.
 	r.mu.RLock()
 	activeTask := r.activeTaskID
 	shouldManageTodo := (activeTask == executionID && r.config.AutoTodoManagement)
 	r.mu.RUnlock()
 
-	if shouldManageTodo {
-		if err == nil {
-			// Mark task as completed
-			if todoErr := r.contextManager.CompleteTodo(ctx, activeTask); todoErr != nil {
-				logger.Warn(ctx, "Failed to complete todo: %v", todoErr)
-			}
-		} else {
-			// Keep task active for retry, but record the error
-			r.recordExecutionError(ctx, executionID, err)
+	if shouldManageTodo && success {
+		if todoErr := r.contextManager.CompleteTodo(ctx, activeTask); todoErr != nil {
+			logger.Warn(ctx, "Failed to complete todo: %v", todoErr)
 		}
 	}
 
-	// Record success/failure for learning
 	if r.config.AutoErrorLearning {
-		if err == nil {
+		if success {
 			r.contextManager.RecordSuccess(ctx, "agent_execution", "Successful task completion", map[string]any{
 				"execution_id": executionID,
 				"input":        input,
 				"result":       result,
 			})
-		} else {
+		} else if err != nil {
 			r.recordExecutionError(ctx, executionID, err)
 		}
 	}
@@ -1552,14 +1734,6 @@ func (r *ReActAgent) initializeModuleLocked(signature core.Signature) error {
 		r.module.WithXMLParsing(*r.config.XMLConfig)
 	}
 
-	// Native function calling takes precedence over XML parsing as they both
-	// govern how actions are emitted and parsed.
-	if r.config.EnableNativeFunctionCalling && r.config.FunctionCallingConfig != nil {
-		r.module.WithNativeFunctionCallingConfig(*r.config.FunctionCallingConfig)
-	} else if r.config.EnableNativeFunctionCalling {
-		r.module.WithNativeFunctionCalling()
-	}
-
 	r.baseReActSignature = r.module.GetSignature()
 	if r.module.Extract != nil {
 		r.baseExtractSig = r.module.Extract.GetSignature()
@@ -1685,15 +1859,20 @@ func (r *ReActAgent) buildExecutionTrace(input map[string]any, result map[string
 		steps = make([]agents.TraceStep, 0, len(reactTrace.Steps))
 		for _, step := range reactTrace.Steps {
 			steps = append(steps, agents.TraceStep{
-				Index:       step.Index,
-				Thought:     step.Thought,
-				ActionRaw:   step.ActionRaw,
-				Tool:        step.Tool,
-				Arguments:   maps.Clone(step.Arguments),
-				Observation: step.Observation,
-				Duration:    step.Duration,
-				Success:     step.Success,
-				Error:       step.Error,
+				Index:              step.Index,
+				Thought:            step.Thought,
+				ActionRaw:          step.ActionRaw,
+				Tool:               step.Tool,
+				Arguments:          maps.Clone(step.Arguments),
+				Observation:        step.Observation,
+				ObservationDisplay: step.ObservationDisplay,
+				ObservationDetails: maps.Clone(step.ObservationDetails),
+				Duration:           step.Duration,
+				Success:            step.Success,
+				Error:              step.Error,
+				Synthetic:          step.Synthetic,
+				Redacted:           step.Redacted,
+				Truncated:          step.Truncated,
 			})
 		}
 	} else if len(actions) > 0 {

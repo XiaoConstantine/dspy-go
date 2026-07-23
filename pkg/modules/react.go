@@ -105,12 +105,8 @@ func (r *ReAct) WithXMLParsing(config interceptors.XMLConfig) *ReAct {
 //	react := modules.NewReAct(signature, registry, maxIters)
 //	react.WithNativeFunctionCalling() // Enable native function calling
 func (r *ReAct) WithNativeFunctionCalling() *ReAct {
-	config := interceptors.FunctionCallingConfig{
-		ToolRegistry:      r.Registry,
-		IncludeFinishTool: true,
-		FinishToolDescription: "Call this tool when you have completed the task and have the final answer. " +
-			"Pass the final answer as the 'answer' argument.",
-	}
+	config := interceptors.DefaultFunctionCallingConfig()
+	config.ToolRegistry = r.Registry
 	interceptor := interceptors.NativeFunctionCallingInterceptor(config)
 	r.Predict.SetInterceptors([]core.ModuleInterceptor{interceptor})
 	return r
@@ -118,7 +114,6 @@ func (r *ReAct) WithNativeFunctionCalling() *ReAct {
 
 // WithNativeFunctionCallingConfig enables native function calling with custom configuration.
 func (r *ReAct) WithNativeFunctionCallingConfig(config interceptors.FunctionCallingConfig) *ReAct {
-	// Ensure the registry is set
 	if config.ToolRegistry == nil {
 		config.ToolRegistry = r.Registry
 	}

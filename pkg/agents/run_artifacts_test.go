@@ -34,6 +34,7 @@ func TestExecutionTraceFromEvents_BuildsCanonicalTrace(t *testing.T) {
 	assert.Equal(t, "model summary", trace.Steps[0].Observation)
 	assert.Equal(t, "operator display", trace.Steps[0].ObservationDisplay)
 	assert.Equal(t, map[string]any{"id": 1}, trace.Steps[0].ObservationDetails)
+	assert.Equal(t, 500*time.Millisecond, trace.Steps[0].Duration)
 	assert.Equal(t, "Finish", trace.Steps[1].Tool)
 	assert.Equal(t, map[string]int{"lookup": 1}, trace.ToolUsageCount)
 	assert.Equal(t, "session-1", trace.ContextMetadata["session_id"])
@@ -138,6 +139,24 @@ func TestExecutionTraceFromEvents_CustomFinishOutcomeIsNotToolUsage(t *testing.T
 	assert.True(t, trace.Steps[0].Success)
 }
 
+func TestExecutionTraceFromEvents_PreservesToolExecutionDurations(t *testing.T) {
+	base := time.Date(2026, time.July, 23, 21, 54, 0, 0, time.UTC)
+	call := core.ToolCall{ID: "call-1", Name: "lookup", Arguments: map[string]any{"query": "abc"}}
+	result := NewToolResultMessage("call-1", "lookup", core.ToolResult{Data: "result"})
+	trace, err := ExecutionTraceFromEvents([]ExecutionEvent{
+		{Timestamp: base, Payload: RunStartedEvent{RunID: "run-1", Task: "lookup"}},
+		{Timestamp: base.Add(time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: Message{Role: RoleAssistant, ToolCalls: []core.ToolCall{call}}}},
+		{Timestamp: base.Add(1500 * time.Millisecond), Payload: ToolExecutionStartedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: call}},
+		{Timestamp: base.Add(2250 * time.Millisecond), Payload: ToolCallFinishedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: call, Outcome: ToolCallOutcomeExecuted, Result: &result, Status: OperationStatusCompleted}},
+		{Timestamp: base.Add(3 * time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: result}},
+		{Timestamp: base.Add(4 * time.Second), Payload: TurnFinishedEvent{RunID: "run-1", Turn: 1, Status: OperationStatusCompleted}},
+		{Timestamp: base.Add(5 * time.Second), Payload: RunFinishedEvent{RunID: "run-1", Status: RunStatusStopped, StopReason: StopReasonMaxTurns, Turns: 1}},
+	}, ExecutionTraceConfig{RunID: "run-1", AgentID: "a", AgentType: "native"})
+	require.NoError(t, err)
+	require.Len(t, trace.Steps, 1)
+	assert.Equal(t, 750*time.Millisecond, trace.Steps[0].Duration)
+}
+
 func TestExecutionTraceFromEvents_CorrelatesRepeatedEmptyIDCallsByToolIndex(t *testing.T) {
 	base := time.Date(2026, time.July, 23, 21, 55, 0, 0, time.UTC)
 	calls := []core.ToolCall{
@@ -149,8 +168,10 @@ func TestExecutionTraceFromEvents_CorrelatesRepeatedEmptyIDCallsByToolIndex(t *t
 	trace, err := ExecutionTraceFromEvents([]ExecutionEvent{
 		{Timestamp: base, Payload: RunStartedEvent{RunID: "run-1", Task: "lookup twice"}},
 		{Timestamp: base.Add(time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: Message{Role: RoleAssistant, ToolCalls: calls}}},
+		{Timestamp: base.Add(1500 * time.Millisecond), Payload: ToolExecutionStartedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: calls[0]}},
 		{Timestamp: base.Add(2 * time.Second), Payload: ToolCallFinishedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: calls[0], Outcome: ToolCallOutcomeExecuted, Result: &first, Status: OperationStatusCompleted}},
 		{Timestamp: base.Add(3 * time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: first}},
+		{Timestamp: base.Add(3500 * time.Millisecond), Payload: ToolExecutionStartedEvent{RunID: "run-1", Turn: 1, ToolIndex: 1, Call: calls[1]}},
 		{Timestamp: base.Add(4 * time.Second), Payload: ToolCallFinishedEvent{RunID: "run-1", Turn: 1, ToolIndex: 1, Call: calls[1], Outcome: ToolCallOutcomeExecuted, Result: &second, Status: OperationStatusCompleted}},
 		{Timestamp: base.Add(5 * time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: second}},
 		{Timestamp: base.Add(6 * time.Second), Payload: TurnFinishedEvent{RunID: "run-1", Turn: 1, Status: OperationStatusCompleted}},
@@ -199,6 +220,7 @@ func testRunEvents(base time.Time) []ExecutionEvent {
 		{Timestamp: base, Payload: RunStartedEvent{RunID: "run-1", Task: "Solve task-1", Model: "model-1", Provider: "provider-1"}},
 		{Timestamp: base.Add(time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: assistant}},
 		{Timestamp: base.Add(2 * time.Second), Payload: ToolCallProposedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: assistant.ToolCalls[0]}},
+		{Timestamp: base.Add(2 * time.Second), Payload: ToolExecutionStartedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: assistant.ToolCalls[0]}},
 		{Timestamp: base.Add(2500 * time.Millisecond), Payload: ToolCallFinishedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: assistant.ToolCalls[0], Outcome: ToolCallOutcomeExecuted, Result: &toolResult, Status: OperationStatusCompleted}},
 		{Timestamp: base.Add(3 * time.Second), Payload: MessageAddedEvent{RunID: "run-1", Turn: 1, Message: toolResult}},
 		{Timestamp: base.Add(4 * time.Second), Payload: TurnFinishedEvent{RunID: "run-1", Turn: 1, Status: OperationStatusCompleted, Usage: &core.TokenInfo{PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3}}},

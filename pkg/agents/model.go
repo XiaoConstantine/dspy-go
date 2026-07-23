@@ -165,6 +165,24 @@ func (a *LLMAdapter) Complete(ctx context.Context, request ModelRequest) (ModelR
 	return response, nil
 }
 
+// SupportsCapability resolves wrappers with the same cycle/depth checks used
+// for request dispatch and reports a provider capability.
+func (a *LLMAdapter) SupportsCapability(capability core.Capability) (bool, error) {
+	if a == nil || a.llm == nil {
+		return false, fmt.Errorf("llm adapter is not initialized")
+	}
+	llm, err := unwrapModelLLM(a.llm)
+	if err != nil {
+		return false, err
+	}
+	for _, available := range llm.Capabilities() {
+		if available == capability {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ModelID returns the wrapped model identifier.
 func (a *LLMAdapter) ModelID() string {
 	if a == nil || a.llm == nil {

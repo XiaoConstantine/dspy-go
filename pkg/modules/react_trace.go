@@ -4,15 +4,20 @@ import "time"
 
 // ReActTraceStep captures a single iteration in the ReAct loop.
 type ReActTraceStep struct {
-	Index       int
-	Thought     string
-	ActionRaw   string
-	Tool        string
-	Arguments   map[string]any
-	Observation string
-	Duration    time.Duration
-	Success     bool
-	Error       string
+	Index              int
+	Thought            string
+	ActionRaw          string
+	Tool               string
+	Arguments          map[string]any
+	Observation        string
+	ObservationDisplay string
+	ObservationDetails map[string]any
+	Duration           time.Duration
+	Success            bool
+	Error              string
+	Synthetic          bool
+	Redacted           bool
+	Truncated          bool
 }
 
 // ReActTrace captures the full execution trace of a ReAct run.

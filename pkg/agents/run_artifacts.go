@@ -20,14 +20,16 @@ type ExecutionTraceConfig struct {
 }
 
 type runEventState struct {
-	runID        string
-	started      *RunStartedEvent
-	startedAt    time.Time
-	terminal     *RunFinishedEvent
-	finishedAt   time.Time
-	messages     []runMessageRecord
-	turnUsage    map[int]*core.TokenInfo
-	toolOutcomes map[int]map[int]ToolCallFinishedEvent
+	runID          string
+	started        *RunStartedEvent
+	startedAt      time.Time
+	terminal       *RunFinishedEvent
+	finishedAt     time.Time
+	messages       []runMessageRecord
+	turnUsage      map[int]*core.TokenInfo
+	toolStarts     map[int]map[int]time.Time
+	toolFinishedAt map[int]map[int]time.Time
+	toolOutcomes   map[int]map[int]ToolCallFinishedEvent
 }
 
 type runMessageRecord struct {
@@ -121,7 +123,7 @@ func collectRunEventState(events []ExecutionEvent, selectedRunID string) (runEve
 	if err != nil {
 		return runEventState{}, err
 	}
-	state := runEventState{runID: runID, turnUsage: map[int]*core.TokenInfo{}, toolOutcomes: map[int]map[int]ToolCallFinishedEvent{}}
+	state := runEventState{runID: runID, turnUsage: map[int]*core.TokenInfo{}, toolStarts: map[int]map[int]time.Time{}, toolFinishedAt: map[int]map[int]time.Time{}, toolOutcomes: map[int]map[int]ToolCallFinishedEvent{}}
 	for _, event := range selected {
 		eventRunID, ok := executionEventRunID(event.Payload)
 		if !ok {
@@ -149,12 +151,21 @@ func collectRunEventState(events []ExecutionEvent, selectedRunID string) (runEve
 			}
 		case MessageAddedEvent:
 			state.messages = append(state.messages, runMessageRecord{turn: payload.Turn, message: payload.Message.Clone(), createdAt: event.Timestamp.UTC()})
+		case ToolExecutionStartedEvent:
+			if state.toolStarts[payload.Turn] == nil {
+				state.toolStarts[payload.Turn] = map[int]time.Time{}
+			}
+			state.toolStarts[payload.Turn][payload.ToolIndex] = event.Timestamp.UTC()
 		case ToolCallFinishedEvent:
 			if state.toolOutcomes[payload.Turn] == nil {
 				state.toolOutcomes[payload.Turn] = map[int]ToolCallFinishedEvent{}
 			}
+			if state.toolFinishedAt[payload.Turn] == nil {
+				state.toolFinishedAt[payload.Turn] = map[int]time.Time{}
+			}
 			copied := cloneEventPayload(payload).(ToolCallFinishedEvent)
 			state.toolOutcomes[payload.Turn][payload.ToolIndex] = copied
+			state.toolFinishedAt[payload.Turn][payload.ToolIndex] = event.Timestamp.UTC()
 		}
 	}
 	return state, nil
@@ -271,6 +282,7 @@ func executionTraceStepsFromState(state runEventState) ([]TraceStep, map[string]
 				toolUsage[call.Name]++
 			}
 			if result != nil {
+				step.Duration = toolExecutionDuration(state, record.turn, index)
 				step.Observation = contentBlocksText(result.ToolResult.Content)
 				step.ObservationDisplay = contentBlocksText(result.ToolResult.DisplayContent)
 				step.ObservationDetails = cloneAnyMap(result.ToolResult.Details)
@@ -286,6 +298,15 @@ func executionTraceStepsFromState(state runEventState) ([]TraceStep, map[string]
 		}
 	}
 	return steps, toolUsage, tokens, nil
+}
+
+func toolExecutionDuration(state runEventState, turn, toolIndex int) time.Duration {
+	started := state.toolStarts[turn][toolIndex]
+	finished := state.toolFinishedAt[turn][toolIndex]
+	if started.IsZero() || finished.IsZero() || finished.Before(started) {
+		return 0
+	}
+	return finished.Sub(started)
 }
 
 func strictToolOutcomeResult(state runEventState, turn, toolIndex int, call core.ToolCall) (*Message, error) {
