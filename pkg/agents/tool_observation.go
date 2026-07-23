@@ -2,7 +2,6 @@ package agents
 
 import (
 	"fmt"
-	"maps"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -22,12 +21,12 @@ type ToolObservation struct {
 
 // NormalizeToolResult converts a ToolResult into a dual-channel observation.
 func NormalizeToolResult(result core.ToolResult) ToolObservation {
-	modelText := core.ToolResultMetadataString(result.Metadata, core.ToolResultModelTextMeta)
-	displayText := core.ToolResultMetadataString(result.Metadata, core.ToolResultDisplayTextMeta)
-	if displayText == "" {
+	modelText, hasModelText := toolResultTextOverride(result.Metadata, core.ToolResultModelTextMeta)
+	displayText, hasDisplayText := toolResultTextOverride(result.Metadata, core.ToolResultDisplayTextMeta)
+	if !hasDisplayText {
 		displayText = agentutil.StringifyToolResult(result)
 	}
-	if modelText == "" {
+	if !hasModelText {
 		modelText = displayText
 	}
 
@@ -35,7 +34,7 @@ func NormalizeToolResult(result core.ToolResult) ToolObservation {
 		ModelText:   strings.TrimSpace(modelText),
 		DisplayText: strings.TrimSpace(displayText),
 		Details:     detailsMap(result.Annotations),
-		IsError:     boolMetadataValue(result.Metadata, core.ToolResultIsErrorMeta) || legacyIsError(result.Metadata),
+		IsError:     toolResultIsError(result),
 		Synthetic:   boolMetadataValue(result.Metadata, core.ToolResultSyntheticMeta),
 		Redacted:    boolMetadataValue(result.Metadata, core.ToolResultRedactedMeta),
 		Truncated:   boolMetadataValue(result.Metadata, core.ToolResultTruncatedMeta),
@@ -61,6 +60,18 @@ func BlockedToolObservation(toolName string, reason string) ToolObservation {
 	}
 }
 
+func toolResultTextOverride(metadata map[string]any, key string) (string, bool) {
+	if metadata == nil {
+		return "", false
+	}
+	value, exists := metadata[key]
+	if !exists {
+		return "", false
+	}
+	text, _ := value.(string)
+	return text, true
+}
+
 func boolMetadataValue(metadata map[string]any, key string) bool {
 	if metadata == nil {
 		return false
@@ -69,12 +80,11 @@ func boolMetadataValue(metadata map[string]any, key string) bool {
 	return value
 }
 
-func legacyIsError(metadata map[string]any) bool {
-	if metadata == nil {
-		return false
-	}
-	value, _ := metadata["isError"].(bool)
-	return value
+func toolResultIsError(result core.ToolResult) bool {
+	return boolMetadataValue(result.Metadata, core.ToolResultIsErrorMeta) ||
+		boolMetadataValue(result.Metadata, "isError") ||
+		boolMetadataValue(result.Annotations, "is_error") ||
+		boolMetadataValue(result.Annotations, "isError")
 }
 
 func detailsMap(annotations map[string]any) map[string]any {
@@ -86,7 +96,7 @@ func detailsMap(annotations map[string]any) map[string]any {
 		return nil
 	}
 	if typed, ok := raw.(map[string]any); ok {
-		return maps.Clone(typed)
+		return cloneAnyMap(typed)
 	}
 	return map[string]any{"value": raw}
 }

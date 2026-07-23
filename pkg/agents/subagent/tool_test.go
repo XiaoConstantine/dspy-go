@@ -160,9 +160,14 @@ func TestTool_DefaultResultUsesFinalAnswerAndTraceDetails(t *testing.T) {
 					"completed":    true,
 				},
 				trace: &agents.ExecutionTrace{
-					AgentID:   "child-1",
-					AgentType: "native",
-					Status:    agents.TraceStatusSuccess,
+					AgentID:         "child-1",
+					AgentType:       "native",
+					Status:          agents.TraceStatusSuccess,
+					Input:           map[string]any{"nested": map[string]any{"value": "original"}},
+					ContextMetadata: map[string]any{"labels": []any{"original"}},
+					Steps: []agents.TraceStep{{
+						Arguments: map[string]any{"nested": map[string]any{"value": "original"}},
+					}},
 				},
 			}, nil
 		},
@@ -182,6 +187,20 @@ func TestTool_DefaultResultUsesFinalAnswerAndTraceDetails(t *testing.T) {
 	assert.Equal(t, "research", trace.Name)
 	require.NotNil(t, trace.Trace)
 	assert.Equal(t, "child-1", trace.Trace.AgentID)
+
+	message := agents.NewToolResultMessage("call-1", "research", result)
+	cloned := message.Clone()
+	originalTrace := message.ToolResult.Details["trace"].(SubagentTraceRef)
+	clonedTrace := cloned.ToolResult.Details["trace"].(SubagentTraceRef)
+	require.NotSame(t, originalTrace.Trace, clonedTrace.Trace)
+	clonedTrace.Trace.AgentID = "changed"
+	clonedTrace.Trace.Input["nested"].(map[string]any)["value"] = "changed"
+	clonedTrace.Trace.ContextMetadata["labels"].([]any)[0] = "changed"
+	clonedTrace.Trace.Steps[0].Arguments["nested"].(map[string]any)["value"] = "changed"
+	assert.Equal(t, "child-1", originalTrace.Trace.AgentID)
+	assert.Equal(t, "original", originalTrace.Trace.Input["nested"].(map[string]any)["value"])
+	assert.Equal(t, "original", originalTrace.Trace.ContextMetadata["labels"].([]any)[0])
+	assert.Equal(t, "original", originalTrace.Trace.Steps[0].Arguments["nested"].(map[string]any)["value"])
 }
 
 func TestTool_TranslatesChildErrorIntoErrorToolResult(t *testing.T) {

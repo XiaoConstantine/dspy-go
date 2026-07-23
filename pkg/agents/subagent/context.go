@@ -58,6 +58,14 @@ type SubagentTraceRef struct {
 	Trace     *agents.ExecutionTrace `json:"trace,omitempty"`
 }
 
+// CloneMessageValue implements agents.MessageValueCloner so trace details do
+// not retain mutable child execution state across cloned messages.
+func (r SubagentTraceRef) CloneMessageValue() any {
+	cloned := r
+	cloned.Trace = r.Trace.Clone()
+	return cloned
+}
+
 type parentContextKey struct{}
 
 // WithParentContext attaches best-effort parent metadata to a context so a

@@ -7,6 +7,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestExecutionTraceClone_DeepCopiesNestedState(t *testing.T) {
+	trace := &ExecutionTrace{
+		Input:           map[string]any{"nested": map[string]any{"value": "input"}},
+		Output:          map[string]any{"nested": []any{map[string]any{"value": "output"}}},
+		ContextMetadata: map[string]any{"nested": map[string][]string{"values": {"context"}}},
+		Steps: []TraceStep{{
+			Arguments:          map[string]any{"nested": map[string]any{"value": "argument"}},
+			ObservationDetails: map[string]any{"nested": []any{"detail"}},
+		}},
+	}
+
+	cloned := trace.Clone()
+	cloned.Input["nested"].(map[string]any)["value"] = "changed"
+	cloned.Output["nested"].([]any)[0].(map[string]any)["value"] = "changed"
+	cloned.ContextMetadata["nested"].(map[string][]string)["values"][0] = "changed"
+	cloned.Steps[0].Arguments["nested"].(map[string]any)["value"] = "changed"
+	cloned.Steps[0].ObservationDetails["nested"].([]any)[0] = "changed"
+
+	assert.Equal(t, "input", trace.Input["nested"].(map[string]any)["value"])
+	assert.Equal(t, "output", trace.Output["nested"].([]any)[0].(map[string]any)["value"])
+	assert.Equal(t, "context", trace.ContextMetadata["nested"].(map[string][]string)["values"][0])
+	assert.Equal(t, "argument", trace.Steps[0].Arguments["nested"].(map[string]any)["value"])
+	assert.Equal(t, "detail", trace.Steps[0].ObservationDetails["nested"].([]any)[0])
+}
+
 func TestExecutionTraceClone_PreservesStepSliceShape(t *testing.T) {
 	t.Run("preserves nil steps", func(t *testing.T) {
 		trace := &ExecutionTrace{}

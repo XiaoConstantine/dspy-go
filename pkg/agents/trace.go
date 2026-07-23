@@ -1,9 +1,6 @@
 package agents
 
-import (
-	"maps"
-	"time"
-)
+import "time"
 
 // TraceStatus captures the high-level outcome of an agent trace.
 type TraceStatus string
@@ -58,10 +55,10 @@ func (s TraceStep) Clone() TraceStep {
 		Thought:            s.Thought,
 		ActionRaw:          s.ActionRaw,
 		Tool:               s.Tool,
-		Arguments:          maps.Clone(s.Arguments),
+		Arguments:          cloneAnyMap(s.Arguments),
 		Observation:        s.Observation,
 		ObservationDisplay: s.ObservationDisplay,
-		ObservationDetails: maps.Clone(s.ObservationDetails),
+		ObservationDetails: cloneAnyMap(s.ObservationDetails),
 		Duration:           s.Duration,
 		Success:            s.Success,
 		Error:              s.Error,
@@ -81,16 +78,16 @@ func (t *ExecutionTrace) Clone() *ExecutionTrace {
 		AgentID:          t.AgentID,
 		AgentType:        t.AgentType,
 		Task:             t.Task,
-		Input:            maps.Clone(t.Input),
-		Output:           maps.Clone(t.Output),
+		Input:            cloneAnyMap(t.Input),
+		Output:           cloneAnyMap(t.Output),
 		Status:           t.Status,
 		Error:            t.Error,
 		StartedAt:        t.StartedAt,
 		CompletedAt:      t.CompletedAt,
 		ProcessingTime:   t.ProcessingTime,
-		TokenUsage:       maps.Clone(t.TokenUsage),
-		ToolUsageCount:   maps.Clone(t.ToolUsageCount),
-		ContextMetadata:  maps.Clone(t.ContextMetadata),
+		TokenUsage:       cloneTypedMap(t.TokenUsage),
+		ToolUsageCount:   cloneTypedMap(t.ToolUsageCount),
+		ContextMetadata:  cloneAnyMap(t.ContextMetadata),
 		TerminationCause: t.TerminationCause,
 	}
 
