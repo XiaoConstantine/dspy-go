@@ -614,6 +614,12 @@ func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
 	require.NotNil(t, proposed)
 	_, hasSubagent := proposed.Data["subagent"]
 	assert.False(t, hasSubagent)
+
+	// Characterize the legacy lifecycle: Finish is a completion sentinel, so
+	// the native loop proposes it without emitting tool start/finish events.
+	// The typed loop will replace this with a balanced terminal lifecycle.
+	assert.Nil(t, findEvent(events, agents.EventToolCallStarted, "Finish"))
+	assert.Nil(t, findEvent(events, agents.EventToolCallFinished, "Finish"))
 }
 
 func TestAgent_Execute_EnrichesSubagentToolEvents(t *testing.T) {
