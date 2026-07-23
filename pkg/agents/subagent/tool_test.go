@@ -323,6 +323,14 @@ func TestTool_SessionPolicyEphemeralStripsSessionKeys(t *testing.T) {
 	assert.False(t, hasFork)
 }
 
+func TestRunCompletedPrefersExplicitOutputThenTypedTraceStatus(t *testing.T) {
+	t.Parallel()
+	assert.False(t, runCompleted(map[string]any{"completed": false}, &agents.ExecutionTrace{Status: agents.TraceStatusSuccess}))
+	assert.True(t, runCompleted(map[string]any{"answer": "done"}, &agents.ExecutionTrace{Status: agents.TraceStatusSuccess}))
+	assert.False(t, runCompleted(map[string]any{"answer": "partial"}, &agents.ExecutionTrace{Status: agents.TraceStatusPartial}))
+	assert.True(t, runCompleted(map[string]any{"answer": "legacy"}, nil))
+}
+
 func TestTool_DefaultResultFallsBackToJSONSummary(t *testing.T) {
 	t.Parallel()
 
@@ -408,6 +416,10 @@ func (s *stubAgent) LastExecutionTrace() *agents.ExecutionTrace {
 		return nil
 	}
 	return s.trace.Clone()
+}
+
+func (s *stubAgent) ExecuteWithTrace(context.Context, map[string]any) (agents.AgentExecutionResult, error) {
+	return agents.AgentExecutionResult{Output: maps.Clone(s.output), Trace: s.trace.Clone()}, s.err
 }
 
 type cloneableStubAgent struct {

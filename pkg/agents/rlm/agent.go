@@ -37,7 +37,10 @@ type Agent struct {
 	mu        sync.RWMutex
 }
 
-var _ optimize.OptimizableAgent = (*Agent)(nil)
+var (
+	_ optimize.OptimizableAgent   = (*Agent)(nil)
+	_ agents.ScopedExecutionAgent = (*Agent)(nil)
+)
 
 // NewAgent creates an optimizable agent around an RLM module.
 func NewAgent(id string, module *modrlm.RLM) *Agent {
@@ -55,6 +58,13 @@ func NewAgent(id string, module *modrlm.RLM) *Agent {
 	return agent
 }
 
+// ExecuteWithTrace runs one task and returns its operation-scoped trace.
+func (a *Agent) ExecuteWithTrace(ctx context.Context, input map[string]any) (agents.AgentExecutionResult, error) {
+	capturedCtx, trace := agents.WithExecutionTraceCapture(ctx)
+	output, err := a.Execute(capturedCtx, input)
+	return agents.AgentExecutionResult{Output: output, Trace: trace()}, err
+}
+
 // Execute runs the wrapped RLM module and records the most recent execution trace.
 func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	if a == nil {
@@ -63,20 +73,26 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	}
 	if a.module == nil {
 		err := fmt.Errorf("rlm agent is not initialized")
-		a.storeTrace(buildMinimalFailureTrace("", input, err))
+		trace := buildMinimalFailureTrace("", input, err)
+		agents.PublishExecutionTrace(ctx, trace)
+		a.storeTrace(trace)
 		return nil, err
 	}
 
 	contextPayload, ok := input["context"]
 	if !ok {
 		err := modrlm.ErrMissingContext
-		a.storeTrace(buildMinimalFailureTrace(a.id, input, err))
+		trace := buildMinimalFailureTrace(a.id, input, err)
+		agents.PublishExecutionTrace(ctx, trace)
+		a.storeTrace(trace)
 		return nil, err
 	}
 	query, ok := input["query"].(string)
 	if !ok {
 		err := modrlm.ErrMissingQuery
-		a.storeTrace(buildMinimalFailureTrace(a.id, input, err))
+		trace := buildMinimalFailureTrace(a.id, input, err)
+		agents.PublishExecutionTrace(ctx, trace)
+		a.storeTrace(trace)
 		return nil, err
 	}
 
@@ -86,12 +102,30 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	if result != nil {
 		output["answer"] = result.Response
 	}
+	output["completed"] = err == nil
 
-	a.storeTrace(a.buildExecutionTrace(input, output, err, trace))
+	executionTrace := a.buildExecutionTrace(input, output, err, trace)
+	agents.PublishExecutionTrace(ctx, executionTrace)
+	a.storeTrace(executionTrace)
 	if err != nil {
 		return nil, err
 	}
 	return output, nil
+}
+
+// AgentContract describes the context and query inputs required by RLM.
+func (a *Agent) AgentContract() agents.AgentContract {
+	return agents.AgentContract{
+		Inputs: []agents.AgentField{
+			{Name: "context", Description: "Context payload available to the recursive language model", Required: true},
+			{Name: "query", Description: "Question to answer from the context", Required: true},
+		},
+		Outputs: []agents.AgentField{
+			{Name: "answer", Description: "RLM response", Required: true},
+			{Name: "completed", Description: "Whether the RLM run completed", Required: true},
+		},
+		PrimaryInput: "query",
+	}
 }
 
 // GetCapabilities returns nil because the RLM-backed agent does not expose tool capabilities through the agent interface.

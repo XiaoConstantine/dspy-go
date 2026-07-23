@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
@@ -18,6 +19,19 @@ import (
 // Text parts are extracted and mapped to input fields based on metadata or position.
 // The first text part without metadata defaults to the "question" field.
 func MessageToAgentInput(msg *Message) (map[string]any, error) {
+	return messageToAgentInput(msg, agents.AgentContract{PrimaryInput: "question"}, false)
+}
+
+// MessageToAgentInputWithContract maps unlabelled text to the contract's
+// primary input and validates required named fields.
+func MessageToAgentInputWithContract(msg *Message, contract agents.AgentContract) (map[string]any, error) {
+	if err := contract.Validate(); err != nil {
+		return nil, err
+	}
+	return messageToAgentInput(msg, contract, true)
+}
+
+func messageToAgentInput(msg *Message, contract agents.AgentContract, validateRequired bool) (map[string]any, error) {
 	if msg == nil {
 		return nil, fmt.Errorf("message cannot be nil")
 	}
@@ -29,7 +43,7 @@ func MessageToAgentInput(msg *Message) (map[string]any, error) {
 	for _, part := range msg.Parts {
 		switch part.Type {
 		case "text":
-			fieldName := extractFieldName(part, textPartCount)
+			fieldName := extractFieldName(part, textPartCount, contract.PrimaryInput)
 			input[fieldName] = part.Text
 			textPartCount++
 
@@ -44,10 +58,14 @@ func MessageToAgentInput(msg *Message) (map[string]any, error) {
 			}
 
 		case "data":
-			// Merge data parts into input
-			// Prefix keys with "_data_" to avoid collisions
 			for key, value := range part.Data {
-				input["_data_"+key] = value
+				if contractHasInput(contract, key) {
+					input[key] = value
+				} else if validateRequired {
+					return nil, fmt.Errorf("message data field %q is not accepted by the agent", key)
+				} else {
+					input["_data_"+key] = value
+				}
 			}
 		}
 	}
@@ -65,12 +83,26 @@ func MessageToAgentInput(msg *Message) (map[string]any, error) {
 	if len(input) == 0 {
 		return nil, fmt.Errorf("message contains no convertible parts")
 	}
+	if validateRequired {
+		for name := range input {
+			if !strings.HasPrefix(name, "_") && !contractHasInput(contract, name) {
+				return nil, fmt.Errorf("message field %q is not accepted by the agent", name)
+			}
+		}
+		for _, field := range contract.Inputs {
+			if field.Required {
+				if _, exists := input[field.Name]; !exists {
+					return nil, fmt.Errorf("message is missing required agent input %q", field.Name)
+				}
+			}
+		}
+	}
 
 	return input, nil
 }
 
 // extractFieldName determines the field name for a text part.
-func extractFieldName(part Part, index int) string {
+func extractFieldName(part Part, index int, primaryInput string) string {
 	// Check metadata for explicit field name
 	if part.Metadata != nil {
 		if field, ok := part.Metadata["field"].(string); ok && field != "" {
@@ -80,9 +112,21 @@ func extractFieldName(part Part, index int) string {
 
 	// Default naming based on position
 	if index == 0 {
-		return "question" // First part is usually the question
+		if primaryInput != "" {
+			return primaryInput
+		}
+		return "question"
 	}
 	return fmt.Sprintf("text_%d", index)
+}
+
+func contractHasInput(contract agents.AgentContract, name string) bool {
+	for _, field := range contract.Inputs {
+		if field.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ============================================================================

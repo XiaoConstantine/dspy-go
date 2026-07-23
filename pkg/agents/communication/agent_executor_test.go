@@ -5,7 +5,12 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	nativeagent "github.com/XiaoConstantine/dspy-go/pkg/agents/native"
+	reactagent "github.com/XiaoConstantine/dspy-go/pkg/agents/react"
+	rlmagent "github.com/XiaoConstantine/dspy-go/pkg/agents/rlm"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ============================================================================
@@ -33,6 +38,21 @@ func (m *mockSimpleAgent) GetMemory() agents.Memory {
 	return nil
 }
 
+type fixedOutputAgent struct {
+	output map[string]any
+	trace  *agents.ExecutionTrace
+}
+
+func (a *fixedOutputAgent) Execute(context.Context, map[string]any) (map[string]any, error) {
+	return a.output, nil
+}
+func (*fixedOutputAgent) GetCapabilities() []core.Tool                 { return nil }
+func (*fixedOutputAgent) GetMemory() agents.Memory                     { return nil }
+func (a *fixedOutputAgent) LastExecutionTrace() *agents.ExecutionTrace { return a.trace }
+func (a *fixedOutputAgent) ExecuteWithTrace(context.Context, map[string]any) (agents.AgentExecutionResult, error) {
+	return agents.AgentExecutionResult{Output: a.output, Trace: a.trace}, nil
+}
+
 // ============================================================================
 // Basic Executor Tests
 // ============================================================================
@@ -50,6 +70,70 @@ func TestNewExecutor(t *testing.T) {
 	if len(executor.subAgents) != 0 {
 		t.Error("new executor should have no sub-agents")
 	}
+}
+
+func TestExecutorUsesBuiltInAgentInputContracts(t *testing.T) {
+	t.Run("native task", func(t *testing.T) {
+		var agent *nativeagent.Agent
+		input, err := NewExecutor(agent).messageToAgentInput(NewUserMessage("inspect repository"))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"task": "inspect repository"}, input)
+		assert.NotContains(t, input, "question")
+	})
+
+	t.Run("ReAct task", func(t *testing.T) {
+		agent := reactagent.NewReActAgent("react-1", "react")
+		input, err := NewExecutor(agent).messageToAgentInput(NewUserMessage("plan work"))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"task": "plan work"}, input)
+		assert.NotContains(t, input, "question")
+	})
+
+	t.Run("RLM context and query", func(t *testing.T) {
+		agent := rlmagent.NewAgent("rlm-1", nil)
+		msg := NewMessage(RoleUser,
+			NewDataPart(map[string]any{"context": map[string]any{"document": "facts"}}),
+			NewTextPartWithMetadata("what matters?", map[string]any{"field": "query"}),
+		)
+		input, err := NewExecutor(agent).messageToAgentInput(msg)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"document": "facts"}, input["context"])
+		assert.Equal(t, "what matters?", input["query"])
+		assert.NotContains(t, input, "question")
+
+		_, err = NewExecutor(agent).messageToAgentInput(NewMessage(RoleUser,
+			NewDataPart(map[string]any{"context": "facts", "qurey": "typo"}),
+			NewTextPartWithMetadata("what matters?", map[string]any{"field": "query"}),
+		))
+		require.ErrorContains(t, err, `data field "qurey" is not accepted`)
+	})
+}
+
+func TestExecutorDoesNotCompleteExplicitlyIncompleteOutput(t *testing.T) {
+	agent := &fixedOutputAgent{output: map[string]any{
+		"completed": false,
+		"error":     "maximum turns reached",
+	}}
+	task, err := NewExecutor(agent).SendMessage(context.Background(), NewUserMessage("work"))
+	require.NoError(t, err)
+	assert.Equal(t, TaskStateFailed, task.Status.State)
+	require.NotNil(t, task.Status.Message)
+	assert.Contains(t, ExtractTextFromMessage(task.Status.Message), "maximum turns reached")
+}
+
+func TestExecutorUsesExecutionScopedTraceStatus(t *testing.T) {
+	agent := &fixedOutputAgent{
+		output: map[string]any{"answer": "partial"},
+		trace:  &agents.ExecutionTrace{Status: agents.TraceStatusPartial},
+	}
+	task, err := NewExecutor(agent).SendMessage(context.Background(), NewUserMessage("work"))
+	require.NoError(t, err)
+	assert.Equal(t, TaskStateFailed, task.Status.State)
+
+	agent.trace = &agents.ExecutionTrace{Status: agents.TraceStatusSuccess}
+	task, err = NewExecutor(agent).SendMessage(context.Background(), NewUserMessage("work"))
+	require.NoError(t, err)
+	assert.Equal(t, TaskStateCompleted, task.Status.State)
 }
 
 func TestExecutorSendMessage(t *testing.T) {

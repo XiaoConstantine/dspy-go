@@ -55,10 +55,6 @@ type Tool struct {
 	metadata            map[string]string
 }
 
-type traceProvider interface {
-	LastExecutionTrace() *agents.ExecutionTrace
-}
-
 // Info captures static metadata about a subagent-wrapped tool.
 type Info struct {
 	Name          string
@@ -206,14 +202,20 @@ func (t *Tool) Execute(ctx context.Context, params map[string]any) (core.ToolRes
 	childInput = applySessionPolicy(t.sessionPolicy, t.name, childInput, parent)
 
 	startedAt := time.Now()
-	output, execErr := child.Execute(runCtx, childInput)
+	var output map[string]any
+	var trace *agents.ExecutionTrace
+	var execErr error
+	if scoped, ok := child.(agents.ScopedExecutionAgent); ok {
+		result, err := scoped.ExecuteWithTrace(runCtx, childInput)
+		output, trace, execErr = result.Output, result.Trace, err
+	} else {
+		output, execErr = child.Execute(runCtx, childInput)
+	}
 	duration := time.Since(startedAt)
-
-	trace := childTrace(child)
 	run := ResultContext{
 		Output:    maps.Clone(output),
 		Duration:  duration,
-		Completed: execErr == nil && completedValue(output),
+		Completed: execErr == nil && runCompleted(output, trace),
 		Trace:     trace,
 	}
 
@@ -390,14 +392,6 @@ func sanitizeSegment(value string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-func childTrace(agent agents.Agent) *agents.ExecutionTrace {
-	provider, ok := agent.(traceProvider)
-	if !ok {
-		return nil
-	}
-	return provider.LastExecutionTrace()
-}
-
 func summarizeOutput(output map[string]any) (string, string) {
 	if text := firstString(output, "final_answer", "answer", "result", "summary", "text"); text != "" {
 		return truncateRunes(text, defaultModelTextLimit), truncateRunes(text, defaultDisplayTextLimit)
@@ -412,6 +406,19 @@ func summarizeOutput(output map[string]any) (string, string) {
 	}
 	display := string(formatted)
 	return truncateRunes(display, defaultModelTextLimit), truncateRunes(display, defaultDisplayTextLimit)
+}
+
+func runCompleted(output map[string]any, trace *agents.ExecutionTrace) bool {
+	if output != nil {
+		if raw, exists := output["completed"]; exists {
+			flag, ok := raw.(bool)
+			return ok && flag
+		}
+	}
+	if trace != nil {
+		return trace.Status == agents.TraceStatusSuccess
+	}
+	return completedValue(output)
 }
 
 func completedValue(output map[string]any) bool {

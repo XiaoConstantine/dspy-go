@@ -26,10 +26,25 @@ type Prompt struct {
 	RunID    string
 	Text     string
 	Content  []core.ContentBlock
+	Fields   map[string]any
 	Metadata map[string]any
 }
 
-func (p Prompt) message() (Message, error) {
+func (p Prompt) message(renderer promptFieldRenderer) (Message, error) {
+	if len(p.Fields) > 0 {
+		if p.Text != "" || len(p.Content) > 0 {
+			return Message{}, fmt.Errorf("prompt fields cannot be combined with text or content")
+		}
+		if renderer == nil {
+			return Message{}, fmt.Errorf("prompt fields require signature-backed instructions")
+		}
+		message, err := renderer.PromptFieldMessage(cloneAnyMap(p.Fields))
+		if err != nil {
+			return Message{}, err
+		}
+		message.Metadata = cloneAnyMap(p.Metadata)
+		return message, nil
+	}
 	content := make([]core.ContentBlock, 0, 1+len(p.Content))
 	if p.Text != "" {
 		content = append(content, core.NewTextBlock(p.Text))
@@ -138,14 +153,16 @@ func WithHarnessToolExecutor(executor ToolExecutor) HarnessOption {
 
 // Harness owns a reusable transcript and serializes stateful RunLoop calls.
 type Harness struct {
-	mu        sync.Mutex
-	model     Model
-	tools     []core.Tool
-	config    LoopConfig
-	messages  []Message
-	hasPrompt bool
-	active    bool
-	cancel    context.CancelFunc
+	mu           sync.Mutex
+	model        Model
+	tools        []core.Tool
+	config       LoopConfig
+	promptFields promptFieldRenderer
+	baseMessages []Message
+	messages     []Message
+	hasPrompt    bool
+	active       bool
+	cancel       context.CancelFunc
 }
 
 // NewHarness creates a reusable stateful agent harness. Instruction artifacts
@@ -175,9 +192,10 @@ func NewHarness(model Model, tools []core.Tool, options ...HarnessOption) (*Harn
 		}
 		initial = CloneMessages(messages)
 	}
+	renderer, _ := config.instructions.(promptFieldRenderer)
 	return &Harness{
 		model: model, tools: append([]core.Tool(nil), tools...), config: cloneLoopConfig(config.loop),
-		messages: initial,
+		promptFields: renderer, baseMessages: CloneMessages(initial), messages: initial,
 	}, nil
 }
 
@@ -186,11 +204,7 @@ func (h *Harness) Prompt(ctx context.Context, prompt Prompt) (LoopResult, error)
 	if h == nil {
 		return LoopResult{}, fmt.Errorf("agent harness is nil")
 	}
-	message, err := prompt.message()
-	if err != nil {
-		return LoopResult{}, err
-	}
-	return h.run(ctx, &message, prompt.RunID, false)
+	return h.run(ctx, &prompt, prompt.RunID, false)
 }
 
 // Continue resumes the current transcript without appending a user message.
@@ -201,7 +215,7 @@ func (h *Harness) Continue(ctx context.Context) (LoopResult, error) {
 	return h.run(ctx, nil, "", true)
 }
 
-func (h *Harness) run(ctx context.Context, prompt *Message, runID string, continuing bool) (LoopResult, error) {
+func (h *Harness) run(ctx context.Context, prompt *Prompt, runID string, continuing bool) (LoopResult, error) {
 	h.mu.Lock()
 	if h.active {
 		h.mu.Unlock()
@@ -211,27 +225,45 @@ func (h *Harness) run(ctx context.Context, prompt *Message, runID string, contin
 		h.mu.Unlock()
 		return LoopResult{}, ErrNothingToContinue
 	}
-	messages := closeHarnessCompletion(CloneMessages(h.messages), h.config.Completion)
-	if prompt != nil {
-		messages = append(messages, prompt.Clone())
-		h.hasPrompt = true
-	}
+	transcript := h.messages
+	completion := h.config.Completion
+	renderer := h.promptFields
 	runConfig := cloneLoopConfig(h.config)
 	runConfig.RunID = runID
+	model := h.model
+	tools := append([]core.Tool(nil), h.tools...)
 	runCtx, cancel := context.WithCancel(ctx)
 	h.active = true
 	h.cancel = cancel
 	h.mu.Unlock()
 
-	result, runErr := RunLoop(runCtx, h.model, h.tools, messages, runConfig)
+	messages := closeHarnessCompletion(CloneMessages(transcript), completion)
+	if prompt != nil {
+		message, err := prompt.message(renderer)
+		if err != nil {
+			cancel()
+			h.mu.Lock()
+			h.active = false
+			h.cancel = nil
+			h.mu.Unlock()
+			return LoopResult{}, err
+		}
+		messages = append(messages, message)
+		h.mu.Lock()
+		h.hasPrompt = true
+		h.mu.Unlock()
+	}
+
+	result, runErr := RunLoop(runCtx, model, tools, messages, runConfig)
 	cancel()
 
-	h.mu.Lock()
-	if result.Messages != nil {
-		h.messages = CloneMessages(result.Messages)
-	} else {
-		h.messages = CloneMessages(messages)
+	persisted := result.Messages
+	if persisted == nil {
+		persisted = messages
 	}
+	persisted = CloneMessages(persisted)
+	h.mu.Lock()
+	h.messages = persisted
 	h.active = false
 	h.cancel = nil
 	h.mu.Unlock()
@@ -244,8 +276,9 @@ func (h *Harness) Messages() []Message {
 		return nil
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	return CloneMessages(h.messages)
+	messages := h.messages
+	h.mu.Unlock()
+	return CloneMessages(messages)
 }
 
 // Cancel cancels the active run.
@@ -284,6 +317,62 @@ func closeHarnessCompletion(messages []Message, completion CompletionConfig) []M
 		messages = append(messages, NewToolResultMessage(call.ID, call.Name, result))
 	}
 	return messages
+}
+
+func (h *Harness) replaceInstructions(source InstructionSource) error {
+	if h == nil {
+		return fmt.Errorf("agent harness is nil")
+	}
+	messages, err := source.InstructionMessages()
+	if err != nil {
+		return err
+	}
+	renderer, _ := source.(promptFieldRenderer)
+	baseMessages := CloneMessages(messages)
+	currentMessages := CloneMessages(messages)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.active || h.hasPrompt {
+		return fmt.Errorf("cannot replace instructions after harness execution has started")
+	}
+	h.baseMessages = baseMessages
+	h.messages = currentMessages
+	h.promptFields = renderer
+	return nil
+}
+
+func (h *Harness) replaceModel(model Model) error {
+	if h == nil {
+		return fmt.Errorf("agent harness is nil")
+	}
+	if model == nil {
+		return fmt.Errorf("model is required")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.active {
+		return ErrHarnessRunning
+	}
+	h.model = model
+	return nil
+}
+
+func (h *Harness) fresh() *Harness {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	model := h.model
+	tools := append([]core.Tool(nil), h.tools...)
+	config := cloneLoopConfig(h.config)
+	renderer := h.promptFields
+	base := h.baseMessages
+	h.mu.Unlock()
+	base = CloneMessages(base)
+	return &Harness{
+		model: model, tools: tools, config: config,
+		promptFields: renderer, baseMessages: CloneMessages(base), messages: base,
+	}
 }
 
 func cloneLoopConfig(config LoopConfig) LoopConfig {

@@ -118,14 +118,21 @@ func (e *A2AExecutor) SendMessage(ctx context.Context, msg *Message) (*Task, err
 	// Update to working state
 	task.UpdateStatus(TaskStateWorking)
 
-	// Convert a2a message to agent input
-	input, err := MessageToAgentInput(msg)
+	// Convert the a2a message using the wrapped agent's named contract when available.
+	input, err := e.messageToAgentInput(msg)
 	if err != nil {
 		return e.failTask(task, err), nil
 	}
 
-	// Execute the wrapped agent
-	output, err := e.agent.Execute(ctx, input)
+	// Execute the wrapped agent, retaining an execution-scoped trace when supported.
+	var output map[string]any
+	var trace *agents.ExecutionTrace
+	if scoped, ok := e.agent.(agents.ScopedExecutionAgent); ok {
+		result, executeErr := scoped.ExecuteWithTrace(ctx, input)
+		output, trace, err = result.Output, result.Trace, executeErr
+	} else {
+		output, err = e.agent.Execute(ctx, input)
+	}
 	if err != nil {
 		return e.failTask(task, err), nil
 	}
@@ -136,8 +143,15 @@ func (e *A2AExecutor) SendMessage(ctx context.Context, msg *Message) (*Task, err
 		return e.failTask(task, err), nil
 	}
 
-	// Complete task with artifact
+	// Preserve partial output, but never report an explicitly incomplete run as completed.
 	task.AddArtifact(artifact)
+	if !agentOutputCompleted(output, trace) {
+		errText := "agent did not complete the task"
+		if value, ok := output["error"].(string); ok && value != "" {
+			errText = value
+		}
+		return e.failTask(task, fmt.Errorf("%s", errText)), nil
+	}
 	task.UpdateStatus(TaskStateCompleted)
 
 	return task, nil
@@ -244,6 +258,34 @@ func (e *A2AExecutor) GetAgentCard() AgentCard {
 // ============================================================================
 // Helper Methods
 // ============================================================================
+
+func (e *A2AExecutor) messageToAgentInput(msg *Message) (map[string]any, error) {
+	input := map[string]any(nil)
+	var err error
+	if provider, ok := e.agent.(agents.AgentContractProvider); ok {
+		input, err = MessageToAgentInputWithContract(msg, provider.AgentContract())
+	} else {
+		input, err = MessageToAgentInput(msg)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if adapter, ok := e.agent.(agents.AgentInputAdapter); ok {
+		return adapter.AdaptAgentInput(input)
+	}
+	return input, nil
+}
+
+func agentOutputCompleted(output map[string]any, trace *agents.ExecutionTrace) bool {
+	if raw, exists := output["completed"]; exists {
+		completed, ok := raw.(bool)
+		return ok && completed
+	}
+	if trace != nil {
+		return trace.Status == agents.TraceStatusSuccess
+	}
+	return true
+}
 
 // failTask marks a task as failed with an error message.
 func (e *A2AExecutor) failTask(task *Task, err error) *Task {

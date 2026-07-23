@@ -150,7 +150,10 @@ type Agent struct {
 	lastNativeTrace *Trace
 }
 
-var _ optimize.OptimizableAgent = (*Agent)(nil)
+var (
+	_ optimize.OptimizableAgent   = (*Agent)(nil)
+	_ agents.ScopedExecutionAgent = (*Agent)(nil)
+)
 
 // NewAgent creates a shared native tool-calling agent.
 func NewAgent(llm core.LLM, cfg Config) (*Agent, error) {
@@ -220,6 +223,13 @@ func (a *Agent) RegisterTool(tool core.Tool) error {
 		return fmt.Errorf("tool-calling agent is nil")
 	}
 	return a.toolRegistry.Register(tool)
+}
+
+// ExecuteWithTrace runs one task and returns its operation-scoped trace.
+func (a *Agent) ExecuteWithTrace(ctx context.Context, input map[string]any) (agents.AgentExecutionResult, error) {
+	capturedCtx, trace := agents.WithExecutionTraceCapture(ctx)
+	output, err := a.Execute(capturedCtx, input)
+	return agents.AgentExecutionResult{Output: output, Trace: trace()}, err
 }
 
 // Execute runs one native tool-calling task.
@@ -635,6 +645,15 @@ func loopTokenUsageMap(usage *core.TokenInfo) map[string]int64 {
 	}
 }
 
+// AgentContract describes native agent input/output fields for composition.
+func (a *Agent) AgentContract() agents.AgentContract {
+	return agents.AgentContract{
+		Inputs:       []agents.AgentField{{Name: "task", Description: "Task for the native coding agent", Required: true}},
+		Outputs:      []agents.AgentField{{Name: "final_answer", Description: "Final task result"}, {Name: "completed", Description: "Whether the task completed", Required: true}},
+		PrimaryInput: "task",
+	}
+}
+
 // GetCapabilities returns the currently registered tools.
 func (a *Agent) GetCapabilities() []core.Tool {
 	if a == nil {
@@ -890,6 +909,7 @@ func (a *Agent) storeTraces(ctx context.Context, input map[string]any, trace *Tr
 	a.lastNativeTrace = trace.Clone()
 	a.lastTrace = execTrace.Clone()
 	a.traceMu.Unlock()
+	agents.PublishExecutionTrace(ctx, execTrace)
 	a.persistSessionRecord(ctx, input, trace, events)
 }
 

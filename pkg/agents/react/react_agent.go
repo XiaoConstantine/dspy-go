@@ -201,7 +201,10 @@ type ReActAgent struct {
 	mu sync.RWMutex
 }
 
-var _ optimize.OptimizableAgent = (*ReActAgent)(nil)
+var (
+	_ optimize.OptimizableAgent   = (*ReActAgent)(nil)
+	_ agents.ScopedExecutionAgent = (*ReActAgent)(nil)
+)
 
 // ExecutionRecord tracks execution history for reflection.
 type ExecutionRecord struct {
@@ -672,6 +675,13 @@ func (r *ReActAgent) Clone() (optimize.OptimizableAgent, error) {
 	return cloned, nil
 }
 
+// ExecuteWithTrace runs one task and returns its operation-scoped trace.
+func (r *ReActAgent) ExecuteWithTrace(ctx context.Context, input map[string]any) (agents.AgentExecutionResult, error) {
+	capturedCtx, trace := agents.WithExecutionTraceCapture(ctx)
+	output, err := r.Execute(capturedCtx, input)
+	return agents.AgentExecutionResult{Output: output, Trace: trace()}, err
+}
+
 // Execute runs the agent's task with given input.
 func (r *ReActAgent) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	// Check if we should use interceptors
@@ -684,6 +694,11 @@ func (r *ReActAgent) Execute(ctx context.Context, input map[string]any) (map[str
 
 // executeInternal performs the actual execution logic with context engineering.
 func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) (map[string]any, error) {
+	r.mu.RLock()
+	mode := r.config.ExecutionMode
+	signature := r.taskSignature
+	r.mu.RUnlock()
+	input = plannerCompatibleInput(input, mode, signature)
 	startTime := time.Now()
 	ctx, span := core.StartSpan(ctx, "ReActAgent.Execute")
 	defer core.EndSpan(ctx)
@@ -754,7 +769,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 	var executionActions []ActionRecord
 	var err error
 
-	switch r.config.ExecutionMode {
+	switch mode {
 	case ModeReAct:
 		result, reactTrace, err = r.executeReAct(ctx, optimizedInput)
 	case ModeReWOO:
@@ -768,6 +783,7 @@ func (r *ReActAgent) executeInternal(ctx context.Context, input map[string]any) 
 	// STEP 4: Create enhanced execution record
 	processingTime := time.Since(startTime)
 	record := r.createEnhancedExecutionRecord(executionID, input, result, err, contextResponse, reactTrace, executionActions, processingTime)
+	agents.PublishExecutionTrace(ctx, record.Trace)
 
 	// ACE: Record steps from execution record using the recorder handle
 	if aceRecorder != nil {
@@ -1074,12 +1090,52 @@ func (r *ReActAgent) adjustPerformance(reflection Reflection) {
 	}
 }
 
+func plannerCompatibleInput(input map[string]any, mode ExecutionMode, signature core.Signature) map[string]any {
+	adapted := maps.Clone(input)
+	if adapted == nil {
+		adapted = map[string]any{}
+	}
+	if mode != ModeReWOO && mode != ModeHybrid {
+		return adapted
+	}
+	if _, exists := adapted["task"]; exists {
+		return adapted
+	}
+	contract := agents.ContractFromSignature(signature)
+	if value, ok := adapted[contract.PrimaryInput].(string); ok && strings.TrimSpace(value) != "" {
+		adapted["task"] = value
+	}
+	return adapted
+}
+
 // storeLearning stores learned insights for future use.
 func (r *ReActAgent) storeLearning(ctx context.Context, reflection Reflection) {
 	if r.memory != nil {
 		key := fmt.Sprintf("learning_%s_%d", r.id, time.Now().Unix())
 		_ = r.memory.Store(key, reflection.Insight)
 	}
+}
+
+// AgentContract derives composition fields from the initialized task signature.
+func (r *ReActAgent) AgentContract() agents.AgentContract {
+	r.mu.RLock()
+	signature := r.taskSignature
+	r.mu.RUnlock()
+	contract := agents.ContractFromSignature(signature)
+	if len(contract.Inputs) == 0 {
+		return agents.AgentContract{
+			Inputs:       []agents.AgentField{{Name: "task", Description: "Task for the ReAct agent", Required: true}},
+			Outputs:      []agents.AgentField{{Name: "result", Description: "ReAct task result"}},
+			PrimaryInput: "task",
+		}
+	}
+	for _, field := range contract.Inputs {
+		if field.Name == "task" {
+			contract.PrimaryInput = "task"
+			break
+		}
+	}
+	return contract
 }
 
 // GetCapabilities returns the tools/capabilities available to this agent.

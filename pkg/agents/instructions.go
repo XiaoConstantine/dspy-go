@@ -27,6 +27,10 @@ type InstructionSource interface {
 	InstructionMessages() ([]Message, error)
 }
 
+type promptFieldRenderer interface {
+	PromptFieldMessage(map[string]any) (Message, error)
+}
+
 type staticInstructionSource struct {
 	messages []Message
 }
@@ -46,6 +50,22 @@ func staticInstructions(text string) InstructionSource {
 type dspyInstructionSource struct {
 	signature core.Signature
 	demos     []core.Example
+}
+
+func (s dspyInstructionSource) PromptFieldMessage(fields map[string]any) (Message, error) {
+	known := make(map[string]struct{}, len(s.signature.Inputs))
+	for _, field := range s.signature.Inputs {
+		known[field.Name] = struct{}{}
+		if _, exists := fields[field.Name]; !exists {
+			return Message{}, fmt.Errorf("prompt is missing signature input %q", field.Name)
+		}
+	}
+	for name := range fields {
+		if _, exists := known[name]; !exists {
+			return Message{}, fmt.Errorf("prompt field %q is not a signature input", name)
+		}
+	}
+	return renderExampleMessage(RoleUser, s.signature.Inputs, fields)
 }
 
 func (s dspyInstructionSource) InstructionMessages() ([]Message, error) {
