@@ -4,7 +4,6 @@ import (
 	"context"
 	goerrors "errors"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
@@ -198,7 +197,7 @@ func (a *Agent) resolveSessionEventBranch(ctx context.Context, input map[string]
 	}, nil
 }
 
-func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, trace *Trace) {
+func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, trace *Trace, events []agents.ExecutionEvent) {
 	sessionID := a.sessionID(input)
 	if sessionID == "" || trace == nil {
 		return
@@ -214,7 +213,7 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 		eventErr     error
 	)
 	if eventStore != nil {
-		eventEntries, eventBranch, eventErr = a.persistSessionEventTrace(ctx, eventStore, trace, sessionID)
+		eventEntries, eventBranch, eventErr = a.persistSessionEvents(ctx, eventStore, trace, events, sessionID)
 	}
 
 	eventData := map[string]any{
@@ -244,7 +243,7 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 	a.emitEvent(agents.EventSessionPersisted, eventData)
 }
 
-func (a *Agent) persistSessionEventTrace(ctx context.Context, store sessionevent.SessionEventStore, trace *Trace, sessionID string) ([]sessionevent.SessionEntry, string, error) {
+func (a *Agent) persistSessionEvents(ctx context.Context, store sessionevent.SessionEventStore, trace *Trace, events []agents.ExecutionEvent, sessionID string) ([]sessionevent.SessionEntry, string, error) {
 	if store == nil || trace == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, "", nil
 	}
@@ -254,7 +253,15 @@ func (a *Agent) persistSessionEventTrace(ctx context.Context, store sessionevent
 		return nil, "", err
 	}
 
-	entries := sessionEventEntriesFromTrace(trace, sessionID, branchID)
+	entries, err := sessionevent.EntriesFromEvents(events, sessionID, branchID, sessionevent.EventProjectionConfig{
+		RunID:    trace.TaskID,
+		TaskID:   trace.TaskID,
+		Source:   "native",
+		UserText: trace.Task,
+	})
+	if err != nil {
+		return nil, branchID, err
+	}
 	if len(entries) == 0 {
 		return nil, branchID, nil
 	}
@@ -308,158 +315,6 @@ func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEve
 		return "", fmt.Errorf("create session event branch recovery failed: %w", goerrors.Join(createErr, getErr))
 	}
 	return "", createErr
-}
-
-func sessionEventEntriesFromTrace(trace *Trace, sessionID, branchID string) []sessionevent.SessionEntry {
-	if trace == nil || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(branchID) == "" {
-		return nil
-	}
-
-	entries := make([]sessionevent.SessionEntry, 0, len(trace.Steps)*3+3)
-	baseTime := time.Now().UTC()
-	offset := 0
-	nextTime := func() time.Time {
-		// The trace only captures run-level timing, not per-entry timestamps. Use a
-		// monotonic nanosecond offset to preserve deterministic entry ordering.
-		t := baseTime.Add(time.Duration(offset) * time.Nanosecond)
-		offset++
-		return t
-	}
-
-	appendEntry := func(entry sessionevent.SessionEntry) {
-		entry.SessionID = sessionID
-		entry.BranchID = branchID
-		if entry.CreatedAt.IsZero() {
-			entry.CreatedAt = nextTime()
-		}
-		entries = append(entries, entry)
-	}
-
-	appendEntry(sessionevent.SessionEntry{
-		Kind:       sessionevent.EntryKindUserMessage,
-		Role:       "user",
-		CreatedAt:  nextTime(),
-		SearchText: strings.TrimSpace(trace.Task),
-		Payload: map[string]any{
-			"text":    strings.TrimSpace(trace.Task),
-			"task_id": strings.TrimSpace(trace.TaskID),
-		},
-		Metadata: map[string]any{
-			"source":   "native",
-			"task_id":  strings.TrimSpace(trace.TaskID),
-			"provider": strings.TrimSpace(trace.Provider),
-			"model":    strings.TrimSpace(trace.Model),
-		},
-	})
-
-	lastAssistantText := ""
-	for _, step := range trace.Steps {
-		if text := strings.TrimSpace(step.AssistantText); text != "" {
-			lastAssistantText = text
-			appendEntry(sessionevent.SessionEntry{
-				Kind:             sessionevent.EntryKindAssistantMessage,
-				Role:             "assistant",
-				CreatedAt:        nextTime(),
-				SearchText:       text,
-				PromptTokens:     step.Usage.PromptTokens,
-				CompletionTokens: step.Usage.CompletionTokens,
-				TotalTokens:      step.Usage.TotalTokens,
-				Payload: map[string]any{
-					"text":       text,
-					"step_index": step.Index,
-				},
-				Metadata: map[string]any{
-					"source":     "native",
-					"step_index": step.Index,
-				},
-			})
-		}
-
-		if strings.TrimSpace(step.ToolName) == "" || strings.EqualFold(step.ToolName, "finish") {
-			continue
-		}
-
-		appendEntry(sessionevent.SessionEntry{
-			Kind:       sessionevent.EntryKindToolCall,
-			Role:       "assistant",
-			ToolName:   step.ToolName,
-			CreatedAt:  nextTime(),
-			SearchText: strings.TrimSpace(step.ToolName),
-			Payload: map[string]any{
-				"arguments":  maps.Clone(step.Arguments),
-				"step_index": step.Index,
-			},
-			Metadata: map[string]any{
-				"source":     "native",
-				"step_index": step.Index,
-			},
-		})
-
-		appendEntry(sessionevent.SessionEntry{
-			Kind:       sessionevent.EntryKindToolResult,
-			ToolName:   step.ToolName,
-			CreatedAt:  nextTime(),
-			IsError:    step.IsError,
-			Synthetic:  step.Synthetic,
-			Redacted:   step.Redacted,
-			Truncated:  step.Truncated,
-			SearchText: firstNonEmpty(strings.TrimSpace(step.ObservationDisplay), strings.TrimSpace(step.Observation)),
-			Payload: map[string]any{
-				"observation":         strings.TrimSpace(step.Observation),
-				"observation_display": strings.TrimSpace(step.ObservationDisplay),
-				"details":             maps.Clone(step.ObservationDetails),
-				"step_index":          step.Index,
-			},
-			Metadata: map[string]any{
-				"source":     "native",
-				"step_index": step.Index,
-			},
-		})
-	}
-
-	if finalAnswer := strings.TrimSpace(trace.FinalAnswer); finalAnswer != "" && finalAnswer != lastAssistantText {
-		appendEntry(sessionevent.SessionEntry{
-			Kind:       sessionevent.EntryKindAssistantMessage,
-			Role:       "assistant",
-			CreatedAt:  nextTime(),
-			SearchText: finalAnswer,
-			Payload: map[string]any{
-				"text":  finalAnswer,
-				"final": true,
-			},
-			Metadata: map[string]any{
-				"source": "native",
-			},
-		})
-	}
-
-	appendEntry(sessionevent.SessionEntry{
-		Kind:             sessionevent.EntryKindSystemEvent,
-		CreatedAt:        nextTime(),
-		SearchText:       firstNonEmpty(strings.TrimSpace(trace.FinalAnswer), strings.TrimSpace(trace.Error), strings.TrimSpace(trace.Task)),
-		PromptTokens:     trace.TokenUsage.PromptTokens,
-		CompletionTokens: trace.TokenUsage.CompletionTokens,
-		TotalTokens:      trace.TokenUsage.TotalTokens,
-		Payload: map[string]any{
-			"event":             "run_finished",
-			"task_id":           strings.TrimSpace(trace.TaskID),
-			"completed":         trace.Completed,
-			"final_answer":      strings.TrimSpace(trace.FinalAnswer),
-			"error":             strings.TrimSpace(trace.Error),
-			"provider":          strings.TrimSpace(trace.Provider),
-			"model":             strings.TrimSpace(trace.Model),
-			"started_at":        trace.StartedAt.UTC().Format(time.RFC3339Nano),
-			"duration_ms":       trace.Duration.Milliseconds(),
-			"prompt_tokens":     trace.TokenUsage.PromptTokens,
-			"completion_tokens": trace.TokenUsage.CompletionTokens,
-			"total_tokens":      trace.TokenUsage.TotalTokens,
-		},
-		Metadata: map[string]any{
-			"source": "native",
-		},
-	})
-
-	return entries
 }
 
 func sessionHeadEntryID(head *sessionevent.SessionEntry) string {
@@ -579,6 +434,15 @@ func renderSessionEventRecallEntry(index int, entry sessionevent.SessionEntry) s
 			}
 			if errText := strings.TrimSpace(agentutil.StringValue(entry.Payload["error"])); errText != "" {
 				return fmt.Sprintf("%d. Run error: %s\n", index, agentutil.TruncateString(errText, maxSessionAnswerChars))
+			}
+			if diagnostic := strings.TrimSpace(agentutil.StringValue(entry.Payload["diagnostic"])); diagnostic != "" {
+				if stopReason := strings.TrimSpace(agentutil.StringValue(entry.Payload["stop_reason"])); stopReason != "" {
+					return fmt.Sprintf("%d. Run stopped (%s): %s\n", index, stopReason, agentutil.TruncateString(diagnostic, maxSessionAnswerChars))
+				}
+				return fmt.Sprintf("%d. Run stopped: %s\n", index, agentutil.TruncateString(diagnostic, maxSessionAnswerChars))
+			}
+			if stopReason := strings.TrimSpace(agentutil.StringValue(entry.Payload["stop_reason"])); stopReason != "" {
+				return fmt.Sprintf("%d. Run stopped: %s\n", index, agentutil.TruncateString(stopReason, maxSessionAnswerChars))
 			}
 		}
 		return fmt.Sprintf("%d. System event: %s\n", index, agentutil.TruncateString(strings.TrimSpace(agentutil.StringValue(entry.Payload["event"])), maxSessionAnswerChars))

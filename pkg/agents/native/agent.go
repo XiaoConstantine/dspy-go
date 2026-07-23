@@ -302,8 +302,25 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	if runErr != nil && len(typedEvents) == 0 {
 		return nil, runErr
 	}
-	trace := nativeTraceFromLoop(a, taskID, task, startedAt, loopResult, typedEvents, runErr)
-	a.storeTraces(ctx, input, trace)
+	execTrace, err := agents.ExecutionTraceFromEvents(typedEvents, agents.ExecutionTraceConfig{
+		RunID:     taskID,
+		AgentID:   fmt.Sprintf("native-%s-%s", a.llm.ProviderName(), a.llm.ModelID()),
+		AgentType: "native",
+		Input:     maps.Clone(input),
+		Task:      firstNonEmpty(taskID, task),
+		ContextMetadata: func() map[string]any {
+			metadata := map[string]any{}
+			if sessionID := a.sessionID(input); sessionID != "" {
+				metadata["session_id"] = sessionID
+			}
+			return metadata
+		}(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	trace := nativeTraceFromEvents(a, taskID, task, startedAt, typedEvents, loopResult, runErr)
+	a.storeTraces(ctx, input, trace, execTrace, typedEvents)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -493,12 +510,12 @@ func nativeLegacyEventSink(
 	})
 }
 
-func nativeTraceFromLoop(
+func nativeTraceFromEvents(
 	a *Agent,
 	taskID, task string,
 	startedAt time.Time,
-	result agents.LoopResult,
 	events []agents.ExecutionEvent,
+	result agents.LoopResult,
 	runErr error,
 ) *Trace {
 	var terminal agents.RunFinishedEvent
@@ -868,78 +885,12 @@ func turnBudgetReminder(currentTurn int, maxTurns int) string {
 	}
 }
 
-func (a *Agent) storeTraces(ctx context.Context, input map[string]any, trace *Trace) {
-	execTrace := nativeTraceToExecutionTrace(a, input, trace)
+func (a *Agent) storeTraces(ctx context.Context, input map[string]any, trace *Trace, execTrace *agents.ExecutionTrace, events []agents.ExecutionEvent) {
 	a.traceMu.Lock()
 	a.lastNativeTrace = trace.Clone()
-	a.lastTrace = execTrace
+	a.lastTrace = execTrace.Clone()
 	a.traceMu.Unlock()
-	a.persistSessionRecord(ctx, input, trace)
-}
-
-func nativeTraceToExecutionTrace(a *Agent, input map[string]any, trace *Trace) *agents.ExecutionTrace {
-	if trace == nil {
-		return nil
-	}
-
-	steps := make([]agents.TraceStep, 0, len(trace.Steps))
-	toolUsage := make(map[string]int)
-	for _, step := range trace.Steps {
-		if step.ToolName != "" && !strings.EqualFold(step.ToolName, "finish") {
-			toolUsage[step.ToolName]++
-		}
-		steps = append(steps, agents.TraceStep{
-			Index:              step.Index,
-			Thought:            step.AssistantText,
-			Tool:               step.ToolName,
-			Arguments:          maps.Clone(step.Arguments),
-			Observation:        step.Observation,
-			ObservationDisplay: step.ObservationDisplay,
-			ObservationDetails: maps.Clone(step.ObservationDetails),
-			Success:            !step.IsError,
-			Error:              boolError(step.IsError, step.Observation),
-			Synthetic:          step.Synthetic,
-			Redacted:           step.Redacted,
-			Truncated:          step.Truncated,
-		})
-	}
-
-	status := agents.TraceStatusFailure
-	switch {
-	case trace.Completed:
-		status = agents.TraceStatusSuccess
-	case len(steps) > 0:
-		status = agents.TraceStatusPartial
-	}
-
-	contextMetadata := map[string]any{
-		"turns": len(trace.Steps),
-	}
-	if sessionID := a.sessionID(input); sessionID != "" {
-		contextMetadata["session_id"] = sessionID
-	}
-
-	return &agents.ExecutionTrace{
-		AgentID:        fmt.Sprintf("native-%s-%s", a.llm.ProviderName(), a.llm.ModelID()),
-		AgentType:      "native",
-		Task:           firstNonEmpty(trace.TaskID, trace.Task),
-		Input:          maps.Clone(input),
-		Output:         map[string]any{"completed": trace.Completed, "final_answer": trace.FinalAnswer},
-		Steps:          steps,
-		Status:         status,
-		Error:          trace.Error,
-		StartedAt:      trace.StartedAt,
-		CompletedAt:    trace.StartedAt.Add(trace.Duration),
-		ProcessingTime: trace.Duration,
-		TokenUsage: map[string]int64{
-			"prompt_tokens":     trace.TokenUsage.PromptTokens,
-			"completion_tokens": trace.TokenUsage.CompletionTokens,
-			"total_tokens":      trace.TokenUsage.TotalTokens,
-		},
-		ToolUsageCount:   toolUsage,
-		ContextMetadata:  contextMetadata,
-		TerminationCause: traceTerminationCause(trace),
-	}
+	a.persistSessionRecord(ctx, input, trace, events)
 }
 
 func traceTerminationCause(trace *Trace) string {
@@ -1007,13 +958,6 @@ func countExecutedTools(steps []TraceStep) int {
 		}
 	}
 	return count
-}
-
-func boolError(isError bool, observation string) string {
-	if !isError {
-		return ""
-	}
-	return observation
 }
 
 func firstNonEmpty(values ...string) string {

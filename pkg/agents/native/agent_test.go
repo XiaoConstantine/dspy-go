@@ -1085,10 +1085,6 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, head)
 
-	derivedEntries := sessionEventEntriesFromTrace(trace, session.ID, session.ActiveBranchID)
-	require.Len(t, derivedEntries, 3)
-	assert.Equal(t, int64(18), derivedEntries[2].TotalTokens)
-
 	lineage, err := eventStore.LoadLineage(context.Background(), session.ID, head.ID, sessionevent.LoadOptions{})
 	require.NoError(t, err)
 	require.Len(t, lineage, 3)
@@ -1113,6 +1109,45 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	assert.Equal(t, true, persisted.Data["event_store_success"])
 	assert.Equal(t, 3, persisted.Data["event_entry_count"])
 	assert.Equal(t, session.ActiveBranchID, persisted.Data["event_branch_id"])
+}
+
+func TestAgent_Execute_PersistsToolCallOrderingAndCorrelationToSessionEventStore(t *testing.T) {
+	memory := agents.NewInMemoryStore()
+	eventStore := newNativeTestSessionEventStore(t)
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{"function_call": map[string]any{"id": "call-1", "name": "write_note", "arguments": map[string]any{"content": "done"}}},
+			{"function_call": map[string]any{"id": "finish-1", "name": "Finish", "arguments": map[string]any{"answer": "all set"}}},
+		},
+	}
+	agent, err := NewAgent(llm, Config{MaxTurns: 4, Memory: memory, SessionID: "session-tool-order", SessionEventStore: eventStore})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note", run: func(context.Context, map[string]any) (core.ToolResult, error) {
+		return core.ToolResult{Data: "tool ok", Metadata: map[string]any{core.ToolResultDisplayTextMeta: "tool display"}}, nil
+	}}))
+
+	_, err = agent.Execute(context.Background(), map[string]any{"task": "Do one tool call then finish", "task_id": "tool-order-task"})
+	require.NoError(t, err)
+
+	session, err := eventStore.GetSession(context.Background(), "session-tool-order")
+	require.NoError(t, err)
+	head, err := eventStore.GetBranchHead(context.Background(), session.ID, session.ActiveBranchID)
+	require.NoError(t, err)
+	lineage, err := eventStore.LoadLineage(context.Background(), session.ID, head.ID, sessionevent.LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, lineage, 5)
+	assert.Equal(t, []sessionevent.EntryKind{
+		sessionevent.EntryKindUserMessage,
+		sessionevent.EntryKindToolCall,
+		sessionevent.EntryKindToolResult,
+		sessionevent.EntryKindAssistantMessage,
+		sessionevent.EntryKindSystemEvent,
+	}, []sessionevent.EntryKind{lineage[0].Kind, lineage[1].Kind, lineage[2].Kind, lineage[3].Kind, lineage[4].Kind})
+	assert.Equal(t, "call-1", lineage[1].Payload["tool_call_id"])
+	assert.Equal(t, "call-1", lineage[2].Payload["tool_call_id"])
+	assert.Equal(t, "tool display", lineage[2].Payload["observation_display"])
+	assert.Equal(t, "all set", lineage[3].Payload["text"])
 }
 
 func TestAgent_Execute_LoadsSessionRecallFromSessionEventStore(t *testing.T) {
@@ -1489,32 +1524,35 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	assert.Contains(t, persisted.Data["event_store_error"], "closed")
 }
 
-func TestSessionEventEntriesFromTrace_DeduplicatesFinalAnswerAssistantEntry(t *testing.T) {
-	trace := &Trace{
-		TaskID:      "task-final-answer",
-		Task:        "Summarize and finish",
-		Provider:    "stub",
-		Model:       "stub-model",
-		StartedAt:   time.Date(2026, time.March, 21, 12, 0, 0, 0, time.UTC),
-		Completed:   true,
-		FinalAnswer: "done",
-		TokenUsage:  TokenUsage{PromptTokens: 9, CompletionTokens: 4, TotalTokens: 13},
-		Steps: []TraceStep{
-			{
-				Index:         1,
-				AssistantText: "done",
-				ToolName:      "Finish",
-			},
-		},
-	}
-
-	entries := sessionEventEntriesFromTrace(trace, "session-1", "branch-1")
+func TestSessionEntriesFromEvents_DeduplicatesFinalAnswerAssistantEntry(t *testing.T) {
+	base := time.Date(2026, time.March, 21, 12, 0, 0, 0, time.UTC)
+	entries, err := sessionevent.EntriesFromEvents([]agents.ExecutionEvent{
+		{Timestamp: base, Payload: agents.RunStartedEvent{RunID: "run-1", Task: "Summarize and finish", Model: "stub-model", Provider: "stub"}},
+		{Timestamp: base.Add(time.Second), Payload: agents.MessageAddedEvent{RunID: "run-1", Turn: 1, Message: agents.Message{Role: agents.RoleAssistant, ToolCalls: []core.ToolCall{{ID: "finish-1", Name: "Finish", Arguments: map[string]any{"answer": "done"}}}}}},
+		{Timestamp: base.Add(1500 * time.Millisecond), Payload: agents.ToolCallFinishedEvent{RunID: "run-1", Turn: 1, ToolIndex: 0, Call: core.ToolCall{ID: "finish-1", Name: "Finish", Arguments: map[string]any{"answer": "done"}}, Outcome: agents.ToolCallOutcomeFinish, Status: agents.OperationStatusCompleted}},
+		{Timestamp: base.Add(2 * time.Second), Payload: agents.TurnFinishedEvent{RunID: "run-1", Turn: 1, Status: agents.OperationStatusCompleted, Usage: &core.TokenInfo{PromptTokens: 9, CompletionTokens: 4, TotalTokens: 13}}},
+		{Timestamp: base.Add(3 * time.Second), Payload: agents.RunFinishedEvent{RunID: "run-1", Status: agents.RunStatusCompleted, StopReason: agents.StopReasonFinish, FinalAnswer: "done"}},
+	}, "session-1", "branch-1", sessionevent.EventProjectionConfig{RunID: "run-1", TaskID: "task-final-answer", Source: "native"})
+	require.NoError(t, err)
 	require.Len(t, entries, 3)
 	assert.Equal(t, sessionevent.EntryKindUserMessage, entries[0].Kind)
 	assert.Equal(t, sessionevent.EntryKindAssistantMessage, entries[1].Kind)
 	assert.Equal(t, "done", entries[1].Payload["text"])
 	assert.Equal(t, sessionevent.EntryKindSystemEvent, entries[2].Kind)
 	assert.Equal(t, "done", entries[2].Payload["final_answer"])
+}
+
+func TestBuildSessionEventRecall_IncludesStoppedRunDiagnostic(t *testing.T) {
+	recall := buildSessionEventRecall("branch-1", nil, []sessionevent.SessionEntry{{
+		Kind:       sessionevent.EntryKindSystemEvent,
+		SearchText: "repeated model responses without tool calls after 3 turns",
+		Payload: map[string]any{
+			"event":       "run_finished",
+			"stop_reason": "no_tool_calls",
+			"diagnostic":  "repeated model responses without tool calls after 3 turns",
+		},
+	}}, 400)
+	assert.Contains(t, recall, "Run stopped (no_tool_calls): repeated model responses without tool calls after 3 turns")
 }
 
 func TestEnsureSessionEventBranch_JoinsCreateAndRecoveryErrors(t *testing.T) {
