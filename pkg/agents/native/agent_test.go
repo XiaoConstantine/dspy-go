@@ -276,6 +276,29 @@ func TestAgent_Execute_UsesModelTextInTranscriptAndDisplayTextInTrace(t *testing
 	assert.Equal(t, map[string]any{"content": "done"}, execTrace.Steps[0].ObservationDetails)
 }
 
+func TestAgent_Execute_PreflightFailureDoesNotReplaceLastTrace(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{{"function_call": map[string]any{
+			"name": "Finish", "arguments": map[string]any{"answer": "first"},
+		}}},
+	}
+	agent, err := NewAgent(llm, Config{MaxTurns: 1})
+	require.NoError(t, err)
+	_, err = agent.Execute(context.Background(), map[string]any{"task": "first task", "task_id": "first"})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{name: "Finish"}))
+
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "second task", "task_id": "second"})
+	assert.Nil(t, result)
+	require.ErrorContains(t, err, "conflicts with executable tool")
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	assert.Equal(t, "first", trace.TaskID)
+	assert.Equal(t, agents.RunStatusCompleted, trace.Status)
+	assert.Equal(t, agents.StopReasonFinish, trace.StopReason)
+}
+
 func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
@@ -301,6 +324,30 @@ func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
 	require.NotNil(t, trace)
 	assert.Len(t, trace.Steps, 3)
 	assert.Equal(t, "empty_content_and_function_call", trace.Steps[0].Metadata["reason"])
+	require.Len(t, llm.prompts, 3)
+	assert.Contains(t, llm.prompts[1], "Provider diagnostic: empty_content_and_function_call")
+	assert.Contains(t, trace.Steps[0].Observation, "Provider diagnostic: empty_content_and_function_call")
+}
+
+func TestAgent_Execute_NoToolDiagnosticCountsOnlyConsecutiveEmptyTurns(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{"function_call": map[string]any{"name": "write_note", "arguments": map[string]any{"content": "done"}}},
+			noCallResult(), noCallResult(), noCallResult(),
+		},
+	}
+	agent, err := NewAgent(llm, Config{MaxTurns: 20})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
+
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "work then stall"})
+	require.NoError(t, err)
+	assert.Contains(t, result["error"], "after 3 turns")
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	assert.Equal(t, agents.StopReasonNoToolCalls, trace.StopReason)
+	assert.Contains(t, trace.Error, "after 3 turns")
 }
 
 func TestAgent_Execute_ProcessesMultipleToolCallsInOneResponse(t *testing.T) {
@@ -503,6 +550,8 @@ func TestAgent_Execute_GroupsMultipleToolCallsFromOneNativeTurn(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
+	assert.Equal(t, 3, result["turns"])
+	assert.Equal(t, 2, result["tool_calls"])
 	require.Len(t, llm.messages, 2)
 	require.GreaterOrEqual(t, len(llm.messages[1]), 4)
 	require.Len(t, llm.messages[1][1].ToolCalls, 2)
@@ -515,6 +564,22 @@ func TestAgent_Execute_GroupsMultipleToolCallsFromOneNativeTurn(t *testing.T) {
 	assert.Equal(t, "call-1", llm.messages[1][2].ToolResult.ToolCallID)
 	require.NotNil(t, llm.messages[1][3].ToolResult)
 	assert.Equal(t, "call-2", llm.messages[1][3].ToolResult.ToolCallID)
+	lastMessage := llm.messages[1][len(llm.messages[1])-1]
+	assert.Contains(t, lastMessage.Content[0].Text, "TURN BUDGET: turn 2 of 4")
+	assert.Contains(t, lastMessage.Content[0].Text, "3 turns remaining")
+	var secondRequestText strings.Builder
+	for _, message := range llm.messages[1] {
+		for _, block := range message.Content {
+			secondRequestText.WriteString(block.Text)
+		}
+	}
+	assert.NotContains(t, secondRequestText.String(), "TURN BUDGET: turn 1 of 4")
+
+	trace := agent.LastNativeTrace()
+	require.NotNil(t, trace)
+	require.Len(t, trace.Steps, 3)
+	assert.Equal(t, "first", trace.Steps[0].Observation)
+	assert.Equal(t, "second", trace.Steps[1].Observation)
 }
 
 func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
@@ -577,6 +642,9 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	assert.Contains(t, eventTypes, agents.EventToolCallProposed)
 	assert.Contains(t, eventTypes, agents.EventToolCallStarted)
 	assert.Contains(t, eventTypes, agents.EventToolCallBlocked)
+	blocked := findEvent(events, agents.EventToolCallBlocked, "write_note")
+	require.NotNil(t, blocked)
+	assert.Equal(t, "approval denied", blocked.Data["reason"])
 	assert.Contains(t, eventTypes, agents.EventToolCallFinished)
 	assert.Contains(t, eventTypes, agents.EventRunFinished)
 }
@@ -1564,6 +1632,7 @@ func TestAgent_Execute_FallsBackToFunctionsForWrappedFunctionOnlyLLM(t *testing.
 	require.True(t, result["completed"].(bool))
 	assert.Len(t, base.prompts, 1)
 	assert.Contains(t, base.prompts[0], "TURN BUDGET: turn 1 of 1")
+	assert.Contains(t, base.prompts[0], "Final turn")
 	assert.Contains(t, base.prompts[0], "call Finish immediately")
 	assert.NotContains(t, base.prompts[0], "SESSION RECALL:")
 }

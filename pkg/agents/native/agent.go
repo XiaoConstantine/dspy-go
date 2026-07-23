@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -52,17 +51,19 @@ type TokenUsage struct {
 
 // Trace captures a native tool-calling run with step-level detail.
 type Trace struct {
-	TaskID      string        `json:"task_id,omitempty"`
-	Model       string        `json:"model"`
-	Provider    string        `json:"provider"`
-	Task        string        `json:"task"`
-	StartedAt   time.Time     `json:"started_at"`
-	Duration    time.Duration `json:"duration"`
-	Completed   bool          `json:"completed"`
-	FinalAnswer string        `json:"final_answer,omitempty"`
-	Error       string        `json:"error,omitempty"`
-	TokenUsage  TokenUsage    `json:"token_usage"`
-	Steps       []TraceStep   `json:"steps"`
+	TaskID      string            `json:"task_id,omitempty"`
+	Model       string            `json:"model"`
+	Provider    string            `json:"provider"`
+	Task        string            `json:"task"`
+	StartedAt   time.Time         `json:"started_at"`
+	Duration    time.Duration     `json:"duration"`
+	Completed   bool              `json:"completed"`
+	FinalAnswer string            `json:"final_answer,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Status      agents.RunStatus  `json:"status,omitempty"`
+	StopReason  agents.StopReason `json:"stop_reason,omitempty"`
+	TokenUsage  TokenUsage        `json:"token_usage"`
+	Steps       []TraceStep       `json:"steps"`
 }
 
 // Clone returns a deep copy of the trace.
@@ -81,6 +82,8 @@ func (t *Trace) Clone() *Trace {
 		Completed:   t.Completed,
 		FinalAnswer: t.FinalAnswer,
 		Error:       t.Error,
+		Status:      t.Status,
+		StopReason:  t.StopReason,
 		TokenUsage:  t.TokenUsage,
 	}
 	if len(t.Steps) > 0 {
@@ -126,18 +129,6 @@ func (s TraceStep) Clone() TraceStep {
 		Usage:              s.Usage,
 		Metadata:           maps.Clone(s.Metadata),
 	}
-}
-
-type toolTurn struct {
-	LLMTurnIndex     int
-	AssistantText    string
-	AssistantContent []core.ContentBlock
-	ToolCallID       string
-	ToolName         string
-	Arguments        map[string]any
-	ToolCallMetadata map[string]any
-	Observation      string
-	IsError          bool
 }
 
 // Agent executes tasks using provider-native tool calling with a shared dspy-go harness.
@@ -242,372 +233,389 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 		return nil, fmt.Errorf("task is required")
 	}
 	taskID := agentutil.StringValue(input["task_id"])
-	maxTurns := a.maxTurns(input)
+
+	a.artifactMu.RLock()
+	runConfig := a.config
+	persistedSkillPrompt := a.persistedSkillPrompt
+	a.artifactMu.RUnlock()
+	runConfig.ToolInterceptors = append([]core.ToolInterceptor(nil), runConfig.ToolInterceptors...)
+	maxTurns := runConfig.MaxTurns
+	if override := agentutil.IntValue(input["max_turns"]); override > 0 {
+		maxTurns = override
+	}
+
 	sessionID := a.sessionID(input)
 	sessionContext, sessionErr := a.loadSessionContext(ctx, input)
 	if sessionID != "" {
 		sessionEventData := map[string]any{
-			"task_id":        taskID,
-			"session_id":     sessionID,
-			"source":         sessionContext.Source,
-			"record_count":   sessionContext.RecordCount,
-			"entry_count":    sessionContext.EntryCount,
-			"summary_count":  sessionContext.SummaryCount,
-			"recall_chars":   len(sessionContext.Recall),
-			"branch_id":      sessionContext.BranchID,
-			"head_entry_id":  sessionContext.HeadEntryID,
+			"task_id": taskID, "session_id": sessionID, "source": sessionContext.Source,
+			"record_count": sessionContext.RecordCount, "entry_count": sessionContext.EntryCount,
+			"summary_count": sessionContext.SummaryCount, "recall_chars": len(sessionContext.Recall),
+			"branch_id": sessionContext.BranchID, "head_entry_id": sessionContext.HeadEntryID,
 			"forked_from_id": sessionContext.ForkedFromEntryID,
 		}
 		if sessionErr != nil {
 			sessionEventData["error"] = sessionErr.Error()
 		}
-		a.emitEvent(agents.EventSessionLoaded, sessionEventData)
+		agents.EmitEvent(runConfig.OnEvent, agents.EventSessionLoaded, sessionEventData)
 	}
 	sessionRecall := sessionContext.Recall
 	if sessionErr != nil {
 		sessionRecall = ""
 	}
 
-	functions, err := toolspkg.BuildFunctionSchemas(a.toolRegistry)
+	initialPrompt := buildNativeInitialPrompt(runConfig, persistedSkillPrompt, task, sessionRecall)
+	initialMessages := []agents.Message{agents.NewTextMessage(agents.RoleUser, initialPrompt)}
+	baseModel, err := agents.NewLLMAdapter(a.llm, agents.WithPromptRenderer(renderNativeModelPrompt))
 	if err != nil {
-		return nil, fmt.Errorf("build tool schemas: %w", err)
+		return nil, err
 	}
-	functions = append(functions, toolspkg.BuildFinishFunctionSchema(a.config.FinishToolText))
-
+	model := &nativeRunModel{Model: baseModel, maxTurns: maxTurns}
 	startedAt := time.Now()
-	trace := &Trace{
-		TaskID:    taskID,
-		Model:     a.llm.ModelID(),
-		Provider:  a.llm.ProviderName(),
-		Task:      task,
-		StartedAt: startedAt,
-		Steps:     make([]TraceStep, 0, maxTurns),
+	var typedEvents []agents.ExecutionEvent
+	legacySink := nativeLegacyEventSink(a, runConfig.OnEvent, sessionID, sessionContext, len(sessionRecall))
+	eventSink := agents.EventSinkFunc(func(eventCtx context.Context, event agents.ExecutionEvent) {
+		typedEvents = append(typedEvents, event)
+		legacySink.EmitEvent(eventCtx, event)
+	})
+	executor := func(executeCtx context.Context, tool core.Tool, arguments map[string]any) (core.ToolResult, error) {
+		handler := func(handlerCtx context.Context, args map[string]any) (core.ToolResult, error) {
+			return tool.Execute(handlerCtx, args)
+		}
+		return core.ChainToolInterceptors(runConfig.ToolInterceptors...)(
+			executeCtx, arguments, core.NewToolInfoFromTool(tool), handler,
+		)
 	}
 
-	totalUsage := TokenUsage{}
-	transcript := make([]toolTurn, 0, maxTurns)
-	noCallStreak := 0
-
-	a.emitEvent(agents.EventRunStarted, map[string]any{
-		"task_id":               taskID,
-		"task":                  task,
-		"max_turns":             maxTurns,
-		"model":                 a.llm.ModelID(),
-		"provider":              a.llm.ProviderName(),
-		"session_id":            sessionID,
-		"session_source":        sessionContext.Source,
-		"session_runs":          sessionContext.RecordCount,
-		"session_entries":       sessionContext.EntryCount,
-		"session_summaries":     sessionContext.SummaryCount,
-		"session_branch_id":     sessionContext.BranchID,
-		"session_head_entry_id": sessionContext.HeadEntryID,
-		"session_recall_chars":  len(sessionRecall),
+	loopResult, runErr := agents.RunLoop(ctx, model, a.toolRegistry.List(), initialMessages, agents.LoopConfig{
+		RunID: taskID, Task: task, MaxTurns: maxTurns,
+		Completion: agents.FinishCompletion(runConfig.FinishToolText),
+		Options: []core.GenerateOption{
+			core.WithMaxTokens(runConfig.MaxTokens),
+			core.WithTemperature(runConfig.Temperature),
+		},
+		Events:                    eventSink,
+		Execute:                   executor,
+		MaxConsecutiveNoToolCalls: runConfig.MaxConsecutiveNoCallResponses,
 	})
 
-	for turn := 0; turn < maxTurns; turn++ {
-		options := []core.GenerateOption{core.WithMaxTokens(a.config.MaxTokens)}
-		options = append(options, core.WithTemperature(a.config.Temperature))
-
-		a.emitEvent(agents.EventLLMTurnStarted, map[string]any{
-			"task_id":   taskID,
-			"turn":      turn + 1,
-			"max_turns": maxTurns,
-		})
-
-		result, err := a.generateToolCallResponse(ctx, task, sessionRecall, transcript, turn+1, maxTurns, functions, options...)
-		if err != nil {
-			trace.Duration = time.Since(startedAt)
-			trace.Error = err.Error()
-			trace.TokenUsage = totalUsage
-			a.storeTraces(ctx, input, trace)
-			a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
-				"task_id":     taskID,
-				"turn":        turn + 1,
-				"tool_calls":  0,
-				"usage_total": int64(0),
-				"error":       err.Error(),
-			})
-			a.emitEvent(agents.EventRunFailed, map[string]any{
-				"task_id": taskID,
-				"error":   err.Error(),
-			})
-			a.emitEvent(agents.EventRunFinished, map[string]any{
-				"task_id":    taskID,
-				"completed":  false,
-				"turns":      len(trace.Steps),
-				"tool_calls": countExecutedTools(trace.Steps),
-				"error":      trace.Error,
-			})
-			return nil, err
-		}
-
-		step := TraceStep{Index: turn + 1}
-		addUsage(&totalUsage, result["_usage"])
-		if usage, ok := result["_usage"].(*core.TokenInfo); ok {
-			step.Usage = tokenUsageFromCore(usage)
-		}
-
-		if content, ok := result["content"].(string); ok && strings.TrimSpace(content) != "" {
-			step.AssistantText = strings.TrimSpace(content)
-		}
-		assistantContent, _ := result["content_blocks"].([]core.ContentBlock)
-		if metadata := toolResponseDiagnosticMetadata(result); len(metadata) > 0 {
-			step.Metadata = metadata
-		}
-
-		calls, err := extractFunctionCalls(result)
-		if err != nil {
-			a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
-				"task_id":        taskID,
-				"turn":           turn + 1,
-				"assistant_text": step.AssistantText,
-				"tool_calls":     0,
-				"usage_total":    step.Usage.TotalTokens,
-				"parse_error":    err.Error(),
-			})
-			step.Observation = err.Error()
-			step.ObservationDisplay = err.Error()
-			step.IsError = true
-			trace.Steps = append(trace.Steps, step)
-			trace.Duration = time.Since(startedAt)
-			trace.Error = err.Error()
-			trace.TokenUsage = totalUsage
-			a.storeTraces(ctx, input, trace)
-			a.emitEvent(agents.EventRunFinished, map[string]any{
-				"task_id":    taskID,
-				"completed":  false,
-				"turns":      len(trace.Steps),
-				"tool_calls": countExecutedTools(trace.Steps),
-				"error":      trace.Error,
-			})
-			return map[string]any{
-				"completed":   false,
-				"error":       trace.Error,
-				"tool_calls":  countExecutedTools(trace.Steps),
-				"turns":       len(trace.Steps),
-				"token_usage": tokenUsageToMap(totalUsage),
-			}, nil
-		}
-		a.emitEvent(agents.EventLLMTurnFinished, map[string]any{
-			"task_id":        taskID,
-			"turn":           turn + 1,
-			"assistant_text": step.AssistantText,
-			"tool_calls":     len(calls),
-			"usage_total":    step.Usage.TotalTokens,
-		})
-		if len(calls) == 0 {
-			noCallStreak++
-			observation := "Model returned text without a tool call. It must use a tool or Finish."
-			if reason := toolResponseDiagnosticReason(step.Metadata); reason != "" {
-				observation += " Provider diagnostic: " + reason
-			}
-			if finishReason := toolResponseDiagnosticFinishReason(step.Metadata); finishReason != "" {
-				observation += " Finish reason: " + finishReason
-			}
-			step.Observation = observation
-			step.ObservationDisplay = observation
-			step.IsError = true
-			trace.Steps = append(trace.Steps, step)
-			transcript = append(transcript, toolTurn{
-				LLMTurnIndex:     turn + 1,
-				AssistantText:    step.AssistantText,
-				AssistantContent: cloneContentBlocks(assistantContent),
-				Observation:      observation,
-				IsError:          true,
-			})
-			if noCallStreak >= a.config.MaxConsecutiveNoCallResponses {
-				trace.Duration = time.Since(startedAt)
-				trace.Error = fmt.Sprintf("repeated model responses without tool calls after %d turns", noCallStreak)
-				trace.TokenUsage = totalUsage
-				a.storeTraces(ctx, input, trace)
-				a.emitEvent(agents.EventRunFinished, map[string]any{
-					"task_id":    taskID,
-					"completed":  false,
-					"turns":      len(trace.Steps),
-					"tool_calls": countExecutedTools(trace.Steps),
-					"error":      trace.Error,
-				})
-				return map[string]any{
-					"completed":   false,
-					"error":       trace.Error,
-					"tool_calls":  countExecutedTools(trace.Steps),
-					"turns":       len(trace.Steps),
-					"token_usage": tokenUsageToMap(totalUsage),
-				}, nil
-			}
-			continue
-		}
-		noCallStreak = 0
-
-		for callIndex, call := range calls {
-			callStep := step
-			if callIndex > 0 {
-				callStep.Index = len(trace.Steps) + 1
-				callStep.AssistantText = ""
-			}
-
-			toolName := call.Name
-			arguments := maps.Clone(call.Arguments)
-			if arguments == nil {
-				arguments = map[string]any{}
-			}
-			callStep.ToolName = toolName
-			// Trace the originally proposed call arguments. Interceptors may rewrite
-			// the executed arguments, but proposed values remain useful for debugging
-			// model behavior and policy decisions.
-			callStep.Arguments = maps.Clone(arguments)
-			proposedEvent := map[string]any{
-				"task_id":   taskID,
-				"turn":      turn + 1,
-				"tool_name": toolName,
-				"arguments": maps.Clone(arguments),
-			}
-
-			if strings.EqualFold(toolName, "finish") {
-				a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(nil, proposedEvent, nil))
-				finalAnswer := extractFinishAnswer(arguments, callStep.AssistantText)
-				trace.Completed = true
-				trace.FinalAnswer = finalAnswer
-				trace.Steps = append(trace.Steps, callStep)
-				trace.Duration = time.Since(startedAt)
-				trace.TokenUsage = totalUsage
-				a.storeTraces(ctx, input, trace)
-				a.emitEvent(agents.EventRunFinished, map[string]any{
-					"task_id":      taskID,
-					"completed":    true,
-					"turns":        len(trace.Steps),
-					"tool_calls":   countExecutedTools(trace.Steps),
-					"final_answer": finalAnswer,
-				})
-				return map[string]any{
-					"completed":    true,
-					"final_answer": finalAnswer,
-					"tool_calls":   countExecutedTools(trace.Steps),
-					"turns":        len(trace.Steps),
-					"token_usage":  tokenUsageToMap(totalUsage),
-				}, nil
-			}
-
-			tool, err := a.toolRegistry.Get(toolName)
-			if err != nil {
-				a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(nil, proposedEvent, nil))
-				callStep.IsError = true
-				callStep.Observation = fmt.Sprintf("unknown tool %q: %v", toolName, err)
-				callStep.ObservationDisplay = callStep.Observation
-				trace.Steps = append(trace.Steps, callStep)
-				transcript = append(transcript, toolTurn{
-					LLMTurnIndex:     turn + 1,
-					AssistantText:    callStep.AssistantText,
-					AssistantContent: cloneContentBlocks(assistantContent),
-					ToolCallID:       call.ID,
-					ToolName:         toolName,
-					Arguments:        callStep.Arguments,
-					ToolCallMetadata: maps.Clone(call.Metadata),
-					Observation:      callStep.Observation,
-					IsError:          true,
-				})
-				continue
-			}
-
-			if err := tool.Validate(arguments); err != nil {
-				a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(tool, proposedEvent, nil))
-				callStep.IsError = true
-				callStep.Observation = fmt.Sprintf("invalid tool arguments: %v", err)
-				callStep.ObservationDisplay = callStep.Observation
-				trace.Steps = append(trace.Steps, callStep)
-				transcript = append(transcript, toolTurn{
-					LLMTurnIndex:     turn + 1,
-					AssistantText:    callStep.AssistantText,
-					AssistantContent: cloneContentBlocks(assistantContent),
-					ToolCallID:       call.ID,
-					ToolName:         toolName,
-					Arguments:        callStep.Arguments,
-					ToolCallMetadata: maps.Clone(call.Metadata),
-					Observation:      callStep.Observation,
-					IsError:          true,
-				})
-				continue
-			}
-
-			a.emitEvent(agents.EventToolCallProposed, enrichSubagentEventData(tool, proposedEvent, nil))
-			a.emitEvent(agents.EventToolCallStarted, enrichSubagentEventData(tool, map[string]any{
-				"task_id":   taskID,
-				"turn":      turn + 1,
-				"tool_name": toolName,
-				"arguments": maps.Clone(arguments),
-			}, nil))
-
-			observation, err := a.executeTool(ctx, tool, arguments)
-			if errors.Is(err, core.ErrToolBlocked) {
-				reason := blockedReason(err)
-				observation = agents.BlockedToolObservation(toolName, reason)
-				callStep.IsError = true
-				a.emitEvent(agents.EventToolCallBlocked, enrichSubagentEventData(tool, map[string]any{
-					"task_id":   taskID,
-					"turn":      turn + 1,
-					"tool_name": toolName,
-					"arguments": maps.Clone(arguments),
-					"reason":    reason,
-				}, observation.Details))
-			} else if err != nil {
-				callStep.IsError = true
-				observation = agents.ToolObservation{
-					ModelText:   fmt.Sprintf("tool execution failed: %v", err),
-					DisplayText: fmt.Sprintf("tool execution failed: %v", err),
-					IsError:     true,
-				}
-			}
-
-			callStep.Observation = observation.ModelText
-			callStep.ObservationDisplay = observation.DisplayText
-			callStep.ObservationDetails = observation.Details
-			callStep.IsError = callStep.IsError || observation.IsError
-			callStep.Synthetic = callStep.Synthetic || observation.Synthetic
-			callStep.Redacted = observation.Redacted
-			callStep.Truncated = observation.Truncated
-
-			trace.Steps = append(trace.Steps, callStep)
-			transcript = append(transcript, toolTurn{
-				LLMTurnIndex:     turn + 1,
-				AssistantText:    callStep.AssistantText,
-				AssistantContent: cloneContentBlocks(assistantContent),
-				ToolCallID:       call.ID,
-				ToolName:         toolName,
-				Arguments:        callStep.Arguments,
-				ToolCallMetadata: maps.Clone(call.Metadata),
-				Observation:      callStep.Observation,
-				IsError:          callStep.IsError,
-			})
-			a.emitEvent(agents.EventToolCallFinished, enrichSubagentEventData(tool, map[string]any{
-				"task_id":   taskID,
-				"turn":      turn + 1,
-				"tool_name": toolName,
-				"is_error":  callStep.IsError,
-				"synthetic": callStep.Synthetic,
-				"redacted":  callStep.Redacted,
-				"truncated": callStep.Truncated,
-			}, observation.Details))
-		}
+	if runErr != nil && len(typedEvents) == 0 {
+		return nil, runErr
 	}
-
-	trace.Duration = time.Since(startedAt)
-	trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", maxTurns)
-	trace.TokenUsage = totalUsage
+	trace := nativeTraceFromLoop(a, taskID, task, startedAt, loopResult, typedEvents, runErr)
 	a.storeTraces(ctx, input, trace)
-	a.emitEvent(agents.EventRunFinished, map[string]any{
-		"task_id":    taskID,
-		"completed":  false,
-		"turns":      len(trace.Steps),
-		"tool_calls": countExecutedTools(trace.Steps),
-		"error":      trace.Error,
-	})
-	return map[string]any{
-		"completed":   false,
-		"error":       trace.Error,
+	if runErr != nil {
+		return nil, runErr
+	}
+
+	output := map[string]any{
+		"completed":   loopResult.StopReason == agents.StopReasonFinish,
 		"tool_calls":  countExecutedTools(trace.Steps),
 		"turns":       len(trace.Steps),
-		"token_usage": tokenUsageToMap(totalUsage),
-	}, nil
+		"token_usage": loopTokenUsageMap(loopResult.Usage),
+	}
+	if loopResult.FinalAnswer != "" {
+		output["final_answer"] = loopResult.FinalAnswer
+	}
+	if loopResult.StopReason != agents.StopReasonFinish {
+		output["error"] = trace.Error
+	}
+	return output, nil
+}
+
+type nativeRunModel struct {
+	agents.Model
+	turn     int
+	maxTurns int
+}
+
+func (m *nativeRunModel) Complete(ctx context.Context, request agents.ModelRequest) (agents.ModelResponse, error) {
+	m.turn++
+	request.Messages = agents.CloneMessages(request.Messages)
+	feedback := fmt.Sprintf("TURN BUDGET: turn %d of %d (%d remaining)\nIf the task appears complete or your latest verification/check succeeded, call Finish immediately instead of doing extra inspection.", m.turn, m.maxTurns, m.maxTurns-m.turn+1)
+	if reminder := turnBudgetReminder(m.turn, m.maxTurns); reminder != "" {
+		feedback += "\n" + reminder
+	}
+	if diagnostic := latestNoToolDiagnostic(request.Messages); diagnostic != "" {
+		feedback += "\n" + diagnostic
+	}
+	request.Messages = append(request.Messages, agents.NewTextMessage(agents.RoleUser, feedback))
+	return m.Model.Complete(ctx, request)
+}
+
+func latestNoToolDiagnostic(messages []agents.Message) string {
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
+		if message.Role != agents.RoleAssistant {
+			continue
+		}
+		if len(message.ToolCalls) != 0 {
+			return ""
+		}
+		diagnostics, _ := message.Metadata[agents.ModelDiagnosticsMetadataKey].(map[string]any)
+		provider, _ := diagnostics["provider_diagnostic"].(map[string]any)
+		parts := make([]string, 0, 2)
+		if reason := strings.TrimSpace(fmt.Sprint(provider["reason"])); reason != "" && reason != "<nil>" {
+			parts = append(parts, "Provider diagnostic: "+reason)
+		}
+		if reason := strings.TrimSpace(fmt.Sprint(provider["finish_reason"])); reason != "" && reason != "<nil>" {
+			parts = append(parts, "Finish reason: "+reason)
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
+}
+
+func renderNativeModelPrompt(request agents.ModelRequest) (string, error) {
+	var builder strings.Builder
+	for index, message := range request.Messages {
+		if index == 0 && message.Role == agents.RoleUser {
+			builder.WriteString(message.TextContent())
+			continue
+		}
+		switch message.Role {
+		case agents.RoleAssistant:
+			if text := strings.TrimSpace(message.TextContent()); text != "" {
+				fmt.Fprintf(&builder, "\nAssistant: %s\n", text)
+			}
+			for _, call := range message.ToolCalls {
+				fmt.Fprintf(&builder, "Tool: %s\nArguments: %v\n", call.Name, call.Arguments)
+			}
+		case agents.RoleTool:
+			if message.ToolResult != nil {
+				label := "Observation"
+				if message.ToolResult.IsError {
+					label = "Observation (error)"
+				}
+				fmt.Fprintf(&builder, "%s: %s\n", label, contentBlocksText(message.ToolResult.Content))
+			}
+		case agents.RoleUser:
+			fmt.Fprintf(&builder, "\n%s\n", message.TextContent())
+		}
+	}
+	return builder.String(), nil
+}
+
+func buildNativeInitialPrompt(config Config, persistedSkillPrompt, task, sessionRecall string) string {
+	var builder strings.Builder
+	builder.WriteString(composeSystemPrompt(config.SystemPrompt, persistedSkillPrompt))
+	builder.WriteString("\n\n")
+	if strings.TrimSpace(config.ToolPolicy) != "" {
+		builder.WriteString("TOOL POLICY:\n")
+		builder.WriteString(config.ToolPolicy)
+		builder.WriteString("\n\n")
+	}
+	builder.WriteString("TASK:\n")
+	builder.WriteString(task)
+	builder.WriteString("\n\n")
+	if strings.TrimSpace(sessionRecall) != "" {
+		builder.WriteString("SESSION RECALL:\n")
+		builder.WriteString(sessionRecall)
+		builder.WriteString("\n\n")
+	}
+	builder.WriteString("You must use tools to work on the task and call Finish when done.\n")
+	return builder.String()
+}
+
+func nativeLegacyEventSink(
+	a *Agent,
+	onEvent func(agents.AgentEvent),
+	sessionID string,
+	sessionContext sessionContext,
+	recallChars int,
+) agents.EventSink {
+	turnSeen := false
+	legacySteps := 0
+	legacyToolCalls := 0
+	legacyTerminalError := ""
+	projector := agents.LegacyEventSink(func(event agents.AgentEvent) {
+		if event.Type == agents.EventLLMTurnStarted {
+			turnSeen = true
+		}
+		if event.Type == agents.EventRunFailed && !turnSeen && onEvent != nil {
+			now := event.Timestamp
+			onEvent(agents.AgentEvent{Type: agents.EventLLMTurnStarted, Timestamp: now, Data: map[string]any{
+				"task_id": event.Data["task_id"], "turn": 1, "max_turns": 1,
+			}})
+			onEvent(agents.AgentEvent{Type: agents.EventLLMTurnFinished, Timestamp: now, Data: map[string]any{
+				"task_id": event.Data["task_id"], "turn": 1, "tool_calls": 0,
+				"usage_total": int64(0), "error": event.Data["error"],
+			}})
+			turnSeen = true
+		}
+		if event.Type == agents.EventRunStarted {
+			event.Data["session_id"] = sessionID
+			event.Data["session_source"] = sessionContext.Source
+			event.Data["session_runs"] = sessionContext.RecordCount
+			event.Data["session_entries"] = sessionContext.EntryCount
+			event.Data["session_summaries"] = sessionContext.SummaryCount
+			event.Data["session_branch_id"] = sessionContext.BranchID
+			event.Data["session_head_entry_id"] = sessionContext.HeadEntryID
+			event.Data["session_recall_chars"] = recallChars
+		}
+		if event.Type == agents.EventRunFinished {
+			event.Data["turns"] = legacySteps
+			event.Data["tool_calls"] = legacyToolCalls
+			if legacyTerminalError != "" {
+				event.Data["error"] = legacyTerminalError
+			}
+		}
+		toolName := agentutil.StringValue(event.Data["tool_name"])
+		if toolName != "" {
+			if tool, err := a.toolRegistry.Get(toolName); err == nil {
+				details, _ := event.Data["details"].(map[string]any)
+				event.Data = enrichSubagentEventData(tool, event.Data, details)
+			}
+		}
+		if onEvent != nil {
+			onEvent(event)
+		}
+	})
+	return agents.EventSinkFunc(func(ctx context.Context, event agents.ExecutionEvent) {
+		switch payload := event.Payload.(type) {
+		case agents.MessageAddedEvent:
+			if payload.Message.Role == agents.RoleAssistant {
+				legacySteps += len(payload.Message.ToolCalls)
+				if len(payload.Message.ToolCalls) == 0 {
+					legacySteps++
+				}
+			}
+		case agents.ToolCallProposedEvent:
+			if !strings.EqualFold(payload.Call.Name, "Finish") {
+				legacyToolCalls++
+			}
+		case agents.RunFinishedEvent:
+			if payload.StopReason == agents.StopReasonMaxTurns {
+				legacyTerminalError = fmt.Sprintf("max turns reached without Finish after %d turns", payload.Turns)
+			}
+		}
+		projector.EmitEvent(ctx, event)
+	})
+}
+
+func nativeTraceFromLoop(
+	a *Agent,
+	taskID, task string,
+	startedAt time.Time,
+	result agents.LoopResult,
+	events []agents.ExecutionEvent,
+	runErr error,
+) *Trace {
+	var terminal agents.RunFinishedEvent
+	turnUsage := make(map[int]TokenUsage)
+	for _, event := range events {
+		switch payload := event.Payload.(type) {
+		case agents.TurnFinishedEvent:
+			turnUsage[payload.Turn] = tokenUsageFromCore(payload.Usage)
+		case agents.RunFinishedEvent:
+			terminal = payload
+		}
+	}
+	trace := &Trace{
+		TaskID: taskID, Model: a.llm.ModelID(), Provider: a.llm.ProviderName(), Task: task,
+		StartedAt: startedAt, Duration: time.Since(startedAt),
+		Completed: result.StopReason == agents.StopReasonFinish, FinalAnswer: result.FinalAnswer,
+		Status: terminal.Status, StopReason: terminal.StopReason,
+		TokenUsage: tokenUsageFromCore(result.Usage), Steps: make([]TraceStep, 0),
+	}
+	if terminal.Err != nil {
+		trace.Error = terminal.Err.Error()
+	} else if terminal.StopReason == agents.StopReasonMaxTurns {
+		trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", result.Turns)
+	} else if terminal.Diagnostic != "" {
+		trace.Error = terminal.Diagnostic
+	} else if runErr != nil {
+		trace.Error = runErr.Error()
+	}
+	turn := 0
+	for index := 0; index < len(result.Messages); index++ {
+		message := result.Messages[index]
+		if message.Role != agents.RoleAssistant {
+			continue
+		}
+		turn++
+		assistantText := message.TextContent()
+		metadata := nativeDiagnosticMetadata(message.Metadata)
+		if len(message.ToolCalls) == 0 {
+			observation := "Model returned text without a tool call. It must use a tool or Finish."
+			if diagnostic := latestNoToolDiagnostic([]agents.Message{message}); diagnostic != "" {
+				observation += " " + diagnostic
+			}
+			trace.Steps = append(trace.Steps, TraceStep{
+				Index: len(trace.Steps) + 1, AssistantText: assistantText,
+				Observation:        observation,
+				ObservationDisplay: observation,
+				IsError:            true, Usage: turnUsage[turn], Metadata: metadata,
+			})
+			continue
+		}
+		toolResults := make([]agents.Message, 0, len(message.ToolCalls))
+		for resultIndex := index + 1; resultIndex < len(result.Messages); resultIndex++ {
+			candidate := result.Messages[resultIndex]
+			if candidate.Role == agents.RoleAssistant {
+				break
+			}
+			if candidate.ToolResult != nil {
+				toolResults = append(toolResults, candidate)
+			}
+		}
+		for callIndex, call := range message.ToolCalls {
+			step := TraceStep{
+				Index: len(trace.Steps) + 1, ToolName: call.Name,
+				Arguments: maps.Clone(call.Arguments), Usage: turnUsage[turn], Metadata: metadata,
+			}
+			if callIndex == 0 {
+				step.AssistantText = assistantText
+			}
+			if callIndex < len(toolResults) {
+				candidate := toolResults[callIndex]
+				if candidate.ToolResult.Name == call.Name && (call.ID == "" || candidate.ToolResult.ToolCallID == call.ID) {
+					step.Observation = contentBlocksText(candidate.ToolResult.Content)
+					step.ObservationDisplay = contentBlocksText(candidate.ToolResult.DisplayContent)
+					step.ObservationDetails = maps.Clone(candidate.ToolResult.Details)
+					step.IsError = candidate.ToolResult.IsError
+					step.Synthetic = candidate.ToolResult.Synthetic
+					step.Redacted = candidate.ToolResult.Redacted
+					step.Truncated = candidate.ToolResult.Truncated
+				}
+			}
+			trace.Steps = append(trace.Steps, step)
+		}
+	}
+	return trace
+}
+
+func nativeDiagnosticMetadata(metadata map[string]any) map[string]string {
+	diagnostics, _ := metadata[agents.ModelDiagnosticsMetadataKey].(map[string]any)
+	provider, _ := diagnostics["provider_diagnostic"].(map[string]any)
+	result := make(map[string]string, len(provider))
+	for key, value := range provider {
+		result[key] = fmt.Sprint(value)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func contentBlocksText(blocks []core.ContentBlock) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type == core.FieldTypeText && strings.TrimSpace(block.Text) != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func loopTokenUsageMap(usage *core.TokenInfo) map[string]int64 {
+	if usage == nil {
+		return map[string]int64{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+	}
+	return map[string]int64{
+		"prompt_tokens": int64(usage.PromptTokens), "completion_tokens": int64(usage.CompletionTokens),
+		"total_tokens": int64(usage.TotalTokens),
+	}
 }
 
 // GetCapabilities returns the currently registered tools.
@@ -809,13 +817,6 @@ func (a *Agent) LastNativeTrace() *Trace {
 	return a.lastNativeTrace.Clone()
 }
 
-func (a *Agent) maxTurns(input map[string]any) int {
-	if override := agentutil.IntValue(input["max_turns"]); override > 0 {
-		return override
-	}
-	return a.config.MaxTurns
-}
-
 func (a *Agent) emitEvent(eventType string, data map[string]any) {
 	if a == nil {
 		return
@@ -838,157 +839,6 @@ func enrichSubagentEventData(tool core.Tool, data map[string]any, details map[st
 		}
 	}
 	return enriched
-}
-
-func (a *Agent) executeTool(ctx context.Context, tool core.Tool, arguments map[string]any) (agents.ToolObservation, error) {
-	handler := func(ctx context.Context, args map[string]any) (core.ToolResult, error) {
-		return tool.Execute(ctx, args)
-	}
-	info := core.NewToolInfoFromTool(tool)
-	result, err := core.ChainToolInterceptors(a.config.ToolInterceptors...)(ctx, arguments, info, handler)
-	if err != nil {
-		return agents.ToolObservation{}, err
-	}
-	return agents.NormalizeToolResult(result), nil
-}
-
-func (a *Agent) generateToolCallResponse(ctx context.Context, task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
-	core.RecordLLMCall(ctx, a.llm)
-	if supportsNativeToolCalling(a.llm) {
-		chatLLM, ok := a.llm.(core.ToolCallingChatLLM)
-		if !ok {
-			return nil, fmt.Errorf("llm %s advertised native tool calling without chat tool support", a.llm.ModelID())
-		}
-		return chatLLM.GenerateWithTools(ctx, a.buildToolMessages(task, sessionRecall, turns, currentTurn, maxTurns), functions, options...)
-	}
-	return a.llm.GenerateWithFunctions(ctx, a.buildPrompt(task, sessionRecall, turns, currentTurn, maxTurns), functions, options...)
-}
-
-func (a *Agent) buildToolMessages(task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int) []core.ChatMessage {
-	messages := []core.ChatMessage{
-		{
-			Role:    "user",
-			Content: []core.ContentBlock{core.NewTextBlock(a.buildPrompt(task, sessionRecall, nil, currentTurn, maxTurns))},
-		},
-	}
-	for i := 0; i < len(turns); i++ {
-		turn := turns[i]
-		if strings.TrimSpace(turn.ToolName) != "" {
-			group := []toolTurn{turn}
-			for j := i + 1; j < len(turns); j++ {
-				next := turns[j]
-				if strings.TrimSpace(next.ToolName) == "" || next.LLMTurnIndex != turn.LLMTurnIndex {
-					break
-				}
-				group = append(group, next)
-				i = j
-			}
-
-			assistant := core.ChatMessage{Role: "assistant"}
-			for _, grouped := range group {
-				if len(assistant.Content) == 0 {
-					if len(grouped.AssistantContent) > 0 {
-						assistant.Content = cloneContentBlocks(grouped.AssistantContent)
-					} else if strings.TrimSpace(grouped.AssistantText) != "" {
-						assistant.Content = []core.ContentBlock{core.NewTextBlock(grouped.AssistantText)}
-					}
-				}
-				assistant.ToolCalls = append(assistant.ToolCalls, core.ToolCall{
-					ID:        grouped.ToolCallID,
-					Name:      grouped.ToolName,
-					Arguments: maps.Clone(grouped.Arguments),
-					Metadata:  maps.Clone(grouped.ToolCallMetadata),
-				})
-			}
-			if len(assistant.Content) > 0 || len(assistant.ToolCalls) > 0 {
-				messages = append(messages, assistant)
-			}
-			for _, grouped := range group {
-				messages = append(messages, core.ChatMessage{
-					Role: "tool",
-					ToolResult: &core.ChatToolResult{
-						ToolCallID: grouped.ToolCallID,
-						Name:       grouped.ToolName,
-						Content:    []core.ContentBlock{core.NewTextBlock(grouped.Observation)},
-						IsError:    grouped.IsError,
-					},
-				})
-			}
-			continue
-		}
-
-		assistant := core.ChatMessage{Role: "assistant"}
-		if len(turn.AssistantContent) > 0 {
-			assistant.Content = cloneContentBlocks(turn.AssistantContent)
-		} else if strings.TrimSpace(turn.AssistantText) != "" {
-			assistant.Content = []core.ContentBlock{core.NewTextBlock(turn.AssistantText)}
-		}
-		if len(assistant.Content) > 0 {
-			messages = append(messages, assistant)
-		}
-		if strings.TrimSpace(turn.Observation) != "" {
-			messages = append(messages, core.ChatMessage{
-				Role:    "user",
-				Content: []core.ContentBlock{core.NewTextBlock("System observation: " + turn.Observation)},
-			})
-		}
-	}
-	if reminder := turnBudgetReminder(currentTurn, maxTurns); reminder != "" {
-		messages = append(messages, core.ChatMessage{
-			Role:    "user",
-			Content: []core.ContentBlock{core.NewTextBlock(reminder)},
-		})
-	}
-	return messages
-}
-
-func (a *Agent) buildPrompt(task string, sessionRecall string, turns []toolTurn, currentTurn int, maxTurns int) string {
-	var b strings.Builder
-	b.WriteString(composeSystemPrompt(a.config.SystemPrompt, a.persistedSkillPrompt))
-	b.WriteString("\n\n")
-	if strings.TrimSpace(a.config.ToolPolicy) != "" {
-		b.WriteString("TOOL POLICY:\n")
-		b.WriteString(a.config.ToolPolicy)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("TASK:\n")
-	b.WriteString(task)
-	b.WriteString("\n\n")
-	if strings.TrimSpace(sessionRecall) != "" {
-		b.WriteString("SESSION RECALL:\n")
-		b.WriteString(sessionRecall)
-		b.WriteString("\n\n")
-	}
-	if currentTurn > 0 && maxTurns > 0 {
-		fmt.Fprintf(&b, "TURN BUDGET: turn %d of %d (%d remaining)\n", currentTurn, maxTurns, maxTurns-currentTurn+1)
-		b.WriteString("If the task appears complete or your latest verification/check succeeded, call Finish immediately instead of doing extra inspection.\n\n")
-	}
-	b.WriteString("You must use tools to work on the task and call Finish when done.\n")
-
-	if len(turns) == 0 {
-		return b.String()
-	}
-
-	b.WriteString("\nPRIOR STEPS:\n")
-	for i, turn := range turns {
-		fmt.Fprintf(&b, "Step %d:\n", i+1)
-		if turn.AssistantText != "" {
-			fmt.Fprintf(&b, "Assistant: %s\n", turn.AssistantText)
-		}
-		if turn.ToolName != "" {
-			fmt.Fprintf(&b, "Tool: %s\n", turn.ToolName)
-		}
-		if turn.Observation != "" {
-			if turn.IsError {
-				fmt.Fprintf(&b, "Observation (error): %s\n", turn.Observation)
-			} else {
-				fmt.Fprintf(&b, "Observation: %s\n", turn.Observation)
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	return b.String()
 }
 
 func composeSystemPrompt(base, persistedSkill string) string {
@@ -1096,6 +946,9 @@ func traceTerminationCause(trace *Trace) string {
 	if trace == nil {
 		return "unknown"
 	}
+	if trace.StopReason != "" {
+		return string(trace.StopReason)
+	}
 	if trace.Completed {
 		return "finish"
 	}
@@ -1111,42 +964,6 @@ func traceTerminationCause(trace *Trace) string {
 	}
 }
 
-func extractFunctionCalls(result map[string]any) ([]core.ToolCall, error) {
-	if result == nil {
-		return nil, nil
-	}
-	if rawCalls, ok := result["tool_calls"].([]core.ToolCall); ok && len(rawCalls) > 0 {
-		calls := make([]core.ToolCall, 0, len(rawCalls))
-		for _, rawCall := range rawCalls {
-			calls = append(calls, core.ToolCall{
-				ID:        rawCall.ID,
-				Name:      rawCall.Name,
-				Arguments: maps.Clone(rawCall.Arguments),
-				Metadata:  maps.Clone(rawCall.Metadata),
-			})
-		}
-		return calls, nil
-	}
-	if call, ok := result["function_call"].(map[string]any); ok {
-		arguments, _ := call["arguments"].(map[string]any)
-		metadata, _ := call["metadata"].(map[string]any)
-		return []core.ToolCall{{
-			ID:        agentutil.StringValue(call["id"]),
-			Name:      agentutil.StringValue(call["name"]),
-			Arguments: maps.Clone(arguments),
-			Metadata:  maps.Clone(metadata),
-		}}, nil
-	}
-	return nil, nil
-}
-
-func extractFinishAnswer(arguments map[string]any, fallback string) string {
-	if answer, ok := arguments["answer"].(string); ok && strings.TrimSpace(answer) != "" {
-		return strings.TrimSpace(answer)
-	}
-	return strings.TrimSpace(fallback)
-}
-
 func supportsToolCalling(llm core.CapabilityProvider) bool {
 	for _, capability := range llm.Capabilities() {
 		if capability == core.CapabilityToolCalling {
@@ -1154,36 +971,6 @@ func supportsToolCalling(llm core.CapabilityProvider) bool {
 		}
 	}
 	return false
-}
-
-func supportsNativeToolCalling(llm core.LLM) bool {
-	if llm == nil {
-		return false
-	}
-	if _, ok := unwrapLLM(llm).(core.ToolCallingChatLLM); ok {
-		return true
-	}
-	return false
-}
-
-func unwrapLLM(llm core.LLM) core.LLM {
-	type unwrapCapable interface {
-		Unwrap() core.LLM
-	}
-
-	current := llm
-	for current != nil {
-		unwrapped, ok := current.(unwrapCapable)
-		if !ok {
-			return current
-		}
-		next := unwrapped.Unwrap()
-		if next == nil || next == current {
-			return current
-		}
-		current = next
-	}
-	return llm
 }
 
 func cloneRegisteredTool(tool core.Tool) (core.Tool, error) {
@@ -1201,41 +988,6 @@ func cloneRegisteredTool(tool core.Tool) (core.Tool, error) {
 	return cloned, nil
 }
 
-func cloneContentBlocks(blocks []core.ContentBlock) []core.ContentBlock {
-	if len(blocks) == 0 {
-		return nil
-	}
-	cloned := make([]core.ContentBlock, len(blocks))
-	for i, block := range blocks {
-		cloned[i] = block
-		if block.Metadata != nil {
-			cloned[i].Metadata = maps.Clone(block.Metadata)
-		}
-		if len(block.Data) > 0 {
-			cloned[i].Data = append([]byte(nil), block.Data...)
-		}
-	}
-	return cloned
-}
-
-func blockedReason(err error) string {
-	var blocked *core.ToolBlockedError
-	if errors.As(err, &blocked) && blocked != nil && strings.TrimSpace(blocked.Reason) != "" {
-		return blocked.Reason
-	}
-	return "blocked by tool policy"
-}
-
-func addUsage(total *TokenUsage, raw any) {
-	usage, ok := raw.(*core.TokenInfo)
-	if !ok || usage == nil {
-		return
-	}
-	total.PromptTokens += int64(usage.PromptTokens)
-	total.CompletionTokens += int64(usage.CompletionTokens)
-	total.TotalTokens += int64(usage.TotalTokens)
-}
-
 func tokenUsageFromCore(usage *core.TokenInfo) TokenUsage {
 	if usage == nil {
 		return TokenUsage{}
@@ -1247,14 +999,6 @@ func tokenUsageFromCore(usage *core.TokenInfo) TokenUsage {
 	}
 }
 
-func tokenUsageToMap(usage TokenUsage) map[string]any {
-	return map[string]any{
-		"prompt_tokens":     usage.PromptTokens,
-		"completion_tokens": usage.CompletionTokens,
-		"total_tokens":      usage.TotalTokens,
-	}
-}
-
 func countExecutedTools(steps []TraceStep) int {
 	count := 0
 	for _, step := range steps {
@@ -1263,43 +1007,6 @@ func countExecutedTools(steps []TraceStep) int {
 		}
 	}
 	return count
-}
-
-func toolResponseDiagnosticMetadata(result map[string]any) map[string]string {
-	raw, ok := result["provider_diagnostic"].(map[string]any)
-	if !ok || len(raw) == 0 {
-		return nil
-	}
-
-	metadata := make(map[string]string)
-	for _, key := range []string{"provider", "provider_mode", "reason", "finish_reason"} {
-		if value, ok := raw[key]; ok {
-			if text := strings.TrimSpace(fmt.Sprint(value)); text != "" && text != "<nil>" {
-				metadata[key] = text
-			}
-		}
-	}
-	if value, ok := raw["candidate_count"]; ok {
-		metadata["candidate_count"] = strings.TrimSpace(fmt.Sprint(value))
-	}
-	if value, ok := raw["part_count"]; ok {
-		metadata["part_count"] = strings.TrimSpace(fmt.Sprint(value))
-	}
-	return metadata
-}
-
-func toolResponseDiagnosticReason(metadata map[string]string) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	return metadata["reason"]
-}
-
-func toolResponseDiagnosticFinishReason(metadata map[string]string) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	return metadata["finish_reason"]
 }
 
 func boolError(isError bool, observation string) string {

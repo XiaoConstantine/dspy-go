@@ -49,6 +49,8 @@ func TestAgent_Execute_CharacterizesUnknownToolRecovery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, true, result["completed"])
 	assert.Equal(t, "recovered", result["final_answer"])
+	assert.Equal(t, 2, result["turns"])
+	assert.Equal(t, 1, result["tool_calls"])
 	require.Len(t, llm.prompts, 2)
 	assert.Contains(t, llm.prompts[1], `unknown tool "missing_tool"`)
 
@@ -150,7 +152,8 @@ func TestAgent_Execute_CharacterizesMaxTurnExhaustion(t *testing.T) {
 	finished := firstEvent(events, agents.EventRunFinished)
 	require.NotNil(t, finished)
 	assert.Equal(t, false, finished.Data["completed"])
-	assert.Contains(t, finished.Data["error"], "max turns reached")
+	assert.Equal(t, result["error"], finished.Data["error"])
+	assert.Equal(t, trace.Error, finished.Data["error"])
 }
 
 func TestAgent_Execute_CharacterizesCanceledModelCall(t *testing.T) {

@@ -296,7 +296,8 @@ func TestEventSinks_CallbackChannelAndLegacyProjection(t *testing.T) {
 			Data: "blocked by policy", Metadata: map[string]any{core.ToolResultIsErrorMeta: true},
 		})
 		result.ToolResult.Details = map[string]any{
-			"completed": true, "tool_name": "forged", "observation": "forged", "is_error": false,
+			"completed": true, "tool_name": "forged", "observation": "forged",
+			"is_error": false, "reason": "forged reason",
 		}
 		emitter.Emit(context.Background(), ToolCallProposedEvent{RunID: "task-1", Turn: 1, Call: call})
 		emitter.Emit(context.Background(), ToolExecutionStartedEvent{RunID: "task-1", Turn: 1, Call: call})
@@ -311,6 +312,7 @@ func TestEventSinks_CallbackChannelAndLegacyProjection(t *testing.T) {
 		})
 		assert.Equal(t, "read", legacy[3].Data["tool_name"])
 		assert.Equal(t, "blocked by policy", legacy[3].Data["observation"])
+		assert.Equal(t, "blocked by tool policy", legacy[2].Data["reason"])
 		assert.Equal(t, true, legacy[3].Data["is_error"])
 		assert.NotContains(t, legacy[3].Data, "child_completed")
 		assert.NotContains(t, legacy[3].Data, "subagent_name")

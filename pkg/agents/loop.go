@@ -13,11 +13,12 @@ import (
 type StopReason string
 
 const (
-	StopReasonFinish   StopReason = "finish"
-	StopReasonText     StopReason = "text"
-	StopReasonMaxTurns StopReason = "max_turns"
-	StopReasonCanceled StopReason = "canceled"
-	StopReasonError    StopReason = "error"
+	StopReasonFinish      StopReason = "finish"
+	StopReasonText        StopReason = "text"
+	StopReasonMaxTurns    StopReason = "max_turns"
+	StopReasonNoToolCalls StopReason = "no_tool_calls"
+	StopReasonCanceled    StopReason = "canceled"
+	StopReasonError       StopReason = "error"
 )
 
 // CompletionMode controls which model response can complete a run.
@@ -67,13 +68,14 @@ type ToolExecutor func(context.Context, core.Tool, map[string]any) (core.ToolRes
 
 // LoopConfig configures one pure sequential RunLoop invocation.
 type LoopConfig struct {
-	RunID      string
-	Task       string
-	MaxTurns   int
-	Completion CompletionConfig
-	Options    []core.GenerateOption
-	Events     EventSink
-	Execute    ToolExecutor
+	RunID                     string
+	Task                      string
+	MaxTurns                  int
+	Completion                CompletionConfig
+	Options                   []core.GenerateOption
+	Events                    EventSink
+	Execute                   ToolExecutor
+	MaxConsecutiveNoToolCalls int
 }
 
 // LoopResult is the provider-neutral terminal state of a RunLoop invocation.
@@ -112,6 +114,7 @@ func RunLoop(
 		Messages: transcript,
 	})
 
+	noToolCallStreak := 0
 	finishRun := func(event RunFinishedEvent, runErr error) (LoopResult, error) {
 		result.Messages = CloneMessages(transcript)
 		result.StopReason = event.StopReason
@@ -173,16 +176,30 @@ func RunLoop(
 				})
 				return finishRun(canceledRunEvent(cancellationErr), cancellationErr)
 			}
+			if prepared.allowText {
+				emitter.Emit(ctx, TurnFinishedEvent{
+					RunID: config.RunID, Turn: turn, Status: OperationStatusCompleted,
+					Assistant: &assistant, Usage: response.Usage,
+				})
+				result.FinalAnswer = assistant.TextContent()
+				return finishRun(RunFinishedEvent{Status: RunStatusCompleted, StopReason: StopReasonText}, nil)
+			}
+			noToolCallStreak++
+			observation := "Model returned text without a tool call. It must use a tool or Finish."
+			message := NewTextMessage(RoleUser, "System observation: "+observation)
+			transcript = append(transcript, message)
+			emitter.Emit(ctx, MessageAddedEvent{RunID: config.RunID, Turn: turn, Message: message})
 			emitter.Emit(ctx, TurnFinishedEvent{
 				RunID: config.RunID, Turn: turn, Status: OperationStatusCompleted,
 				Assistant: &assistant, Usage: response.Usage,
 			})
-			if prepared.allowText {
-				result.FinalAnswer = assistant.TextContent()
-				return finishRun(RunFinishedEvent{Status: RunStatusCompleted, StopReason: StopReasonText}, nil)
+			if config.MaxConsecutiveNoToolCalls > 0 && noToolCallStreak >= config.MaxConsecutiveNoToolCalls {
+				diagnostic := fmt.Sprintf("repeated model responses without tool calls after %d turns", noToolCallStreak)
+				return finishRun(RunFinishedEvent{Status: RunStatusStopped, StopReason: StopReasonNoToolCalls, Diagnostic: diagnostic}, nil)
 			}
 			continue
 		}
+		noToolCallStreak = 0
 
 		for toolIndex, call := range assistant.ToolCalls {
 			emitter.Emit(ctx, ToolCallProposedEvent{
@@ -230,7 +247,7 @@ func RunLoop(
 
 			tool, exists := prepared.tools[call.Name]
 			if !exists {
-				toolErr := fmt.Errorf("unknown tool %q", call.Name)
+				toolErr := fmt.Errorf("unknown tool %q: tool not found", call.Name)
 				message := errorToolResultMessage(call, toolErr.Error())
 				transcript = append(transcript, message)
 				emitter.Emit(ctx, ToolCallFinishedEvent{
@@ -246,7 +263,7 @@ func RunLoop(
 				arguments = map[string]any{}
 			}
 			if validationErr := tool.Validate(arguments); validationErr != nil {
-				toolErr := fmt.Errorf("invalid arguments for tool %q: %w", call.Name, validationErr)
+				toolErr := fmt.Errorf("invalid tool arguments: %w", validationErr)
 				message := errorToolResultMessage(call, toolErr.Error())
 				transcript = append(transcript, message)
 				emitter.Emit(ctx, ToolCallFinishedEvent{
@@ -290,7 +307,7 @@ func RunLoop(
 					toolResult = blockedToolResult(call.Name, executeErr)
 				} else {
 					status = OperationStatusFailed
-					toolResult = errorToolResult(fmt.Sprintf("tool %q execution failed: %v", call.Name, executeErr))
+					toolResult = executionErrorToolResult(fmt.Sprintf("tool execution failed: %v", executeErr))
 				}
 			} else if ctx.Err() != nil {
 				status = OperationStatusCanceled
@@ -466,8 +483,14 @@ func errorToolResult(text string) core.ToolResult {
 	}
 }
 
+func executionErrorToolResult(text string) core.ToolResult {
+	result := errorToolResult(text)
+	delete(result.Metadata, core.ToolResultSyntheticMeta)
+	return result
+}
+
 func blockedToolResult(toolName string, err error) core.ToolResult {
-	observation := BlockedToolObservation(toolName, strings.TrimPrefix(err.Error(), core.ErrToolBlocked.Error()+":"))
+	observation := BlockedToolObservation(toolName, blockedReasonText(err))
 	return core.ToolResult{
 		Data: observation.ModelText,
 		Metadata: map[string]any{
@@ -478,6 +501,16 @@ func blockedToolResult(toolName string, err error) core.ToolResult {
 		},
 		Annotations: map[string]any{core.ToolResultDetailsAnnotation: observation.Details},
 	}
+}
+
+func blockedReasonText(err error) string {
+	var blocked *core.ToolBlockedError
+	if errors.As(err, &blocked) && blocked != nil {
+		if reason := strings.TrimSpace(blocked.Reason); reason != "" {
+			return reason
+		}
+	}
+	return "blocked by tool policy"
 }
 
 func addTokenInfo(result *LoopResult, usage *core.TokenInfo) {

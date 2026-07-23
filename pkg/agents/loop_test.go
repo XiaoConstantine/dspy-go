@@ -194,7 +194,7 @@ func TestRunLoop_RejectsUnknownAndInvalidToolsWithoutExecution(t *testing.T) {
 	assert.Equal(t, 0, tool.executeCalls)
 	require.Len(t, model.requests[1].Messages, 3)
 	assert.Contains(t, model.requests[1].Messages[1].ToolResult.Content[0].Text, "unknown tool")
-	assert.Contains(t, model.requests[1].Messages[2].ToolResult.Content[0].Text, "invalid arguments")
+	assert.Contains(t, model.requests[1].Messages[2].ToolResult.Content[0].Text, "invalid tool arguments")
 	require.NoError(t, ValidateEventLifecycle(events))
 	for _, event := range events {
 		_, started := event.Payload.(ToolExecutionStartedEvent)
@@ -211,7 +211,9 @@ func TestRunLoop_ConvertsToolExecutionFailuresAndUsesExecutorSeam(t *testing.T) 
 		wantStatus  OperationStatus
 		wantText    string
 	}{
-		{name: "blocked", executeErr: &core.ToolBlockedError{Reason: "denied"}, wantOutcome: ToolCallOutcomeBlocked, wantStatus: OperationStatusBlocked, wantText: "blocked"},
+		{name: "blocked", executeErr: &core.ToolBlockedError{Reason: "denied"}, wantOutcome: ToolCallOutcomeBlocked, wantStatus: OperationStatusBlocked, wantText: "denied"},
+		{name: "wrapped blocked", executeErr: fmt.Errorf("approval: %w", &core.ToolBlockedError{Reason: "wrapped reason"}), wantOutcome: ToolCallOutcomeBlocked, wantStatus: OperationStatusBlocked, wantText: "wrapped reason"},
+		{name: "empty blocked reason", executeErr: &core.ToolBlockedError{}, wantOutcome: ToolCallOutcomeBlocked, wantStatus: OperationStatusBlocked, wantText: "blocked by tool policy"},
 		{name: "execution error", executeErr: errors.New("boom"), wantOutcome: ToolCallOutcomeExecuted, wantStatus: OperationStatusFailed, wantText: "execution failed"},
 		{name: "error result", toolResult: core.ToolResult{Data: "bad result", Metadata: map[string]any{core.ToolResultIsErrorMeta: true}}, wantOutcome: ToolCallOutcomeExecuted, wantStatus: OperationStatusFailed, wantText: "bad result"},
 	}

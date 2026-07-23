@@ -550,8 +550,8 @@ func validateRunFinished(event RunFinishedEvent) error {
 			return fmt.Errorf("completed run has invalid stop reason %q", event.StopReason)
 		}
 	case RunStatusStopped:
-		if event.Err != nil || event.StopReason != StopReasonMaxTurns {
-			return fmt.Errorf("stopped run requires max-turn stop reason without an error")
+		if event.Err != nil || (event.StopReason != StopReasonMaxTurns && event.StopReason != StopReasonNoToolCalls) {
+			return fmt.Errorf("stopped run requires a non-error exhaustion stop reason")
 		}
 	case RunStatusFailed:
 		if event.Err == nil || event.StopReason != StopReasonError {
@@ -629,9 +629,9 @@ func legacyEvents(payload EventPayload) []AgentEvent {
 			data["assistant_text"] = event.Assistant.TextContent()
 		}
 		if event.Usage != nil {
-			data["usage_total"] = event.Usage.TotalTokens
+			data["usage_total"] = int64(event.Usage.TotalTokens)
 		} else {
-			data["usage_total"] = 0
+			data["usage_total"] = int64(0)
 		}
 		if event.Err != nil {
 			data["error"] = event.Err.Error()
@@ -664,9 +664,7 @@ func legacyEvents(payload EventPayload) []AgentEvent {
 		finished := AgentEvent{Type: EventToolCallFinished, Data: data}
 		if event.Outcome == ToolCallOutcomeBlocked {
 			blockedData := cloneAnyMap(data)
-			if event.Err != nil {
-				blockedData["reason"] = event.Err.Error()
-			}
+			blockedData["reason"] = blockedReasonText(event.Err)
 			return []AgentEvent{{Type: EventToolCallBlocked, Data: blockedData}, finished}
 		}
 		return []AgentEvent{finished}
