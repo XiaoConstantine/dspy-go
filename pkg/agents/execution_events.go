@@ -511,8 +511,8 @@ func validateToolCallFinished(event ToolCallFinishedEvent, wasStarted bool) erro
 			return fmt.Errorf("blocked tool call requires a started, blocked execution")
 		}
 	case ToolCallOutcomeRejected:
-		if wasStarted || event.Status != OperationStatusFailed {
-			return fmt.Errorf("rejected tool call must fail before execution")
+		if wasStarted || (event.Status != OperationStatusFailed && event.Status != OperationStatusCanceled) {
+			return fmt.Errorf("rejected tool call must fail or cancel before execution")
 		}
 	case ToolCallOutcomeFinish:
 		if wasStarted || event.Status != OperationStatusCompleted || event.Result != nil {

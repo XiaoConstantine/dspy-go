@@ -111,10 +111,6 @@ func (a *LLMAdapter) Complete(ctx context.Context, request ModelRequest) (ModelR
 	if err != nil {
 		return ModelResponse{}, err
 	}
-	if len(toolSchemas) == 0 {
-		return ModelResponse{}, fmt.Errorf("at least one model tool is required")
-	}
-
 	baseLLM, err := unwrapModelLLM(a.llm)
 	if err != nil {
 		return ModelResponse{}, err
@@ -122,7 +118,25 @@ func (a *LLMAdapter) Complete(ctx context.Context, request ModelRequest) (ModelR
 	core.RecordLLMCall(ctx, baseLLM)
 
 	var raw map[string]any
-	if baseChat, ok := baseLLM.(core.ToolCallingChatLLM); ok {
+	if len(toolSchemas) == 0 {
+		prompt, renderErr := a.renderPrompt(request)
+		if renderErr != nil {
+			return ModelResponse{}, fmt.Errorf("render model prompt: %w", renderErr)
+		}
+		response, generateErr := a.llm.Generate(ctx, prompt, request.Options...)
+		if generateErr != nil {
+			return ModelResponse{}, generateErr
+		}
+		if response == nil {
+			return ModelResponse{}, fmt.Errorf("text generation returned a nil response")
+		}
+		raw = cloneAnyMap(response.Metadata)
+		if raw == nil {
+			raw = map[string]any{}
+		}
+		raw["content"] = response.Content
+		raw["_usage"] = response.Usage
+	} else if baseChat, ok := baseLLM.(core.ToolCallingChatLLM); ok {
 		chat, outerSupportsChat := a.llm.(core.ToolCallingChatLLM)
 		if !outerSupportsChat {
 			chat = baseChat

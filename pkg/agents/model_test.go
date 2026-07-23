@@ -345,14 +345,25 @@ func TestLLMAdapter_CompletePreservesProviderAndRendererErrors(t *testing.T) {
 	assert.ErrorContains(t, err, "render model prompt")
 }
 
+func TestLLMAdapter_CompleteSupportsTextWithoutTools(t *testing.T) {
+	llm := &adapterTestLLM{textResponse: &core.LLMResponse{
+		Content: "plain response", Usage: &core.TokenInfo{TotalTokens: 4},
+		Metadata: map[string]any{"finish_reason": "stop"},
+	}}
+	adapter, err := NewLLMAdapter(llm)
+	require.NoError(t, err)
+	response, err := adapter.Complete(context.Background(), ModelRequest{
+		Messages: []Message{NewTextMessage(RoleUser, "hello")},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "plain response", response.Message.TextContent())
+	assert.Equal(t, 4, response.Usage.TotalTokens)
+	assert.Equal(t, "stop", response.Diagnostics["finish_reason"])
+}
+
 func TestLLMAdapter_CompleteRejectsInvalidInputsAndResults(t *testing.T) {
 	_, err := NewLLMAdapter(nil)
 	require.EqualError(t, err, "llm is required")
-
-	adapter, err := NewLLMAdapter(&adapterTestLLM{})
-	require.NoError(t, err)
-	_, err = adapter.Complete(context.Background(), ModelRequest{})
-	require.EqualError(t, err, "at least one model tool is required")
 
 	tests := []struct {
 		name   string
@@ -434,6 +445,7 @@ func (w uncomparableAdapterWrapper) Unwrap() core.LLM {
 
 type adapterTestLLM struct {
 	result        map[string]any
+	textResponse  *core.LLMResponse
 	err           error
 	prompt        string
 	toolSchemas   []map[string]any
@@ -442,7 +454,10 @@ type adapterTestLLM struct {
 }
 
 func (m *adapterTestLLM) Generate(context.Context, string, ...core.GenerateOption) (*core.LLMResponse, error) {
-	return nil, errors.New("unexpected Generate call")
+	if m.textResponse == nil && m.err == nil {
+		return nil, errors.New("unexpected Generate call")
+	}
+	return m.textResponse, m.err
 }
 func (m *adapterTestLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOption) (map[string]any, error) {
 	return nil, errors.New("unexpected GenerateWithJSON call")
