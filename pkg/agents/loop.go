@@ -57,13 +57,19 @@ type LoopConfig struct {
 	ToolTimeout        time.Duration
 }
 
+// StopReason explains why an agent loop terminated.
+type StopReason string
+
 const (
-	StopReasonFinish           = "finish"
-	StopReasonMaxIterations    = "max_iterations"
-	StopReasonError            = "error"
-	StopReasonAborted          = "aborted"
-	StopReasonBudgetExhausted  = "budget_exhausted"
-	StopReasonFinishOverBudget = "finish_over_budget"
+	StopReasonFinish           StopReason = "finish"
+	StopReasonText             StopReason = "text"
+	StopReasonMaxTurns         StopReason = "max_turns"
+	StopReasonMaxIterations    StopReason = "max_iterations"
+	StopReasonCanceled         StopReason = "canceled"
+	StopReasonError            StopReason = "error"
+	StopReasonAborted          StopReason = "aborted"
+	StopReasonBudgetExhausted  StopReason = "budget_exhausted"
+	StopReasonFinishOverBudget StopReason = "finish_over_budget"
 )
 
 // LoopResult holds the result of a RunLoop execution.
@@ -71,7 +77,7 @@ type LoopResult struct {
 	Messages []Message
 	Output   map[string]any
 	// StopReason is one of the StopReason* constants.
-	StopReason string
+	StopReason StopReason
 	Iterations int
 	Usage      *core.TokenInfo
 }
@@ -81,7 +87,7 @@ type LoopAction struct {
 	ToolCalls  []core.ToolCall
 	Thought    string
 	Result     map[string]any
-	StopReason string
+	StopReason StopReason
 }
 
 // LLMRequest is built by PrepareRequest for the strategy's CallLLM.
