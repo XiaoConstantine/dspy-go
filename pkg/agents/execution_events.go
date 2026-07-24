@@ -302,6 +302,13 @@ func cloneEventPayload(payload EventPayload) EventPayload {
 	}
 }
 
+// CloneExecutionEvent returns an ownership-safe copy of one execution event.
+func CloneExecutionEvent(event ExecutionEvent) ExecutionEvent {
+	cloned := event
+	cloned.Payload = cloneEventPayload(event.Payload)
+	return cloned
+}
+
 func cloneToolCall(call core.ToolCall) core.ToolCall {
 	return cloneToolCalls([]core.ToolCall{call})[0]
 }
@@ -567,10 +574,9 @@ func validateRunFinished(event RunFinishedEvent) error {
 	return nil
 }
 
-// LegacyEventSink projects portable events onto the temporary string/map
-// callback, including failed-plus-finished and blocked-plus-finished pairs.
-// Wrapper-specific enrichment such as subagent identity remains the native
-// adapter's responsibility. Message events have no legacy equivalent.
+// Deprecated: prefer typed ExecutionEvent consumers directly for portable
+// run/turn/tool lifecycles. LegacyEventSink keeps string/map callback
+// compatibility; native-only session notifications still flow through OnEvent.
 func LegacyEventSink(onEvent func(AgentEvent)) EventSink {
 	return EventSinkFunc(func(_ context.Context, event ExecutionEvent) {
 		if onEvent == nil {

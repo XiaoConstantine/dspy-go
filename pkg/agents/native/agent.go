@@ -39,7 +39,12 @@ type Config struct {
 	SkillStore                    skills.Store
 	MaxConsecutiveNoCallResponses int
 	ToolInterceptors              []core.ToolInterceptor
-	OnEvent                       func(agents.AgentEvent)
+	EventSink                     agents.EventSink
+	// Deprecated: EventSink covers only portable typed execution events.
+	// OnEvent remains the compatibility surface for legacy string/map consumers
+	// and native-only session lifecycle notifications such as session_loaded and
+	// session_persisted.
+	OnEvent func(agents.AgentEvent)
 }
 
 // TokenUsage captures aggregate token usage for one tool-calling run.
@@ -285,8 +290,12 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	var typedEvents []agents.ExecutionEvent
 	legacySink := nativeLegacyEventSink(a, runConfig.OnEvent, sessionID, sessionContext, len(sessionRecall))
 	eventSink := agents.EventSinkFunc(func(eventCtx context.Context, event agents.ExecutionEvent) {
-		typedEvents = append(typedEvents, event)
-		legacySink.EmitEvent(eventCtx, event)
+		stored := agents.CloneExecutionEvent(event)
+		typedEvents = append(typedEvents, stored)
+		if runConfig.EventSink != nil {
+			runConfig.EventSink.EmitEvent(eventCtx, agents.CloneExecutionEvent(event))
+		}
+		legacySink.EmitEvent(eventCtx, agents.CloneExecutionEvent(event))
 	})
 	executor := func(executeCtx context.Context, tool core.Tool, arguments map[string]any) (core.ToolResult, error) {
 		handler := func(handlerCtx context.Context, args map[string]any) (core.ToolResult, error) {

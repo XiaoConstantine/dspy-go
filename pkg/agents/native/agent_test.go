@@ -649,6 +649,112 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	assert.Contains(t, eventTypes, agents.EventRunFinished)
 }
 
+func TestAgent_Execute_EmitsTypedExecutionEvents(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{{
+			"function_call": map[string]any{
+				"name":      "Finish",
+				"arguments": map[string]any{"answer": "done"},
+			},
+		}},
+	}
+
+	var typed []agents.ExecutionEvent
+	var legacy []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 1,
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
+			typed = append(typed, event)
+		}),
+		OnEvent: func(event agents.AgentEvent) {
+			legacy = append(legacy, event)
+		},
+	})
+	require.NoError(t, err)
+
+	result, err := agent.Execute(context.Background(), map[string]any{
+		"task":    "Finish immediately.",
+		"task_id": "task-typed-events",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+	require.NotEmpty(t, typed)
+	require.NotEmpty(t, legacy)
+
+	typeNames := make([]string, 0, len(typed))
+	for _, event := range typed {
+		typeNames = append(typeNames, fmt.Sprintf("%T", event.Payload))
+	}
+	assert.Equal(t, "agents.RunStartedEvent", typeNames[0])
+	assert.Contains(t, typeNames, "agents.ToolCallProposedEvent")
+	assert.Contains(t, typeNames, "agents.ToolCallFinishedEvent")
+	assert.Equal(t, "agents.RunFinishedEvent", typeNames[len(typeNames)-1])
+}
+
+func TestAgent_Execute_TypedAndLegacyEventConsumersAreMutationIsolated(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "lookup",
+					"arguments": map[string]any{"query": "original"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
+				},
+			},
+		},
+	}
+
+	var events []agents.AgentEvent
+	agent, err := NewAgent(llm, Config{
+		MaxTurns: 2,
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
+			switch payload := event.Payload.(type) {
+			case agents.ToolCallProposedEvent:
+				payload.Call.Arguments["query"] = "mutated"
+			case agents.ToolCallFinishedEvent:
+				if payload.Result != nil && payload.Result.ToolResult != nil && len(payload.Result.ToolResult.Content) > 0 {
+					payload.Result.ToolResult.Content[0].Text = "mutated"
+				}
+			}
+		}),
+		OnEvent: func(event agents.AgentEvent) {
+			events = append(events, event)
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, agent.RegisterTool(simpleTool{name: "lookup", run: func(context.Context, map[string]any) (core.ToolResult, error) {
+		return core.ToolResult{Data: "found"}, nil
+	}}))
+
+	result, err := agent.Execute(context.Background(), map[string]any{
+		"task":    "Look up once and finish.",
+		"task_id": "task-mutation-isolation",
+	})
+	require.NoError(t, err)
+	require.True(t, result["completed"].(bool))
+
+	proposed := findEvent(events, agents.EventToolCallProposed, "lookup")
+	require.NotNil(t, proposed)
+	assert.Equal(t, "original", proposed.Data["arguments"].(map[string]any)["query"])
+
+	finished := findEvent(events, agents.EventToolCallFinished, "lookup")
+	require.NotNil(t, finished)
+	assert.Equal(t, "found", finished.Data["observation"])
+
+	execTrace := agent.LastExecutionTrace()
+	require.NotNil(t, execTrace)
+	require.Len(t, execTrace.Steps, 2)
+	assert.Equal(t, "original", execTrace.Steps[0].Arguments["query"])
+	assert.Equal(t, "found", execTrace.Steps[0].Observation)
+}
+
 func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},

@@ -19,15 +19,18 @@ const (
 	EventToolCallFinished = "tool_call_finished"
 )
 
-// AgentEvent represents an event emitted during agent execution.
-// This is intentionally minimal and will be extended by streaming/event work.
+// Deprecated: prefer typed ExecutionEvent consumers via EventSink for portable
+// run/turn/tool lifecycles. AgentEvent remains the compatibility format for
+// legacy callbacks and native-only session notifications.
 type AgentEvent struct {
 	Type      string
 	Data      map[string]any
 	Timestamp time.Time
 }
 
-// EmitEvent safely emits an agent event to an optional callback.
+// Deprecated: prefer typed ExecutionEvent consumers via EventSink for portable
+// run/turn/tool lifecycles. EmitEvent remains for compatibility callbacks and
+// native-only session notifications.
 func EmitEvent(onEvent func(AgentEvent), eventType string, data map[string]any) {
 	if onEvent == nil {
 		return
