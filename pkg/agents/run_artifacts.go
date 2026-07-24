@@ -94,7 +94,8 @@ func ExecutionTraceFromEvents(events []ExecutionEvent, config ExecutionTraceConf
 		startedAt = completedAt
 	}
 
-	return &ExecutionTrace{
+	trace := &ExecutionTrace{
+		RunID:          state.runID,
 		AgentID:        config.AgentID,
 		AgentType:      config.AgentType,
 		Task:           task,
@@ -115,7 +116,12 @@ func ExecutionTraceFromEvents(events []ExecutionEvent, config ExecutionTraceConf
 			return contextMetadata
 		}(),
 		TerminationCause: string(stopReason),
-	}, nil
+	}
+	if state.started != nil {
+		trace.Model = state.started.Model
+		trace.Provider = state.started.Provider
+	}
+	return trace, nil
 }
 
 func collectRunEventState(events []ExecutionEvent, selectedRunID string) (runEventState, error) {
@@ -244,9 +250,11 @@ func executionTraceStepsFromState(state runEventState) ([]TraceStep, map[string]
 		if len(message.ToolCalls) == 0 {
 			if state.terminal != nil && state.terminal.Status == RunStatusCompleted && state.terminal.StopReason == StopReasonText && record.turn == state.terminal.Turns {
 				steps = append(steps, TraceStep{
-					Index:   len(steps) + 1,
-					Thought: assistantText,
-					Success: true,
+					Index:      len(steps) + 1,
+					Thought:    assistantText,
+					TokenUsage: tokenInfoMap(state.turnUsage[record.turn]),
+					Metadata:   cloneAnyMap(message.Metadata),
+					Success:    true,
 				})
 				continue
 			}
@@ -259,6 +267,8 @@ func executionTraceStepsFromState(state runEventState) ([]TraceStep, map[string]
 				Thought:            assistantText,
 				Observation:        observation,
 				ObservationDisplay: observation,
+				TokenUsage:         tokenInfoMap(state.turnUsage[record.turn]),
+				Metadata:           cloneAnyMap(message.Metadata),
 				Success:            false,
 				Error:              observation,
 			})
@@ -266,10 +276,12 @@ func executionTraceStepsFromState(state runEventState) ([]TraceStep, map[string]
 		}
 		for index, call := range message.ToolCalls {
 			step := TraceStep{
-				Index:     len(steps) + 1,
-				Tool:      call.Name,
-				Arguments: cloneAnyMap(call.Arguments),
-				Success:   true,
+				Index:      len(steps) + 1,
+				Tool:       call.Name,
+				Arguments:  cloneAnyMap(call.Arguments),
+				TokenUsage: tokenInfoMap(state.turnUsage[record.turn]),
+				Metadata:   cloneAnyMap(message.Metadata),
+				Success:    true,
 			}
 			if index == 0 {
 				step.Thought = assistantText
@@ -331,6 +343,17 @@ func strictToolOutcomeResult(state runEventState, turn, toolIndex int, call core
 		return nil, fmt.Errorf("tool result for %q at turn %d index %d does not match its call", call.Name, turn, toolIndex)
 	}
 	return &result, nil
+}
+
+func tokenInfoMap(usage *core.TokenInfo) map[string]int64 {
+	if usage == nil {
+		return map[string]int64{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+	}
+	return map[string]int64{
+		"prompt_tokens":     int64(usage.PromptTokens),
+		"completion_tokens": int64(usage.CompletionTokens),
+		"total_tokens":      int64(usage.TotalTokens),
+	}
 }
 
 func aggregateTurnUsage(turnUsage map[int]*core.TokenInfo) map[string]int64 {

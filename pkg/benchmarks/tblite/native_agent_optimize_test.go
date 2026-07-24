@@ -77,7 +77,8 @@ func TestNativeAgent_ArtifactsCloneAndTrace(t *testing.T) {
 
 	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
-	assert.Equal(t, "trace-task", trace.Task)
+	assert.Equal(t, "trace-task", trace.RunID)
+	assert.Contains(t, trace.Task, "TASK INSTRUCTION:\nFinish immediately")
 	assert.Equal(t, "finish", trace.TerminationCause)
 	require.Len(t, trace.Steps, 1)
 	assert.Equal(t, "Finish", trace.Steps[0].Tool)

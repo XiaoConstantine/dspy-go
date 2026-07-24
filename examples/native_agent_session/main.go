@@ -181,7 +181,7 @@ func run() error {
 	fmt.Printf("Turns: %d\n", intValue(result["turns"], 0))
 	fmt.Printf("Tool calls: %d\n", intValue(result["tool_calls"], 0))
 
-	if trace := agent.LastNativeTrace(); trace != nil {
+	if trace := agent.LastExecutionTrace(); trace != nil {
 		fmt.Printf("Trace steps recorded: %d\n", len(trace.Steps))
 	}
 

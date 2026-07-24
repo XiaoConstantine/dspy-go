@@ -15,6 +15,8 @@ func TestExecutionTraceClone_DeepCopiesNestedState(t *testing.T) {
 		Steps: []TraceStep{{
 			Arguments:          map[string]any{"nested": map[string]any{"value": "argument"}},
 			ObservationDetails: map[string]any{"nested": []any{"detail"}},
+			TokenUsage:         map[string]int64{"total_tokens": 3},
+			Metadata:           map[string]any{"nested": map[string]any{"value": "metadata"}},
 		}},
 	}
 
@@ -24,12 +26,16 @@ func TestExecutionTraceClone_DeepCopiesNestedState(t *testing.T) {
 	cloned.ContextMetadata["nested"].(map[string][]string)["values"][0] = "changed"
 	cloned.Steps[0].Arguments["nested"].(map[string]any)["value"] = "changed"
 	cloned.Steps[0].ObservationDetails["nested"].([]any)[0] = "changed"
+	cloned.Steps[0].TokenUsage["total_tokens"] = 9
+	cloned.Steps[0].Metadata["nested"].(map[string]any)["value"] = "changed"
 
 	assert.Equal(t, "input", trace.Input["nested"].(map[string]any)["value"])
 	assert.Equal(t, "output", trace.Output["nested"].([]any)[0].(map[string]any)["value"])
 	assert.Equal(t, "context", trace.ContextMetadata["nested"].(map[string][]string)["values"][0])
 	assert.Equal(t, "argument", trace.Steps[0].Arguments["nested"].(map[string]any)["value"])
 	assert.Equal(t, "detail", trace.Steps[0].ObservationDetails["nested"].([]any)[0])
+	assert.Equal(t, int64(3), trace.Steps[0].TokenUsage["total_tokens"])
+	assert.Equal(t, "metadata", trace.Steps[0].Metadata["nested"].(map[string]any)["value"])
 }
 
 func TestExecutionTraceClone_PreservesStepSliceShape(t *testing.T) {

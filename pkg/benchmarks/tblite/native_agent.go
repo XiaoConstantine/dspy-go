@@ -170,7 +170,7 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 	a.lastTrace = sharedAgent.LastExecutionTrace()
 	a.traceMu.Unlock()
 	if err != nil {
-		nativeTrace := sharedAgent.LastNativeTrace()
+		nativeTrace := sharedAgent.LastExecutionTrace()
 		result := &TerminalTaskResult{
 			Completed: false,
 			Error:     err.Error(),
@@ -192,7 +192,7 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 		return result, nil
 	}
 
-	nativeTrace := sharedAgent.LastNativeTrace()
+	nativeTrace := sharedAgent.LastExecutionTrace()
 	if nativeTrace == nil {
 		return nil, fmt.Errorf("shared native agent did not record a trace")
 	}
@@ -222,7 +222,7 @@ func (r dockerCommandRunner) Run(ctx context.Context, workingDir string, command
 // populateTraceResult fills trace-derived fields (Duration, ToolCalls,
 // TokenUsage, TracePath, Metadata) on an existing result. It returns the
 // trace file path for callers that need it independently.
-func (a *NativeAgent) populateTraceResult(result *TerminalTaskResult, nativeTrace *sharednative.Trace, req TerminalTaskRequest) (string, error) {
+func (a *NativeAgent) populateTraceResult(result *TerminalTaskResult, nativeTrace *agents.ExecutionTrace, req TerminalTaskRequest) (string, error) {
 	if result.Metadata == nil {
 		result.Metadata = map[string]any{}
 	}
@@ -233,9 +233,9 @@ func (a *NativeAgent) populateTraceResult(result *TerminalTaskResult, nativeTrac
 	}
 	trace := nativeTraceToToolCallTrace(nativeTrace, req.Instruction)
 	traceFile, writeErr := writeTrace(req.TaskDir, trace)
-	result.Duration = nativeTrace.Duration
+	result.Duration = nativeTrace.ProcessingTime
 	result.ToolCalls = countExecutedTools(trace.Steps)
-	result.TokenUsage = tokenUsageFromShared(nativeTrace.TokenUsage)
+	result.TokenUsage = tokenUsageFromCanonical(nativeTrace.TokenUsage)
 	result.TracePath = traceFile
 	result.Metadata["turns"] = len(trace.Steps)
 	return traceFile, writeErr
@@ -315,7 +315,7 @@ func writeDebugSnapshot(taskDir string, snapshot taskDebugSnapshot) string {
 	return debugPath
 }
 
-func nativeTraceToToolCallTrace(trace *sharednative.Trace, instruction string) ToolCallTrace {
+func nativeTraceToToolCallTrace(trace *agents.ExecutionTrace, instruction string) ToolCallTrace {
 	if trace == nil {
 		return ToolCallTrace{Instruction: instruction}
 	}
@@ -324,36 +324,56 @@ func nativeTraceToToolCallTrace(trace *sharednative.Trace, instruction string) T
 	for _, step := range trace.Steps {
 		steps = append(steps, ToolCallTraceStep{
 			Index:         step.Index,
-			AssistantText: step.AssistantText,
-			ToolName:      step.ToolName,
+			AssistantText: step.Thought,
+			ToolName:      step.Tool,
 			Arguments:     maps.Clone(step.Arguments),
 			Observation:   step.Observation,
-			IsError:       step.IsError,
-			Usage:         tokenUsageFromShared(step.Usage),
-			Metadata:      maps.Clone(step.Metadata),
+			IsError:       !step.Success,
+			Usage:         tokenUsageFromCanonical(step.TokenUsage),
+			Metadata:      stringifyMetadata(step.Metadata),
 		})
 	}
 
 	return ToolCallTrace{
-		TaskID:      trace.TaskID,
+		TaskID:      trace.RunID,
 		Model:       trace.Model,
 		Provider:    trace.Provider,
 		Instruction: instruction,
 		StartedAt:   trace.StartedAt,
-		Duration:    trace.Duration,
-		Completed:   trace.Completed,
-		FinalAnswer: trace.FinalAnswer,
+		Duration:    trace.ProcessingTime,
+		Completed:   trace.Status == agents.TraceStatusSuccess,
+		FinalAnswer: agentutil.StringValue(trace.Output["final_answer"]),
 		Error:       trace.Error,
 		Steps:       steps,
 	}
 }
 
-func tokenUsageFromShared(usage sharednative.TokenUsage) TokenUsage {
+func tokenUsageFromCanonical(usage map[string]int64) TokenUsage {
 	return TokenUsage{
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
+		PromptTokens:     usage["prompt_tokens"],
+		CompletionTokens: usage["completion_tokens"],
+		TotalTokens:      usage["total_tokens"],
 	}
+}
+
+func stringifyMetadata(metadata map[string]any) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	if diagnostics, ok := metadata[agents.ModelDiagnosticsMetadataKey].(map[string]any); ok {
+		if provider, ok := diagnostics["provider_diagnostic"].(map[string]any); ok {
+			result := make(map[string]string, len(provider))
+			for key, value := range provider {
+				result[key] = fmt.Sprint(value)
+			}
+			return result
+		}
+	}
+	result := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		result[key] = fmt.Sprint(value)
+	}
+	return result
 }
 
 func countExecutedTools(steps []ToolCallTraceStep) int {

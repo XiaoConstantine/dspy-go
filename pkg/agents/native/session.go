@@ -197,7 +197,7 @@ func (a *Agent) resolveSessionEventBranch(ctx context.Context, input map[string]
 	}, nil
 }
 
-func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, trace *Trace, events []agents.ExecutionEvent) {
+func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, trace *agents.ExecutionTrace, events []agents.ExecutionEvent) {
 	sessionID := a.sessionID(input)
 	if sessionID == "" || trace == nil {
 		return
@@ -219,9 +219,9 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 	a.emitSessionEvent(ctx, SessionPersistedEvent{
 		SessionID:         sessionID,
 		RecordID:          record.ID,
-		TaskID:            trace.TaskID,
+		TaskID:            trace.RunID,
 		Success:           snapshotErr == nil,
-		Completed:         trace.Completed,
+		Completed:         trace.Status == agents.TraceStatusSuccess,
 		Err:               snapshotErr,
 		EventStoreEnabled: eventStore != nil,
 		EventStoreSuccess: eventStore != nil && eventErr == nil,
@@ -237,7 +237,7 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 	})
 }
 
-func (a *Agent) persistSessionEvents(ctx context.Context, store sessionevent.SessionEventStore, trace *Trace, events []agents.ExecutionEvent, sessionID string) ([]sessionevent.SessionEntry, string, error) {
+func (a *Agent) persistSessionEvents(ctx context.Context, store sessionevent.SessionEventStore, trace *agents.ExecutionTrace, events []agents.ExecutionEvent, sessionID string) ([]sessionevent.SessionEntry, string, error) {
 	if store == nil || trace == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, "", nil
 	}
@@ -248,10 +248,10 @@ func (a *Agent) persistSessionEvents(ctx context.Context, store sessionevent.Ses
 	}
 
 	entries, err := sessionevent.EntriesFromEvents(events, sessionID, branchID, sessionevent.EventProjectionConfig{
-		RunID:    trace.TaskID,
-		TaskID:   trace.TaskID,
+		RunID:    trace.RunID,
+		TaskID:   trace.RunID,
 		Source:   "native",
-		UserText: trace.Task,
+		UserText: agentutil.StringValue(trace.Input["task"]),
 	})
 	if err != nil {
 		return nil, branchID, err
@@ -267,7 +267,7 @@ func (a *Agent) persistSessionEvents(ctx context.Context, store sessionevent.Ses
 	return inserted, branchID, nil
 }
 
-func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEventStore, sessionID string, trace *Trace) (string, error) {
+func ensureSessionEventBranch(ctx context.Context, store sessionevent.SessionEventStore, sessionID string, trace *agents.ExecutionTrace) (string, error) {
 	session, err := store.GetSession(ctx, sessionID)
 	if err == nil {
 		if branchID := strings.TrimSpace(session.ActiveBranchID); branchID != "" {
@@ -483,46 +483,58 @@ func buildSessionRecall(records []agents.SessionRecord, maxChars int) string {
 	return agentutil.TruncateString(builder.String(), maxChars)
 }
 
-func sessionRecordFromTrace(a *Agent, input map[string]any, trace *Trace, sessionID string) agents.SessionRecord {
+func sessionRecordFromTrace(a *Agent, input map[string]any, trace *agents.ExecutionTrace, sessionID string) agents.SessionRecord {
 	if trace == nil {
 		return agents.SessionRecord{}
 	}
 
-	completedAt := trace.StartedAt.Add(trace.Duration)
 	return agents.SessionRecord{
-		ID:          fmt.Sprintf("%s-%d", firstNonEmpty(trace.TaskID, "run"), trace.StartedAt.UTC().UnixNano()),
+		ID:          fmt.Sprintf("%s-%d", firstNonEmpty(trace.RunID, "run"), trace.StartedAt.UTC().UnixNano()),
 		SessionID:   sessionID,
 		AgentID:     fmt.Sprintf("native-%s-%s", a.llm.ProviderName(), a.llm.ModelID()),
 		AgentType:   "native",
-		TaskID:      trace.TaskID,
-		Task:        trace.Task,
+		TaskID:      trace.RunID,
+		Task:        agentutil.StringValue(trace.Input["task"]),
 		StartedAt:   trace.StartedAt.UTC(),
-		CompletedAt: completedAt.UTC(),
-		Completed:   trace.Completed,
-		FinalAnswer: strings.TrimSpace(trace.FinalAnswer),
+		CompletedAt: trace.CompletedAt.UTC(),
+		Completed:   trace.Status == agents.TraceStatusSuccess,
+		FinalAnswer: strings.TrimSpace(agentutil.StringValue(trace.Output["final_answer"])),
 		Error:       strings.TrimSpace(trace.Error),
 		Highlights:  traceHighlights(trace.Steps),
 		Metadata: map[string]any{
 			"provider":          trace.Provider,
 			"model":             trace.Model,
 			"turns":             len(trace.Steps),
-			"tool_calls":        countExecutedTools(trace.Steps),
-			"termination_cause": traceTerminationCause(trace),
-			"task_id":           firstNonEmpty(trace.TaskID, agentutil.StringValue(input["task_id"])),
-			"prompt_tokens":     trace.TokenUsage.PromptTokens,
-			"completion_tokens": trace.TokenUsage.CompletionTokens,
-			"total_tokens":      trace.TokenUsage.TotalTokens,
+			"tool_calls":        executionTraceToolCalls(trace),
+			"termination_cause": trace.TerminationCause,
+			"task_id":           firstNonEmpty(trace.RunID, agentutil.StringValue(input["task_id"])),
+			"prompt_tokens":     trace.TokenUsage["prompt_tokens"],
+			"completion_tokens": trace.TokenUsage["completion_tokens"],
+			"total_tokens":      trace.TokenUsage["total_tokens"],
 		},
 	}
 }
 
-func traceHighlights(steps []TraceStep) []string {
+func executionTraceToolCalls(trace *agents.ExecutionTrace) int {
+	if trace == nil {
+		return 0
+	}
+	total := 0
+	for name, count := range trace.ToolUsageCount {
+		if !strings.EqualFold(name, "Finish") {
+			total += count
+		}
+	}
+	return total
+}
+
+func traceHighlights(steps []agents.TraceStep) []string {
 	highlights := make([]string, 0, maxSessionHighlights)
 	for _, step := range steps {
 		if len(highlights) >= maxSessionHighlights {
 			break
 		}
-		if strings.EqualFold(step.ToolName, "finish") {
+		if strings.EqualFold(step.Tool, "finish") {
 			continue
 		}
 		text := strings.TrimSpace(step.Observation)
@@ -530,13 +542,13 @@ func traceHighlights(steps []TraceStep) []string {
 			continue
 		}
 
-		prefix := strings.TrimSpace(step.ToolName)
+		prefix := strings.TrimSpace(step.Tool)
 		switch {
-		case prefix != "" && step.IsError:
+		case prefix != "" && !step.Success:
 			text = fmt.Sprintf("%s error: %s", prefix, text)
 		case prefix != "":
 			text = fmt.Sprintf("%s: %s", prefix, text)
-		case step.IsError:
+		case !step.Success:
 			text = "error: " + text
 		}
 		text = agentutil.TruncateString(text, maxSessionHighlightChars)

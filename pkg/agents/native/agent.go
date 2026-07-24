@@ -42,95 +42,6 @@ type Config struct {
 	SessionEventSink              SessionEventSink
 }
 
-// TokenUsage captures aggregate token usage for one tool-calling run.
-type TokenUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
-}
-
-// Trace captures a native tool-calling run with step-level detail.
-type Trace struct {
-	TaskID      string            `json:"task_id,omitempty"`
-	Model       string            `json:"model"`
-	Provider    string            `json:"provider"`
-	Task        string            `json:"task"`
-	StartedAt   time.Time         `json:"started_at"`
-	Duration    time.Duration     `json:"duration"`
-	Completed   bool              `json:"completed"`
-	FinalAnswer string            `json:"final_answer,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	Status      agents.RunStatus  `json:"status,omitempty"`
-	StopReason  agents.StopReason `json:"stop_reason,omitempty"`
-	TokenUsage  TokenUsage        `json:"token_usage"`
-	Steps       []TraceStep       `json:"steps"`
-}
-
-// Clone returns a deep copy of the trace.
-func (t *Trace) Clone() *Trace {
-	if t == nil {
-		return nil
-	}
-
-	cloned := &Trace{
-		TaskID:      t.TaskID,
-		Model:       t.Model,
-		Provider:    t.Provider,
-		Task:        t.Task,
-		StartedAt:   t.StartedAt,
-		Duration:    t.Duration,
-		Completed:   t.Completed,
-		FinalAnswer: t.FinalAnswer,
-		Error:       t.Error,
-		Status:      t.Status,
-		StopReason:  t.StopReason,
-		TokenUsage:  t.TokenUsage,
-	}
-	if len(t.Steps) > 0 {
-		cloned.Steps = make([]TraceStep, len(t.Steps))
-		for i, step := range t.Steps {
-			cloned.Steps[i] = step.Clone()
-		}
-	}
-	return cloned
-}
-
-// TraceStep captures one model/tool turn.
-type TraceStep struct {
-	Index              int               `json:"index"`
-	AssistantText      string            `json:"assistant_text,omitempty"`
-	ToolName           string            `json:"tool_name,omitempty"`
-	Arguments          map[string]any    `json:"arguments,omitempty"`
-	Observation        string            `json:"observation,omitempty"`
-	ObservationDisplay string            `json:"observation_display,omitempty"`
-	ObservationDetails map[string]any    `json:"observation_details,omitempty"`
-	IsError            bool              `json:"is_error,omitempty"`
-	Synthetic          bool              `json:"synthetic,omitempty"`
-	Redacted           bool              `json:"redacted,omitempty"`
-	Truncated          bool              `json:"truncated,omitempty"`
-	Usage              TokenUsage        `json:"usage,omitempty"`
-	Metadata           map[string]string `json:"metadata,omitempty"`
-}
-
-// Clone returns a deep copy of the step.
-func (s TraceStep) Clone() TraceStep {
-	return TraceStep{
-		Index:              s.Index,
-		AssistantText:      s.AssistantText,
-		ToolName:           s.ToolName,
-		Arguments:          maps.Clone(s.Arguments),
-		Observation:        s.Observation,
-		ObservationDisplay: s.ObservationDisplay,
-		ObservationDetails: maps.Clone(s.ObservationDetails),
-		IsError:            s.IsError,
-		Synthetic:          s.Synthetic,
-		Redacted:           s.Redacted,
-		Truncated:          s.Truncated,
-		Usage:              s.Usage,
-		Metadata:           maps.Clone(s.Metadata),
-	}
-}
-
 // Agent executes tasks using provider-native tool calling with a shared dspy-go harness.
 type Agent struct {
 	llm          core.LLM
@@ -144,10 +55,9 @@ type Agent struct {
 	skillLoadErr         error
 	persistedSkillPrompt string
 
-	artifactMu      sync.RWMutex
-	traceMu         sync.RWMutex
-	lastTrace       *agents.ExecutionTrace
-	lastNativeTrace *Trace
+	artifactMu sync.RWMutex
+	traceMu    sync.RWMutex
+	lastTrace  *agents.ExecutionTrace
 }
 
 var (
@@ -283,7 +193,6 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 		return nil, err
 	}
 	model := &nativeRunModel{Model: baseModel, maxTurns: maxTurns}
-	startedAt := time.Now()
 	var typedEvents []agents.ExecutionEvent
 	eventSink := agents.EventSinkFunc(func(eventCtx context.Context, event agents.ExecutionEvent) {
 		stored := agents.CloneExecutionEvent(event)
@@ -321,7 +230,7 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 		AgentID:   fmt.Sprintf("native-%s-%s", a.llm.ProviderName(), a.llm.ModelID()),
 		AgentType: "native",
 		Input:     maps.Clone(input),
-		Task:      firstNonEmpty(taskID, task),
+		Task:      task,
 		ContextMetadata: func() map[string]any {
 			metadata := map[string]any{}
 			if sessionID := a.sessionID(input); sessionID != "" {
@@ -333,23 +242,26 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	if err != nil {
 		return nil, err
 	}
-	trace := nativeTraceFromEvents(a, taskID, task, startedAt, typedEvents, loopResult, runErr)
-	a.storeTraces(ctx, input, trace, execTrace, typedEvents)
+	a.storeTrace(ctx, input, execTrace, typedEvents)
 	if runErr != nil {
 		return nil, runErr
 	}
 
 	output := map[string]any{
 		"completed":   loopResult.StopReason == agents.StopReasonFinish,
-		"tool_calls":  countExecutedTools(trace.Steps),
-		"turns":       len(trace.Steps),
+		"tool_calls":  executionTraceToolCalls(execTrace),
+		"turns":       len(execTrace.Steps),
 		"token_usage": loopTokenUsageMap(loopResult.Usage),
 	}
 	if loopResult.FinalAnswer != "" {
 		output["final_answer"] = loopResult.FinalAnswer
 	}
 	if loopResult.StopReason != agents.StopReasonFinish {
-		output["error"] = trace.Error
+		errorText := execTrace.Error
+		if loopResult.StopReason == agents.StopReasonMaxTurns {
+			errorText = fmt.Sprintf("max turns reached without Finish after %d turns", loopResult.Turns)
+		}
+		output["error"] = errorText
 	}
 	return output, nil
 }
@@ -446,111 +358,6 @@ func buildNativeInitialPrompt(config Config, persistedSkillPrompt, task, session
 	}
 	builder.WriteString("You must use tools to work on the task and call Finish when done.\n")
 	return builder.String()
-}
-
-func nativeTraceFromEvents(
-	a *Agent,
-	taskID, task string,
-	startedAt time.Time,
-	events []agents.ExecutionEvent,
-	result agents.LoopResult,
-	runErr error,
-) *Trace {
-	var terminal agents.RunFinishedEvent
-	turnUsage := make(map[int]TokenUsage)
-	for _, event := range events {
-		switch payload := event.Payload.(type) {
-		case agents.TurnFinishedEvent:
-			turnUsage[payload.Turn] = tokenUsageFromCore(payload.Usage)
-		case agents.RunFinishedEvent:
-			terminal = payload
-		}
-	}
-	trace := &Trace{
-		TaskID: taskID, Model: a.llm.ModelID(), Provider: a.llm.ProviderName(), Task: task,
-		StartedAt: startedAt, Duration: time.Since(startedAt),
-		Completed: result.StopReason == agents.StopReasonFinish, FinalAnswer: result.FinalAnswer,
-		Status: terminal.Status, StopReason: terminal.StopReason,
-		TokenUsage: tokenUsageFromCore(result.Usage), Steps: make([]TraceStep, 0),
-	}
-	if terminal.Err != nil {
-		trace.Error = terminal.Err.Error()
-	} else if terminal.StopReason == agents.StopReasonMaxTurns {
-		trace.Error = fmt.Sprintf("max turns reached without Finish after %d turns", result.Turns)
-	} else if terminal.Diagnostic != "" {
-		trace.Error = terminal.Diagnostic
-	} else if runErr != nil {
-		trace.Error = runErr.Error()
-	}
-	turn := 0
-	for index := 0; index < len(result.Messages); index++ {
-		message := result.Messages[index]
-		if message.Role != agents.RoleAssistant {
-			continue
-		}
-		turn++
-		assistantText := message.TextContent()
-		metadata := nativeDiagnosticMetadata(message.Metadata)
-		if len(message.ToolCalls) == 0 {
-			observation := "Model returned text without a tool call. It must use a tool or Finish."
-			if diagnostic := latestNoToolDiagnostic([]agents.Message{message}); diagnostic != "" {
-				observation += " " + diagnostic
-			}
-			trace.Steps = append(trace.Steps, TraceStep{
-				Index: len(trace.Steps) + 1, AssistantText: assistantText,
-				Observation:        observation,
-				ObservationDisplay: observation,
-				IsError:            true, Usage: turnUsage[turn], Metadata: metadata,
-			})
-			continue
-		}
-		toolResults := make([]agents.Message, 0, len(message.ToolCalls))
-		for resultIndex := index + 1; resultIndex < len(result.Messages); resultIndex++ {
-			candidate := result.Messages[resultIndex]
-			if candidate.Role == agents.RoleAssistant {
-				break
-			}
-			if candidate.ToolResult != nil {
-				toolResults = append(toolResults, candidate)
-			}
-		}
-		for callIndex, call := range message.ToolCalls {
-			step := TraceStep{
-				Index: len(trace.Steps) + 1, ToolName: call.Name,
-				Arguments: maps.Clone(call.Arguments), Usage: turnUsage[turn], Metadata: metadata,
-			}
-			if callIndex == 0 {
-				step.AssistantText = assistantText
-			}
-			if callIndex < len(toolResults) {
-				candidate := toolResults[callIndex]
-				if candidate.ToolResult.Name == call.Name && (call.ID == "" || candidate.ToolResult.ToolCallID == call.ID) {
-					step.Observation = contentBlocksText(candidate.ToolResult.Content)
-					step.ObservationDisplay = contentBlocksText(candidate.ToolResult.DisplayContent)
-					step.ObservationDetails = maps.Clone(candidate.ToolResult.Details)
-					step.IsError = candidate.ToolResult.IsError
-					step.Synthetic = candidate.ToolResult.Synthetic
-					step.Redacted = candidate.ToolResult.Redacted
-					step.Truncated = candidate.ToolResult.Truncated
-				}
-			}
-			trace.Steps = append(trace.Steps, step)
-		}
-	}
-	return trace
-}
-
-func nativeDiagnosticMetadata(metadata map[string]any) map[string]string {
-	diagnostics, _ := metadata[agents.ModelDiagnosticsMetadataKey].(map[string]any)
-	provider, _ := diagnostics["provider_diagnostic"].(map[string]any)
-	result := make(map[string]string, len(provider))
-	for key, value := range provider {
-		result[key] = fmt.Sprint(value)
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
 }
 
 func contentBlocksText(blocks []core.ContentBlock) string {
@@ -771,16 +578,6 @@ func (a *Agent) LastExecutionTrace() *agents.ExecutionTrace {
 	return a.lastTrace.Clone()
 }
 
-// LastNativeTrace returns the richer native-tool trace from the most recent run.
-func (a *Agent) LastNativeTrace() *Trace {
-	if a == nil {
-		return nil
-	}
-	a.traceMu.RLock()
-	defer a.traceMu.RUnlock()
-	return a.lastNativeTrace.Clone()
-}
-
 func (a *Agent) emitSessionEvent(ctx context.Context, payload SessionEventPayload) {
 	if a == nil || a.config.SessionEventSink == nil || payload == nil {
 		return
@@ -818,35 +615,12 @@ func turnBudgetReminder(currentTurn int, maxTurns int) string {
 	}
 }
 
-func (a *Agent) storeTraces(ctx context.Context, input map[string]any, trace *Trace, execTrace *agents.ExecutionTrace, events []agents.ExecutionEvent) {
+func (a *Agent) storeTrace(ctx context.Context, input map[string]any, trace *agents.ExecutionTrace, events []agents.ExecutionEvent) {
 	a.traceMu.Lock()
-	a.lastNativeTrace = trace.Clone()
-	a.lastTrace = execTrace.Clone()
+	a.lastTrace = trace.Clone()
 	a.traceMu.Unlock()
-	agents.PublishExecutionTrace(ctx, execTrace)
+	agents.PublishExecutionTrace(ctx, trace)
 	a.persistSessionRecord(ctx, input, trace, events)
-}
-
-func traceTerminationCause(trace *Trace) string {
-	if trace == nil {
-		return "unknown"
-	}
-	if trace.StopReason != "" {
-		return string(trace.StopReason)
-	}
-	if trace.Completed {
-		return "finish"
-	}
-	switch {
-	case strings.Contains(strings.ToLower(trace.Error), "max turns"):
-		return "max_turns"
-	case strings.Contains(strings.ToLower(trace.Error), "without tool calls"):
-		return "no_tool_calls"
-	case strings.TrimSpace(trace.Error) != "":
-		return "error"
-	default:
-		return "unknown"
-	}
 }
 
 func supportsToolCalling(llm core.CapabilityProvider) bool {
@@ -871,27 +645,6 @@ func cloneRegisteredTool(tool core.Tool) (core.Tool, error) {
 		return nil, fmt.Errorf("tool %q returned nil clone", tool.Name())
 	}
 	return cloned, nil
-}
-
-func tokenUsageFromCore(usage *core.TokenInfo) TokenUsage {
-	if usage == nil {
-		return TokenUsage{}
-	}
-	return TokenUsage{
-		PromptTokens:     int64(usage.PromptTokens),
-		CompletionTokens: int64(usage.CompletionTokens),
-		TotalTokens:      int64(usage.TotalTokens),
-	}
-}
-
-func countExecutedTools(steps []TraceStep) int {
-	count := 0
-	for _, step := range steps {
-		if step.ToolName != "" && !strings.EqualFold(step.ToolName, "finish") {
-			count++
-		}
-	}
-	return count
 }
 
 func firstNonEmpty(values ...string) string {

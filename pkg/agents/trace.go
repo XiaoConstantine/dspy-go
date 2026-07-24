@@ -21,6 +21,8 @@ type TraceStep struct {
 	Observation        string
 	ObservationDisplay string
 	ObservationDetails map[string]any
+	TokenUsage         map[string]int64
+	Metadata           map[string]any
 	Duration           time.Duration
 	Success            bool
 	Error              string
@@ -31,8 +33,11 @@ type TraceStep struct {
 
 // ExecutionTrace captures an agent execution with step-level detail.
 type ExecutionTrace struct {
+	RunID            string
 	AgentID          string
 	AgentType        string
+	Model            string
+	Provider         string
 	Task             string
 	Input            map[string]any
 	Output           map[string]any
@@ -59,6 +64,8 @@ func (s TraceStep) Clone() TraceStep {
 		Observation:        s.Observation,
 		ObservationDisplay: s.ObservationDisplay,
 		ObservationDetails: cloneAnyMap(s.ObservationDetails),
+		TokenUsage:         cloneTypedMap(s.TokenUsage),
+		Metadata:           cloneAnyMap(s.Metadata),
 		Duration:           s.Duration,
 		Success:            s.Success,
 		Error:              s.Error,
@@ -75,8 +82,11 @@ func (t *ExecutionTrace) Clone() *ExecutionTrace {
 	}
 
 	cloned := &ExecutionTrace{
+		RunID:            t.RunID,
 		AgentID:          t.AgentID,
 		AgentType:        t.AgentType,
+		Model:            t.Model,
+		Provider:         t.Provider,
 		Task:             t.Task,
 		Input:            cloneAnyMap(t.Input),
 		Output:           cloneAnyMap(t.Output),

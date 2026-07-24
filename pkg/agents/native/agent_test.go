@@ -205,14 +205,14 @@ func TestAgent_Execute_CompletesWithToolAndFinish(t *testing.T) {
 	require.True(t, result["completed"].(bool))
 	assert.Equal(t, "done", result["final_answer"])
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
-	assert.True(t, trace.Completed)
-	assert.Equal(t, "done", trace.FinalAnswer)
+	assert.Equal(t, agents.TraceStatusSuccess, trace.Status)
+	assert.Equal(t, "done", trace.Output["final_answer"])
 	assert.Len(t, trace.Steps, 2)
-	assert.Equal(t, "write_note", trace.Steps[0].ToolName)
-	assert.Equal(t, int64(9), trace.TokenUsage.PromptTokens)
-	assert.Equal(t, int64(5), trace.TokenUsage.CompletionTokens)
+	assert.Equal(t, "write_note", trace.Steps[0].Tool)
+	assert.Equal(t, int64(9), trace.TokenUsage["prompt_tokens"])
+	assert.Equal(t, int64(5), trace.TokenUsage["completion_tokens"])
 }
 
 func TestAgent_Execute_UsesModelTextInTranscriptAndDisplayTextInTrace(t *testing.T) {
@@ -261,7 +261,7 @@ func TestAgent_Execute_UsesModelTextInTranscriptAndDisplayTextInTrace(t *testing
 	assert.Contains(t, llm.prompts[1], "summary for model")
 	assert.NotContains(t, llm.prompts[1], "full output for operator")
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
 	require.Len(t, trace.Steps, 2)
 	assert.Equal(t, "summary for model", trace.Steps[0].Observation)
@@ -292,11 +292,11 @@ func TestAgent_Execute_PreflightFailureDoesNotReplaceLastTrace(t *testing.T) {
 	result, err := agent.Execute(context.Background(), map[string]any{"task": "second task", "task_id": "second"})
 	assert.Nil(t, result)
 	require.ErrorContains(t, err, "conflicts with executable tool")
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
-	assert.Equal(t, "first", trace.TaskID)
-	assert.Equal(t, agents.RunStatusCompleted, trace.Status)
-	assert.Equal(t, agents.StopReasonFinish, trace.StopReason)
+	assert.Equal(t, "first", trace.RunID)
+	assert.Equal(t, agents.TraceStatusSuccess, trace.Status)
+	assert.Equal(t, string(agents.StopReasonFinish), trace.TerminationCause)
 }
 
 func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
@@ -320,10 +320,12 @@ func TestAgent_Execute_FailsFastAfterRepeatedNoCallResponses(t *testing.T) {
 	require.False(t, result["completed"].(bool))
 	assert.Contains(t, result["error"], "repeated model responses without tool calls")
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
 	assert.Len(t, trace.Steps, 3)
-	assert.Equal(t, "empty_content_and_function_call", trace.Steps[0].Metadata["reason"])
+	diagnostics := trace.Steps[0].Metadata[agents.ModelDiagnosticsMetadataKey].(map[string]any)
+	providerDiagnostic := diagnostics["provider_diagnostic"].(map[string]any)
+	assert.Equal(t, "empty_content_and_function_call", providerDiagnostic["reason"])
 	require.Len(t, llm.prompts, 3)
 	assert.Contains(t, llm.prompts[1], "Provider diagnostic: empty_content_and_function_call")
 	assert.Contains(t, trace.Steps[0].Observation, "Provider diagnostic: empty_content_and_function_call")
@@ -344,9 +346,9 @@ func TestAgent_Execute_NoToolDiagnosticCountsOnlyConsecutiveEmptyTurns(t *testin
 	result, err := agent.Execute(context.Background(), map[string]any{"task": "work then stall"})
 	require.NoError(t, err)
 	assert.Contains(t, result["error"], "after 3 turns")
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
-	assert.Equal(t, agents.StopReasonNoToolCalls, trace.StopReason)
+	assert.Equal(t, string(agents.StopReasonNoToolCalls), trace.TerminationCause)
 	assert.Contains(t, trace.Error, "after 3 turns")
 }
 
@@ -396,12 +398,12 @@ func TestAgent_Execute_ProcessesMultipleToolCallsInOneResponse(t *testing.T) {
 	require.True(t, result["completed"].(bool))
 	assert.Equal(t, []string{"first", "second"}, observed)
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
 	require.Len(t, trace.Steps, 3)
-	assert.Equal(t, "write_note", trace.Steps[0].ToolName)
-	assert.Equal(t, "write_note", trace.Steps[1].ToolName)
-	assert.Equal(t, "Finish", trace.Steps[2].ToolName)
+	assert.Equal(t, "write_note", trace.Steps[0].Tool)
+	assert.Equal(t, "write_note", trace.Steps[1].Tool)
+	assert.Equal(t, "Finish", trace.Steps[2].Tool)
 }
 
 func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
@@ -575,7 +577,7 @@ func TestAgent_Execute_GroupsMultipleToolCallsFromOneNativeTurn(t *testing.T) {
 	}
 	assert.NotContains(t, secondRequestText.String(), "TURN BUDGET: turn 1 of 4")
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
 	require.Len(t, trace.Steps, 3)
 	assert.Equal(t, "first", trace.Steps[0].Observation)
@@ -625,11 +627,11 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	require.Len(t, llm.prompts, 2)
 	assert.Contains(t, llm.prompts[1], `Tool "write_note" blocked: approval denied`)
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
 	require.Len(t, trace.Steps, 2)
 	assert.True(t, trace.Steps[0].Synthetic)
-	assert.True(t, trace.Steps[0].IsError)
+	assert.False(t, trace.Steps[0].Success)
 	assert.Contains(t, trace.Steps[0].Observation, "approval denied")
 
 	require.NoError(t, agents.ValidateEventLifecycle(events))
@@ -769,6 +771,26 @@ func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
 	finished := findToolFinishedEvent(events, "Finish")
 	require.NotNil(t, finished)
 	assert.Equal(t, agents.ToolCallOutcomeFinish, finished.Outcome)
+}
+
+func TestAgent_Execute_MalformedFinishDoesNotCountAsExecutedTool(t *testing.T) {
+	llm := &stubLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{"function_call": map[string]any{"name": "Finish", "arguments": map[string]any{}}},
+			{"function_call": map[string]any{"name": "Finish", "arguments": map[string]any{"answer": "done"}}},
+		},
+	}
+	agent, err := NewAgent(llm, Config{MaxTurns: 2})
+	require.NoError(t, err)
+
+	result, err := agent.Execute(context.Background(), map[string]any{"task": "Recover from malformed Finish."})
+	require.NoError(t, err)
+	assert.Equal(t, true, result["completed"])
+	assert.Equal(t, 0, result["tool_calls"])
+	trace := agent.LastExecutionTrace()
+	require.NotNil(t, trace)
+	assert.Equal(t, "Recover from malformed Finish.", trace.Task)
 }
 
 func TestAgent_Execute_PreservesSubagentResultDetailsInTypedEvents(t *testing.T) {
@@ -939,11 +961,11 @@ func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
 	require.Len(t, llm.prompts, 2)
 	assert.Contains(t, llm.prompts[1], "tool execution failed: approval backend unavailable")
 
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
 	require.Len(t, trace.Steps, 2)
 	assert.False(t, trace.Steps[0].Synthetic)
-	assert.True(t, trace.Steps[0].IsError)
+	assert.False(t, trace.Steps[0].Success)
 	assert.Contains(t, trace.Steps[0].Observation, "approval backend unavailable")
 	assert.Contains(t, trace.Steps[0].ObservationDisplay, "approval backend unavailable")
 
@@ -1141,11 +1163,11 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 		"task_id": "dual-write-task",
 	})
 	require.NoError(t, err)
-	trace := agent.LastNativeTrace()
+	trace := agent.LastExecutionTrace()
 	require.NotNil(t, trace)
-	assert.Equal(t, int64(11), trace.TokenUsage.PromptTokens)
-	assert.Equal(t, int64(7), trace.TokenUsage.CompletionTokens)
-	assert.Equal(t, int64(18), trace.TokenUsage.TotalTokens)
+	assert.Equal(t, int64(11), trace.TokenUsage["prompt_tokens"])
+	assert.Equal(t, int64(7), trace.TokenUsage["completion_tokens"])
+	assert.Equal(t, int64(18), trace.TokenUsage["total_tokens"])
 
 	records, err := agents.NewSessionStore(memory).Recent("session-dual-write", 10)
 	require.NoError(t, err)
@@ -1625,7 +1647,7 @@ func TestEnsureSessionEventBranch_JoinsCreateAndRecoveryErrors(t *testing.T) {
 		createSessionErr: createErr,
 	}
 
-	_, err := ensureSessionEventBranch(context.Background(), store, "session-1", &Trace{Task: "task"})
+	_, err := ensureSessionEventBranch(context.Background(), store, "session-1", &agents.ExecutionTrace{Task: "task"})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, createErr)
 	assert.ErrorIs(t, err, recoveryErr)
