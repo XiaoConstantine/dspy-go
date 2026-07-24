@@ -601,7 +601,7 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 4,
 		ToolInterceptors: []core.ToolInterceptor{
@@ -609,9 +609,9 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 				return core.ToolResult{}, &core.ToolBlockedError{Reason: "approval denied"}
 			},
 		},
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
@@ -632,21 +632,16 @@ func TestAgent_Execute_EmitsEventsAndHandlesBlockedTools(t *testing.T) {
 	assert.True(t, trace.Steps[0].IsError)
 	assert.Contains(t, trace.Steps[0].Observation, "approval denied")
 
-	eventTypes := make([]string, 0, len(events))
-	for _, event := range events {
-		eventTypes = append(eventTypes, event.Type)
-	}
-	assert.Contains(t, eventTypes, agents.EventRunStarted)
-	assert.Contains(t, eventTypes, agents.EventLLMTurnStarted)
-	assert.Contains(t, eventTypes, agents.EventLLMTurnFinished)
-	assert.Contains(t, eventTypes, agents.EventToolCallProposed)
-	assert.Contains(t, eventTypes, agents.EventToolCallStarted)
-	assert.Contains(t, eventTypes, agents.EventToolCallBlocked)
-	blocked := findEvent(events, agents.EventToolCallBlocked, "write_note")
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	require.NotNil(t, findToolProposedEvent(events, "write_note"))
+	require.NotNil(t, findToolStartedEvent(events, "write_note"))
+	blocked := findToolFinishedEvent(events, "write_note")
 	require.NotNil(t, blocked)
-	assert.Equal(t, "approval denied", blocked.Data["reason"])
-	assert.Contains(t, eventTypes, agents.EventToolCallFinished)
-	assert.Contains(t, eventTypes, agents.EventRunFinished)
+	assert.Equal(t, agents.ToolCallOutcomeBlocked, blocked.Outcome)
+	var blockedErr *core.ToolBlockedError
+	require.ErrorAs(t, blocked.Err, &blockedErr)
+	assert.Equal(t, "approval denied", blockedErr.Reason)
+	require.NotNil(t, findRunFinishedEvent(events))
 }
 
 func TestAgent_Execute_EmitsTypedExecutionEvents(t *testing.T) {
@@ -661,15 +656,11 @@ func TestAgent_Execute_EmitsTypedExecutionEvents(t *testing.T) {
 	}
 
 	var typed []agents.ExecutionEvent
-	var legacy []agents.AgentEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 1,
 		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			typed = append(typed, event)
 		}),
-		OnEvent: func(event agents.AgentEvent) {
-			legacy = append(legacy, event)
-		},
 	})
 	require.NoError(t, err)
 
@@ -680,7 +671,7 @@ func TestAgent_Execute_EmitsTypedExecutionEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
 	require.NotEmpty(t, typed)
-	require.NotEmpty(t, legacy)
+	require.NoError(t, agents.ValidateEventLifecycle(typed))
 
 	typeNames := make([]string, 0, len(typed))
 	for _, event := range typed {
@@ -692,7 +683,7 @@ func TestAgent_Execute_EmitsTypedExecutionEvents(t *testing.T) {
 	assert.Equal(t, "agents.RunFinishedEvent", typeNames[len(typeNames)-1])
 }
 
-func TestAgent_Execute_TypedAndLegacyEventConsumersAreMutationIsolated(t *testing.T) {
+func TestAgent_Execute_ExternalEventConsumerCannotMutateInternalTrace(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -711,7 +702,6 @@ func TestAgent_Execute_TypedAndLegacyEventConsumersAreMutationIsolated(t *testin
 		},
 	}
 
-	var events []agents.AgentEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 2,
 		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
@@ -724,9 +714,6 @@ func TestAgent_Execute_TypedAndLegacyEventConsumersAreMutationIsolated(t *testin
 				}
 			}
 		}),
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{name: "lookup", run: func(context.Context, map[string]any) (core.ToolResult, error) {
@@ -739,14 +726,6 @@ func TestAgent_Execute_TypedAndLegacyEventConsumersAreMutationIsolated(t *testin
 	})
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
-
-	proposed := findEvent(events, agents.EventToolCallProposed, "lookup")
-	require.NotNil(t, proposed)
-	assert.Equal(t, "original", proposed.Data["arguments"].(map[string]any)["query"])
-
-	finished := findEvent(events, agents.EventToolCallFinished, "lookup")
-	require.NotNil(t, finished)
-	assert.Equal(t, "found", finished.Data["observation"])
 
 	execTrace := agent.LastExecutionTrace()
 	require.NotNil(t, execTrace)
@@ -768,12 +747,12 @@ func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 1,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 
@@ -784,19 +763,15 @@ func TestAgent_Execute_EmitsProposedEventForFinish(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
 
-	proposed := findEvent(events, agents.EventToolCallProposed, "Finish")
-	require.NotNil(t, proposed)
-	_, hasSubagent := proposed.Data["subagent"]
-	assert.False(t, hasSubagent)
-
-	// Characterize the legacy lifecycle: Finish is a completion sentinel, so
-	// the native loop proposes it without emitting tool start/finish events.
-	// The typed loop will replace this with a balanced terminal lifecycle.
-	assert.Nil(t, findEvent(events, agents.EventToolCallStarted, "Finish"))
-	assert.Nil(t, findEvent(events, agents.EventToolCallFinished, "Finish"))
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	require.NotNil(t, findToolProposedEvent(events, "Finish"))
+	assert.Nil(t, findToolStartedEvent(events, "Finish"))
+	finished := findToolFinishedEvent(events, "Finish")
+	require.NotNil(t, finished)
+	assert.Equal(t, agents.ToolCallOutcomeFinish, finished.Outcome)
 }
 
-func TestAgent_Execute_EnrichesSubagentToolEvents(t *testing.T) {
+func TestAgent_Execute_PreservesSubagentResultDetailsInTypedEvents(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -815,12 +790,12 @@ func TestAgent_Execute_EnrichesSubagentToolEvents(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 4,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 
@@ -850,22 +825,21 @@ func TestAgent_Execute_EnrichesSubagentToolEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
 
-	proposed := findEvent(events, agents.EventToolCallProposed, "researcher")
-	started := findEvent(events, agents.EventToolCallStarted, "researcher")
-	finished := findEvent(events, agents.EventToolCallFinished, "researcher")
-	require.NotNil(t, proposed)
-	require.NotNil(t, started)
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	require.NotNil(t, findToolProposedEvent(events, "researcher"))
+	require.NotNil(t, findToolStartedEvent(events, "researcher"))
+	finished := findToolFinishedEvent(events, "researcher")
 	require.NotNil(t, finished)
-
-	for _, event := range []*agents.AgentEvent{proposed, started, finished} {
-		assert.Equal(t, true, event.Data["subagent"])
-		assert.Equal(t, "researcher", event.Data["subagent_name"])
-		assert.Equal(t, "derived", event.Data["session_policy"])
-	}
-	assert.Equal(t, true, finished.Data["child_completed"])
+	require.NotNil(t, finished.Result)
+	require.NotNil(t, finished.Result.ToolResult)
+	details := finished.Result.ToolResult.Details
+	assert.Equal(t, true, details["subagent"])
+	assert.Equal(t, "researcher", details["subagent_name"])
+	assert.Equal(t, "derived", details["session_policy"])
+	assert.Equal(t, true, details["completed"])
 }
 
-func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
+func TestAgent_Execute_ReportsBlockedSubagentAsTypedToolOutcome(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 		results: []map[string]any{
@@ -884,7 +858,7 @@ func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 4,
 		ToolInterceptors: []core.ToolInterceptor{
@@ -892,9 +866,9 @@ func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
 				return core.ToolResult{}, &core.ToolBlockedError{Reason: "approval denied"}
 			},
 		},
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 
@@ -918,12 +892,13 @@ func TestAgent_Execute_EnrichesBlockedSubagentToolEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result["completed"].(bool))
 
-	blocked := findEvent(events, agents.EventToolCallBlocked, "researcher")
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	blocked := findToolFinishedEvent(events, "researcher")
 	require.NotNil(t, blocked)
-	assert.Equal(t, true, blocked.Data["subagent"])
-	assert.Equal(t, "researcher", blocked.Data["subagent_name"])
-	assert.Equal(t, "ephemeral", blocked.Data["session_policy"])
-	assert.NotContains(t, blocked.Data, "child_completed")
+	assert.Equal(t, agents.ToolCallOutcomeBlocked, blocked.Outcome)
+	var blockedErr *core.ToolBlockedError
+	require.ErrorAs(t, blocked.Err, &blockedErr)
+	assert.Equal(t, "approval denied", blockedErr.Reason)
 }
 
 func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
@@ -979,17 +954,17 @@ func TestAgent_Execute_HandlesGenericInterceptorError(t *testing.T) {
 	assert.Contains(t, execTrace.Steps[0].ObservationDisplay, "approval backend unavailable")
 }
 
-func TestAgent_Execute_EmitsLLMTurnFinishedOnGenerateError(t *testing.T) {
+func TestAgent_Execute_EmitsTypedTerminalLifecycleOnGenerateError(t *testing.T) {
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 1,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 
@@ -1000,23 +975,18 @@ func TestAgent_Execute_EmitsLLMTurnFinishedOnGenerateError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no more stubbed results")
 
-	eventTypes := make([]string, 0, len(events))
-	var llmFinished *agents.AgentEvent
-	for i := range events {
-		eventTypes = append(eventTypes, events[i].Type)
-		if events[i].Type == agents.EventLLMTurnFinished {
-			llmFinished = &events[i]
-		}
-	}
-
-	assert.Contains(t, eventTypes, agents.EventLLMTurnStarted)
-	assert.Contains(t, eventTypes, agents.EventLLMTurnFinished)
-	assert.Contains(t, eventTypes, agents.EventRunFailed)
-	assert.Contains(t, eventTypes, agents.EventRunFinished)
-	require.NotNil(t, llmFinished)
-	assert.Equal(t, 0, llmFinished.Data["tool_calls"])
-	assert.Equal(t, int64(0), llmFinished.Data["usage_total"])
-	assert.Contains(t, llmFinished.Data["error"], "no more stubbed results")
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	turnFinished := findTurnFinishedEvent(events, 1)
+	require.NotNil(t, turnFinished)
+	assert.Equal(t, agents.OperationStatusFailed, turnFinished.Status)
+	assert.Equal(t, 0, turnFinished.ToolCallCount)
+	require.Error(t, turnFinished.Err)
+	assert.Contains(t, turnFinished.Err.Error(), "no more stubbed results")
+	runFinished := findRunFinishedEvent(events)
+	require.NotNil(t, runFinished)
+	assert.Equal(t, agents.RunStatusFailed, runFinished.Status)
+	require.Error(t, runFinished.Err)
+	assert.Contains(t, runFinished.Err.Error(), "no more stubbed results")
 }
 
 func TestAgent_Execute_PersistsAndReloadsSessionRecall(t *testing.T) {
@@ -1985,15 +1955,51 @@ func (s *subagentChildAgent) LastExecutionTrace() *agents.ExecutionTrace {
 	return s.trace.Clone()
 }
 
-func findEvent(events []agents.AgentEvent, eventType, toolName string) *agents.AgentEvent {
-	for i := range events {
-		if events[i].Type != eventType {
-			continue
+func findToolProposedEvent(events []agents.ExecutionEvent, toolName string) *agents.ToolCallProposedEvent {
+	for _, event := range events {
+		payload, ok := event.Payload.(agents.ToolCallProposedEvent)
+		if ok && payload.Call.Name == toolName {
+			return &payload
 		}
-		if events[i].Data["tool_name"] != toolName {
-			continue
+	}
+	return nil
+}
+
+func findToolStartedEvent(events []agents.ExecutionEvent, toolName string) *agents.ToolExecutionStartedEvent {
+	for _, event := range events {
+		payload, ok := event.Payload.(agents.ToolExecutionStartedEvent)
+		if ok && payload.Call.Name == toolName {
+			return &payload
 		}
-		return &events[i]
+	}
+	return nil
+}
+
+func findToolFinishedEvent(events []agents.ExecutionEvent, toolName string) *agents.ToolCallFinishedEvent {
+	for _, event := range events {
+		payload, ok := event.Payload.(agents.ToolCallFinishedEvent)
+		if ok && payload.Call.Name == toolName {
+			return &payload
+		}
+	}
+	return nil
+}
+
+func findTurnFinishedEvent(events []agents.ExecutionEvent, turn int) *agents.TurnFinishedEvent {
+	for _, event := range events {
+		payload, ok := event.Payload.(agents.TurnFinishedEvent)
+		if ok && payload.Turn == turn {
+			return &payload
+		}
+	}
+	return nil
+}
+
+func findRunFinishedEvent(events []agents.ExecutionEvent) *agents.RunFinishedEvent {
+	for _, event := range events {
+		if payload, ok := event.Payload.(agents.RunFinishedEvent); ok {
+			return &payload
+		}
 	}
 	return nil
 }

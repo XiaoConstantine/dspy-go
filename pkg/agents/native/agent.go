@@ -12,7 +12,6 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/sessionevent"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/skills"
-	"github.com/XiaoConstantine/dspy-go/pkg/agents/subagent"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -41,10 +40,6 @@ type Config struct {
 	ToolInterceptors              []core.ToolInterceptor
 	EventSink                     agents.EventSink
 	SessionEventSink              SessionEventSink
-	// Deprecated: EventSink covers only portable typed execution events.
-	// SessionEventSink carries native-only typed session lifecycle notifications.
-	// OnEvent remains the compatibility surface for legacy string/map consumers.
-	OnEvent func(agents.AgentEvent)
 }
 
 // TokenUsage captures aggregate token usage for one tool-calling run.
@@ -290,14 +285,12 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	model := &nativeRunModel{Model: baseModel, maxTurns: maxTurns}
 	startedAt := time.Now()
 	var typedEvents []agents.ExecutionEvent
-	legacySink := nativeLegacyEventSink(a, runConfig.OnEvent, sessionID, sessionContext, len(sessionRecall))
 	eventSink := agents.EventSinkFunc(func(eventCtx context.Context, event agents.ExecutionEvent) {
 		stored := agents.CloneExecutionEvent(event)
 		typedEvents = append(typedEvents, stored)
 		if runConfig.EventSink != nil {
 			runConfig.EventSink.EmitEvent(eventCtx, agents.CloneExecutionEvent(event))
 		}
-		legacySink.EmitEvent(eventCtx, agents.CloneExecutionEvent(event))
 	})
 	executor := func(executeCtx context.Context, tool core.Tool, arguments map[string]any) (core.ToolResult, error) {
 		handler := func(handlerCtx context.Context, args map[string]any) (core.ToolResult, error) {
@@ -453,82 +446,6 @@ func buildNativeInitialPrompt(config Config, persistedSkillPrompt, task, session
 	}
 	builder.WriteString("You must use tools to work on the task and call Finish when done.\n")
 	return builder.String()
-}
-
-func nativeLegacyEventSink(
-	a *Agent,
-	onEvent func(agents.AgentEvent),
-	sessionID string,
-	sessionContext sessionContext,
-	recallChars int,
-) agents.EventSink {
-	turnSeen := false
-	legacySteps := 0
-	legacyToolCalls := 0
-	legacyTerminalError := ""
-	projector := agents.LegacyEventSink(func(event agents.AgentEvent) {
-		if event.Type == agents.EventLLMTurnStarted {
-			turnSeen = true
-		}
-		if event.Type == agents.EventRunFailed && !turnSeen && onEvent != nil {
-			now := event.Timestamp
-			onEvent(agents.AgentEvent{Type: agents.EventLLMTurnStarted, Timestamp: now, Data: map[string]any{
-				"task_id": event.Data["task_id"], "turn": 1, "max_turns": 1,
-			}})
-			onEvent(agents.AgentEvent{Type: agents.EventLLMTurnFinished, Timestamp: now, Data: map[string]any{
-				"task_id": event.Data["task_id"], "turn": 1, "tool_calls": 0,
-				"usage_total": int64(0), "error": event.Data["error"],
-			}})
-			turnSeen = true
-		}
-		if event.Type == agents.EventRunStarted {
-			event.Data["session_id"] = sessionID
-			event.Data["session_source"] = sessionContext.Source
-			event.Data["session_runs"] = sessionContext.RecordCount
-			event.Data["session_entries"] = sessionContext.EntryCount
-			event.Data["session_summaries"] = sessionContext.SummaryCount
-			event.Data["session_branch_id"] = sessionContext.BranchID
-			event.Data["session_head_entry_id"] = sessionContext.HeadEntryID
-			event.Data["session_recall_chars"] = recallChars
-		}
-		if event.Type == agents.EventRunFinished {
-			event.Data["turns"] = legacySteps
-			event.Data["tool_calls"] = legacyToolCalls
-			if legacyTerminalError != "" {
-				event.Data["error"] = legacyTerminalError
-			}
-		}
-		toolName := agentutil.StringValue(event.Data["tool_name"])
-		if toolName != "" {
-			if tool, err := a.toolRegistry.Get(toolName); err == nil {
-				details, _ := event.Data["details"].(map[string]any)
-				event.Data = enrichSubagentEventData(tool, event.Data, details)
-			}
-		}
-		if onEvent != nil {
-			onEvent(event)
-		}
-	})
-	return agents.EventSinkFunc(func(ctx context.Context, event agents.ExecutionEvent) {
-		switch payload := event.Payload.(type) {
-		case agents.MessageAddedEvent:
-			if payload.Message.Role == agents.RoleAssistant {
-				legacySteps += len(payload.Message.ToolCalls)
-				if len(payload.Message.ToolCalls) == 0 {
-					legacySteps++
-				}
-			}
-		case agents.ToolCallProposedEvent:
-			if !strings.EqualFold(payload.Call.Name, "Finish") {
-				legacyToolCalls++
-			}
-		case agents.RunFinishedEvent:
-			if payload.StopReason == agents.StopReasonMaxTurns {
-				legacyTerminalError = fmt.Sprintf("max turns reached without Finish after %d turns", payload.Turns)
-			}
-		}
-		projector.EmitEvent(ctx, event)
-	})
 }
 
 func nativeTraceFromEvents(
@@ -872,23 +789,6 @@ func (a *Agent) emitSessionEvent(ctx context.Context, payload SessionEventPayloa
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 	})
-}
-
-func enrichSubagentEventData(tool core.Tool, data map[string]any, details map[string]any) map[string]any {
-	info, ok := subagent.InfoFromTool(tool)
-	if !ok {
-		return data
-	}
-	enriched := maps.Clone(data)
-	enriched["subagent"] = true
-	enriched["subagent_name"] = info.Name
-	enriched["session_policy"] = info.SessionPolicy
-	if details != nil {
-		if completed, ok := details["completed"].(bool); ok {
-			enriched["child_completed"] = completed
-		}
-	}
-	return enriched
 }
 
 func composeSystemPrompt(base, persistedSkill string) string {

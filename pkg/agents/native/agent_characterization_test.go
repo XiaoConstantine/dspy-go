@@ -12,9 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests intentionally characterize the native loop before it moves into
-// pkg/agents. Some assertions record legacy event/error behavior that the typed
-// loop will replace deliberately rather than changing accidentally.
+// These tests preserve native wrapper behavior after migration to the shared
+// typed execution lifecycle.
 
 func TestAgent_Execute_CharacterizesUnknownToolRecovery(t *testing.T) {
 	llm := &stubLLM{
@@ -36,12 +35,12 @@ func TestAgent_Execute_CharacterizesUnknownToolRecovery(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 2,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 
@@ -61,11 +60,15 @@ func TestAgent_Execute_CharacterizesUnknownToolRecovery(t *testing.T) {
 	assert.Equal(t, "missing_tool", trace.Steps[0].ToolName)
 	assert.Contains(t, trace.Steps[0].Observation, "tool not found")
 
-	// Legacy behavior emits only a proposed event for lookup failures. The
-	// typed loop will close this lifecycle with an error tool-result event.
-	assert.NotNil(t, findEvent(events, agents.EventToolCallProposed, "missing_tool"))
-	assert.Nil(t, findEvent(events, agents.EventToolCallStarted, "missing_tool"))
-	assert.Nil(t, findEvent(events, agents.EventToolCallFinished, "missing_tool"))
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	require.NotNil(t, findToolProposedEvent(events, "missing_tool"))
+	assert.Nil(t, findToolStartedEvent(events, "missing_tool"))
+	finished := findToolFinishedEvent(events, "missing_tool")
+	require.NotNil(t, finished)
+	assert.Equal(t, agents.ToolCallOutcomeRejected, finished.Outcome)
+	require.NotNil(t, finished.Result)
+	require.NotNil(t, finished.Result.ToolResult)
+	assert.True(t, finished.Result.ToolResult.IsError)
 }
 
 func TestAgent_Execute_CharacterizesInvalidArgumentsRecovery(t *testing.T) {
@@ -88,12 +91,12 @@ func TestAgent_Execute_CharacterizesInvalidArgumentsRecovery(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 2,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(validationFailureTool{name: "strict_tool"}))
@@ -109,9 +112,15 @@ func TestAgent_Execute_CharacterizesInvalidArgumentsRecovery(t *testing.T) {
 	require.Len(t, trace.Steps, 2)
 	assert.True(t, trace.Steps[0].IsError)
 	assert.Contains(t, trace.Steps[0].Observation, "value must be a string")
-	assert.NotNil(t, findEvent(events, agents.EventToolCallProposed, "strict_tool"))
-	assert.Nil(t, findEvent(events, agents.EventToolCallStarted, "strict_tool"))
-	assert.Nil(t, findEvent(events, agents.EventToolCallFinished, "strict_tool"))
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	require.NotNil(t, findToolProposedEvent(events, "strict_tool"))
+	assert.Nil(t, findToolStartedEvent(events, "strict_tool"))
+	finished := findToolFinishedEvent(events, "strict_tool")
+	require.NotNil(t, finished)
+	assert.Equal(t, agents.ToolCallOutcomeRejected, finished.Outcome)
+	require.NotNil(t, finished.Result)
+	require.NotNil(t, finished.Result.ToolResult)
+	assert.True(t, finished.Result.ToolResult.IsError)
 }
 
 func TestAgent_Execute_CharacterizesMaxTurnExhaustion(t *testing.T) {
@@ -127,12 +136,12 @@ func TestAgent_Execute_CharacterizesMaxTurnExhaustion(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 1,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 	require.NoError(t, agent.RegisterTool(simpleTool{name: "write_note"}))
@@ -147,13 +156,12 @@ func TestAgent_Execute_CharacterizesMaxTurnExhaustion(t *testing.T) {
 	require.NotNil(t, trace)
 	assert.False(t, trace.Completed)
 	assert.Contains(t, trace.Error, "max turns reached")
-	assert.NotContains(t, eventTypes(events), agents.EventRunFailed)
-
-	finished := firstEvent(events, agents.EventRunFinished)
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	finished := findRunFinishedEvent(events)
 	require.NotNil(t, finished)
-	assert.Equal(t, false, finished.Data["completed"])
-	assert.Equal(t, result["error"], finished.Data["error"])
-	assert.Equal(t, trace.Error, finished.Data["error"])
+	assert.Equal(t, agents.RunStatusStopped, finished.Status)
+	assert.Equal(t, agents.StopReasonMaxTurns, finished.StopReason)
+	assert.Contains(t, finished.Diagnostic, "max turns reached without completion")
 }
 
 func TestAgent_Execute_CharacterizesCanceledModelCall(t *testing.T) {
@@ -161,12 +169,12 @@ func TestAgent_Execute_CharacterizesCanceledModelCall(t *testing.T) {
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
 	}}
 
-	var events []agents.AgentEvent
+	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns: 1,
-		OnEvent: func(event agents.AgentEvent) {
+		EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
 			events = append(events, event)
-		},
+		}),
 	})
 	require.NoError(t, err)
 
@@ -177,30 +185,12 @@ func TestAgent_Execute_CharacterizesCanceledModelCall(t *testing.T) {
 	assert.Nil(t, result)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, []string{
-		agents.EventRunStarted,
-		agents.EventLLMTurnStarted,
-		agents.EventLLMTurnFinished,
-		agents.EventRunFailed,
-		agents.EventRunFinished,
-	}, eventTypes(events))
-}
-
-func eventTypes(events []agents.AgentEvent) []string {
-	types := make([]string, 0, len(events))
-	for _, event := range events {
-		types = append(types, event.Type)
-	}
-	return types
-}
-
-func firstEvent(events []agents.AgentEvent, eventType string) *agents.AgentEvent {
-	for i := range events {
-		if events[i].Type == eventType {
-			return &events[i]
-		}
-	}
-	return nil
+	require.NoError(t, agents.ValidateEventLifecycle(events))
+	runFinished := findRunFinishedEvent(events)
+	require.NotNil(t, runFinished)
+	assert.Equal(t, agents.RunStatusCanceled, runFinished.Status)
+	assert.Equal(t, agents.StopReasonCanceled, runFinished.StopReason)
+	assert.ErrorIs(t, runFinished.Err, context.Canceled)
 }
 
 type validationFailureTool struct {

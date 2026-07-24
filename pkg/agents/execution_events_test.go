@@ -224,101 +224,20 @@ func TestValidateEventLifecycle_RejectsUnbalancedAndInvalidTerminalEvents(t *tes
 	}
 }
 
-func TestEventSinks_CallbackChannelAndLegacyProjection(t *testing.T) {
-	t.Run("channel observes cancellation instead of blocking", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		sink := ChannelEventSink{Channel: make(chan ExecutionEvent)}
-		done := make(chan struct{})
-		go func() {
-			sink.EmitEvent(ctx, ExecutionEvent{})
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Fatal("channel sink remained blocked after cancellation")
-		}
-	})
-
-	t.Run("legacy projection has one terminal event", func(t *testing.T) {
-		var mu sync.Mutex
-		var legacy []AgentEvent
-		emitter := NewEventEmitter(LegacyEventSink(func(event AgentEvent) {
-			mu.Lock()
-			defer mu.Unlock()
-			legacy = append(legacy, event)
-		}))
-		failure := errors.New("provider failed")
-		emitter.Emit(context.Background(), RunStartedEvent{})
-		emitter.Emit(context.Background(), MessageAddedEvent{Turn: 1, Message: NewTextMessage(RoleAssistant, "omitted")})
-		emitter.Emit(context.Background(), RunFinishedEvent{
-			Status: RunStatusFailed, StopReason: StopReasonError, Err: failure,
-		})
-
-		require.Len(t, legacy, 3)
-		assert.Equal(t, EventRunStarted, legacy[0].Type)
-		assert.Equal(t, EventRunFailed, legacy[1].Type)
-		assert.Equal(t, EventRunFinished, legacy[2].Type)
-		assert.Equal(t, false, legacy[2].Data["completed"])
-		assert.Equal(t, "provider failed", legacy[1].Data["error"])
-	})
-
-	t.Run("max turns is stopped rather than completed or failed", func(t *testing.T) {
-		var legacy []AgentEvent
-		var typed []ExecutionEvent
-		emitter := NewEventEmitter(EventSinkFunc(func(ctx context.Context, event ExecutionEvent) {
-			typed = append(typed, event)
-			LegacyEventSink(func(event AgentEvent) { legacy = append(legacy, event) }).EmitEvent(ctx, event)
-		}))
-		emitter.Emit(context.Background(), RunStartedEvent{RunID: "task-1"})
-		emitter.Emit(context.Background(), RunFinishedEvent{
-			RunID: "task-1", Status: RunStatusStopped, StopReason: StopReasonMaxTurns,
-			Turns: 3, ToolCalls: 2, Diagnostic: "max turns reached without Finish after 3 turns",
-		})
-
-		require.NoError(t, ValidateEventLifecycle(typed))
-		require.Len(t, legacy, 2)
-		assert.Equal(t, EventRunFinished, legacy[1].Type)
-		assert.Equal(t, false, legacy[1].Data["completed"])
-		assert.Equal(t, 3, legacy[1].Data["turns"])
-		assert.Equal(t, "max turns reached without Finish after 3 turns", legacy[1].Data["error"])
-	})
-
-	t.Run("legacy blocked tool preserves keys and terminal pair", func(t *testing.T) {
-		var legacy []AgentEvent
-		emitter := NewEventEmitter(LegacyEventSink(func(event AgentEvent) {
-			legacy = append(legacy, event)
-		}))
-		call := core.ToolCall{ID: "call-1", Name: "read", Arguments: map[string]any{"path": "main.go"}}
-		blockedErr := errors.New("policy denied")
-		result := NewToolResultMessage(call.ID, call.Name, core.ToolResult{
-			Data: "blocked by policy", Metadata: map[string]any{core.ToolResultIsErrorMeta: true},
-		})
-		result.ToolResult.Details = map[string]any{
-			"completed": true, "tool_name": "forged", "observation": "forged",
-			"is_error": false, "reason": "forged reason",
-		}
-		emitter.Emit(context.Background(), ToolCallProposedEvent{RunID: "task-1", Turn: 1, Call: call})
-		emitter.Emit(context.Background(), ToolExecutionStartedEvent{RunID: "task-1", Turn: 1, Call: call})
-		emitter.Emit(context.Background(), ToolCallFinishedEvent{
-			RunID: "task-1", Turn: 1, Call: call, Outcome: ToolCallOutcomeBlocked,
-			Result: &result, Status: OperationStatusBlocked, Err: blockedErr,
-		})
-
-		require.Len(t, legacy, 4)
-		assert.Equal(t, []string{EventToolCallProposed, EventToolCallStarted, EventToolCallBlocked, EventToolCallFinished}, []string{
-			legacy[0].Type, legacy[1].Type, legacy[2].Type, legacy[3].Type,
-		})
-		assert.Equal(t, "read", legacy[3].Data["tool_name"])
-		assert.Equal(t, "blocked by policy", legacy[3].Data["observation"])
-		assert.Equal(t, "blocked by tool policy", legacy[2].Data["reason"])
-		assert.Equal(t, true, legacy[3].Data["is_error"])
-		assert.NotContains(t, legacy[3].Data, "child_completed")
-		assert.NotContains(t, legacy[3].Data, "subagent_name")
-		assert.Equal(t, "forged", legacy[3].Data["details"].(map[string]any)["tool_name"])
-		assert.NotContains(t, legacy[3].Data, "tool")
-	})
+func TestChannelEventSink_ObservesCancellationInsteadOfBlocking(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sink := ChannelEventSink{Channel: make(chan ExecutionEvent)}
+	done := make(chan struct{})
+	go func() {
+		sink.EmitEvent(ctx, ExecutionEvent{})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("channel sink remained blocked after cancellation")
+	}
 }
 
 func TestEventEmitter_AllowsReentrantEmissionInSequence(t *testing.T) {
