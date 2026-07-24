@@ -353,6 +353,14 @@ func normalizeModelResponse(raw map[string]any) (ModelResponse, error) {
 	}
 	response.Message.ToolCalls = calls
 
+	if value, exists := raw["provider_data"]; exists {
+		providerData, ok := value.(map[string]any)
+		if !ok {
+			return ModelResponse{}, fmt.Errorf("provider_data has type %T, want map[string]any", value)
+		}
+		response.Message.ProviderData = cloneAnyMap(providerData)
+	}
+
 	if value, exists := raw["_usage"]; exists {
 		usage, err := normalizeTokenInfo(value)
 		if err != nil {
@@ -364,7 +372,7 @@ func normalizeModelResponse(raw map[string]any) (ModelResponse, error) {
 	diagnostics := make(map[string]any)
 	for key, value := range raw {
 		switch key {
-		case "content", "content_blocks", "tool_calls", "function_call", "_usage":
+		case "content", "content_blocks", "tool_calls", "function_call", "provider_data", "_usage":
 			continue
 		default:
 			if key == "thought_blocks" {

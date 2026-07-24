@@ -42,6 +42,21 @@ func TestMessagesToChatMessages_FiltersInternalMessages(t *testing.T) {
 	assert.Equal(t, "hello", chat[1].Content[0].Text)
 }
 
+func TestMessage_ProviderDataRoundTripsThroughDiagnostics(t *testing.T) {
+	message := Message{
+		Role:         RoleAssistant,
+		ProviderData: map[string]any{"openai-codex": []any{map[string]any{"type": "reasoning", "encrypted_content": "opaque"}}},
+	}
+
+	chat := message.ToChatMessage()
+	require.Contains(t, chat.ProviderData, "openai-codex")
+	roundTrip := MessageFromChatMessage(chat)
+	assert.Equal(t, "opaque", roundTrip.ProviderData["openai-codex"].([]any)[0].(map[string]any)["encrypted_content"])
+
+	message.ProviderData["openai-codex"].([]any)[0].(map[string]any)["encrypted_content"] = "changed"
+	assert.Equal(t, "opaque", roundTrip.ProviderData["openai-codex"].([]any)[0].(map[string]any)["encrypted_content"])
+}
+
 func TestNewToolResultMessage_PreservesTypedAndRawPayload(t *testing.T) {
 	result := core.ToolResult{
 		Data: map[string]any{"answer": 42},

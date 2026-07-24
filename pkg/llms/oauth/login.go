@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -12,9 +13,10 @@ import (
 
 var (
 	pkceGenerator                    = GeneratePKCE
+	oauthStateGenerator              = GenerateState
 	anthropicAuthURL                 = GetAuthorizationURL
 	anthropicCodeExchanger           = ExchangeCode
-	openAIAuthURL                    = GetOpenAIAuthorizationURL
+	openAIAuthURL                    = GetOpenAIAuthorizationURLWithState
 	openAICodeExchanger              = ExchangeOpenAICode
 	browserOpener                    = openBrowser
 	currentGOOS                      = runtime.GOOS
@@ -68,6 +70,20 @@ func LoginAnthropic() (*TokenResponse, error) {
 
 // extractCode extracts the authorization code from various input formats.
 // Supports: bare code, code#state, and full URL with code parameter.
+func extractCodeAndState(input string) (code, state string) {
+	if parsed, err := url.Parse(input); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return parsed.Query().Get("code"), parsed.Query().Get("state")
+	}
+	if strings.Contains(input, "#") {
+		parts := strings.SplitN(input, "#", 2)
+		return parts[0], parts[1]
+	}
+	if values, err := url.ParseQuery(input); err == nil && values.Has("code") {
+		return values.Get("code"), values.Get("state")
+	}
+	return input, ""
+}
+
 func extractCode(input string) string {
 	// If it contains #, take the part before it
 	if idx := strings.Index(input, "#"); idx != -1 {
@@ -93,14 +109,19 @@ func extractCode(input string) string {
 // LoginOpenAI performs interactive OAuth login for ChatGPT Plus/Pro subscriptions.
 // It opens a browser for authentication and returns the access token.
 func LoginOpenAI() (*OpenAITokenResponse, error) {
-	// Generate PKCE
+	// Generate independent PKCE and CSRF values. The verifier must never be
+	// placed in the authorization URL or browser history.
 	verifier, challenge, err := pkceGenerator()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate PKCE: %w", err)
 	}
+	state, err := oauthStateGenerator()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate OAuth state: %w", err)
+	}
 
 	// Get authorization URL
-	authURL := openAIAuthURL(verifier, challenge)
+	authURL := openAIAuthURL(challenge, state)
 
 	// Open browser
 	fmt.Println("Opening browser for OpenAI authentication...")
@@ -114,10 +135,13 @@ func LoginOpenAI() (*OpenAITokenResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
-	code := strings.TrimSpace(input)
-
-	// Extract code if user pasted full URL
-	code = extractCode(code)
+	code, returnedState := extractCodeAndState(strings.TrimSpace(input))
+	if returnedState != state {
+		return nil, fmt.Errorf("OpenAI OAuth state mismatch")
+	}
+	if code == "" {
+		return nil, fmt.Errorf("OpenAI OAuth callback did not include a code")
+	}
 
 	// Exchange for token
 	fmt.Println("Exchanging code for token...")

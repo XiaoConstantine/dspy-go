@@ -21,12 +21,13 @@ const (
 // This is the agent-level message type; use ToChatMessage() to convert
 // to core.ChatMessage at the LLM boundary.
 type Message struct {
-	ID         string              `json:"id"`
-	Role       MessageRole         `json:"role"`
-	Content    []core.ContentBlock `json:"content"`
-	ToolCalls  []core.ToolCall     `json:"tool_calls,omitempty"`
-	ToolResult *MessageToolResult  `json:"tool_result,omitempty"`
-	Metadata   map[string]any      `json:"metadata,omitempty"`
+	ID           string              `json:"id"`
+	Role         MessageRole         `json:"role"`
+	Content      []core.ContentBlock `json:"content"`
+	ToolCalls    []core.ToolCall     `json:"tool_calls,omitempty"`
+	ToolResult   *MessageToolResult  `json:"tool_result,omitempty"`
+	Metadata     map[string]any      `json:"metadata,omitempty"`
+	ProviderData map[string]any      `json:"provider_data,omitempty"`
 }
 
 // MessageToolResult carries the result of a tool execution at the agent message level.
@@ -110,8 +111,9 @@ func toolResultDisplayContent(result core.ToolResult, displayText string) []core
 
 // ToChatMessage converts an agent-level Message to a core.ChatMessage for the
 // LLM boundary. Agent-only metadata and operator-facing tool details are not
-// included. Use MessagesToChatMessages when converting a transcript so internal
-// messages are filtered rather than represented by placeholders.
+// included. Opaque provider continuation data is carried forward without
+// interpretation. Use MessagesToChatMessages when converting a
+// transcript so internal messages are filtered rather than represented by placeholders.
 func (m Message) ToChatMessage() core.ChatMessage {
 	if !m.ShouldSendToLLM() {
 		// Keep the legacy direct-call behavior valid for callers that convert one
@@ -128,6 +130,7 @@ func (m Message) ToChatMessage() core.ChatMessage {
 		Content:   cloneContentBlocks(m.Content),
 		ToolCalls: cloneToolCalls(m.ToolCalls),
 	}
+	cm.ProviderData = cloneAnyMap(m.ProviderData)
 	if m.ToolResult != nil {
 		cm.ToolResult = &core.ChatToolResult{
 			ToolCallID: m.ToolResult.ToolCallID,
@@ -164,6 +167,7 @@ func MessageFromChatMessage(message core.ChatMessage) Message {
 		Content:   cloneContentBlocks(message.Content),
 		ToolCalls: cloneToolCalls(message.ToolCalls),
 	}
+	converted.ProviderData = cloneAnyMap(message.ProviderData)
 	if message.ToolResult != nil {
 		converted.ToolResult = &MessageToolResult{
 			ToolCallID:     message.ToolResult.ToolCallID,

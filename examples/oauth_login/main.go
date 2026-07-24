@@ -56,7 +56,7 @@ func loginOpenAI() {
 	fmt.Println("OpenAI ChatGPT Plus/Pro OAuth Login")
 	fmt.Println("====================================")
 	fmt.Println()
-	fmt.Println("The token can be used with dspy-go by setting OPENAI_OAUTH_TOKEN.")
+	fmt.Println("The token can be used with the openai-codex provider by setting OPENAI_OAUTH_TOKEN.")
 	fmt.Println()
 
 	if _, err := oauth.LoginOpenAI(); err != nil {
