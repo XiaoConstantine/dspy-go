@@ -107,10 +107,11 @@ func (cb ContentBlock) String() string {
 // ChatMessage represents a single message in a multi-turn conversation.
 // Used by ToolCallingChatLLM for true native tool-use loops.
 type ChatMessage struct {
-	Role       string          `json:"role"`                  // "system"|"user"|"assistant"|"tool"
-	Content    []ContentBlock  `json:"content"`               // reuse existing multimodal blocks from llm.go
-	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`  // for assistant messages requesting tool calls
-	ToolResult *ChatToolResult `json:"tool_result,omitempty"` // for tool role messages
+	Role         string          `json:"role"`                    // "system"|"user"|"assistant"|"tool"
+	Content      []ContentBlock  `json:"content"`                 // reuse existing multimodal blocks from llm.go
+	ToolCalls    []ToolCall      `json:"tool_calls,omitempty"`    // for assistant messages requesting tool calls
+	ToolResult   *ChatToolResult `json:"tool_result,omitempty"`   // for tool role messages
+	ProviderData map[string]any  `json:"provider_data,omitempty"` // opaque continuation state owned by a provider
 }
 
 // ChatToolResult carries the result of a single tool execution in a chat message.

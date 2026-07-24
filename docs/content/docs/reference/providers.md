@@ -249,6 +249,47 @@ llm.SetRetryDelay(time.Second)
 
 ---
 
+## OpenAI Codex Subscription
+
+ChatGPT Plus/Pro subscription access is separate from the API-key OpenAI
+provider. It uses OAuth and `chatgpt.com/backend-api/codex/responses`; never send
+subscription tokens to `api.openai.com/v1/chat/completions`.
+As of this change, the `openai` provider no longer reads `OPENAI_OAUTH_TOKEN`;
+select `openai-codex` explicitly. Explicit OpenAI API-key configuration takes
+precedence over `OPENAI_API_KEY`.
+
+```go
+llm, err := llms.NewOpenAICodexLLM(
+    core.ModelOpenAIGPT54,
+    llms.WithOpenAICodexCredentials(
+        func(ctx context.Context, rejectedAccessToken string) (llms.OpenAICodexCredentials, error) {
+            credential, err := credentialStore.ResolveOpenAI(ctx, rejectedAccessToken)
+            if err != nil {
+                return llms.OpenAICodexCredentials{}, err
+            }
+            return llms.OpenAICodexCredentials{
+                AccessToken: credential.AccessToken,
+                AccountID: credential.AccountID,
+            }, nil
+        },
+    ),
+)
+```
+
+Credentials are resolved before every request. A `401` causes one retry with the rejected access token so concurrent refresh
+rotation can be correlated safely. The application owns secure persistence and cross-process
+serialization of rotating refresh tokens. Use
+`oauth.GetOpenAIAuthorizationURLWithState`, independent `oauth.GenerateState`,
+and the context-aware exchange/refresh helpers. The provider continues to use
+the shared `pkg/agents` execution loop.
+
+For static command-line use, select `openai-codex` and pass the OAuth access
+token in `ProviderConfig.APIKey` or `OPENAI_OAUTH_TOKEN`. Supply `account_id` or
+`id_token` in `ProviderConfig.Params` (or set `OPENAI_ID_TOKEN`); access-token
+account claims remain a compatibility fallback.
+
+---
+
 ## Anthropic Claude
 
 **Best for:** Long context, detailed reasoning, safety

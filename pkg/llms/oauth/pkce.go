@@ -10,6 +10,15 @@ var randRead = rand.Read
 
 // GeneratePKCE generates a PKCE verifier and challenge pair.
 // The verifier is a random string, and the challenge is its SHA256 hash.
+// GenerateState returns an unpredictable OAuth CSRF state value.
+func GenerateState() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := randRead(bytes); err != nil {
+		return "", err
+	}
+	return base64URLEncode(bytes), nil
+}
+
 func GeneratePKCE() (verifier, challenge string, err error) {
 	// Generate 32 random bytes for verifier
 	bytes := make([]byte, 32)

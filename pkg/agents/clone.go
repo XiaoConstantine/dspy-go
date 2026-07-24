@@ -42,11 +42,12 @@ func CloneMessages(messages []Message) []Message {
 func (m Message) Clone() Message {
 	state := make(cloneState)
 	cloned := Message{
-		ID:        m.ID,
-		Role:      m.Role,
-		Content:   cloneContentBlocksWithState(m.Content, state),
-		ToolCalls: cloneToolCallsWithState(m.ToolCalls, state),
-		Metadata:  cloneAnyMapWithState(m.Metadata, state),
+		ID:           m.ID,
+		Role:         m.Role,
+		Content:      cloneContentBlocksWithState(m.Content, state),
+		ToolCalls:    cloneToolCallsWithState(m.ToolCalls, state),
+		Metadata:     cloneAnyMapWithState(m.Metadata, state),
+		ProviderData: cloneAnyMapWithState(m.ProviderData, state),
 	}
 	if m.ToolResult != nil {
 		result := m.ToolResult.cloneWithState(state)

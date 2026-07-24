@@ -86,6 +86,10 @@ func ensureRegistryInitialized() error {
 			registryInitErr = fmt.Errorf("failed to register openai provider: %w", err)
 			return
 		}
+		if err := registry.RegisterProvider("openai-codex", OpenAICodexProviderFactory); err != nil {
+			registryInitErr = fmt.Errorf("failed to register openai-codex provider: %w", err)
+			return
+		}
 		if err := registry.RegisterProvider("litellm", LiteLLMProviderFactory); err != nil {
 			registryInitErr = fmt.Errorf("failed to register litellm provider: %w", err)
 			return

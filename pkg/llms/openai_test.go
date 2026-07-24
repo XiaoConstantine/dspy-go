@@ -19,6 +19,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenAIExplicitAPIKeyPrecedesEnvironment(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "environment-key")
+	t.Setenv("OPENAI_OAUTH_TOKEN", "oauth-token-for-separate-provider")
+
+	llm, err := NewOpenAILLM(core.ModelOpenAIGPT4, WithAPIKey("explicit-key"))
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer explicit-key", llm.GetEndpointConfig().Headers["Authorization"])
+	assert.Empty(t, llm.GetEndpointConfig().Headers["openai-beta"])
+}
+
 func TestNewOpenAILLM(t *testing.T) {
 	tests := []struct {
 		name        string

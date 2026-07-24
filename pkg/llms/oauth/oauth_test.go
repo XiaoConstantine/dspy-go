@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -30,7 +31,9 @@ func withOAuthSeams(t *testing.T) {
 
 	origRandRead := randRead
 	origHTTPPost := httpPost
+	origHTTPDo := httpDo
 	origPKCEGenerator := pkceGenerator
+	origStateGenerator := oauthStateGenerator
 	origAnthropicAuthURL := anthropicAuthURL
 	origAnthropicExchanger := anthropicCodeExchanger
 	origOpenAIAuthURL := openAIAuthURL
@@ -44,7 +47,9 @@ func withOAuthSeams(t *testing.T) {
 	t.Cleanup(func() {
 		randRead = origRandRead
 		httpPost = origHTTPPost
+		httpDo = origHTTPDo
 		pkceGenerator = origPKCEGenerator
+		oauthStateGenerator = origStateGenerator
 		anthropicAuthURL = origAnthropicAuthURL
 		anthropicCodeExchanger = origAnthropicExchanger
 		openAIAuthURL = origOpenAIAuthURL
@@ -153,7 +158,12 @@ func TestGetOpenAIAuthorizationURL(t *testing.T) {
 	assert.Equal(t, OpenAIScopes, u.Query().Get("scope"))
 	assert.Equal(t, "challenge", u.Query().Get("code_challenge"))
 	assert.Equal(t, "S256", u.Query().Get("code_challenge_method"))
-	assert.Equal(t, "verifier", u.Query().Get("state"))
+	assert.Equal(t, "challenge", u.Query().Get("state"))
+
+	secure, err := url.Parse(GetOpenAIAuthorizationURLWithState("challenge", "independent-state"))
+	require.NoError(t, err)
+	assert.Equal(t, "independent-state", secure.Query().Get("state"))
+	assert.NotEqual(t, "verifier", secure.Query().Get("state"))
 }
 
 func TestExchangeCode(t *testing.T) {
@@ -217,6 +227,19 @@ func TestExchangeCode(t *testing.T) {
 	})
 }
 
+func TestOpenAITokenContextCancellation(t *testing.T) {
+	withOAuthSeams(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	httpDo = func(req *http.Request) (*http.Response, error) {
+		return nil, req.Context().Err()
+	}
+
+	response, err := RefreshOpenAIAccessTokenContext(ctx, "refresh-token")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, response)
+}
+
 func TestRefreshAccessToken(t *testing.T) {
 	withOAuthSeams(t)
 
@@ -277,17 +300,19 @@ func TestExchangeOpenAICode(t *testing.T) {
 	withOAuthSeams(t)
 
 	t.Run("success", func(t *testing.T) {
-		httpPost = func(url, contentType string, body io.Reader) (*http.Response, error) {
-			assert.Equal(t, OpenAITokenURL, url)
-			assert.Equal(t, "application/json", contentType)
+		httpPost = func(endpoint, contentType string, body io.Reader) (*http.Response, error) {
+			assert.Equal(t, OpenAITokenURL, endpoint)
+			assert.Equal(t, "application/x-www-form-urlencoded", contentType)
 
-			var payload map[string]string
-			require.NoError(t, json.NewDecoder(body).Decode(&payload))
-			assert.Equal(t, "authorization_code", payload["grant_type"])
-			assert.Equal(t, OpenAIClientID, payload["client_id"])
-			assert.Equal(t, "auth-code", payload["code"])
-			assert.Equal(t, OpenAIRedirectURI, payload["redirect_uri"])
-			assert.Equal(t, "verifier", payload["code_verifier"])
+			encoded, err := io.ReadAll(body)
+			require.NoError(t, err)
+			payload, err := url.ParseQuery(string(encoded))
+			require.NoError(t, err)
+			assert.Equal(t, "authorization_code", payload.Get("grant_type"))
+			assert.Equal(t, OpenAIClientID, payload.Get("client_id"))
+			assert.Equal(t, "auth-code", payload.Get("code"))
+			assert.Equal(t, OpenAIRedirectURI, payload.Get("redirect_uri"))
+			assert.Equal(t, "verifier", payload.Get("code_verifier"))
 
 			return httpResponse(http.StatusOK, `{"access_token":"access","refresh_token":"refresh","expires_in":3600,"token_type":"Bearer","scope":"openid"}`), nil
 		}
@@ -337,15 +362,17 @@ func TestRefreshOpenAIAccessToken(t *testing.T) {
 	withOAuthSeams(t)
 
 	t.Run("success", func(t *testing.T) {
-		httpPost = func(url, contentType string, body io.Reader) (*http.Response, error) {
-			assert.Equal(t, OpenAITokenURL, url)
-			assert.Equal(t, "application/json", contentType)
+		httpPost = func(endpoint, contentType string, body io.Reader) (*http.Response, error) {
+			assert.Equal(t, OpenAITokenURL, endpoint)
+			assert.Equal(t, "application/x-www-form-urlencoded", contentType)
 
-			var payload map[string]string
-			require.NoError(t, json.NewDecoder(body).Decode(&payload))
-			assert.Equal(t, "refresh_token", payload["grant_type"])
-			assert.Equal(t, OpenAIClientID, payload["client_id"])
-			assert.Equal(t, "refresh-token", payload["refresh_token"])
+			encoded, err := io.ReadAll(body)
+			require.NoError(t, err)
+			payload, err := url.ParseQuery(string(encoded))
+			require.NoError(t, err)
+			assert.Equal(t, "refresh_token", payload.Get("grant_type"))
+			assert.Equal(t, OpenAIClientID, payload.Get("client_id"))
+			assert.Equal(t, "refresh-token", payload.Get("refresh_token"))
 
 			return httpResponse(http.StatusOK, `{"access_token":"access","refresh_token":"refresh","expires_in":3600,"token_type":"Bearer","scope":"openid"}`), nil
 		}
@@ -447,15 +474,28 @@ func TestLoginAnthropic(t *testing.T) {
 func TestLoginOpenAI(t *testing.T) {
 	withOAuthSeams(t)
 
-	t.Run("exchange failure", func(t *testing.T) {
+	configure := func(input string) {
 		pkceGenerator = func() (string, string, error) { return "verifier", "challenge", nil }
-		openAIAuthURL = func(verifier, challenge string) string {
-			assert.Equal(t, "verifier", verifier)
+		oauthStateGenerator = func() (string, error) { return "csrf-state", nil }
+		openAIAuthURL = func(challenge, state string) string {
 			assert.Equal(t, "challenge", challenge)
+			assert.Equal(t, "csrf-state", state)
 			return "https://example.com/authorize"
 		}
 		browserOpener = func(string) {}
-		loginInputReader = strings.NewReader("code123\n")
+		loginInputReader = strings.NewReader(input + "\n")
+	}
+
+	t.Run("state mismatch", func(t *testing.T) {
+		configure("http://localhost/callback?code=code123&state=wrong")
+		resp, err := LoginOpenAI()
+		require.Error(t, err)
+		assert.Nil(t, resp)
+		assert.Contains(t, err.Error(), "state mismatch")
+	})
+
+	t.Run("exchange failure", func(t *testing.T) {
+		configure("code123#csrf-state")
 		openAICodeExchanger = func(code, verifier string) (*OpenAITokenResponse, error) {
 			assert.Equal(t, "code123", code)
 			assert.Equal(t, "verifier", verifier)
@@ -469,25 +509,11 @@ func TestLoginOpenAI(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		var openedURL string
-		pkceGenerator = func() (string, string, error) { return "verifier", "challenge", nil }
-		openAIAuthURL = func(verifier, challenge string) string {
-			assert.Equal(t, "verifier", verifier)
-			assert.Equal(t, "challenge", challenge)
-			return "https://example.com/openai"
-		}
-		browserOpener = func(url string) { openedURL = url }
-		loginInputReader = strings.NewReader("http://localhost/callback?code=xyz789\n")
+		configure("http://localhost/callback?code=xyz789&state=csrf-state")
 		openAICodeExchanger = func(code, verifier string) (*OpenAITokenResponse, error) {
 			assert.Equal(t, "xyz789", code)
 			assert.Equal(t, "verifier", verifier)
-			return &OpenAITokenResponse{
-				AccessToken:  "access",
-				RefreshToken: "refresh",
-				ExpiresIn:    3600,
-				TokenType:    "Bearer",
-				Scope:        "openid",
-			}, nil
+			return &OpenAITokenResponse{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 3600}, nil
 		}
 
 		resp, err := LoginOpenAI()
@@ -495,7 +521,6 @@ func TestLoginOpenAI(t *testing.T) {
 		require.NotNil(t, resp)
 		assert.Equal(t, "access", resp.AccessToken)
 		assert.Equal(t, "refresh", resp.RefreshToken)
-		assert.Equal(t, "https://example.com/openai", openedURL)
 	})
 }
 

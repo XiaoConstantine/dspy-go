@@ -67,6 +67,7 @@ func TestLLMAdapter_CompleteUsesTypedChatBoundary(t *testing.T) {
 	rawArguments := map[string]any{"path": "main.go", "range": map[string]any{"start": 1}}
 	rawMetadata := map[string]any{"signature": []byte{1, 2}}
 	rawDiagnostic := map[string]any{"reason": "test", "nested": map[string]any{"value": "original"}}
+	rawProviderData := map[string]any{"openai-codex": []any{map[string]any{"encrypted_content": "opaque"}}}
 	rawThoughtBlocks := []core.ContentBlock{{
 		Type:     core.FieldTypeImage,
 		Data:     []byte{3, 4},
@@ -86,6 +87,7 @@ func TestLLMAdapter_CompleteUsesTypedChatBoundary(t *testing.T) {
 				Metadata:  rawMetadata,
 			}},
 			"_usage":               usage,
+			"provider_data":        rawProviderData,
 			"provider_diagnostic":  rawDiagnostic,
 			"thought_blocks":       rawThoughtBlocks,
 			"thoughts_token_count": 4,
@@ -144,6 +146,8 @@ func TestLLMAdapter_CompleteUsesTypedChatBoundary(t *testing.T) {
 	assert.Equal(t, 5, response.Usage.TotalTokens)
 	assert.Equal(t, 4, response.Diagnostics["thoughts_token_count"])
 	assert.Equal(t, rawDiagnostic, response.Diagnostics["provider_diagnostic"])
+	assert.Equal(t, "opaque", response.Message.ProviderData["openai-codex"].([]any)[0].(map[string]any)["encrypted_content"])
+	assert.NotContains(t, response.Diagnostics, "provider_data")
 	thoughtBlocks := response.Diagnostics["thought_blocks"].([]core.ContentBlock)
 	require.Len(t, thoughtBlocks, 1)
 	assert.Equal(t, []byte{3, 4}, thoughtBlocks[0].Data)
@@ -151,12 +155,14 @@ func TestLLMAdapter_CompleteUsesTypedChatBoundary(t *testing.T) {
 	rawArguments["range"].(map[string]any)["start"] = 9
 	rawMetadata["signature"].([]byte)[0] = 9
 	rawDiagnostic["nested"].(map[string]any)["value"] = "changed"
+	rawProviderData["openai-codex"].([]any)[0].(map[string]any)["encrypted_content"] = "changed"
 	rawThoughtBlocks[0].Data[0] = 9
 	rawThoughtBlocks[0].Metadata["nested"].(map[string]any)["value"] = "changed"
 	usage.TotalTokens = 99
 	assert.Equal(t, 1, response.Message.ToolCalls[0].Arguments["range"].(map[string]any)["start"])
 	assert.Equal(t, byte(1), response.Message.ToolCalls[0].Metadata["signature"].([]byte)[0])
 	assert.Equal(t, "original", response.Diagnostics["provider_diagnostic"].(map[string]any)["nested"].(map[string]any)["value"])
+	assert.Equal(t, "opaque", response.Message.ProviderData["openai-codex"].([]any)[0].(map[string]any)["encrypted_content"])
 	assert.Equal(t, byte(3), thoughtBlocks[0].Data[0])
 	assert.Equal(t, "original", thoughtBlocks[0].Metadata["nested"].(map[string]any)["value"])
 	assert.Equal(t, 5, response.Usage.TotalTokens)
