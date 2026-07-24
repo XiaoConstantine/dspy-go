@@ -771,6 +771,67 @@ func main() {
 
 ---
 
+## Reusable Agent Execution
+
+Native tool execution now uses the provider-neutral contracts in `pkg/agents`.
+Consume typed execution events through `EventSink`, native-only session events
+through `SessionEventSink`, and traces through `LastExecutionTrace`:
+
+```go
+var executionEvents []agents.ExecutionEvent
+var sessionEvents []native.SessionEvent
+
+agent, err := native.NewAgent(llm, native.Config{
+    MaxTurns: 20,
+    SessionID: "example-session",
+    EventSink: agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
+        executionEvents = append(executionEvents, agents.CloneExecutionEvent(event))
+    }),
+    SessionEventSink: native.SessionEventSinkFunc(func(_ context.Context, event native.SessionEvent) {
+        sessionEvents = append(sessionEvents, event)
+    }),
+})
+if err != nil {
+    panic(err)
+}
+
+result, err := agent.Execute(context.Background(), map[string]any{
+    "task": "Inspect the repository and finish.",
+})
+if err != nil {
+    panic(err)
+}
+
+trace := agent.LastExecutionTrace()
+fmt.Println(result["completed"], trace.TerminationCause)
+```
+
+`ExecutionEvent` payloads describe balanced run and turn lifecycles plus
+balanced terminal outcomes for proposed tool calls. Message additions are
+immutable point-in-time events. `ExecutionTrace` is projected from those
+canonical events and is
+defensively cloned before being returned to callers.
+
+### Pre-1.0 migration notes
+
+The reusable execution-layer cleanup is a breaking change in the next `v0.x`
+minor release:
+
+- replace `native.Config.OnEvent` with `native.Config.EventSink`
+- replace `agents.AgentEvent` string/map callbacks with typed
+  `agents.ExecutionEvent` payloads
+- replace native `session_loaded` and `session_persisted` callback maps with
+  `native.SessionEventSink`
+- replace `LastNativeTrace` and native-specific trace structs with
+  `LastExecutionTrace`
+- configure native ReAct execution through
+  `react.WithNativeFunctionCalling(...)`; direct `modules.ReAct` remains the
+  text/XML module and no longer installs a native function-calling interceptor
+
+Users that need the removed APIs should remain on the previous minor series
+while migrating. See `examples/native_agent_session` for a compilable typed
+execution/session event example.
+
 ## Optimizable Agents
 
 dspy-go now has a shared optimization surface for several agent families:
