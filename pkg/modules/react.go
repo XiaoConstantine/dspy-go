@@ -87,41 +87,6 @@ func (r *ReAct) WithXMLParsing(config interceptors.XMLConfig) *ReAct {
 	return r
 }
 
-// WithNativeFunctionCalling enables native LLM function calling for action selection.
-// This bypasses text-based XML parsing entirely by using the LLM's built-in
-// function/tool calling capabilities (e.g., OpenAI function calling, Gemini tools).
-//
-// Benefits:
-//   - Eliminates parsing errors and hallucinated observations
-//   - Strongly typed tool arguments from the LLM
-//   - More reliable tool selection
-//
-// Requirements:
-//   - The LLM must support CapabilityToolCalling
-//   - Falls back to text-based parsing if not supported
-//
-// Usage:
-//
-//	react := modules.NewReAct(signature, registry, maxIters)
-//	react.WithNativeFunctionCalling() // Enable native function calling
-func (r *ReAct) WithNativeFunctionCalling() *ReAct {
-	config := interceptors.DefaultFunctionCallingConfig()
-	config.ToolRegistry = r.Registry
-	interceptor := interceptors.NativeFunctionCallingInterceptor(config)
-	r.Predict.SetInterceptors([]core.ModuleInterceptor{interceptor})
-	return r
-}
-
-// WithNativeFunctionCallingConfig enables native function calling with custom configuration.
-func (r *ReAct) WithNativeFunctionCallingConfig(config interceptors.FunctionCallingConfig) *ReAct {
-	if config.ToolRegistry == nil {
-		config.ToolRegistry = r.Registry
-	}
-	interceptor := interceptors.NativeFunctionCallingInterceptor(config)
-	r.Predict.SetInterceptors([]core.ModuleInterceptor{interceptor})
-	return r
-}
-
 // SetLLM sets the language model for the base module and all internal modules (Predict and Extract).
 func (r *ReAct) SetLLM(llm core.LLM) {
 	r.BaseModule.SetLLM(llm)
