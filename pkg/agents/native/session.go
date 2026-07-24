@@ -240,6 +240,25 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 			eventData["event_store_error"] = eventErr.Error()
 		}
 	}
+	a.emitSessionEvent(ctx, SessionPersistedEvent{
+		SessionID:         sessionID,
+		RecordID:          record.ID,
+		TaskID:            trace.TaskID,
+		Success:           snapshotErr == nil,
+		Completed:         trace.Completed,
+		Err:               snapshotErr,
+		EventStoreEnabled: eventStore != nil,
+		EventStoreSuccess: eventStore != nil && eventErr == nil,
+		EventEntryCount:   len(eventEntries),
+		EventBranchID:     eventBranch,
+		EventStoreErr:     eventErr,
+		EventHeadEntryID: func() string {
+			if len(eventEntries) == 0 {
+				return ""
+			}
+			return eventEntries[len(eventEntries)-1].ID
+		}(),
+	})
 	a.emitEvent(agents.EventSessionPersisted, eventData)
 }
 

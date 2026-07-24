@@ -143,7 +143,8 @@ func run() error {
 		SessionRecallLimit:            4,
 		SessionRecallMaxChars:         1800,
 		SessionEventStore:             store,
-		OnEvent:                       makeEventPrinter(verbose),
+		EventSink:                     makeExecutionEventPrinter(verbose),
+		SessionEventSink:              makeSessionEventPrinter(verbose),
 	})
 	if err != nil {
 		return fmt.Errorf("create native agent: %w", err)
@@ -263,34 +264,50 @@ func printSessionState(ctx context.Context, agent *native.Agent, sessionID strin
 	return nil
 }
 
-func makeEventPrinter(verbose bool) func(agents.AgentEvent) {
+func makeExecutionEventPrinter(verbose bool) agents.EventSink {
 	if !verbose {
 		return nil
 	}
-	return func(event agents.AgentEvent) {
-		switch event.Type {
-		case agents.EventSessionLoaded:
-			fmt.Printf("[event] session_loaded source=%s branch=%s entries=%d summaries=%d\n",
-				stringValue(event.Data["source"]),
-				stringValue(event.Data["branch_id"]),
-				intValue(event.Data["entry_count"], 0),
-				intValue(event.Data["summary_count"], 0),
-			)
-		case agents.EventToolCallStarted:
-			fmt.Printf("[event] tool_call_started tool=%s\n", stringValue(event.Data["tool_name"]))
-		case agents.EventToolCallFinished:
+	return agents.EventSinkFunc(func(_ context.Context, event agents.ExecutionEvent) {
+		switch payload := event.Payload.(type) {
+		case agents.ToolExecutionStartedEvent:
+			fmt.Printf("[event] tool_call_started tool=%s\n", payload.Call.Name)
+		case agents.ToolCallFinishedEvent:
 			fmt.Printf("[event] tool_call_finished tool=%s error=%t\n",
-				stringValue(event.Data["tool_name"]),
-				boolValue(event.Data["is_error"]),
+				payload.Call.Name,
+				payload.Err != nil || (payload.Result != nil && payload.Result.ToolResult != nil && payload.Result.ToolResult.IsError),
 			)
-		case agents.EventRunFinished:
+		case agents.RunFinishedEvent:
 			fmt.Printf("[event] run_finished completed=%t turns=%d tool_calls=%d\n",
-				boolValue(event.Data["completed"]),
-				intValue(event.Data["turns"], 0),
-				intValue(event.Data["tool_calls"], 0),
+				payload.Status == agents.RunStatusCompleted,
+				payload.Turns,
+				payload.ToolCalls,
 			)
 		}
+	})
+}
+
+func makeSessionEventPrinter(verbose bool) native.SessionEventSink {
+	if !verbose {
+		return nil
 	}
+	return native.SessionEventSinkFunc(func(_ context.Context, event native.SessionEvent) {
+		switch payload := event.Payload.(type) {
+		case native.SessionLoadedEvent:
+			fmt.Printf("[event] session_loaded source=%s branch=%s entries=%d summaries=%d\n",
+				payload.Source,
+				payload.BranchID,
+				payload.EntryCount,
+				payload.SummaryCount,
+			)
+		case native.SessionPersistedEvent:
+			fmt.Printf("[event] session_persisted success=%t completed=%t entries=%d\n",
+				payload.Success,
+				payload.Completed,
+				payload.EventEntryCount,
+			)
+		}
+	})
 }
 
 func reusingExistingState(sessionDB, workspaceDir string) bool {

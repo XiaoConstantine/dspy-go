@@ -1098,10 +1098,14 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 	}
 
 	var events []agents.AgentEvent
+	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:  1,
 		Memory:    memory,
 		SessionID: "session-events",
+		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
+			typedSession = append(typedSession, event)
+		}),
 		OnEvent: func(event agents.AgentEvent) {
 			events = append(events, event)
 		},
@@ -1134,6 +1138,26 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 	assert.Equal(t, "session-events", sessionPersisted.Data["session_id"])
 	assert.Equal(t, true, sessionPersisted.Data["success"])
 	assert.Equal(t, true, sessionPersisted.Data["completed"])
+
+	require.Len(t, typedSession, 2)
+	loaded, ok := typedSession[0].Payload.(SessionLoadedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "session-events", loaded.SessionID)
+	assert.Equal(t, 0, loaded.RecordCount)
+	assert.Equal(t, 0, loaded.RecallChars)
+
+	persisted, ok := typedSession[1].Payload.(SessionPersistedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "session-events", persisted.SessionID)
+	assert.True(t, persisted.Success)
+	assert.True(t, persisted.Completed)
+	assert.False(t, persisted.EventStoreEnabled)
+	assert.False(t, persisted.EventStoreSuccess)
+}
+
+func TestSessionEventSinkFunc_TypedNilIsNoOp(t *testing.T) {
+	var sink SessionEventSinkFunc
+	sink.EmitSessionEvent(context.Background(), SessionEvent{Payload: SessionLoadedEvent{SessionID: "session-1"}})
 }
 
 func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
@@ -1156,11 +1180,15 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	}
 
 	var events []agents.AgentEvent
+	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
 		Memory:            memory,
 		SessionID:         "session-dual-write",
 		SessionEventStore: eventStore,
+		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
+			typedSession = append(typedSession, event)
+		}),
 		OnEvent: func(event agents.AgentEvent) {
 			events = append(events, event)
 		},
@@ -1215,6 +1243,19 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	assert.Equal(t, true, persisted.Data["event_store_success"])
 	assert.Equal(t, 3, persisted.Data["event_entry_count"])
 	assert.Equal(t, session.ActiveBranchID, persisted.Data["event_branch_id"])
+
+	require.Len(t, typedSession, 2)
+	typedPersisted, ok := typedSession[1].Payload.(SessionPersistedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "session-dual-write", typedPersisted.SessionID)
+	assert.True(t, typedPersisted.Success)
+	assert.True(t, typedPersisted.EventStoreEnabled)
+	assert.True(t, typedPersisted.EventStoreSuccess)
+	assert.Equal(t, 3, typedPersisted.EventEntryCount)
+	assert.Equal(t, session.ActiveBranchID, typedPersisted.EventBranchID)
+	assert.Equal(t, persisted.Data["event_branch_id"], typedPersisted.EventBranchID)
+	require.NoError(t, typedPersisted.Err)
+	require.NoError(t, typedPersisted.EventStoreErr)
 }
 
 func TestAgent_Execute_PersistsToolCallOrderingAndCorrelationToSessionEventStore(t *testing.T) {
@@ -1578,9 +1619,8 @@ func TestAgent_Execute_ForksSessionBranchFromRequestedEntry(t *testing.T) {
 
 func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPersistence(t *testing.T) {
 	memory := agents.NewInMemoryStore()
-	eventStore, err := sessionevent.NewSQLiteStore(filepath.Join(t.TempDir(), "session-events.db"))
-	require.NoError(t, err)
-	require.NoError(t, eventStore.Close())
+	eventStoreErr := errors.New("sentinel append failure")
+	eventStore := &stubSessionEventStore{appendEntriesErr: eventStoreErr}
 
 	llm := &stubLLM{
 		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
@@ -1595,11 +1635,15 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	}
 
 	var events []agents.AgentEvent
+	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
 		Memory:            memory,
 		SessionID:         "session-event-failure",
 		SessionEventStore: eventStore,
+		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
+			typedSession = append(typedSession, event)
+		}),
 		OnEvent: func(event agents.AgentEvent) {
 			events = append(events, event)
 		},
@@ -1627,7 +1671,20 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	assert.Equal(t, true, persisted.Data["success"])
 	assert.Equal(t, true, persisted.Data["event_store_enabled"])
 	assert.Equal(t, false, persisted.Data["event_store_success"])
-	assert.Contains(t, persisted.Data["event_store_error"], "closed")
+	assert.Equal(t, eventStoreErr.Error(), persisted.Data["event_store_error"])
+	assert.Equal(t, "branch-1", persisted.Data["event_branch_id"])
+
+	require.Len(t, typedSession, 2)
+	typedPersisted, ok := typedSession[1].Payload.(SessionPersistedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "session-event-failure", typedPersisted.SessionID)
+	assert.True(t, typedPersisted.Success)
+	assert.True(t, typedPersisted.EventStoreEnabled)
+	assert.False(t, typedPersisted.EventStoreSuccess)
+	assert.Equal(t, "branch-1", typedPersisted.EventBranchID)
+	require.NoError(t, typedPersisted.Err)
+	require.ErrorIs(t, typedPersisted.EventStoreErr, eventStoreErr)
+	assert.Equal(t, persisted.Data["event_store_error"], typedPersisted.EventStoreErr.Error())
 }
 
 func TestSessionEntriesFromEvents_DeduplicatesFinalAnswerAssistantEntry(t *testing.T) {
@@ -2125,6 +2182,7 @@ type stubSessionEventStore struct {
 	getSessionErrs       []error
 	getSessionIndex      int
 	createSessionErr     error
+	appendEntriesErr     error
 	getBranchHead        *sessionevent.SessionEntry
 	getBranchHeadErr     error
 	setActiveBranchErr   error
@@ -2139,8 +2197,21 @@ func (s *stubSessionEventStore) CreateSession(context.Context, sessionevent.Crea
 	return &sessionevent.Session{ID: "session-1", ActiveBranchID: "branch-1"}, &sessionevent.SessionBranch{ID: "branch-1", SessionID: "session-1"}, nil
 }
 
-func (s *stubSessionEventStore) AppendEntries(context.Context, []sessionevent.SessionEntry) ([]sessionevent.SessionEntry, error) {
-	return nil, fmt.Errorf("unexpected AppendEntries call")
+func (s *stubSessionEventStore) AppendEntries(_ context.Context, entries []sessionevent.SessionEntry) ([]sessionevent.SessionEntry, error) {
+	if s.appendEntriesErr != nil {
+		return nil, s.appendEntriesErr
+	}
+	inserted := make([]sessionevent.SessionEntry, len(entries))
+	copy(inserted, entries)
+	for i := range inserted {
+		if strings.TrimSpace(inserted[i].ID) == "" {
+			inserted[i].ID = fmt.Sprintf("entry-%d", i+1)
+		}
+		if inserted[i].CreatedAt.IsZero() {
+			inserted[i].CreatedAt = time.Date(2026, time.July, 23, 0, 0, i+1, 0, time.UTC)
+		}
+	}
+	return inserted, nil
 }
 
 func (s *stubSessionEventStore) AppendSummary(context.Context, sessionevent.SessionSummary) error {

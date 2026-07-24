@@ -40,10 +40,10 @@ type Config struct {
 	MaxConsecutiveNoCallResponses int
 	ToolInterceptors              []core.ToolInterceptor
 	EventSink                     agents.EventSink
+	SessionEventSink              SessionEventSink
 	// Deprecated: EventSink covers only portable typed execution events.
-	// OnEvent remains the compatibility surface for legacy string/map consumers
-	// and native-only session lifecycle notifications such as session_loaded and
-	// session_persisted.
+	// SessionEventSink carries native-only typed session lifecycle notifications.
+	// OnEvent remains the compatibility surface for legacy string/map consumers.
 	OnEvent func(agents.AgentEvent)
 }
 
@@ -272,6 +272,19 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 		if sessionErr != nil {
 			sessionEventData["error"] = sessionErr.Error()
 		}
+		a.emitSessionEvent(ctx, SessionLoadedEvent{
+			TaskID:            taskID,
+			SessionID:         sessionID,
+			Source:            sessionContext.Source,
+			RecordCount:       sessionContext.RecordCount,
+			EntryCount:        sessionContext.EntryCount,
+			SummaryCount:      sessionContext.SummaryCount,
+			RecallChars:       len(sessionContext.Recall),
+			BranchID:          sessionContext.BranchID,
+			HeadEntryID:       sessionContext.HeadEntryID,
+			ForkedFromEntryID: sessionContext.ForkedFromEntryID,
+			Err:               sessionErr,
+		})
 		agents.EmitEvent(runConfig.OnEvent, agents.EventSessionLoaded, sessionEventData)
 	}
 	sessionRecall := sessionContext.Recall
@@ -867,6 +880,16 @@ func (a *Agent) emitEvent(eventType string, data map[string]any) {
 		return
 	}
 	agents.EmitEvent(a.config.OnEvent, eventType, data)
+}
+
+func (a *Agent) emitSessionEvent(ctx context.Context, payload SessionEventPayload) {
+	if a == nil || a.config.SessionEventSink == nil || payload == nil {
+		return
+	}
+	a.config.SessionEventSink.EmitSessionEvent(ctx, SessionEvent{
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	})
 }
 
 func enrichSubagentEventData(tool core.Tool, data map[string]any, details map[string]any) map[string]any {
