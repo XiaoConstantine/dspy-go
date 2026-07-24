@@ -150,6 +150,23 @@ Costs:
   the loop.
 - Existing native and ReAct implementations will coexist during migration.
 
+## Compatibility removal timing
+
+DSPy-Go is still pre-1.0 (`v0.x`). The Phase 10 removals are therefore targeted
+for the next minor release rather than deferred to a `v1` major release. The
+release must call these removals out as breaking changes, and users that still
+need `native.Config.OnEvent`, `agents.AgentEvent`, legacy native trace models,
+or legacy result-map parsing should remain on the preceding minor series while
+migrating.
+
+Native-only session lifecycle notifications move first: first-party consumers
+must use `native.SessionEventSink`, after which `session_loaded` and
+`session_persisted` string/map notifications can be removed. Portable execution
+callbacks follow the same sequence: migrate consumers to `agents.EventSink`,
+then remove `OnEvent`, `AgentEvent`, `EmitEvent`, and `LegacyEventSink` before
+the Phase 10 release. This does not require a separate major release, but it
+does require explicit migration notes and compiled examples.
+
 ## Verification
 
 Every implementation phase must run:

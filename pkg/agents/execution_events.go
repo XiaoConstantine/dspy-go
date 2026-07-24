@@ -574,9 +574,8 @@ func validateRunFinished(event RunFinishedEvent) error {
 	return nil
 }
 
-// Deprecated: prefer typed ExecutionEvent consumers directly for portable
-// run/turn/tool lifecycles. LegacyEventSink keeps string/map callback
-// compatibility; native-only session notifications still flow through OnEvent.
+// Deprecated: prefer typed ExecutionEvent consumers directly.
+// LegacyEventSink keeps temporary string/map callback compatibility.
 func LegacyEventSink(onEvent func(AgentEvent)) EventSink {
 	return EventSinkFunc(func(_ context.Context, event ExecutionEvent) {
 		if onEvent == nil {

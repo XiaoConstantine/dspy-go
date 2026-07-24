@@ -262,16 +262,6 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 	sessionID := a.sessionID(input)
 	sessionContext, sessionErr := a.loadSessionContext(ctx, input)
 	if sessionID != "" {
-		sessionEventData := map[string]any{
-			"task_id": taskID, "session_id": sessionID, "source": sessionContext.Source,
-			"record_count": sessionContext.RecordCount, "entry_count": sessionContext.EntryCount,
-			"summary_count": sessionContext.SummaryCount, "recall_chars": len(sessionContext.Recall),
-			"branch_id": sessionContext.BranchID, "head_entry_id": sessionContext.HeadEntryID,
-			"forked_from_id": sessionContext.ForkedFromEntryID,
-		}
-		if sessionErr != nil {
-			sessionEventData["error"] = sessionErr.Error()
-		}
 		a.emitSessionEvent(ctx, SessionLoadedEvent{
 			TaskID:            taskID,
 			SessionID:         sessionID,
@@ -285,7 +275,6 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 			ForkedFromEntryID: sessionContext.ForkedFromEntryID,
 			Err:               sessionErr,
 		})
-		agents.EmitEvent(runConfig.OnEvent, agents.EventSessionLoaded, sessionEventData)
 	}
 	sessionRecall := sessionContext.Recall
 	if sessionErr != nil {
@@ -873,13 +862,6 @@ func (a *Agent) LastNativeTrace() *Trace {
 	a.traceMu.RLock()
 	defer a.traceMu.RUnlock()
 	return a.lastNativeTrace.Clone()
-}
-
-func (a *Agent) emitEvent(eventType string, data map[string]any) {
-	if a == nil {
-		return
-	}
-	agents.EmitEvent(a.config.OnEvent, eventType, data)
 }
 
 func (a *Agent) emitSessionEvent(ctx context.Context, payload SessionEventPayload) {

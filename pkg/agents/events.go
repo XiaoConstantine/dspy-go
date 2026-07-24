@@ -9,8 +9,6 @@ const (
 	EventRunStarted       = "run_started"
 	EventRunFinished      = "run_finished"
 	EventRunFailed        = "run_failed"
-	EventSessionLoaded    = "session_loaded"
-	EventSessionPersisted = "session_persisted"
 	EventLLMTurnStarted   = "llm_turn_started"
 	EventLLMTurnFinished  = "llm_turn_finished"
 	EventToolCallProposed = "tool_call_proposed"
@@ -19,18 +17,16 @@ const (
 	EventToolCallFinished = "tool_call_finished"
 )
 
-// Deprecated: prefer typed ExecutionEvent consumers via EventSink for portable
-// run/turn/tool lifecycles. AgentEvent remains the compatibility format for
-// legacy callbacks and native-only session notifications.
+// Deprecated: prefer typed ExecutionEvent consumers via EventSink.
+// AgentEvent remains only as a compatibility format for legacy callbacks.
 type AgentEvent struct {
 	Type      string
 	Data      map[string]any
 	Timestamp time.Time
 }
 
-// Deprecated: prefer typed ExecutionEvent consumers via EventSink for portable
-// run/turn/tool lifecycles. EmitEvent remains for compatibility callbacks and
-// native-only session notifications.
+// Deprecated: prefer typed ExecutionEvent consumers via EventSink.
+// EmitEvent remains only for compatibility callbacks.
 func EmitEvent(onEvent func(AgentEvent), eventType string, data map[string]any) {
 	if onEvent == nil {
 		return

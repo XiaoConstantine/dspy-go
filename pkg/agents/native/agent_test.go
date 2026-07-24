@@ -1097,7 +1097,6 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
 	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:  1,
@@ -1106,9 +1105,6 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
 			typedSession = append(typedSession, event)
 		}),
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
 	})
 	require.NoError(t, err)
 
@@ -1117,27 +1113,6 @@ func TestAgent_Execute_EmitsSessionEvents(t *testing.T) {
 		"task_id": "event-task",
 	})
 	require.NoError(t, err)
-
-	var sessionLoaded *agents.AgentEvent
-	var sessionPersisted *agents.AgentEvent
-	for i := range events {
-		switch events[i].Type {
-		case agents.EventSessionLoaded:
-			sessionLoaded = &events[i]
-		case agents.EventSessionPersisted:
-			sessionPersisted = &events[i]
-		}
-	}
-
-	require.NotNil(t, sessionLoaded)
-	assert.Equal(t, "session-events", sessionLoaded.Data["session_id"])
-	assert.Equal(t, 0, sessionLoaded.Data["record_count"])
-	assert.Equal(t, 0, sessionLoaded.Data["recall_chars"])
-
-	require.NotNil(t, sessionPersisted)
-	assert.Equal(t, "session-events", sessionPersisted.Data["session_id"])
-	assert.Equal(t, true, sessionPersisted.Data["success"])
-	assert.Equal(t, true, sessionPersisted.Data["completed"])
 
 	require.Len(t, typedSession, 2)
 	loaded, ok := typedSession[0].Payload.(SessionLoadedEvent)
@@ -1179,7 +1154,6 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
 	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
@@ -1189,9 +1163,6 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
 			typedSession = append(typedSession, event)
 		}),
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
 	})
 	require.NoError(t, err)
 
@@ -1232,18 +1203,6 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	assert.Equal(t, int64(7), lineage[2].CompletionTokens)
 	assert.Equal(t, int64(18), lineage[2].TotalTokens)
 
-	var persisted *agents.AgentEvent
-	for i := range events {
-		if events[i].Type == agents.EventSessionPersisted {
-			persisted = &events[i]
-		}
-	}
-	require.NotNil(t, persisted)
-	assert.Equal(t, true, persisted.Data["success"])
-	assert.Equal(t, true, persisted.Data["event_store_success"])
-	assert.Equal(t, 3, persisted.Data["event_entry_count"])
-	assert.Equal(t, session.ActiveBranchID, persisted.Data["event_branch_id"])
-
 	require.Len(t, typedSession, 2)
 	typedPersisted, ok := typedSession[1].Payload.(SessionPersistedEvent)
 	require.True(t, ok)
@@ -1253,7 +1212,6 @@ func TestAgent_Execute_DualWritesSessionEventStore(t *testing.T) {
 	assert.True(t, typedPersisted.EventStoreSuccess)
 	assert.Equal(t, 3, typedPersisted.EventEntryCount)
 	assert.Equal(t, session.ActiveBranchID, typedPersisted.EventBranchID)
-	assert.Equal(t, persisted.Data["event_branch_id"], typedPersisted.EventBranchID)
 	require.NoError(t, typedPersisted.Err)
 	require.NoError(t, typedPersisted.EventStoreErr)
 }
@@ -1619,7 +1577,6 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 		},
 	}
 
-	var events []agents.AgentEvent
 	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
@@ -1629,9 +1586,6 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
 			typedSession = append(typedSession, event)
 		}),
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
 	})
 	require.NoError(t, err)
 
@@ -1646,19 +1600,6 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	require.Len(t, records, 1)
 	assert.Equal(t, "Event store should fail only for dual write", records[0].Task)
 
-	var persisted *agents.AgentEvent
-	for i := range events {
-		if events[i].Type == agents.EventSessionPersisted {
-			persisted = &events[i]
-		}
-	}
-	require.NotNil(t, persisted)
-	assert.Equal(t, true, persisted.Data["success"])
-	assert.Equal(t, true, persisted.Data["event_store_enabled"])
-	assert.Equal(t, false, persisted.Data["event_store_success"])
-	assert.Equal(t, eventStoreErr.Error(), persisted.Data["event_store_error"])
-	assert.Equal(t, "branch-1", persisted.Data["event_branch_id"])
-
 	require.Len(t, typedSession, 2)
 	typedPersisted, ok := typedSession[1].Payload.(SessionPersistedEvent)
 	require.True(t, ok)
@@ -1669,7 +1610,7 @@ func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPer
 	assert.Equal(t, "branch-1", typedPersisted.EventBranchID)
 	require.NoError(t, typedPersisted.Err)
 	require.ErrorIs(t, typedPersisted.EventStoreErr, eventStoreErr)
-	assert.Equal(t, persisted.Data["event_store_error"], typedPersisted.EventStoreErr.Error())
+	assert.Equal(t, eventStoreErr.Error(), typedPersisted.EventStoreErr.Error())
 }
 
 func TestSessionEntriesFromEvents_DeduplicatesFinalAnswerAssistantEntry(t *testing.T) {

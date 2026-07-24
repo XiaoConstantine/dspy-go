@@ -216,30 +216,6 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 		eventEntries, eventBranch, eventErr = a.persistSessionEvents(ctx, eventStore, trace, events, sessionID)
 	}
 
-	eventData := map[string]any{
-		"session_id": sessionID,
-		"record_id":  record.ID,
-		"task_id":    trace.TaskID,
-		"success":    snapshotErr == nil,
-		"completed":  trace.Completed,
-	}
-	if snapshotErr != nil {
-		eventData["error"] = snapshotErr.Error()
-	}
-	if eventStore != nil {
-		eventData["event_store_enabled"] = true
-		eventData["event_store_success"] = eventErr == nil
-		eventData["event_entry_count"] = len(eventEntries)
-		if eventBranch != "" {
-			eventData["event_branch_id"] = eventBranch
-		}
-		if len(eventEntries) > 0 {
-			eventData["event_head_entry_id"] = eventEntries[len(eventEntries)-1].ID
-		}
-		if eventErr != nil {
-			eventData["event_store_error"] = eventErr.Error()
-		}
-	}
 	a.emitSessionEvent(ctx, SessionPersistedEvent{
 		SessionID:         sessionID,
 		RecordID:          record.ID,
@@ -259,7 +235,6 @@ func (a *Agent) persistSessionRecord(ctx context.Context, input map[string]any, 
 			return eventEntries[len(eventEntries)-1].ID
 		}(),
 	})
-	a.emitEvent(agents.EventSessionPersisted, eventData)
 }
 
 func (a *Agent) persistSessionEvents(ctx context.Context, store sessionevent.SessionEventStore, trace *Trace, events []agents.ExecutionEvent, sessionID string) ([]sessionevent.SessionEntry, string, error) {
