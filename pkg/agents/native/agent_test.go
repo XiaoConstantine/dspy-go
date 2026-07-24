@@ -1349,15 +1349,15 @@ func TestAgent_Execute_LoadsSessionRecallFromSessionEventStore(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
 		Memory:            memory,
 		SessionID:         session.ID,
 		SessionEventStore: eventStore,
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
+		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
+			typedSession = append(typedSession, event)
+		}),
 	})
 	require.NoError(t, err)
 
@@ -1373,20 +1373,15 @@ func TestAgent_Execute_LoadsSessionRecallFromSessionEventStore(t *testing.T) {
 	assert.Contains(t, llm.prompts[0], "Prior event-store task")
 	assert.Contains(t, llm.prompts[0], "Prior event-store answer")
 
-	var loaded *agents.AgentEvent
-	for i := range events {
-		if events[i].Type == agents.EventSessionLoaded {
-			loaded = &events[i]
-			break
-		}
-	}
-	require.NotNil(t, loaded)
-	assert.Equal(t, "event_store", loaded.Data["source"])
-	assert.Equal(t, 0, loaded.Data["record_count"])
-	assert.Equal(t, 2, loaded.Data["entry_count"])
-	assert.Equal(t, 1, loaded.Data["summary_count"])
-	assert.Equal(t, branch.ID, loaded.Data["branch_id"])
-	assert.Equal(t, inserted[1].ID, loaded.Data["head_entry_id"])
+	require.Len(t, typedSession, 2)
+	loaded, ok := typedSession[0].Payload.(SessionLoadedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "event_store", loaded.Source)
+	assert.Equal(t, 0, loaded.RecordCount)
+	assert.Equal(t, 2, loaded.EntryCount)
+	assert.Equal(t, 1, loaded.SummaryCount)
+	assert.Equal(t, branch.ID, loaded.BranchID)
+	assert.Equal(t, inserted[1].ID, loaded.HeadEntryID)
 }
 
 func TestAgent_Execute_UsesRequestedSessionBranchForRecallAndPersistence(t *testing.T) {
@@ -1455,14 +1450,14 @@ func TestAgent_Execute_UsesRequestedSessionBranchForRecallAndPersistence(t *test
 		},
 	}
 
-	var events []agents.AgentEvent
+	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
 		SessionID:         session.ID,
 		SessionEventStore: eventStore,
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
+		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
+			typedSession = append(typedSession, event)
+		}),
 	})
 	require.NoError(t, err)
 
@@ -1489,16 +1484,11 @@ func TestAgent_Execute_UsesRequestedSessionBranchForRecallAndPersistence(t *test
 	assert.NotEmpty(t, lineage)
 	assert.NotContains(t, sessionEventPayloadTexts(lineage), "main branch only")
 
-	var loaded *agents.AgentEvent
-	for i := range events {
-		if events[i].Type == agents.EventSessionLoaded {
-			loaded = &events[i]
-			break
-		}
-	}
-	require.NotNil(t, loaded)
-	assert.Equal(t, "event_store", loaded.Data["source"])
-	assert.Equal(t, altBranch.ID, loaded.Data["branch_id"])
+	require.Len(t, typedSession, 2)
+	loaded, ok := typedSession[0].Payload.(SessionLoadedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "event_store", loaded.Source)
+	assert.Equal(t, altBranch.ID, loaded.BranchID)
 }
 
 func TestAgent_Execute_ForksSessionBranchFromRequestedEntry(t *testing.T) {
@@ -1552,14 +1542,14 @@ func TestAgent_Execute_ForksSessionBranchFromRequestedEntry(t *testing.T) {
 		},
 	}
 
-	var events []agents.AgentEvent
+	var typedSession []SessionEvent
 	agent, err := NewAgent(llm, Config{
 		MaxTurns:          1,
 		SessionID:         session.ID,
 		SessionEventStore: eventStore,
-		OnEvent: func(event agents.AgentEvent) {
-			events = append(events, event)
-		},
+		SessionEventSink: SessionEventSinkFunc(func(_ context.Context, event SessionEvent) {
+			typedSession = append(typedSession, event)
+		}),
 	})
 	require.NoError(t, err)
 
@@ -1603,18 +1593,13 @@ func TestAgent_Execute_ForksSessionBranchFromRequestedEntry(t *testing.T) {
 	assert.NotContains(t, sessionEventPayloadTexts(lineage), "main branch only")
 	assert.Contains(t, sessionEventPayloadTexts(lineage), "shared root")
 
-	var loaded *agents.AgentEvent
-	for i := range events {
-		if events[i].Type == agents.EventSessionLoaded {
-			loaded = &events[i]
-			break
-		}
-	}
-	require.NotNil(t, loaded)
-	assert.Equal(t, "event_store", loaded.Data["source"])
-	assert.Equal(t, mainEntries[1].ID, loaded.Data["forked_from_id"])
-	assert.Equal(t, forked.ID, loaded.Data["branch_id"])
-	assert.Equal(t, mainEntries[1].ID, loaded.Data["head_entry_id"])
+	require.Len(t, typedSession, 2)
+	loaded, ok := typedSession[0].Payload.(SessionLoadedEvent)
+	require.True(t, ok)
+	assert.Equal(t, "event_store", loaded.Source)
+	assert.Equal(t, mainEntries[1].ID, loaded.ForkedFromEntryID)
+	assert.Equal(t, forked.ID, loaded.BranchID)
+	assert.Equal(t, mainEntries[1].ID, loaded.HeadEntryID)
 }
 
 func TestAgent_Execute_ReportsSessionEventStoreFailureWithoutBreakingSnapshotPersistence(t *testing.T) {
