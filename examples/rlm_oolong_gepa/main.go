@@ -402,8 +402,20 @@ type oolongEvaluator struct{}
 
 func (oolongEvaluator) Evaluate(ctx context.Context, agent optimize.OptimizableAgent, ex optimize.AgentExample) (*optimize.EvalResult, error) {
 	startedAt := time.Now()
-	output, execErr := agent.Execute(ctx, maps.Clone(ex.Inputs))
-	trace := latestTrace(agent)
+	var (
+		output  map[string]any
+		trace   *agents.ExecutionTrace
+		execErr error
+	)
+	if scoped, ok := agent.(agents.ScopedExecutionAgent); ok {
+		execution, err := scoped.ExecuteWithTrace(ctx, maps.Clone(ex.Inputs))
+		output = execution.Output
+		trace = execution.Trace
+		execErr = err
+	} else {
+		output, execErr = agent.Execute(ctx, maps.Clone(ex.Inputs))
+		trace = latestTrace(agent)
+	}
 	latency := time.Since(startedAt)
 	if trace != nil && trace.ProcessingTime > 0 {
 		latency = trace.ProcessingTime

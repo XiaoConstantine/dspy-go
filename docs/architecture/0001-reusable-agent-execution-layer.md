@@ -4,7 +4,29 @@
 - Date: 2026-07-23
 - Tracking issue: [#207](https://github.com/XiaoConstantine/dspy-go/issues/207)
 
+## Outcome
+
+This ADR has been implemented and released in `v0.86.0`.
+
+The final user-facing execution surfaces are:
+
+- typed `agents.ExecutionEvent` values consumed through `agents.EventSink`
+- native session lifecycle events consumed through `native.SessionEventSink`
+- canonical `agents.ExecutionTrace` values projected from typed events
+- operation-scoped trace capture through `ExecuteWithTrace(...)`
+- reusable `pkg/agents.RunLoop` and stateful `pkg/agents.Harness`
+
+The legacy `native.Config.OnEvent`, `agents.AgentEvent`, native-specific trace
+structs, and legacy provider result-map parsing referenced below have since
+been removed. Native `Execute` still returns compatibility output fields for
+existing callers.
+
 ## Context
+
+>The remainder of this ADR preserves the pre-implementation decision record.
+>References to missing pieces or future removals below are historical context,
+>not the current shipped state.
+
 
 DSPy-Go currently has several agent execution paths:
 

@@ -106,10 +106,18 @@ module := rlm.NewFromLLM(
 
 ## Inspecting Replay Behavior
 
-If you wrap the module in `pkg/agents/rlm`, the execution trace exposes the replay metadata directly:
+If you wrap the module in `pkg/agents/rlm`, the execution trace exposes the replay metadata directly. Prefer `ExecuteWithTrace` so the output and trace stay correlated:
 
 ```go
-trace := agent.LastExecutionTrace()
+execution, err := agent.ExecuteWithTrace(ctx, map[string]any{
+    "context": document,
+    "query":   query,
+})
+if err != nil {
+    panic(err)
+}
+
+trace := execution.Trace
 fmt.Println(trace.ContextMetadata["context_policy_preset"])
 fmt.Println(trace.ContextMetadata["history_compressions"])
 fmt.Println(trace.ContextMetadata["root_prompt_mean_tokens"])

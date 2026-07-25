@@ -223,13 +223,13 @@ func runPolicy(
 	agent := agentrlm.NewAgent("rlm-context-"+policy.Name, module)
 
 	startedAt := time.Now()
-	output, err := agent.Execute(ctx, map[string]any{
+	execution, err := agent.ExecuteWithTrace(ctx, map[string]any{
 		"context": document,
 		"query":   query,
 	})
 	duration := time.Since(startedAt)
 
-	return summarizePolicyRun(policy, agent.LastExecutionTrace(), output, err, duration)
+	return summarizePolicyRun(policy, execution.Trace, execution.Output, err, duration)
 }
 
 func summarizePolicyRun(

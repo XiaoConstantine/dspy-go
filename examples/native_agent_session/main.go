@@ -163,12 +163,13 @@ func run() error {
 	fmt.Printf("  session_db: %s\n", filepath.Clean(sessionDB))
 	fmt.Printf("  workspace: %s\n\n", toolset.Root())
 
-	result, err := agent.Execute(ctx, map[string]any{
+	execution, err := agent.ExecuteWithTrace(ctx, map[string]any{
 		"task": task,
 	})
 	if err != nil {
 		return fmt.Errorf("execute task: %w", err)
 	}
+	result := execution.Output
 
 	fmt.Printf("Task: %s\n\n", task)
 	fmt.Printf("Completed: %t\n", boolValue(result["completed"]))
@@ -181,8 +182,8 @@ func run() error {
 	fmt.Printf("Turns: %d\n", intValue(result["turns"], 0))
 	fmt.Printf("Tool calls: %d\n", intValue(result["tool_calls"], 0))
 
-	if trace := agent.LastExecutionTrace(); trace != nil {
-		fmt.Printf("Trace steps recorded: %d\n", len(trace.Steps))
+	if execution.Trace != nil {
+		fmt.Printf("Trace steps recorded: %d\n", len(execution.Trace.Steps))
 	}
 
 	if strings.TrimSpace(forkName) != "" {

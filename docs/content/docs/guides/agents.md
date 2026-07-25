@@ -20,423 +20,158 @@ dspy-go's **agent package** provides powerful abstractions for building intellig
 
 ## Agent Architecture
 
-An agent in dspy-go combines:
-- **ReAct Module**: Reasoning + Acting pattern
-- **Tool Registry**: Available tools the agent can use
-- **Memory**: Conversation history and context
-- **Orchestrator**: Task decomposition and coordination
+The current agent stack is split into a reusable execution core plus higher-level adapters:
+
+- **`pkg/agents`**: provider-neutral execution contracts, canonical messages, typed events, `RunLoop`, `Harness`, and `ExecutionTrace`
+- **`pkg/agents/native`**: native tool-calling agents with sessions, tool registration, and typed execution/session events
+- **`pkg/agents/react`**: higher-level ReAct-style agents that layer planning, context engineering, and ACE-oriented patterns on top of shared execution contracts
+- **`pkg/agents/rlm`**: agent wrapper around the RLM module with the same execution/trace surface
+- **`pkg/modules.ReAct`**: the signature-oriented text/XML module, separate from native tool-calling execution
+
+A useful mental model is:
+
+```text
+RunLoop   = one model/tool execution algorithm
+Harness   = transcript, active-run lifecycle, and cancellation
+native    = tool-calling adapter with sessions and tools
+react     = higher-level ReAct wrapper
+rlm       = RLM-backed agent wrapper
+modules   = text/XML module layer
+```
+
+If you are starting fresh and want a runnable example, begin with `examples/native_agent_session`.
+If you need a signature-oriented text/XML loop, use `pkg/modules.ReAct` directly.
 
 ---
 
-## ReAct Pattern
+## Choosing an Agent Style
 
-**Reasoning and Acting** - The foundation of intelligent agents.
+### `pkg/modules.ReAct`
 
-### What is ReAct?
+Use `pkg/modules.ReAct` when you want a signature-driven text/XML module that stays close to the core DSPy module model.
+This is the right fit for structured prompt programming and module composition.
 
-ReAct combines:
-1. **Thought**: The agent reasons about what to do
-2. **Action**: The agent uses a tool
-3. **Observation**: The agent sees the tool's result
-4. **Repeat**: Until the task is complete
+### `pkg/agents/native`
 
-### Basic ReAct Agent
+Use `pkg/agents/native` when you want an application-facing adapter for provider-native tool calling, typed execution events, sessions, and operation-scoped traces.
+The reusable execution core remains `pkg/agents` (`RunLoop` and `Harness`).
 
-```go
-package main
+### `pkg/agents/react`
 
-import (
-    "context"
-    "fmt"
-    "log"
+Use `pkg/agents/react` when you want a higher-level ReAct agent wrapper with shared execution contracts plus additional planning/context behavior.
 
-    "github.com/XiaoConstantine/dspy-go/pkg/core"
-    "github.com/XiaoConstantine/dspy-go/pkg/modules"
-    "github.com/XiaoConstantine/dspy-go/pkg/tools"
-)
+### `pkg/agents/rlm`
 
-func main() {
-    // Configure LLM
-    llm, _ := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
-    core.SetDefaultLLM(llm)
-
-    // Create tools
-    calculator := tools.NewCalculatorTool()
-    searchTool := tools.NewSearchTool()
-    weatherTool := tools.NewWeatherTool()
-
-    // Create tool registry
-    registry := tools.NewInMemoryToolRegistry()
-    registry.Register(calculator)
-    registry.Register(searchTool)
-    registry.Register(weatherTool)
-
-    // Define signature for the agent's task
-    signature := core.NewSignature(
-        []core.InputField{
-            {Field: core.NewField("question",
-                core.WithDescription("The question to answer"))},
-        },
-        []core.OutputField{
-            {Field: core.NewField("answer",
-                core.WithDescription("The final answer"))},
-        },
-    )
-
-    // Create ReAct module
-    react := modules.NewReAct(
-        signature,
-        registry,
-        5, // max iterations
-    )
-
-    // Execute
-    ctx := context.Background()
-    result, err := react.Process(ctx, map[string]interface{}{
-        "question": "What is the population of Tokyo divided by 1000?",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Printf("Answer: %s\n", result["answer"])
-}
-```
-
-### How ReAct Works
-
-Given the question "What is the population of Tokyo divided by 1000?":
-
-**Iteration 1:**
-- **Thought**: "I need to find the population of Tokyo"
-- **Action**: `search("Tokyo population")`
-- **Observation**: "Tokyo has a population of approximately 14 million"
-
-**Iteration 2:**
-- **Thought**: "Now I need to divide 14,000,000 by 1000"
-- **Action**: `calculator("14000000 / 1000")`
-- **Observation**: "14000"
-
-**Iteration 3:**
-- **Thought**: "I have the answer"
-- **Action**: `finish("14,000")`
+Use `pkg/agents/rlm` when you want the RLM module exposed as an agent with the same trace and optimization surfaces as other agent families.
 
 ---
 
-## Custom Tools
+## Native Tool-Calling Agent
 
-**Extend agents** with domain-specific tools.
-
-### Creating a Custom Tool
+The most current end-to-end agent surface is `pkg/agents/native`.
+A minimal setup looks like this:
 
 ```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "strings"
-)
-
-// Custom Weather Tool
-type WeatherTool struct{}
-
-func (t *WeatherTool) GetName() string {
-    return "weather"
+llms.EnsureFactory()
+llm, err := llms.NewLLM(apiKey, core.ModelGoogleGeminiFlash)
+if err != nil {
+    panic(err)
 }
 
-func (t *WeatherTool) GetDescription() string {
-    return "Get the current weather for a location. Usage: weather(location)"
+toolset, err := filetools.NewToolset(filetools.Config{
+    Root: workspaceDir,
+})
+if err != nil {
+    panic(err)
 }
 
-func (t *WeatherTool) CanHandle(action string) bool {
-    return strings.HasPrefix(action, "weather(")
+agent, err := native.NewAgent(llm, native.Config{
+    MaxTurns:           12,
+    SystemPrompt:       "Use the workspace tools to inspect files and finish the task.",
+    EventSink:          myExecutionSink,
+    SessionEventSink:   mySessionSink,
+    SessionEventStore:  store,
+    SessionID:          "example-session",
+})
+if err != nil {
+    panic(err)
 }
-
-func (t *WeatherTool) Execute(ctx context.Context, action string) (string, error) {
-    // Parse location from action string
-    location := parseLocation(action)
-
-    // Fetch weather data (your implementation)
-    weather, err := fetchWeather(location)
-    if err != nil {
-        return "", err
+for _, tool := range toolset.Tools() {
+    if err := agent.RegisterTool(tool); err != nil {
+        panic(err)
     }
-
-    return fmt.Sprintf("Weather in %s: %s, %d°C",
-        location, weather.Condition, weather.Temperature), nil
 }
 
-func parseLocation(action string) string {
-    // Extract "Paris" from "weather(Paris)"
-    start := strings.Index(action, "(") + 1
-    end := strings.Index(action, ")")
-    return action[start:end]
+execution, err := agent.ExecuteWithTrace(ctx, map[string]any{
+    "task": "Inspect the workspace and report what you changed.",
+})
+if err != nil {
+    panic(err)
 }
+
+fmt.Println(execution.Output["final_answer"])
+fmt.Println(execution.Trace.TerminationCause)
 ```
 
-### Using Custom Tools
+See `examples/native_agent_session` for a compilable version with SQLite-backed session recall, branching, and typed event printing.
 
-```go
-// Register custom tool
-registry := tools.NewInMemoryToolRegistry()
-registry.Register(&WeatherTool{})
-registry.Register(&DatabaseTool{})
-registry.Register(&EmailTool{})
+### How Native Execution Works
 
-// Create ReAct agent with custom tools
-react := modules.NewReAct(signature, registry, 10)
-```
+A native run typically follows this lifecycle:
 
-**[Full Agents Example →](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/agents)**
+1. the model receives the task plus current transcript state
+2. the model proposes tool calls or a finish action
+3. registered tools execute through the shared `RunLoop`
+4. typed `ExecutionEvent` values report run, turn, message, and tool outcomes
+5. `ExecutionTrace` is projected from those events
+
+When you need the output and trace for the same run, prefer `ExecuteWithTrace(...)` over reading a later mutable trace accessor.
 
 ---
 
-## Memory Management
+## Tools
 
-**Conversation history** and context tracking.
+Tool registration is explicit: create or load tools, then register them on the agent.
+For a workspace-safe file baseline, use `pkg/tools/files`, which provides rooted `ls`, `read`, `write`, and `edit` operations.
 
-### Buffer Memory
+`pkg/tools/defaults` also includes unrestricted `bash`. Its `Root` config sets the command's initial working directory; it is not an OS sandbox and does not prevent access to absolute paths, the user's home directory, the network, or other process-visible resources. Enable shell access only as an explicit trusted opt-in.
 
-Store recent conversation turns:
-
-```go
-package main
-
-import (
-    "context"
-    "github.com/XiaoConstantine/dspy-go/pkg/agents/memory"
-)
-
-func main() {
-    // Create buffer memory (keeps last 10 exchanges)
-    mem := memory.NewBufferMemory(10)
-
-    ctx := context.Background()
-
-    // Add messages
-    mem.Add(ctx, "user", "Hello, how can you help me?")
-    mem.Add(ctx, "assistant", "I can answer questions and help with tasks.")
-    mem.Add(ctx, "user", "What's the weather in Paris?")
-    mem.Add(ctx, "assistant", "The weather in Paris is sunny, 22°C.")
-
-    // Retrieve conversation history
-    history, err := mem.Get(ctx)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Use history in prompts
-    for _, msg := range history {
-        fmt.Printf("%s: %s\n", msg.Role, msg.Content)
-    }
-}
-```
-
-### Summary Memory
-
-**Compress long conversations** into summaries:
-
-```go
-// Create summary memory
-summaryMem := memory.NewSummaryMemory(
-    core.GetDefaultLLM(),
-    100, // summarize after 100 messages
-)
-
-// Add messages (automatically summarizes when threshold is reached)
-summaryMem.Add(ctx, "user", "Long conversation...")
-summaryMem.Add(ctx, "assistant", "Response...")
-
-// Get summarized history
-history, err := summaryMem.Get(ctx)
-```
-
-### Using Memory with Agents
-
-```go
-// Create agent with memory
-mem := memory.NewBufferMemory(20)
-
-// In your agent loop
-for {
-    userInput := getUserInput()
-
-    // Add user message to memory
-    mem.Add(ctx, "user", userInput)
-
-    // Get conversation history
-    history, _ := mem.Get(ctx)
-
-    // Include history in agent context
-    result, err := react.Process(ctx, map[string]interface{}{
-        "question": userInput,
-        "history": history,
-    })
-
-    // Add assistant response to memory
-    mem.Add(ctx, "assistant", result["answer"].(string))
-
-    fmt.Println(result["answer"])
-}
-```
+If you need custom tools, implement the current `core.Tool` contract rather than the older string-action examples that appeared in pre-Phase-10 material.
+For a current end-to-end example, use the native agent examples and built-in toolsets as the reference surface.
 
 ---
 
-## Orchestrator
+## Memory, Sessions, and State
 
-**Task decomposition** and multi-agent coordination.
+The reusable execution layer now centers state around transcripts, harness lifecycle, and optional native session persistence.
+For native agents, `SessionEventStore` performs recall and persistence. `SessionEventSink` only observes typed session lifecycle notifications; it does not store session state.
 
-### Basic Orchestrator
+Use this split:
 
-```go
-package main
+- **short-lived in-memory execution state**: `Harness` / current transcript
+- **persistent native recall and branching**: `native` session event store APIs
+- **application-owned long-term memory**: your own storage layer on top of traces, sessions, or exported summaries
 
-import (
-    "context"
-    "github.com/XiaoConstantine/dspy-go/pkg/agents"
-    "github.com/XiaoConstantine/dspy-go/pkg/modules"
-)
-
-func main() {
-    // Create orchestrator
-    orchestrator := agents.NewOrchestrator()
-
-    // Define subtasks with different modules
-    researchTask := agents.NewTask("research", researchModule)
-    analyzeTask := agents.NewTask("analyze", analyzeModule)
-    summarizeTask := agents.NewTask("summarize", summarizeModule)
-
-    // Add tasks to orchestrator
-    orchestrator.AddTask(researchTask)
-    orchestrator.AddTask(analyzeTask)
-    orchestrator.AddTask(summarizeTask)
-
-    // Execute orchestration
-    ctx := context.Background()
-    result, err := orchestrator.Execute(ctx, map[string]interface{}{
-        "topic": "Impact of AI on healthcare",
-    })
-
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Printf("Final Result: %v\n", result)
-}
-```
-
-### Task Dependencies
-
-```go
-// Create tasks with dependencies
-task1 := agents.NewTask("fetch_data", fetchModule)
-task2 := agents.NewTask("process_data", processModule)
-task3 := agents.NewTask("analyze", analyzeModule)
-
-// Set dependencies (task2 depends on task1, task3 depends on task2)
-task2.DependsOn(task1)
-task3.DependsOn(task2)
-
-// Orchestrator automatically handles execution order
-orchestrator.AddTask(task1)
-orchestrator.AddTask(task2)
-orchestrator.AddTask(task3)
-```
+Again, `examples/native_agent_session` is the current runnable reference.
 
 ---
 
-## Advanced Agent Patterns
+## Orchestration and Multi-Agent Work
 
-### Multi-Agent System
+For multi-agent composition, prefer the current A2A and communication/orchestration surfaces documented in the A2A guide instead of the older `NewOrchestrator` / `NewTask` examples that no longer reflect exported APIs.
 
-**Specialized agents** working together:
+Good fits are:
 
-```go
-package main
+- **A2A composition** for explicit agent-to-agent delegation
+- **shared `ScopedExecutionAgent` / `ExecuteWithTrace(...)`** when evaluators or orchestrators must keep outputs correlated with traces
+- **workflow examples** under `examples/agents` for broader orchestration patterns
 
-import (
-    "context"
-    "github.com/XiaoConstantine/dspy-go/pkg/agents"
-)
+---
 
-type MultiAgentSystem struct {
-    researcher  *Agent
-    analyst     *Agent
-    writer      *Agent
-    coordinator *agents.Orchestrator
-}
+## Reflection Patterns
 
-func NewMultiAgentSystem() *MultiAgentSystem {
-    return &MultiAgentSystem{
-        researcher:  NewResearchAgent(),
-        analyst:     NewAnalystAgent(),
-        writer:      NewWriterAgent(),
-        coordinator: agents.NewOrchestrator(),
-    }
-}
-
-func (m *MultiAgentSystem) Execute(ctx context.Context, task string) (string, error) {
-    // 1. Research phase
-    researchTask := agents.NewTask("research", m.researcher.module)
-    research, err := researchTask.Execute(ctx, map[string]interface{}{
-        "task": task,
-    })
-
-    // 2. Analysis phase
-    analysisTask := agents.NewTask("analyze", m.analyst.module)
-    analysis, err := analysisTask.Execute(ctx, map[string]interface{}{
-        "research": research,
-    })
-
-    // 3. Writing phase
-    writingTask := agents.NewTask("write", m.writer.module)
-    result, err := writingTask.Execute(ctx, map[string]interface{}{
-        "analysis": analysis,
-    })
-
-    return result["output"].(string), nil
-}
-```
-
-### Agent with Reflection
-
-**Self-improvement** through reflection:
-
-```go
-type ReflectiveAgent struct {
-    react      *modules.ReAct
-    memory     memory.Memory
-    reflection *modules.ChainOfThought
-}
-
-func (a *ReflectiveAgent) ExecuteWithReflection(ctx context.Context, task string) (string, error) {
-    // 1. Execute task
-    result, err := a.react.Process(ctx, map[string]interface{}{
-        "question": task,
-    })
-
-    // 2. Reflect on performance
-    reflection, err := a.reflection.Process(ctx, map[string]interface{}{
-        "action": "reflect on previous attempt",
-        "result": result,
-        "task": task,
-    })
-
-    // 3. Store reflection for future improvement
-    a.memory.Add(ctx, "reflection", reflection["rationale"].(string))
-
-    // 4. Retry if needed based on reflection
-    if shouldRetry(reflection) {
-        return a.react.Process(ctx, map[string]interface{}{
-            "question": task,
-            "reflection": reflection,
-        })
-    }
-
-    return result["answer"].(string), nil
-}
-```
+Reflection and self-improvement now show up primarily through ACE and the optimizable-agent surfaces below, rather than through the older standalone reflection sketches.
+If you want runnable self-improvement examples, jump to the ACE section and the optimization examples.
 
 ---
 
@@ -642,132 +377,17 @@ go run ./examples/ace_react/... --learnings-dir=./my_learnings
 
 ---
 
-## Production Agent Example
+## Stateful Agent Applications
 
-**Complete production-ready agent** with all features:
+Stateful applications should compose the current execution surfaces rather than copy an application-specific agent loop:
 
-```go
-package main
+- use `Harness` for transcript ownership, overlap protection, and cancellation
+- use `ExecuteWithTrace(...)` when output/trace correlation matters
+- use a native `SessionEventStore` when runs need persistent recall or branching
+- consume `SessionEventSink` only for typed lifecycle notifications
+- keep application-specific memory, workspace ownership, and UI state outside the reusable execution loop
 
-import (
-    "context"
-    "fmt"
-    "log"
-
-    "github.com/XiaoConstantine/dspy-go/pkg/core"
-    "github.com/XiaoConstantine/dspy-go/pkg/modules"
-    "github.com/XiaoConstantine/dspy-go/pkg/tools"
-    "github.com/XiaoConstantine/dspy-go/pkg/agents/memory"
-)
-
-type ProductionAgent struct {
-    react    *modules.ReAct
-    memory   memory.Memory
-    registry core.ToolRegistry
-}
-
-func NewProductionAgent() *ProductionAgent {
-    // Configure LLM
-    llm, _ := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
-    core.SetDefaultLLM(llm)
-
-    // Create Smart Tool Registry
-    registry := tools.NewSmartToolRegistry(&tools.SmartToolRegistryConfig{
-        AutoDiscoveryEnabled:       true,
-        PerformanceTrackingEnabled: true,
-        FallbackEnabled:           true,
-    })
-
-    // Register tools
-    registry.Register(tools.NewCalculatorTool())
-    registry.Register(tools.NewSearchTool())
-    registry.Register(tools.NewDatabaseTool())
-    registry.Register(tools.NewAPITool())
-
-    // Create signature
-    signature := core.NewSignature(
-        []core.InputField{
-            {Field: core.NewField("question")},
-            {Field: core.NewField("history")},
-        },
-        []core.OutputField{
-            {Field: core.NewField("answer")},
-        },
-    )
-
-    // Create ReAct module
-    react := modules.NewReAct(signature, registry, 10)
-
-    // Create memory
-    memory := memory.NewBufferMemory(50)
-
-    return &ProductionAgent{
-        react:    react,
-        memory:   memory,
-        registry: registry,
-    }
-}
-
-func (a *ProductionAgent) Chat(ctx context.Context, userInput string) (string, error) {
-    // Add user message to memory
-    a.memory.Add(ctx, "user", userInput)
-
-    // Get conversation history
-    history, err := a.memory.Get(ctx)
-    if err != nil {
-        return "", err
-    }
-
-    // Execute with history
-    result, err := a.react.Process(ctx, map[string]interface{}{
-        "question": userInput,
-        "history":  formatHistory(history),
-    })
-    if err != nil {
-        return "", err
-    }
-
-    answer := result["answer"].(string)
-
-    // Add assistant response to memory
-    a.memory.Add(ctx, "assistant", answer)
-
-    return answer, nil
-}
-
-func formatHistory(history []memory.Message) string {
-    var formatted string
-    for _, msg := range history {
-        formatted += fmt.Sprintf("%s: %s\n", msg.Role, msg.Content)
-    }
-    return formatted
-}
-
-func main() {
-    agent := NewProductionAgent()
-
-    ctx := context.Background()
-
-    // Interactive loop
-    for {
-        fmt.Print("You: ")
-        var input string
-        fmt.Scanln(&input)
-
-        if input == "exit" {
-            break
-        }
-
-        response, err := agent.Chat(ctx, input)
-        if err != nil {
-            log.Printf("Error: %v\n", err)
-            continue
-        }
-
-        fmt.Printf("Agent: %s\n\n", response)
-    }
-}
-```
+The runnable `examples/native_agent_session` program demonstrates this composition. `Maestro` is a larger application example that adds a workspace session and frontend around the same execution spine.
 
 ---
 
@@ -775,7 +395,8 @@ func main() {
 
 Native tool execution now uses the provider-neutral contracts in `pkg/agents`.
 Consume typed execution events through `EventSink`, native-only session events
-through `SessionEventSink`, and traces through `LastExecutionTrace`:
+through `SessionEventSink`, and prefer `ExecuteWithTrace` when you need the
+output and trace from the same execution:
 
 ```go
 var executionEvents []agents.ExecutionEvent
@@ -795,27 +416,27 @@ if err != nil {
     panic(err)
 }
 
-result, err := agent.Execute(context.Background(), map[string]any{
+execution, err := agent.ExecuteWithTrace(context.Background(), map[string]any{
     "task": "Inspect the repository and finish.",
 })
 if err != nil {
     panic(err)
 }
 
-trace := agent.LastExecutionTrace()
-fmt.Println(result["completed"], trace.TerminationCause)
+fmt.Println(execution.Output["completed"], execution.Trace.TerminationCause)
 ```
 
 `ExecutionEvent` payloads describe balanced run and turn lifecycles plus
 balanced terminal outcomes for proposed tool calls. Message additions are
 immutable point-in-time events. `ExecutionTrace` is projected from those
-canonical events and is
-defensively cloned before being returned to callers.
+canonical events and is defensively cloned before being returned to callers.
+Use `ExecuteWithTrace` when you need operation-scoped correlation instead of a
+later mutable trace lookup.
 
 ### Pre-1.0 migration notes
 
-The reusable execution-layer cleanup is a breaking change in the next `v0.x`
-minor release:
+The reusable execution-layer cleanup shipped as a pre-1.0 breaking change in
+`v0.86.0`:
 
 - replace `native.Config.OnEvent` with `native.Config.EventSink`
 - replace `agents.AgentEvent` string/map callbacks with typed
@@ -823,14 +444,15 @@ minor release:
 - replace native `session_loaded` and `session_persisted` callback maps with
   `native.SessionEventSink`
 - replace `LastNativeTrace` and native-specific trace structs with
-  `LastExecutionTrace`
+  `agents.ExecutionTrace`; prefer `ExecuteWithTrace` when you need the trace
+  correlated with one specific execution
 - configure native ReAct execution through
   `react.WithNativeFunctionCalling(...)`; direct `modules.ReAct` remains the
   text/XML module and no longer installs a native function-calling interceptor
 
-Users that need the removed APIs should remain on the previous minor series
-while migrating. See `examples/native_agent_session` for a compilable typed
-execution/session event example.
+Users that still need the removed APIs should remain on the previous minor
+series while migrating. See `examples/native_agent_session` for a compilable
+typed execution/session event example.
 
 ## Optimizable Agents
 
@@ -908,7 +530,7 @@ See:
 ## Examples
 
 ### Complete Agent Examples
-- **[Agents Package Examples](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/agents)** - ReAct, orchestrator, memory
+- **[Agents Package Examples](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/agents)** - workflow-style orchestration examples
 - **[ACE Basic Example](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/ace_basic)** - Standalone ACE usage (no LLM)
 - **[ACE + ReAct Example](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/ace_react)** - Self-improving ReAct agent
 - **[Maestro](https://github.com/XiaoConstantine/maestro)** - Production code review agent
@@ -918,7 +540,7 @@ See:
 
 ```bash
 # Basic agent examples
-cd examples/agents && go run main.go
+cd examples/agents && go run .
 
 # ACE examples
 go run ./examples/ace_basic/...

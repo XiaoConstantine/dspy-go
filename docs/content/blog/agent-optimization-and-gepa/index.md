@@ -103,7 +103,7 @@ Once core GEPA was in much better shape, the next gap was the agent bridge.
 - `SetArtifacts(...)`
 - `Clone()`
 
-Some agents also expose `LastExecutionTrace()`, which lets evaluators attach richer side information, but that is intentionally optional rather than part of the base `OptimizableAgent` contract.
+Some agents also expose `ExecuteWithTrace(...)` or `LastExecutionTrace()`, which lets evaluators attach richer side information. Prefer `ExecuteWithTrace(...)` when it is available so output and trace stay correlated for one execution; `LastExecutionTrace()` remains an optional compatibility fallback rather than part of the base `OptimizableAgent` contract.
 
 The GEPA bridge around that interface now lives in the agent optimizer layer. The important shift is that the user-facing story is no longer just `Optimize(...)` followed by an in-memory `SetArtifacts(...)`. It is now a real workflow:
 
