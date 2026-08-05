@@ -568,7 +568,7 @@ func (m *MIPRO) runOptimizationLoop(
 		}
 		// Report results back to the TPE optimizer
 		if err := m.searchStrategy.UpdateResults(params, score); err != nil {
-			m.logger.Error(ctx, "Failed to update search results: %v", err)
+			return program, fmt.Errorf("failed to update search results: %w", err)
 		}
 
 		// Update optimization state and check for best program

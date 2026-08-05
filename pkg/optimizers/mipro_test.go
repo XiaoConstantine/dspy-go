@@ -573,6 +573,42 @@ func TestMIPROCompileResetsReusedSearchState(t *testing.T) {
 	strategy.AssertExpectations(t)
 }
 
+func TestMIPRORunOptimizationLoop_PropagatesUpdateResultsError(t *testing.T) {
+	mipro := createTestMIPRO(t)
+	strategy := new(MockSearchStrategy)
+	params := map[string]any{"module_0_instruction": float64(0)}
+	updateErr := errors.New(errors.Unknown, "search state rejected result")
+	strategy.On("SuggestParams", mock.Anything).Return(params, nil).Once()
+	strategy.On("UpdateResults", params, mock.AnythingOfType("float64")).Return(updateErr).Once()
+	mipro.searchStrategy = strategy
+	mipro.config.NumTrials = 1
+
+	program := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"test": newInstructionModule("test", "base")},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return modules["test"].Process(ctx, inputs)
+			}
+		},
+	)
+	dataset := testutil.NewMockDataset([]core.Example{{
+		Inputs:  map[string]any{"input": "sample"},
+		Outputs: map[string]any{"output": "ok"},
+	}})
+
+	_, err := mipro.runOptimizationLoop(
+		context.Background(),
+		program,
+		dataset,
+		nil,
+		map[int][]string{0: {"candidate"}},
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, updateErr)
+	assert.Contains(t, err.Error(), "failed to update search results")
+	strategy.AssertExpectations(t)
+}
+
 // MockTPEOptimizer implements a simplified version of Tree-structured Parzen Estimators for testing.
 type MockTPEOptimizer struct {
 	gamma float64
