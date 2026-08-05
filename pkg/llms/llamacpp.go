@@ -486,9 +486,11 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 	}
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST",
+	streamCtx, cancelFunc := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(streamCtx, "POST",
 		o.GetEndpointConfig().BaseURL+"/completion", bytes.NewBuffer(jsonData))
 	if err != nil {
+		cancelFunc()
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidInput, "failed to create request"),
 			errors.Fields{
@@ -501,8 +503,6 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 	}
 
 	// Create stream context and cancellation function
-	streamCtx, cancelFunc := context.WithCancel(ctx)
-
 	// Create channel for stream chunks
 	chunkChan := make(chan core.StreamChunk)
 
@@ -516,17 +516,28 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 	go func() {
 		defer close(chunkChan)
 		defer cancelFunc() // Ensure context is cancelled when goroutine exits
+		send := func(chunk core.StreamChunk) bool {
+			select {
+			case chunkChan <- chunk:
+				return true
+			case <-streamCtx.Done():
+				return false
+			}
+		}
 
 		// Send HTTP request
 		resp, err := o.GetHTTPClient().Do(req)
 		if err != nil {
-			chunkChan <- core.StreamChunk{
+			if streamCtx.Err() != nil {
+				return
+			}
+			send(core.StreamChunk{
 				Error: errors.WithFields(
 					errors.Wrap(err, errors.LLMGenerationFailed, "failed to send request"),
 					errors.Fields{
 						"model": o.ModelID(),
 					}),
-			}
+			})
 			return
 		}
 		defer resp.Body.Close()
@@ -534,7 +545,7 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 		// Check response status
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			chunkChan <- core.StreamChunk{
+			send(core.StreamChunk{
 				Error: errors.WithFields(
 					errors.New(errors.LLMGenerationFailed, fmt.Sprintf(
 						"API request failed with status code %d", resp.StatusCode)),
@@ -543,7 +554,7 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 						"status_code":   resp.StatusCode,
 						"response_body": string(body),
 					}),
-			}
+			})
 			return
 		}
 
@@ -583,34 +594,43 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 				}
 
 				// Send the chunk
-				chunkChan <- core.StreamChunk{
+				if !send(core.StreamChunk{
 					Content: streamResp.Content,
 					Usage:   tokenInfo,
+				}) {
+					return
 				}
 			}
 
 			// Check if we've reached the end of the stream
 			if streamResp.Stop {
 				// Send completion signal
-				chunkChan <- core.StreamChunk{Done: true}
+				send(core.StreamChunk{Done: true})
 				return
 			}
 		}
 
-		// Handle scanner errors
+		// Handle scanner errors. Cancel closes the response body and commonly
+		// surfaces here as a read error; that is expected shutdown, not a stream
+		// failure for the caller.
 		if err := scanner.Err(); err != nil {
-			chunkChan <- core.StreamChunk{
+			if streamCtx.Err() != nil {
+				return
+			}
+			send(core.StreamChunk{
 				Error: errors.WithFields(
 					errors.Wrap(err, errors.LLMGenerationFailed, "error reading stream"),
 					errors.Fields{
 						"model": o.ModelID(),
 					}),
-			}
+			})
 			return
 		}
 
-		// If we get here without seeing a 'stop' flag, still signal completion
-		chunkChan <- core.StreamChunk{Done: true}
+		// If we get here without seeing a 'stop' flag, still signal completion.
+		if streamCtx.Err() == nil {
+			send(core.StreamChunk{Done: true})
+		}
 	}()
 
 	return response, nil

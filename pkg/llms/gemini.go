@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -1288,8 +1286,10 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 	// Add streaming parameter
 	streamURL := constructRequestURL(g.GetEndpointConfig(), g.apiKey) + "&alt=sse"
 
-	req, err := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewBuffer(jsonData))
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(streamCtx, "POST", streamURL, bytes.NewBuffer(jsonData))
 	if err != nil {
+		cancelStream()
 		return nil, errors.WithFields(
 			errors.New(errors.InvalidInput, fmt.Sprintf("failed to create request: %v", err)),
 			errors.Fields{"model": g.ModelID()})
@@ -1302,17 +1302,6 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 
 	// Create channels and response
 	chunkChan := make(chan core.StreamChunk)
-	streamCtx, cancelStream := context.WithCancel(ctx)
-
-	// Used to protect against multiple closes
-	var channelClosed sync.Once
-
-	// Create a safe way to close the channel
-	safeCloseChannel := func() {
-		channelClosed.Do(func() {
-			close(chunkChan)
-		})
-	}
 
 	response := &core.StreamResponse{
 		ChunkChannel: chunkChan,
@@ -1323,7 +1312,16 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 
 	// Start streaming goroutine
 	go func() {
-		defer safeCloseChannel()
+		defer close(chunkChan)
+		defer cancelStream()
+		send := func(chunk core.StreamChunk) bool {
+			select {
+			case chunkChan <- chunk:
+				return true
+			case <-streamCtx.Done():
+				return false
+			}
+		}
 
 		client := g.GetHTTPClient()
 		resp, err := client.Do(req)
@@ -1331,61 +1329,25 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 			if streamCtx.Err() != nil {
 				return
 			}
-			chunkChan <- core.StreamChunk{
+			send(core.StreamChunk{
 				Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("request failed: %v", err)),
-			}
+			})
 			return
 		}
 		defer resp.Body.Close()
 
 		reader := bufio.NewReader(resp.Body)
-
 		for {
-			select {
-			case <-streamCtx.Done():
-				return
-			default:
-			}
-
-			readCtx, cancel := context.WithTimeout(streamCtx, 500*time.Millisecond)
-
-			ch := make(chan struct {
-				line string
-				err  error
-			}, 1)
-
-			go func() {
-				line, err := reader.ReadString('\n')
-				ch <- struct {
-					line string
-					err  error
-				}{line, err}
-			}()
-
-			var line string
-			var readErr error
-
-			select {
-			case result := <-ch:
-				line = result.line
-				readErr = result.err
-				cancel()
-			case <-readCtx.Done():
-				cancel()
-				if streamCtx.Err() != nil {
-					return
-				}
-				continue
-			}
+			line, readErr := reader.ReadString('\n')
 
 			if readErr != nil {
 				if readErr == io.EOF || streamCtx.Err() != nil {
 					return
 				}
 				if streamCtx.Err() == nil {
-					chunkChan <- core.StreamChunk{
+					send(core.StreamChunk{
 						Error: errors.New(errors.LLMGenerationFailed, fmt.Sprintf("stream read error: %v", readErr)),
-					}
+					})
 				}
 				return
 			}
@@ -1409,8 +1371,8 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 
 				if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
 					content := chunk.Candidates[0].Content.Parts[0].Text
-					if streamCtx.Err() == nil {
-						chunkChan <- core.StreamChunk{Content: content}
+					if !send(core.StreamChunk{Content: content}) {
+						return
 					}
 				}
 			}

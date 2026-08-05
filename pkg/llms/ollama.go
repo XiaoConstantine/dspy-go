@@ -419,18 +419,26 @@ func (o *OllamaLLM) streamGenerateOpenAI(ctx context.Context, prompt string, opt
 	go func() {
 		defer close(chunkChan)
 		defer cancelStream()
+		send := func(chunk core.StreamChunk) bool {
+			select {
+			case chunkChan <- chunk:
+				return true
+			case <-streamCtx.Done():
+				return false
+			}
+		}
 
 		// Make streaming request
 		jsonData, err := json.Marshal(req)
 		if err != nil {
-			chunkChan <- core.StreamChunk{Error: err}
+			send(core.StreamChunk{Error: err})
 			return
 		}
 
 		httpReq, err := http.NewRequestWithContext(streamCtx, "POST",
 			o.GetEndpointConfig().BaseURL+"/v1/chat/completions", bytes.NewBuffer(jsonData))
 		if err != nil {
-			chunkChan <- core.StreamChunk{Error: err}
+			send(core.StreamChunk{Error: err})
 			return
 		}
 
@@ -440,18 +448,21 @@ func (o *OllamaLLM) streamGenerateOpenAI(ctx context.Context, prompt string, opt
 
 		resp, err := o.GetHTTPClient().Do(httpReq)
 		if err != nil {
-			chunkChan <- core.StreamChunk{Error: err}
+			if streamCtx.Err() != nil {
+				return
+			}
+			send(core.StreamChunk{Error: err})
 			return
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			chunkChan <- core.StreamChunk{Error: fmt.Errorf("HTTP %d", resp.StatusCode)}
+			send(core.StreamChunk{Error: fmt.Errorf("HTTP %d", resp.StatusCode)})
 			return
 		}
 
 		// Parse SSE format
-		o.parseOpenAIStreamResponse(resp.Body, chunkChan)
+		o.parseOpenAIStreamResponse(streamCtx, resp.Body, send)
 	}()
 
 	return response, nil
@@ -477,9 +488,11 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 		return nil, errors.Wrap(err, errors.InvalidInput, "failed to marshal request")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST",
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(streamCtx, "POST",
 		o.GetEndpointConfig().BaseURL+"/api/generate", bytes.NewBuffer(jsonData))
 	if err != nil {
+		cancelStream()
 		return nil, errors.Wrap(err, errors.InvalidInput, "failed to create request")
 	}
 
@@ -488,8 +501,6 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 	}
 
 	chunkChan := make(chan core.StreamChunk)
-	streamCtx, cancelStream := context.WithCancel(ctx)
-
 	response := &core.StreamResponse{
 		ChunkChannel: chunkChan,
 		Cancel:       cancelStream,
@@ -497,10 +508,22 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 
 	go func() {
 		defer close(chunkChan)
+		defer cancelStream()
+		send := func(chunk core.StreamChunk) bool {
+			select {
+			case chunkChan <- chunk:
+				return true
+			case <-streamCtx.Done():
+				return false
+			}
+		}
 
 		resp, err := o.GetHTTPClient().Do(req)
 		if err != nil {
-			chunkChan <- core.StreamChunk{Error: err}
+			if streamCtx.Err() != nil {
+				return
+			}
+			send(core.StreamChunk{Error: err})
 			return
 		}
 		defer resp.Body.Close()
@@ -526,10 +549,12 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 					continue
 				}
 
-				chunkChan <- core.StreamChunk{Content: response.Response}
+				if !send(core.StreamChunk{Content: response.Response}) {
+					return
+				}
 
 				if response.Done {
-					chunkChan <- core.StreamChunk{Done: true}
+					send(core.StreamChunk{Done: true})
 					return
 				}
 			}
@@ -1004,7 +1029,7 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 // Helper functions
 
 // parseOpenAIStreamResponse parses OpenAI SSE format.
-func (o *OllamaLLM) parseOpenAIStreamResponse(body io.Reader, chunkChan chan<- core.StreamChunk) {
+func (o *OllamaLLM) parseOpenAIStreamResponse(ctx context.Context, body io.Reader, send func(core.StreamChunk) bool) {
 	scanner := bufio.NewScanner(body)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1013,7 +1038,7 @@ func (o *OllamaLLM) parseOpenAIStreamResponse(body io.Reader, chunkChan chan<- c
 			data := strings.TrimPrefix(line, "data: ")
 
 			if data == "[DONE]" {
-				chunkChan <- core.StreamChunk{Done: true}
+				send(core.StreamChunk{Done: true})
 				return
 			}
 
@@ -1023,15 +1048,19 @@ func (o *OllamaLLM) parseOpenAIStreamResponse(body io.Reader, chunkChan chan<- c
 			}
 
 			if len(streamResp.Choices) > 0 && streamResp.Choices[0].Delta.Content != "" {
-				chunkChan <- core.StreamChunk{
+				if !send(core.StreamChunk{
 					Content: streamResp.Choices[0].Delta.Content,
+				}) {
+					return
 				}
 			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		chunkChan <- core.StreamChunk{Error: err}
+		if ctx.Err() == nil {
+			send(core.StreamChunk{Error: err})
+		}
 	}
 }
 
