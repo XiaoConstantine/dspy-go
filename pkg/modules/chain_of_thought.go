@@ -147,7 +147,9 @@ func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map
 	}
 
 	// Create correct ModuleInfo for ChainOfThought (not Predict)
-	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature()).WithLLM(c.Predict.LLM)
+	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature()).
+		WithLLM(c.Predict.LLM).
+		WithDefaultOptions(c.Predict.defaultOptions)
 
 	// Create handler that calls our own Process method
 	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {

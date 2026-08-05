@@ -82,13 +82,14 @@ func StructuredOutputInterceptor(config StructuredOutputConfig) core.ModuleInter
 		signature := info.Signature
 
 		// Build the prompt with JSON schema instructions
-		prompt := buildStructuredPrompt(inputs, signature, config)
+		prompt := BuildStructuredPrompt(inputs, signature, config)
 
 		logger.Debug(ctx, "Using structured JSON output for %d output fields", len(signature.Outputs))
 
 		// Call LLM with JSON output
 		core.RecordLLMCall(ctx, llm)
-		result, err := llm.GenerateWithJSON(ctx, prompt)
+		callOptions := resolveModuleOptions(info, opts)
+		result, err := llm.GenerateWithJSON(ctx, prompt, callOptions.GenerateOptions...)
 		if err != nil {
 			logger.Warn(ctx, "GenerateWithJSON failed: %v, falling back to text-based parsing", err)
 			// Fall back to handler on error - the text-based parsing might still work
@@ -106,8 +107,25 @@ func supportsJSONOutput(llm core.CapabilityProvider) bool {
 	return slices.Contains(capabilities, core.CapabilityJSON)
 }
 
+func resolveModuleOptions(info *core.ModuleInfo, opts []core.Option) *core.ModuleOptions {
+	callOptions := &core.ModuleOptions{}
+	for _, opt := range opts {
+		opt(callOptions)
+	}
+	if info == nil {
+		return callOptions
+	}
+	return info.DefaultOptions.MergeWith(callOptions)
+}
+
 // buildStructuredPrompt constructs a prompt that instructs the LLM to output JSON.
 func buildStructuredPrompt(inputs map[string]any, signature core.Signature, config StructuredOutputConfig) string {
+	return BuildStructuredPrompt(inputs, signature, config)
+}
+
+// BuildStructuredPrompt constructs the native JSON prompt used by the
+// structured-output interceptor and modules with an explicit JSON mode.
+func BuildStructuredPrompt(inputs map[string]any, signature core.Signature, config StructuredOutputConfig) string {
 	var sb strings.Builder
 
 	// Add custom instructions if provided
@@ -260,7 +278,8 @@ func ChainOfThoughtStructuredInterceptor(config ChainOfThoughtStructuredConfig) 
 		logger.Debug(ctx, "Using structured JSON output for ChainOfThought with reasoning field '%s'", reasoningField)
 
 		core.RecordLLMCall(ctx, llm)
-		result, err := llm.GenerateWithJSON(ctx, prompt)
+		callOptions := resolveModuleOptions(info, opts)
+		result, err := llm.GenerateWithJSON(ctx, prompt, callOptions.GenerateOptions...)
 		if err != nil {
 			logger.Warn(ctx, "GenerateWithJSON failed for CoT: %v, falling back", err)
 			return handler(ctx, inputs, opts...)

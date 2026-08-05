@@ -14,6 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type jsonCapablePredictLLM struct {
+	*testutil.MockLLM
+}
+
+func (m *jsonCapablePredictLLM) Capabilities() []core.Capability {
+	return []core.Capability{core.CapabilityChat, core.CapabilityJSON}
+}
+
 func TestPredict(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)
@@ -166,6 +174,146 @@ func TestPredict_WithGenerateOptions(t *testing.T) {
 	// We can't directly test the options since they're opaque functions,
 	// but we can verify the mock was called with some options
 	mockLLM.AssertExpectations(t)
+}
+
+func TestPredict_ParseSignatureEndToEnd(t *testing.T) {
+	signature, err := core.ParseSignature("question -> answer")
+	require.NoError(t, err)
+	mockLLM := new(testutil.MockLLM)
+	mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+		Return(&core.LLMResponse{Content: "answer:\n42"}, nil).Once()
+	predict := NewPredict(signature)
+	predict.SetLLM(mockLLM)
+
+	outputs, err := predict.Process(context.Background(), map[string]any{"question": "meaning?"})
+	require.NoError(t, err)
+	assert.Equal(t, "42", outputs["answer"])
+	mockLLM.AssertExpectations(t)
+}
+
+func TestPredict_StructuredOutputUsesDemosAndMergedOptions(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	).WithInstruction("Answer precisely")
+	mockBase := new(testutil.MockLLM)
+	mockLLM := &jsonCapablePredictLLM{MockLLM: mockBase}
+	var capturedPrompt string
+	var capturedOptions *core.GenerateOptions
+	mockBase.On("GenerateWithJSON", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+		capturedPrompt = prompt
+		return true
+	}), mock.MatchedBy(func(options []core.GenerateOption) bool {
+		capturedOptions = core.NewGenerateOptions()
+		for _, option := range options {
+			option(capturedOptions)
+		}
+		return true
+	})).Return(map[string]any{"answer": "Paris"}, nil).Once()
+
+	predict := NewPredict(signature).WithStructuredOutput()
+	predict.SetLLM(mockLLM)
+	predict.SetDemos([]core.Example{{
+		Inputs:  map[string]any{"question": "Demo question"},
+		Outputs: map[string]any{"answer": "Demo answer"},
+	}})
+	predict.WithDefaultOptions(core.WithGenerateOptions(core.WithMaxTokens(123)))
+
+	outputs, err := predict.Process(context.Background(), map[string]any{"question": "Capital?"},
+		core.WithGenerateOptions(core.WithTemperature(0.2)))
+	require.NoError(t, err)
+	assert.Equal(t, "Paris", outputs["answer"])
+	assert.Contains(t, capturedPrompt, "Answer precisely")
+	assert.Contains(t, capturedPrompt, "Demo question")
+	assert.Contains(t, capturedPrompt, "Demo answer")
+	require.NotNil(t, capturedOptions)
+	assert.Equal(t, 123, capturedOptions.MaxTokens)
+	assert.Equal(t, 0.2, capturedOptions.Temperature)
+	assert.False(t, predict.IsXMLModeEnabled())
+	mockBase.AssertExpectations(t)
+}
+
+func TestPredict_StructuredOutputPreservesExtraFields(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	mockBase := new(testutil.MockLLM)
+	mockLLM := &jsonCapablePredictLLM{MockLLM: mockBase}
+	mockBase.On("GenerateWithJSON", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+		Return(map[string]any{
+			"answer":         "Paris",
+			"provider_trace": "trace-123",
+		}, nil).Once()
+	predict := NewPredict(signature).WithStructuredOutput()
+	predict.SetLLM(mockLLM)
+
+	outputs, err := predict.Process(context.Background(), map[string]any{"question": "Capital?"})
+	require.NoError(t, err)
+	assert.Equal(t, "Paris", outputs["answer"])
+	assert.Equal(t, "trace-123", outputs["provider_trace"], "structured Predict must preserve extra JSON fields like the interceptor path")
+	mockBase.AssertExpectations(t)
+}
+
+func TestPredict_StructuredOutputDisablesDefaultXMLAndFallsBackToText(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{
+			{Field: core.NewField("answer")},
+			{Field: core.NewField("confidence")},
+		},
+	)
+
+	t.Run("unsupported JSON", func(t *testing.T) {
+		mockLLM := new(testutil.MockLLM)
+		mockLLM.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+			Return(&core.LLMResponse{Content: "answer:\nParis\nconfidence:\nhigh"}, nil).Once()
+		predict := NewPredict(signature)
+		assert.True(t, predict.IsXMLModeEnabled())
+		predict.WithStructuredOutput()
+		assert.False(t, predict.IsXMLModeEnabled())
+		predict.SetLLM(mockLLM)
+
+		outputs, err := predict.Process(context.Background(), map[string]any{"question": "Capital?"})
+		require.NoError(t, err)
+		assert.Equal(t, "Paris", outputs["answer"])
+		assert.Equal(t, "high", outputs["confidence"])
+		assert.NotContains(t, outputs, "response")
+		mockLLM.AssertExpectations(t)
+	})
+
+	t.Run("JSON generation error", func(t *testing.T) {
+		mockBase := new(testutil.MockLLM)
+		mockLLM := &jsonCapablePredictLLM{MockLLM: mockBase}
+		mockBase.On("GenerateWithJSON", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+			Return((map[string]any)(nil), errors.New(errors.LLMGenerationFailed, "JSON failed")).Once()
+		mockBase.On("Generate", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("[]core.GenerateOption")).
+			Return(&core.LLMResponse{Content: "answer:\nParis\nconfidence:\nmedium"}, nil).Once()
+		predict := NewPredict(signature).WithStructuredOutput()
+		predict.SetLLM(mockLLM)
+
+		outputs, err := predict.Process(context.Background(), map[string]any{"question": "Capital?"})
+		require.NoError(t, err)
+		assert.Equal(t, "Paris", outputs["answer"])
+		assert.Equal(t, "medium", outputs["confidence"])
+		assert.NotContains(t, outputs, "response")
+		mockBase.AssertExpectations(t)
+	})
+}
+
+func TestPredict_ClonePreservesStructuredOutputMode(t *testing.T) {
+	predict := NewPredict(core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)).WithStructuredOutputConfig(interceptors.StructuredOutputConfig{StrictSchema: true})
+
+	cloned := predict.Clone().(*Predict)
+	require.NotNil(t, cloned.structuredOutputConfig)
+	assert.NotSame(t, predict.structuredOutputConfig, cloned.structuredOutputConfig)
+	assert.True(t, cloned.structuredOutputConfig.StrictSchema)
+	assert.False(t, cloned.IsXMLModeEnabled())
+	_, _, err := cloned.InstructionArtifacts()
+	assert.ErrorContains(t, err, "output/interceptor behavior")
 }
 
 func TestPredict_SetLLMUpdatesEmbeddedBaseModule(t *testing.T) {

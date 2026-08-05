@@ -20,8 +20,9 @@ type Predict struct {
 	defaultOptions *core.ModuleOptions
 
 	// XML output configuration
-	xmlConfig     *interceptors.XMLConfig
-	enableXMLMode bool
+	xmlConfig              *interceptors.XMLConfig
+	enableXMLMode          bool
+	structuredOutputConfig *interceptors.StructuredOutputConfig
 }
 
 // Ensure Predict implements core.Module.
@@ -79,6 +80,7 @@ func (p *Predict) IsXMLModeEnabled() bool {
 // This provides structured XML output with validation, security features, and error handling.
 func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
 	p.enableXMLMode = true
+	p.structuredOutputConfig = nil
 	p.xmlConfig = &config
 
 	// Apply the combined XML interceptor (format + parse)
@@ -111,15 +113,17 @@ func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
 //	predict := modules.NewPredict(signature).WithStructuredOutput()
 func (p *Predict) WithStructuredOutput() *Predict {
 	config := interceptors.DefaultStructuredOutputConfig()
-	interceptor := interceptors.StructuredOutputInterceptor(config)
-	p.SetInterceptors([]core.ModuleInterceptor{interceptor})
-	return p
+	return p.WithStructuredOutputConfig(config)
 }
 
 // WithStructuredOutputConfig enables structured output with custom configuration.
 func (p *Predict) WithStructuredOutputConfig(config interceptors.StructuredOutputConfig) *Predict {
-	interceptor := interceptors.StructuredOutputInterceptor(config)
-	p.SetInterceptors([]core.ModuleInterceptor{interceptor})
+	p.enableXMLMode = false
+	p.xmlConfig = nil
+	p.structuredOutputConfig = &config
+	// Predict executes JSON mode explicitly so its complete prompt state (notably
+	// demonstrations) is available and fallback cannot inherit XML raw mode.
+	p.SetInterceptors([]core.ModuleInterceptor{})
 	return p
 }
 
@@ -149,6 +153,7 @@ func (p *Predict) WithStructuredOutputConfig(config interceptors.StructuredOutpu
 func (p *Predict) WithTextOutput() *Predict {
 	p.enableXMLMode = false
 	p.xmlConfig = nil
+	p.structuredOutputConfig = nil
 
 	// WARNING: This clears ALL interceptors, not just XML ones
 	// See TODO above for future improvement
@@ -158,6 +163,9 @@ func (p *Predict) WithTextOutput() *Predict {
 }
 
 func (p *Predict) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	if p.structuredOutputConfig != nil {
+		return p.executeStructuredGeneration(ctx, inputs, opts...)
+	}
 	// If XML mode is enabled, automatically use ProcessWithInterceptors for proper XML handling
 	if p.enableXMLMode {
 		return p.ProcessWithInterceptors(ctx, inputs, nil, opts...)
@@ -167,15 +175,79 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]any, opts ...co
 	return p.executeGeneration(ctx, inputs, false, opts...)
 }
 
+func (p *Predict) executeStructuredGeneration(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	if err := p.ValidateInputs(inputs); err != nil {
+		return nil, errors.Wrap(err, errors.ValidationFailed, "input validation failed")
+	}
+	llm, err := p.resolveLLM(ctx)
+	if err != nil {
+		return nil, err
+	}
+	callOptions := &core.ModuleOptions{}
+	for _, opt := range opts {
+		opt(callOptions)
+	}
+	finalOptions := p.defaultOptions.MergeWith(callOptions)
+	if finalOptions.StreamHandler != nil || !llmSupportsJSON(llm) {
+		return p.executeGeneration(ctx, inputs, false, opts...)
+	}
+	signature := p.GetSignature()
+	// Start with Predict's ordinary prompt to retain demonstrations and the
+	// signature instruction, then append the JSON contract.
+	prompt := formatPrompt(signature, p.Demos, inputs) + "\n\n" +
+		interceptors.BuildStructuredPrompt(inputs, signature, *p.structuredOutputConfig)
+	core.RecordLLMCall(ctx, llm)
+	result, err := llm.GenerateWithJSON(ctx, prompt, finalOptions.GenerateOptions...)
+	if err != nil {
+		return p.executeGeneration(ctx, inputs, false, opts...)
+	}
+	outputs := make(map[string]any, len(signature.Outputs))
+	for _, field := range signature.Outputs {
+		value, ok := result[field.Name]
+		if !ok && p.structuredOutputConfig.StrictSchema {
+			return nil, fmt.Errorf("missing required field '%s' in JSON response", field.Name)
+		}
+		if !ok {
+			value = ""
+		}
+		outputs[field.Name] = value
+	}
+	// Match StructuredOutputInterceptor's compatibility behavior: provider- or
+	// application-specific fields remain available to callers.
+	for key, value := range result {
+		if _, exists := outputs[key]; !exists {
+			outputs[key] = value
+		}
+	}
+	return outputs, nil
+}
+
+func llmSupportsJSON(llm core.LLM) bool {
+	for _, capability := range llm.Capabilities() {
+		if capability == core.CapabilityJSON {
+			return true
+		}
+	}
+	return false
+}
+
 // ProcessWithInterceptors executes the Predict module's logic with interceptor support.
 func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
-	// Use the helper method from BaseModule, but pass our core processing method
-	return p.ProcessWithInterceptorsImpl(ctx, inputs, interceptors, p.processCore, opts...)
+	if interceptors == nil {
+		interceptors = p.GetInterceptors()
+	}
+	info := core.NewModuleInfo(p.GetDisplayName(), p.GetModuleType(), p.GetSignature()).
+		WithLLM(p.LLM).
+		WithDefaultOptions(p.defaultOptions)
+	return core.ChainModuleInterceptors(interceptors...)(ctx, inputs, info, p.processCore, opts...)
 }
 
 // processCore handles the core prediction logic for interceptor pipeline.
 // When called via ProcessWithInterceptors, XML interceptors handle response parsing.
 func (p *Predict) processCore(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	if p.structuredOutputConfig != nil {
+		return p.executeStructuredGeneration(ctx, inputs, opts...)
+	}
 	// For XML mode via interceptors, return raw response for XML interceptor to parse
 	return p.executeGeneration(ctx, inputs, p.enableXMLMode, opts...)
 }
@@ -348,7 +420,7 @@ func (p *Predict) Clone() core.Module {
 	cloned := &Predict{
 		BaseModule:     *p.BaseModule.Clone().(*core.BaseModule),
 		Demos:          append([]core.Example{}, p.Demos...),
-		defaultOptions: p.defaultOptions,
+		defaultOptions: p.defaultOptions.Clone(),
 		enableXMLMode:  p.enableXMLMode,
 	}
 
@@ -356,6 +428,10 @@ func (p *Predict) Clone() core.Module {
 	if p.xmlConfig != nil {
 		configCopy := *p.xmlConfig
 		cloned.xmlConfig = &configCopy
+	}
+	if p.structuredOutputConfig != nil {
+		configCopy := *p.structuredOutputConfig
+		cloned.structuredOutputConfig = &configCopy
 	}
 
 	return cloned
@@ -372,7 +448,7 @@ func (p *Predict) InstructionArtifacts() (core.Signature, []core.Example, error)
 	if p.defaultOptions != nil {
 		return core.Signature{}, nil, fmt.Errorf("default generation options are not representable as instruction artifacts")
 	}
-	if p.enableXMLMode || len(p.GetInterceptors()) > 0 {
+	if p.enableXMLMode || p.structuredOutputConfig != nil || len(p.GetInterceptors()) > 0 {
 		return core.Signature{}, nil, fmt.Errorf("output/interceptor behavior is not representable as instruction artifacts")
 	}
 	return p.GetSignature(), p.GetDemos(), nil

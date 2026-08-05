@@ -195,6 +195,41 @@ Test response
 	mockLLM.AssertExpectations(t)
 }
 
+func TestChainOfThought_StructuredOutputUsesMergedOptions(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	mockBase := new(testutil.MockLLM)
+	mockLLM := &jsonCapablePredictLLM{MockLLM: mockBase}
+	var capturedOptions *core.GenerateOptions
+	mockBase.On("GenerateWithJSON", mock.Anything, mock.AnythingOfType("string"), mock.MatchedBy(func(options []core.GenerateOption) bool {
+		capturedOptions = core.NewGenerateOptions()
+		for _, option := range options {
+			option(capturedOptions)
+		}
+		return true
+	})).Return(map[string]any{
+		"reasoning": "The question asks for a capital.",
+		"rationale": "The question asks for a capital.",
+		"answer":    "Paris",
+	}, nil).Once()
+
+	cot := NewChainOfThought(signature).
+		WithDefaultOptions(core.WithGenerateOptions(core.WithMaxTokens(123))).
+		WithStructuredOutput()
+	cot.SetLLM(mockLLM)
+
+	outputs, err := cot.Process(context.Background(), map[string]any{"question": "Capital?"},
+		core.WithGenerateOptions(core.WithTemperature(0.2)))
+	require.NoError(t, err)
+	assert.Equal(t, "Paris", outputs["answer"])
+	require.NotNil(t, capturedOptions)
+	assert.Equal(t, 123, capturedOptions.MaxTokens, "structured output must retain module default options")
+	assert.Equal(t, 0.2, capturedOptions.Temperature)
+	mockBase.AssertExpectations(t)
+}
+
 func TestChainOfThought_WithStreamHandler(t *testing.T) {
 	// Create a mock LLM
 	mockLLM := new(testutil.MockLLM)

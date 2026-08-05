@@ -15,6 +15,7 @@ type mockLLMWithJSON struct {
 	generateWithJSONResult map[string]any
 	generateWithJSONError  error
 	lastPrompt             string
+	lastOptions            *core.GenerateOptions
 }
 
 func newMockLLMWithJSON() *mockLLMWithJSON {
@@ -32,6 +33,10 @@ func (m *mockLLMWithJSON) Generate(ctx context.Context, prompt string, options .
 
 func (m *mockLLMWithJSON) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
 	m.lastPrompt = prompt
+	m.lastOptions = core.NewGenerateOptions()
+	for _, option := range options {
+		option(m.lastOptions)
+	}
 	if m.generateWithJSONError != nil {
 		return nil, m.generateWithJSONError
 	}
@@ -306,7 +311,8 @@ func TestStructuredOutputInterceptor_WithJSONCapableLLM(t *testing.T) {
 		"question": "What is the capital of France?",
 	}
 
-	result, err := interceptor(context.Background(), inputs, info, mockHandler)
+	result, err := interceptor(context.Background(), inputs, info, mockHandler,
+		core.WithGenerateOptions(core.WithMaxTokens(321), core.WithTemperature(0.25)))
 	require.NoError(t, err)
 
 	// Handler should NOT be called since LLM supports JSON
@@ -318,6 +324,9 @@ func TestStructuredOutputInterceptor_WithJSONCapableLLM(t *testing.T) {
 
 	// Verify prompt was built correctly
 	assert.Contains(t, mockLLM.lastPrompt, "What is the capital of France?")
+	require.NotNil(t, mockLLM.lastOptions)
+	assert.Equal(t, 321, mockLLM.lastOptions.MaxTokens)
+	assert.Equal(t, 0.25, mockLLM.lastOptions.Temperature)
 }
 
 func TestStructuredOutputInterceptor_FallbackWithoutJSONCapability(t *testing.T) {

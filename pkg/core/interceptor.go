@@ -43,6 +43,10 @@ type ModuleInfo struct {
 	// Interceptors should prefer this over process-global defaults.
 	LLM LLM
 
+	// DefaultOptions contains module-level options that should be merged with
+	// invocation options before an interceptor calls the LLM.
+	DefaultOptions *ModuleOptions
+
 	// Version is the module version for compatibility tracking
 	Version string
 
@@ -344,6 +348,14 @@ func (mi *ModuleInfo) WithMetadata(key string, value any) *ModuleInfo {
 func (mi *ModuleInfo) WithLLM(llm LLM) *ModuleInfo {
 	if mi != nil {
 		mi.LLM = llm
+	}
+	return mi
+}
+
+// WithDefaultOptions records a snapshot of module-level options for interceptors.
+func (mi *ModuleInfo) WithDefaultOptions(options *ModuleOptions) *ModuleInfo {
+	if mi != nil {
+		mi.DefaultOptions = options.Clone()
 	}
 	return mi
 }
