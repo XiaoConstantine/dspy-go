@@ -17,6 +17,33 @@ type MockLLM struct {
 	mock.Mock
 }
 
+type endpointMockLLM struct {
+	*MockLLM
+	endpoint *core.EndpointConfig
+}
+
+func (m *endpointMockLLM) GetEndpointConfig() *core.EndpointConfig {
+	return m.endpoint
+}
+
+type unwrappingMockLLM struct {
+	*MockLLM
+	next core.LLM
+}
+
+func (m *unwrappingMockLLM) Unwrap() core.LLM {
+	return m.next
+}
+
+type uncomparableUnwrappingMockLLM struct {
+	*MockLLM
+	marker []string
+}
+
+func (m uncomparableUnwrappingMockLLM) Unwrap() core.LLM {
+	return m
+}
+
 func (m *MockLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	args := m.Called(ctx, prompt, options)
 	return args.Get(0).(*core.LLMResponse), args.Error(1)
@@ -63,8 +90,13 @@ func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []core.
 }
 
 func (m *MockLLM) ProviderName() string {
-	args := m.Called()
-	return args.String(0)
+	for _, call := range m.ExpectedCalls {
+		if call.Method == "ProviderName" {
+			args := m.Called()
+			return args.String(0)
+		}
+	}
+	return "mock-provider"
 }
 
 func (m *MockLLM) ModelID() string {
@@ -392,6 +424,57 @@ func TestCachedLLM_Unwrap(t *testing.T) {
 
 	unwrapped := cachedLLM.Unwrap()
 	assert.Equal(t, mockLLM, unwrapped)
+}
+
+func TestCachedLLMCacheNamespace(t *testing.T) {
+	newLLM := func(provider, model, baseURL, path, auth string) *CachedLLM {
+		mockLLM := &MockLLM{}
+		mockLLM.On("ProviderName").Return(provider)
+		mockLLM.On("ModelID").Return(model)
+		return &CachedLLM{LLM: &endpointMockLLM{
+			MockLLM: mockLLM,
+			endpoint: &core.EndpointConfig{
+				BaseURL: baseURL,
+				Path:    path,
+				Headers: map[string]string{"Authorization": auth},
+			},
+		}}
+	}
+
+	base := newLLM("provider-a", "shared-model", "https://one.example", "/generate", "secret-one")
+	assert.NotEqual(t, base.cacheNamespace(), newLLM("provider-a", "shared-model", "https://one.example", "/generate", "secret-two").cacheNamespace(), "different credential scopes must not share cache entries")
+	assert.NotEqual(t, base.cacheNamespace(), newLLM("provider-b", "shared-model", "https://one.example", "/generate", "secret-one").cacheNamespace())
+	assert.NotEqual(t, base.cacheNamespace(), newLLM("provider-a", "shared-model", "https://two.example", "/generate", "secret-one").cacheNamespace())
+	assert.NotEqual(t, base.cacheNamespace(), newLLM("provider-a", "shared-model", "https://one.example", "/chat", "secret-one").cacheNamespace())
+
+	t.Run("finds endpoint without a decorator depth limit", func(t *testing.T) {
+		underlying := newLLM("provider-a", "shared-model", "https://deep.example", "/generate", "secret").LLM
+		var wrapped core.LLM = underlying
+		for range 12 {
+			wrapped = &core.BaseDecorator{LLM: wrapped}
+		}
+		assert.Equal(t, (&CachedLLM{LLM: underlying}).cacheNamespace(), (&CachedLLM{LLM: wrapped}).cacheNamespace())
+	})
+
+	t.Run("stops at an unwrap cycle", func(t *testing.T) {
+		firstMock := &MockLLM{}
+		firstMock.On("ProviderName").Return("provider-a")
+		firstMock.On("ModelID").Return("shared-model")
+		secondMock := &MockLLM{}
+		first := &unwrappingMockLLM{MockLLM: firstMock}
+		second := &unwrappingMockLLM{MockLLM: secondMock}
+		first.next = second
+		second.next = first
+		assert.Empty(t, (&CachedLLM{LLM: first}).cacheNamespace())
+	})
+
+	t.Run("does not unwrap an untrackable value cycle", func(t *testing.T) {
+		mockLLM := &MockLLM{}
+		mockLLM.On("ProviderName").Return("provider-a")
+		mockLLM.On("ModelID").Return("shared-model")
+		wrapper := uncomparableUnwrappingMockLLM{MockLLM: mockLLM, marker: []string{"uncomparable"}}
+		assert.Empty(t, (&CachedLLM{LLM: wrapper}).cacheNamespace())
+	})
 }
 
 func TestCachedLLM_SetCacheEnabled(t *testing.T) {

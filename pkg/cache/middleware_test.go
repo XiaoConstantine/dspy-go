@@ -137,6 +137,24 @@ func TestMiddleware_WithCache(t *testing.T) {
 		mockCache.AssertNotCalled(t, "Set")
 	})
 
+	t.Run("Uncacheable request bypasses cache", func(t *testing.T) {
+		mockCache := &MockCache{}
+		middleware := NewMiddleware(mockCache, ttl)
+
+		callCount := 0
+		result, err := middleware.WithCache(ctx, "", ttl, func() (*core.LLMResponse, error) {
+			callCount++
+			return &core.LLMResponse{Content: "fresh response"}, nil
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, "fresh response", result.Content)
+		assert.Nil(t, result.Metadata)
+		assert.Equal(t, 1, callCount)
+		mockCache.AssertNotCalled(t, "Get")
+		mockCache.AssertNotCalled(t, "Set")
+	})
+
 	t.Run("Nil cache", func(t *testing.T) {
 		middleware := NewMiddleware(nil, ttl)
 

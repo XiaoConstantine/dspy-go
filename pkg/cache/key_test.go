@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"math"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -28,7 +29,7 @@ func TestGenerateKey(t *testing.T) {
 		key := generator.GenerateKey("gpt-4", "Hello world", nil)
 		assert.True(t, len(key) > 0)
 		assert.Contains(t, key, "test_gpt-4_")
-		assert.Equal(t, 27, len(key)) // test_gpt-4_ (11) + hash (16)
+		assert.Equal(t, 75, len(key)) // test_gpt-4_ (11) + SHA-256 (64)
 	})
 
 	t.Run("Same inputs produce same key", func(t *testing.T) {
@@ -131,7 +132,7 @@ func TestGenerateContentKey(t *testing.T) {
 		assert.NotEqual(t, key1, key2)
 	})
 
-	t.Run("Order independence", func(t *testing.T) {
+	t.Run("Order is preserved", func(t *testing.T) {
 		contents1 := []Content{
 			{Type: "text", Data: "Hello"},
 			{Type: "image", Data: "data"},
@@ -142,7 +143,7 @@ func TestGenerateContentKey(t *testing.T) {
 		}
 		key1 := generator.GenerateContentKey("gpt-4", contents1, nil)
 		key2 := generator.GenerateContentKey("gpt-4", contents2, nil)
-		assert.Equal(t, key1, key2)
+		assert.NotEqual(t, key1, key2)
 	})
 
 	t.Run("Empty contents", func(t *testing.T) {
@@ -212,90 +213,102 @@ func TestCreateKeyData(t *testing.T) {
 
 		keyData := generator.createKeyData("gpt-4", "Hello world", config)
 		assert.Contains(t, keyData, "gpt-4")
-		assert.Contains(t, keyData, "hello world")
-		assert.Contains(t, keyData, "temp:0.70")
-		assert.Contains(t, keyData, "max:100")
+		assert.Contains(t, keyData, "Hello world")
+		assert.Contains(t, keyData, `"Temperature":0.7`)
+		assert.Contains(t, keyData, `"MaxTokens":100`)
 	})
 
-	t.Run("Prompt normalization", func(t *testing.T) {
+	t.Run("Prompt whitespace is exact", func(t *testing.T) {
 		config := core.NewGenerateOptions()
 		keyData1 := generator.createKeyData("gpt-4", "  Hello world  ", config)
 		keyData2 := generator.createKeyData("gpt-4", "Hello world", config)
-		assert.Equal(t, keyData1, keyData2)
+		assert.NotEqual(t, keyData1, keyData2)
 	})
 
-	t.Run("Prompt lowercasing", func(t *testing.T) {
+	t.Run("Prompt case is exact", func(t *testing.T) {
 		config := core.NewGenerateOptions()
 		keyData1 := generator.createKeyData("gpt-4", "Hello World", config)
 		keyData2 := generator.createKeyData("gpt-4", "hello world", config)
-		assert.Equal(t, keyData1, keyData2)
+		assert.NotEqual(t, keyData1, keyData2)
 	})
 }
 
 func TestOptionsToString(t *testing.T) {
 	generator := NewKeyGenerator("test_")
+	config := core.NewGenerateOptions()
+	core.WithTemperature(0.7001)(config)
+	core.WithMaxTokens(100)(config)
+	core.WithTopP(0.9)(config)
+	core.WithPresencePenalty(0.5)(config)
+	core.WithFrequencyPenalty(0.3)(config)
+	core.WithStopSequences("zebra", "apple")(config)
 
-	t.Run("Basic options", func(t *testing.T) {
-		config := core.NewGenerateOptions()
-		core.WithTemperature(0.7)(config)
-		core.WithMaxTokens(100)(config)
+	result := generator.optionsToString(config)
+	assert.Contains(t, result, `"Temperature":0.7001`)
+	assert.Contains(t, result, `"TopP":0.9`)
+	assert.Contains(t, result, `"PresencePenalty":0.5`)
+	assert.Contains(t, result, `"FrequencyPenalty":0.3`)
+	assert.Contains(t, result, `"Stop":["zebra","apple"]`)
+	assert.Equal(t, result, generator.optionsToString(config))
+}
 
-		result := generator.optionsToString(config)
-		assert.Contains(t, result, "temp:0.70")
-		assert.Contains(t, result, "max:100")
-	})
+func TestGenerateKeyPreservesOptionPrecisionAndStopOrder(t *testing.T) {
+	generator := NewKeyGenerator("test_")
+	precise := generator.GenerateKey("model", "prompt", []core.GenerateOption{core.WithTemperature(0.701)})
+	rounded := generator.GenerateKey("model", "prompt", []core.GenerateOption{core.WithTemperature(0.704)})
+	assert.NotEqual(t, precise, rounded)
 
-	t.Run("All options", func(t *testing.T) {
-		config := core.NewGenerateOptions()
-		core.WithTemperature(0.7)(config)
-		core.WithMaxTokens(100)(config)
-		core.WithTopP(0.9)(config)
-		core.WithPresencePenalty(0.5)(config)
-		core.WithFrequencyPenalty(0.3)(config)
-		core.WithStopSequences("stop1", "stop2")(config)
+	first := generator.GenerateKey("model", "prompt", []core.GenerateOption{core.WithStopSequences("a", "b")})
+	second := generator.GenerateKey("model", "prompt", []core.GenerateOption{core.WithStopSequences("b", "a")})
+	assert.NotEqual(t, first, second)
+}
 
-		result := generator.optionsToString(config)
-		assert.Contains(t, result, "temp:0.70")
-		assert.Contains(t, result, "max:100")
-		assert.Contains(t, result, "topp:0.90")
-		assert.Contains(t, result, "presence:0.50")
-		assert.Contains(t, result, "frequency:0.30")
-		assert.Contains(t, result, "stop:stop1,stop2")
-	})
+func TestKeyGenerationRejectsUnserializableRequests(t *testing.T) {
+	generator := NewKeyGenerator("test_")
 
-	t.Run("Default values are excluded", func(t *testing.T) {
-		config := core.NewGenerateOptions()
-		config.Temperature = 0.7
-		config.MaxTokens = 100
-		// TopP, PresencePenalty, FrequencyPenalty are 0, Stop is empty
+	assert.Empty(t, generator.GenerateKey("model", "prompt", []core.GenerateOption{
+		core.WithTemperature(math.NaN()),
+	}))
+	assert.Empty(t, generator.GenerateJSONKey("model", "prompt", map[string]any{
+		"invalid": make(chan int),
+	}, nil))
+	assert.Empty(t, generator.GenerateContentKey("model", []Content{{
+		Type:     "text",
+		Text:     "prompt",
+		Metadata: map[string]any{"invalid": func() {}},
+	}}, nil))
+}
 
-		result := generator.optionsToString(config)
-		assert.Contains(t, result, "temp:0.70")
-		assert.Contains(t, result, "max:100")
-		assert.NotContains(t, result, "topp:")
-		assert.NotContains(t, result, "presence:")
-		assert.NotContains(t, result, "frequency:")
-		assert.NotContains(t, result, "stop:")
-	})
+func TestContentKeyIncludesCompleteIdentityAndDeterministicMetadata(t *testing.T) {
+	generator := NewKeyGenerator("test_")
+	base := Content{Type: "image", Text: "caption", Data: "bytes", MimeType: "image/png", Metadata: map[string]any{"a": 1, "b": 2}}
+	same := Content{Type: "image", Text: "caption", Data: "bytes", MimeType: "image/png", Metadata: map[string]any{"b": 2, "a": 1}}
+	assert.Equal(t, generator.GenerateContentKey("model", []Content{base}, nil), generator.GenerateContentKey("model", []Content{same}, nil))
 
-	t.Run("Stop sequences are sorted", func(t *testing.T) {
-		config := core.NewGenerateOptions()
-		core.WithStopSequences("zebra", "apple", "banana")(config)
+	variants := []Content{
+		{Type: "image", Text: "other", Data: "bytes", MimeType: "image/png", Metadata: base.Metadata},
+		{Type: "image", Text: "caption", Data: "other", MimeType: "image/png", Metadata: base.Metadata},
+		{Type: "image", Text: "caption", Data: "bytes", MimeType: "image/jpeg", Metadata: base.Metadata},
+		{Type: "image", Text: "caption", Data: "bytes", MimeType: "image/png", Metadata: map[string]any{"a": 2, "b": 2}},
+	}
+	baseKey := generator.GenerateContentKey("model", []Content{base}, nil)
+	for _, variant := range variants {
+		assert.NotEqual(t, baseKey, generator.GenerateContentKey("model", []Content{variant}, nil))
+	}
+}
 
-		result := generator.optionsToString(config)
-		assert.Contains(t, result, "stop:apple,banana,zebra")
-	})
+func TestContentKeyPreservesArbitraryBinaryData(t *testing.T) {
+	generator := NewKeyGenerator("test_")
+	first := generator.GenerateContentKey("model", []Content{{
+		Type: "image",
+		Data: string([]byte{0xff}),
+	}}, nil)
+	second := generator.GenerateContentKey("model", []Content{{
+		Type: "image",
+		Data: string([]byte{0xfe}),
+	}}, nil)
 
-	t.Run("Consistent ordering", func(t *testing.T) {
-		config := core.NewGenerateOptions()
-		core.WithTemperature(0.7)(config)
-		core.WithMaxTokens(100)(config)
-		core.WithTopP(0.9)(config)
-
-		result1 := generator.optionsToString(config)
-		result2 := generator.optionsToString(config)
-		assert.Equal(t, result1, result2)
-	})
+	assert.NotEqual(t, first, second, "distinct binary payloads must not share a cache key")
 }
 
 func TestInvalidatePattern(t *testing.T) {

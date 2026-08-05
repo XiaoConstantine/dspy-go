@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -31,23 +29,27 @@ func NewKeyGenerator(prefix string) *KeyGenerator {
 }
 
 // GenerateKey creates a deterministic cache key from LLM request parameters.
+// It returns an empty key when the request cannot be serialized safely.
 func (g *KeyGenerator) GenerateKey(modelID string, prompt string, options []core.GenerateOption) string {
 	// Merge options to get final parameters
 	opts := g.mergeOptions(options)
 
-	// Create a normalized representation of all parameters
-	keyData := g.createKeyData(modelID, prompt, opts)
+	// Create an exact representation of all parameters.
+	keyData, err := g.marshalKeyData(modelID, prompt, opts)
+	if err != nil {
+		return ""
+	}
 
 	// Generate SHA256 hash
 	h := sha256.New()
-	h.Write([]byte(keyData))
+	h.Write(keyData)
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	// Return prefixed key (truncate hash for readability)
-	return fmt.Sprintf("%s%s_%s", g.prefix, modelID, hash[:16])
+	return fmt.Sprintf("%s%s_%s", g.prefix, modelID, hash)
 }
 
 // GenerateJSONKey creates a cache key for JSON-structured requests.
+// It returns an empty key when the request cannot be serialized safely.
 func (g *KeyGenerator) GenerateJSONKey(modelID string, prompt string, schema any, options []core.GenerateOption) string {
 	// Merge options
 	opts := g.mergeOptions(options)
@@ -55,49 +57,83 @@ func (g *KeyGenerator) GenerateJSONKey(modelID string, prompt string, schema any
 	// Serialize schema
 	schemaJSON, err := json.Marshal(schema)
 	if err != nil {
-		// If schema serialization fails, use empty schema
-		schemaJSON = []byte("{}")
+		return ""
+	}
+	request, err := g.marshalKeyData(modelID, prompt, opts)
+	if err != nil {
+		return ""
 	}
 
 	// Create key data including schema
-	keyData := g.createKeyData(modelID, prompt, opts) + string(schemaJSON)
+	keyData, err := json.Marshal(struct {
+		Request string          `json:"request"`
+		Schema  json.RawMessage `json:"schema"`
+	}{string(request), schemaJSON})
+	if err != nil {
+		return ""
+	}
 
 	// Generate hash
 	h := sha256.New()
 	h.Write([]byte(keyData))
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	return fmt.Sprintf("%sjson_%s_%s", g.prefix, modelID, hash[:16])
+	return fmt.Sprintf("%sjson_%s_%s", g.prefix, modelID, hash)
 }
 
 // Content represents content for cache key generation.
 type Content struct {
-	Type string
-	Data string
+	Type     string
+	Text     string
+	Data     string
+	MimeType string
+	Metadata map[string]any
 }
 
 // GenerateContentKey creates a cache key for multimodal content requests.
+// It returns an empty key when the request cannot be serialized safely.
 func (g *KeyGenerator) GenerateContentKey(modelID string, contents []Content, options []core.GenerateOption) string {
 	// Merge options
 	opts := g.mergeOptions(options)
 
-	// Create normalized content representation
-	var contentParts []string
-	for _, content := range contents {
-		part := fmt.Sprintf("%s:%s", content.Type, content.Data)
-		contentParts = append(contentParts, part)
+	// Content.Data remains a string for API compatibility, but it can contain
+	// arbitrary image or audio bytes. Marshal a byte view so encoding/json uses
+	// base64 instead of replacing invalid UTF-8 sequences with U+FFFD.
+	type exactContent struct {
+		Type     string         `json:"type"`
+		Text     string         `json:"text"`
+		Data     []byte         `json:"data"`
+		MimeType string         `json:"mime_type"`
+		Metadata map[string]any `json:"metadata"`
 	}
-	sort.Strings(contentParts)
+	exactContents := make([]exactContent, len(contents))
+	for i, content := range contents {
+		exactContents[i] = exactContent{
+			Type:     content.Type,
+			Text:     content.Text,
+			Data:     []byte(content.Data),
+			MimeType: content.MimeType,
+			Metadata: content.Metadata,
+		}
+	}
 
-	// Create key data
-	keyData := fmt.Sprintf("%s|%s|%s", modelID, strings.Join(contentParts, "|"), g.optionsToString(opts))
+	// JSON preserves slice order and encoding/json deterministically orders map
+	// keys. Explicit fields retain the complete content block identity.
+	keyData, err := json.Marshal(struct {
+		Model    string                `json:"model"`
+		Contents []exactContent        `json:"contents"`
+		Options  *core.GenerateOptions `json:"options"`
+	}{modelID, exactContents, opts})
+	if err != nil {
+		return ""
+	}
 
 	// Generate hash
 	h := sha256.New()
 	h.Write([]byte(keyData))
 	hash := hex.EncodeToString(h.Sum(nil))
 
-	return fmt.Sprintf("%scontent_%s_%s", g.prefix, modelID, hash[:16])
+	return fmt.Sprintf("%scontent_%s_%s", g.prefix, modelID, hash)
 }
 
 // mergeOptions combines multiple generate options into a single config.
@@ -111,56 +147,32 @@ func (g *KeyGenerator) mergeOptions(options []core.GenerateOption) *core.Generat
 	return config
 }
 
-// createKeyData creates a normalized string representation of request parameters.
+// marshalKeyData creates an exact serialized representation of request parameters.
+func (g *KeyGenerator) marshalKeyData(modelID string, prompt string, config *core.GenerateOptions) ([]byte, error) {
+	return json.Marshal(struct {
+		Model   string                `json:"model"`
+		Prompt  string                `json:"prompt"`
+		Options *core.GenerateOptions `json:"options"`
+	}{modelID, prompt, config})
+}
+
+// createKeyData retains the legacy string helper used by callers and tests.
+// An empty result means the request cannot be safely cached.
 func (g *KeyGenerator) createKeyData(modelID string, prompt string, config *core.GenerateOptions) string {
-	// Normalize prompt (trim whitespace, lowercase for consistency)
-	normalizedPrompt := strings.ToLower(strings.TrimSpace(prompt))
-
-	// Create parameter string
-	params := g.optionsToString(config)
-
-	// Combine all parts
-	return fmt.Sprintf("%s|%s|%s", modelID, normalizedPrompt, params)
+	data, err := g.marshalKeyData(modelID, prompt, config)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // optionsToString converts generate config to a deterministic string.
 func (g *KeyGenerator) optionsToString(config *core.GenerateOptions) string {
-	// Create sorted parameter list for deterministic ordering
-	var params []string
-
-	// Add temperature with fixed precision
-	params = append(params, fmt.Sprintf("temp:%.2f", config.Temperature))
-
-	// Add max tokens
-	params = append(params, fmt.Sprintf("max:%d", config.MaxTokens))
-
-	// Add top-p if set
-	if config.TopP > 0 {
-		params = append(params, fmt.Sprintf("topp:%.2f", config.TopP))
+	data, err := json.Marshal(config)
+	if err != nil {
+		return ""
 	}
-
-	// Add presence penalty if set
-	if config.PresencePenalty != 0 {
-		params = append(params, fmt.Sprintf("presence:%.2f", config.PresencePenalty))
-	}
-
-	// Add frequency penalty if set
-	if config.FrequencyPenalty != 0 {
-		params = append(params, fmt.Sprintf("frequency:%.2f", config.FrequencyPenalty))
-	}
-
-	// Add stop sequences if present
-	if len(config.Stop) > 0 {
-		stops := make([]string, len(config.Stop))
-		copy(stops, config.Stop)
-		sort.Strings(stops)
-		params = append(params, fmt.Sprintf("stop:%s", strings.Join(stops, ",")))
-	}
-
-	// Sort parameters for consistency
-	sort.Strings(params)
-
-	return strings.Join(params, "|")
+	return string(data)
 }
 
 // InvalidatePattern generates a pattern for invalidating cache entries.

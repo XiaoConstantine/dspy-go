@@ -37,7 +37,7 @@ func (m *Middleware) WithCache(
 	ttl time.Duration,
 	fn func() (*core.LLMResponse, error),
 ) (*core.LLMResponse, error) {
-	if !m.enabled.Load() || m.cache == nil {
+	if !m.enabled.Load() || m.cache == nil || cacheKey == "" {
 		return fn()
 	}
 

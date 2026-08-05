@@ -2,8 +2,10 @@ package cache
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -107,7 +109,14 @@ func (c *CachedLLM) Generate(ctx context.Context, prompt string, options ...core
 		return c.LLM.Generate(ctx, prompt, options...)
 	}
 
-	key := c.keyGenerator.GenerateKey(c.ModelID(), prompt, options)
+	namespace := c.cacheNamespace()
+	if namespace == "" {
+		return c.LLM.Generate(ctx, prompt, options...)
+	}
+	key := c.keyGenerator.GenerateKey(namespace, prompt, options)
+	if key == "" {
+		return c.LLM.Generate(ctx, prompt, options...)
+	}
 	return c.withCache(ctx, key, func() (*core.LLMResponse, error) {
 		return c.LLM.Generate(ctx, prompt, options...)
 	})
@@ -119,7 +128,14 @@ func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 		return c.LLM.GenerateWithJSON(ctx, prompt, options...)
 	}
 
-	key := c.keyGenerator.GenerateJSONKey(c.ModelID(), prompt, nil, options)
+	namespace := c.cacheNamespace()
+	if namespace == "" {
+		return c.LLM.GenerateWithJSON(ctx, prompt, options...)
+	}
+	key := c.keyGenerator.GenerateJSONKey(namespace, prompt, nil, options)
+	if key == "" {
+		return c.LLM.GenerateWithJSON(ctx, prompt, options...)
+	}
 
 	// Try cache first
 	if cached, found, err := c.cache.Get(ctx, key); found && err == nil {
@@ -150,7 +166,14 @@ func (c *CachedLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	}
 
 	// Create a special key that includes function definitions
-	key := c.keyGenerator.GenerateJSONKey(c.ModelID(), prompt, functions, options)
+	namespace := c.cacheNamespace()
+	if namespace == "" {
+		return c.LLM.GenerateWithFunctions(ctx, prompt, functions, options...)
+	}
+	key := c.keyGenerator.GenerateJSONKey(namespace, prompt, functions, options)
+	if key == "" {
+		return c.LLM.GenerateWithFunctions(ctx, prompt, functions, options...)
+	}
 
 	// Try cache first
 	if cached, found, err := c.cache.Get(ctx, key); found && err == nil {
@@ -195,15 +218,105 @@ func (c *CachedLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 	var contents []Content
 	for _, block := range content {
 		contents = append(contents, Content{
-			Type: string(block.Type),
-			Data: string(block.Data),
+			Type:     string(block.Type),
+			Text:     block.Text,
+			Data:     string(block.Data),
+			MimeType: block.MimeType,
+			Metadata: block.Metadata,
 		})
 	}
 
-	key := c.keyGenerator.GenerateContentKey(c.ModelID(), contents, options)
+	namespace := c.cacheNamespace()
+	if namespace == "" {
+		return c.LLM.GenerateWithContent(ctx, content, options...)
+	}
+	key := c.keyGenerator.GenerateContentKey(namespace, contents, options)
+	if key == "" {
+		return c.LLM.GenerateWithContent(ctx, content, options...)
+	}
 	return c.withCache(ctx, key, func() (*core.LLMResponse, error) {
 		return c.LLM.GenerateWithContent(ctx, content, options...)
 	})
+}
+
+type endpointConfigurer interface {
+	GetEndpointConfig() *core.EndpointConfig
+}
+
+type llmUnwrapper interface {
+	Unwrap() core.LLM
+}
+
+// cacheNamespace separates otherwise identical model names across providers,
+// deployments, and credential scopes. Header values participate only in the
+// namespace digest and are never included verbatim in the returned key.
+func (c *CachedLLM) cacheNamespace() string {
+	identity := struct {
+		Provider    string `json:"provider"`
+		Model       string `json:"model"`
+		BaseURL     string `json:"base_url,omitempty"`
+		Path        string `json:"path,omitempty"`
+		HeadersHash string `json:"headers_hash,omitempty"`
+	}{Provider: c.LLM.ProviderName(), Model: c.LLM.ModelID()}
+	if identity.Provider == "" || identity.Model == "" {
+		return ""
+	}
+
+	llm := c.LLM
+	seen := make(map[core.LLM]struct{})
+	for llm != nil {
+		// Decorator implementations are normally pointers and therefore
+		// comparable. Track comparable values so a malformed Unwrap cycle cannot
+		// make cache-key generation loop forever, without imposing an arbitrary
+		// limit on valid decorator depth.
+		value := reflect.ValueOf(llm)
+		if value.Comparable() {
+			if _, exists := seen[llm]; exists {
+				return ""
+			}
+			seen[llm] = struct{}{}
+		}
+		if configured, ok := llm.(endpointConfigurer); ok {
+			if endpoint := configured.GetEndpointConfig(); endpoint != nil {
+				identity.BaseURL = endpoint.BaseURL
+				identity.Path = endpoint.Path
+				identity.HeadersHash = cacheHeadersHash(endpoint.Headers)
+			}
+			break
+		}
+		// Interface values with non-comparable concrete types cannot be tracked
+		// safely. Disable caching rather than invoking an untrackable wrapper that
+		// could return itself forever or hiding routing identity from the key.
+		if !value.Comparable() {
+			return ""
+		}
+		unwrapper, ok := llm.(llmUnwrapper)
+		if !ok {
+			break
+		}
+		next := unwrapper.Unwrap()
+		if next == nil {
+			return ""
+		}
+		llm = next
+	}
+
+	data, err := json.Marshal(identity)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s:%x", identity.Provider, identity.Model, sha256.Sum256(data))
+}
+
+func cacheHeadersHash(headers map[string]string) string {
+	if len(headers) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(headers)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
 // Streaming methods are not cached - pass through directly.
