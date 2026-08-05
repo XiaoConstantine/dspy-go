@@ -134,6 +134,7 @@ func TestMIPRO(t *testing.T) {
 			ctx := context.Background()
 
 			mockStrategy := new(MockSearchStrategy)
+			mockStrategy.On("Initialize", mock.Anything).Return(nil).Once()
 			mipro := createTestMIPRO(t)
 			mipro.searchStrategy = mockStrategy
 
@@ -184,7 +185,7 @@ func TestMIPRO(t *testing.T) {
 			assert.Equal(t, 0.8, mipro.state.BestScore)
 			mockModule.AssertExpectations(t)
 			mockStrategy.AssertExpectations(t)
-			dataset.AssertNumberOfCalls(t, "Reset", 2) // Expect 2 Reset calls
+			dataset.AssertNumberOfCalls(t, "Reset", 3) // Demonstrations, trial evaluation, and final validation
 			dataset.AssertNumberOfCalls(t, "Next", 6)  // Expect 4 Next calls (2 per evaluateCandidate)
 		})
 
@@ -194,6 +195,7 @@ func TestMIPRO(t *testing.T) {
 
 			// Create a failing search strategy
 			mockStrategy := new(MockSearchStrategy)
+			mockStrategy.On("Initialize", mock.Anything).Return(nil).Once()
 			mockStrategy.On("SuggestParams", mock.Anything).Return(
 				nil, errors.New(errors.Unknown, "search failed"))
 			mipro.searchStrategy = mockStrategy
@@ -248,6 +250,7 @@ func TestMIPRO(t *testing.T) {
 			ctx := context.Background()
 			mipro := createTestMIPRO(t)
 			mockStrategy := new(MockSearchStrategy)
+			mockStrategy.On("Initialize", mock.Anything).Return(nil).Once()
 			mipro.searchStrategy = mockStrategy
 			program := createTestProgram()
 			dataset := createTestDataset()
@@ -283,7 +286,7 @@ func TestMIPRO(t *testing.T) {
 
 			mockStrategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Maybe()
 
-			mockDataset.On("Reset").Return().Once()
+			mockDataset.On("Reset").Return().Twice()
 			mockDataset.On("Next").Return(sampleExample, true).Once() // 1st example again
 
 			mockDataset.On("Next").Return(sampleExample, true).Once()    // 2nd example
@@ -389,7 +392,7 @@ func TestMIPRO(t *testing.T) {
 
 			// Add Reset expectation for the mock dataset
 			mockDataset := dataset.(*testutil.MockDataset)
-			mockDataset.On("Reset").Return().Times(3)
+			mockDataset.On("Reset").Return().Times(4)
 			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"prompt": "tpe_test"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"prompt": "tpe_test2"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{}, false).Maybe()
@@ -527,6 +530,47 @@ func TestMIPROCreateCandidateProgram_UsesDeterministicModuleOrder(t *testing.T) 
 		assert.Equal(t, "alpha tuned", modules[0].GetSignature().Instruction)
 		assert.Equal(t, "beta tuned", modules[1].GetSignature().Instruction)
 	}
+}
+
+func TestMIPROCompileResetsReusedSearchState(t *testing.T) {
+	strategy := new(MockSearchStrategy)
+	strategy.On("Initialize", mock.Anything).Return(nil).Twice()
+	strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Twice()
+	strategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Twice()
+	strategy.On("GetBestParams").Return(map[string]any{}, 0.8).Twice()
+
+	model := new(testutil.MockLLM)
+	mipro := NewMIPRO(
+		func(example, prediction map[string]any, ctx context.Context) float64 { return 0.8 },
+		WithNumTrials(1),
+		WithSearchStrategy(strategy),
+		WithModels(model, model),
+	)
+	// Keep this test focused on Compile's search lifecycle rather than teacher
+	// or instruction-model calls.
+	mipro.maxBootstrappedDemos = 0
+	mipro.instructionGenerator.MaxCandidates = 0
+
+	program := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"test": newInstructionModule("test", "base")},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return modules["test"].Process(ctx, inputs)
+			}
+		},
+	)
+	dataset := testutil.NewMockDataset([]core.Example{{
+		Inputs:  map[string]any{"input": "sample"},
+		Outputs: map[string]any{"output": "ok"},
+	}})
+
+	_, firstErr := mipro.Compile(context.Background(), program, dataset, nil)
+	_, secondErr := mipro.Compile(context.Background(), program, dataset, nil)
+	require.NoError(t, firstErr)
+	require.NoError(t, secondErr)
+	strategy.AssertNumberOfCalls(t, "Initialize", 2)
+	assert.Equal(t, 1, mipro.state.CurrentIteration, "each Compile should start with fresh optimization state")
+	strategy.AssertExpectations(t)
 }
 
 // MockTPEOptimizer implements a simplified version of Tree-structured Parzen Estimators for testing.

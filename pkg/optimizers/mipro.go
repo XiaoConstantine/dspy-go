@@ -221,6 +221,7 @@ type MIPRO struct {
 	// Core components
 	metric               func(example, prediction map[string]any, ctx context.Context) float64
 	searchStrategy       SearchStrategy
+	searchConfig         SearchConfig
 	teacherStudent       *TeacherStudentOptimizer
 	instructionGenerator *InstructionGenerator
 
@@ -406,59 +407,71 @@ func (m *MIPRO) initComponents() {
 		MaxCandidates: m.numCandidates,
 		Temperature:   0.7,
 	}
-	// Initialize search strategy if not provided via option
-	if m.searchStrategy == nil {
-		paramSpace := make(map[string][]any)
-
-		// We need to determine how many modules we'll be optimizing
-		// This would typically come from the program structure or configuration
-		numModules := m.config.NumModules
-		if numModules <= 0 {
-			numModules = 1 // Default to at least one module
+	paramSpace := make(map[string][]any)
+	numModules := m.config.NumModules
+	if numModules <= 0 {
+		numModules = 1
+	}
+	for i := 0; i < numModules; i++ {
+		values := make([]any, m.numCandidates)
+		for j := 0; j < m.numCandidates; j++ {
+			values[j] = float64(j)
 		}
-
-		// For each module, create a parameter for selecting an instruction
+		paramSpace[fmt.Sprintf("module_%d_instruction", i)] = values
+	}
+	if m.maxBootstrappedDemos > 0 || m.config.MaxLabeledDemos > 0 {
+		const demoSets = 5
+		values := make([]any, demoSets)
+		for j := range demoSets {
+			values[j] = float64(j)
+		}
 		for i := 0; i < numModules; i++ {
-			// Create a parameter that can select among numCandidates instruction options
-			values := make([]any, m.numCandidates)
-			for j := 0; j < m.numCandidates; j++ {
-				values[j] = float64(j) // Use float64 for consistency
-			}
-			paramSpace[fmt.Sprintf("module_%d_instruction", i)] = values
-		}
-
-		// If we also have demo sets, create parameters for those
-		if m.maxBootstrappedDemos > 0 || m.config.MaxLabeledDemos > 0 {
-			demoSets := 5 // Default to 5 sets of demos
-			values := make([]any, demoSets)
-			for j := 0; j < demoSets; j++ {
-				values[j] = float64(j)
-			}
-
-			for i := 0; i < numModules; i++ {
-				paramSpace[fmt.Sprintf("module_%d_demos", i)] = values
-			}
-		}
-		m.searchStrategy = NewTPEOptimizer(TPEConfig{
-			Gamma:            0.25,
-			Seed:             m.config.Seed,
-			NumEIGenerations: 20,
-			PriorWeight:      1.0,
-			BandwidthFactor:  1.0,
-		})
-
-		// Initialize the search strategy with our parameter space
-		err := m.searchStrategy.Initialize(SearchConfig{
-			ParamSpace: paramSpace,
-			MaxTrials:  m.config.NumTrials,
-			Seed:       m.config.Seed,
-		})
-
-		if err != nil {
-			m.logger.Error(context.Background(), "Failed to initialize search strategy: %v", err)
+			paramSpace[fmt.Sprintf("module_%d_demos", i)] = append([]any(nil), values...)
 		}
 	}
 
+	if m.searchStrategy == nil {
+		m.searchStrategy = NewTPEOptimizer(TPEConfig{
+			Gamma:            m.config.TPEGamma,
+			Seed:             m.config.Seed,
+			NumEIGenerations: m.config.TPEGenerations,
+			PriorWeight:      1.0,
+			BandwidthFactor:  1.0,
+		})
+	}
+	m.searchConfig = SearchConfig{
+		ParamSpace: paramSpace,
+		MaxTrials:  m.config.NumTrials,
+		Seed:       m.config.Seed,
+	}
+}
+
+func (m *MIPRO) resetCompileState() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state = &OptimizationState{
+		TeacherScores: make(map[string]float64),
+		BestScore:     math.Inf(-1),
+	}
+	m.metrics = &MIPROMetrics{
+		PromptEffectiveness: make(map[string]float64),
+	}
+}
+
+func (m *MIPRO) compileSearchConfig() SearchConfig {
+	config := SearchConfig{
+		ParamSpace:  make(map[string][]any, len(m.searchConfig.ParamSpace)),
+		MaxTrials:   m.config.NumTrials,
+		Seed:        m.config.Seed,
+		Constraints: make(map[string]any, len(m.searchConfig.Constraints)),
+	}
+	for name, values := range m.searchConfig.ParamSpace {
+		config.ParamSpace[name] = append([]any(nil), values...)
+	}
+	for name, value := range m.searchConfig.Constraints {
+		config.Constraints[name] = value
+	}
+	return config
 }
 
 // Compile implements the main optimization loop.
@@ -468,6 +481,10 @@ func (m *MIPRO) Compile(
 	dataset core.Dataset,
 	metric core.Metric,
 ) (core.Program, error) {
+	m.resetCompileState()
+	if err := m.searchStrategy.Initialize(m.compileSearchConfig()); err != nil {
+		return program, fmt.Errorf("failed to initialize search strategy: %w", err)
+	}
 	m.logger.Info(ctx, "Starting MIPRO optimization with configuration: %+v", m.config)
 
 	originalForward := program.Forward
@@ -475,6 +492,9 @@ func (m *MIPRO) Compile(
 	if err := m.teacherStudent.Initialize(ctx, program, dataset); err != nil {
 		return program, fmt.Errorf("failed to initialize teacher-student: %w", err)
 	}
+
+	// Each compile owns a fresh traversal, including demonstration generation.
+	dataset.Reset()
 
 	// Step 2: Generate initial demonstrations
 	demos, err := m.generateDemonstrations(ctx, program, dataset)

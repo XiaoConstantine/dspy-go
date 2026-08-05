@@ -38,6 +38,7 @@ type TPEOptimizer struct {
 	// Internal state
 	rng           *rand.Rand
 	paramSpace    map[string][]any
+	paramNames    []string
 	observations  []observation
 	bestParams    map[string]any
 	bestScore     float64
@@ -99,12 +100,28 @@ func (t *TPEOptimizer) Initialize(config SearchConfig) error {
 		return fmt.Errorf("parameter space cannot be empty")
 	}
 
-	t.paramSpace = config.ParamSpace
+	t.paramSpace = make(map[string][]any, len(config.ParamSpace))
+	t.paramNames = make([]string, 0, len(config.ParamSpace))
+	for name, values := range config.ParamSpace {
+		t.paramSpace[name] = append([]any(nil), values...)
+		t.paramNames = append(t.paramNames, name)
+	}
+	sort.Strings(t.paramNames)
 	t.maxTrials = config.MaxTrials
+	// Initialize may be called when a strategy is reused by another compile. A
+	// reused TPE must behave exactly like a fresh search with its configured seed.
+	t.observations = make([]observation, 0)
+	t.bestParams = make(map[string]any)
+	t.bestScore = -math.MaxFloat64
 	t.currentTrials = 0
+	seed := t.seed
+	if config.Seed > 0 {
+		seed = config.Seed
+	}
+	t.rng = rand.New(rand.NewSource(seed))
 
 	logger.Info(context.Background(), "TPE optimizer initialized - max_trials: %d, param_space_size: %d, gamma: %.3f, seed: %d",
-		t.maxTrials, len(t.paramSpace), t.gamma, t.seed)
+		t.maxTrials, len(t.paramSpace), t.gamma, seed)
 
 	return nil
 }
@@ -126,10 +143,10 @@ func (t *TPEOptimizer) SuggestParams(ctx context.Context) (map[string]any, error
 	}
 
 	// Ensure all parameters from the param space are included
-	for key := range t.paramSpace {
-		if _, exists := params[key]; !exists {
+	for _, name := range t.paramNames {
+		if _, exists := params[name]; !exists {
 			// If parameter is missing, provide a default value (0)
-			params[key] = float64(0)
+			params[name] = float64(0)
 		}
 	}
 
@@ -142,7 +159,7 @@ func (t *TPEOptimizer) UpdateResults(params map[string]any, score float64) error
 	logger := logging.GetLogger()
 
 	t.observations = append(t.observations, observation{
-		params: params,
+		params: cloneParams(params),
 		score:  score,
 	})
 
@@ -162,14 +179,15 @@ func (t *TPEOptimizer) UpdateResults(params map[string]any, score float64) error
 
 // GetBestParams returns the best parameters found so far and their score.
 func (t *TPEOptimizer) GetBestParams() (map[string]any, float64) {
-	return t.bestParams, t.bestScore
+	return cloneParams(t.bestParams), t.bestScore
 }
 
 // randomSample generates a random set of parameters.
 func (t *TPEOptimizer) randomSample() map[string]any {
 	params := make(map[string]any)
 
-	for param, values := range t.paramSpace {
+	for _, param := range t.paramNames {
+		values := t.paramSpace[param]
 		if len(values) > 0 {
 			// For now, handle numerical (float64) and categorical (any type) parameters
 			idx := t.rng.Intn(len(values))
@@ -228,7 +246,8 @@ func (t *TPEOptimizer) generateTPECandidate(
 	candidate := make(map[string]any)
 
 	// For each parameter, sample from the KDE of the good parameters
-	for param, values := range t.paramSpace {
+	for _, param := range t.paramNames {
+		values := t.paramSpace[param]
 		// Handle categorical parameters (assuming all parameters are categorical in our implementation)
 		// Get value counts for the parameter in good and bad sets
 		goodCounts := t.countValues(goodParams, param, values)
@@ -346,7 +365,11 @@ func (t *TPEOptimizer) computeLikelihood(
 	// For categorical parameters, we use a simple frequency-based approach
 	likelihood := 1.0
 
-	for param, candidateVal := range candidate {
+	for _, param := range t.paramNames {
+		candidateVal, ok := candidate[param]
+		if !ok || len(t.paramSpace[param]) == 0 {
+			continue
+		}
 		// Count how many times this value appears in the params
 		count := 0
 		for _, p := range params {

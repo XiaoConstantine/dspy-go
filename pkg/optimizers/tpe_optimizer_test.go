@@ -2,12 +2,87 @@ package optimizers
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestTPEOptimizer(t *testing.T) {
+	t.Run("Initialize resets reused optimizer and aliases", func(t *testing.T) {
+		tpe := NewTPEOptimizer(TPEConfig{Seed: 17}).(*TPEOptimizer)
+		config := SearchConfig{ParamSpace: map[string][]any{"p": {1, 2, 3}}, MaxTrials: 10}
+		assert.NoError(t, tpe.Initialize(config))
+		first, err := tpe.SuggestParams(context.Background())
+		assert.NoError(t, err)
+		assert.NoError(t, tpe.UpdateResults(first, 9))
+
+		// Neither caller mutation nor mutation of a returned best map may alter
+		// the optimizer's stored observation/best value.
+		first["p"] = 99
+		best, _ := tpe.GetBestParams()
+		assert.NotEqual(t, 99, best["p"])
+		best["p"] = 88
+		bestAgain, _ := tpe.GetBestParams()
+		assert.NotEqual(t, 88, bestAgain["p"])
+
+		assert.NoError(t, tpe.Initialize(config))
+		assert.Empty(t, tpe.observations)
+		assert.Empty(t, tpe.bestParams)
+		assert.Equal(t, -math.MaxFloat64, tpe.bestScore)
+		assert.Equal(t, 0, tpe.currentTrials)
+		restarted, err := tpe.SuggestParams(context.Background())
+		assert.NoError(t, err)
+		fresh := NewTPEOptimizer(TPEConfig{Seed: 17})
+		assert.NoError(t, fresh.Initialize(config))
+		freshFirst, err := fresh.SuggestParams(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, freshFirst, restarted, "Initialize must rewind the configured RNG")
+	})
+
+	t.Run("Initialize rewinds multi-parameter seeded search deterministically", func(t *testing.T) {
+		values := make([]any, 97)
+		for i := range values {
+			values[i] = i
+		}
+		config := SearchConfig{
+			ParamSpace: map[string][]any{
+				"p00": values,
+				"p01": values,
+				"p02": values,
+				"p03": values,
+				"p04": values,
+				"p05": values,
+				"p06": values,
+				"p07": values,
+				"p08": values,
+				"p09": values,
+				"p10": values,
+				"p11": values,
+			},
+			MaxTrials: 10,
+			Seed:      17,
+		}
+		tpe := NewTPEOptimizer(TPEConfig{Seed: 17})
+		var first map[string]any
+		for iteration := 0; iteration < 64; iteration++ {
+			if !assert.NoError(t, tpe.Initialize(config)) {
+				return
+			}
+			got, err := tpe.SuggestParams(context.Background())
+			if !assert.NoError(t, err) {
+				return
+			}
+			if iteration == 0 {
+				first = got
+				continue
+			}
+			if !assert.Equal(t, first, got, "the same seed and search space must produce the same first suggestion after Initialize") {
+				return
+			}
+		}
+	})
+
 	t.Run("Basic Optimization Loop", func(t *testing.T) {
 		// Create a simple test configuration
 		config := TPEConfig{
