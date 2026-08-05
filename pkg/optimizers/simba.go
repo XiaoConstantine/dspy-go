@@ -432,10 +432,14 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 
 	// Reset state for new compilation
 	s.resetState()
+	examples := core.DatasetToSlice(dataset)
+	if len(examples) == 0 {
+		return program, errors.New(errors.ValidationFailed, "dataset is empty")
+	}
 
 	// Initialize with current program as best candidate
 	bestProgram := program.Clone()
-	initialScore := s.evaluateProgram(ctx, bestProgram, dataset)
+	initialScore := s.evaluateProgramOnExamples(ctx, bestProgram, examples)
 	s.state.BestScore = initialScore
 	s.state.BestProgram = bestProgram
 
@@ -444,10 +448,15 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 	// Choose optimization mode: pipeline processing or sequential processing
 	if s.config.UsePipelineProcessing {
 		s.logger.Info(ctx, "Using pipeline processing mode with buffer size %d", s.config.PipelineBufferSize)
-		return s.runPipelineProcessing(ctx, bestProgram, dataset)
+		return s.runPipelineProcessing(ctx, bestProgram, examples)
 	}
 
 	s.logger.Info(ctx, "Using sequential processing mode")
+	// The incumbent is advanced using minibatch comparisons, but BestProgram is
+	// tracked only with full-dataset scores. This avoids comparing estimates from
+	// different sample populations while requiring just one full evaluation per
+	// step (rather than one per generated candidate).
+	incumbentProgram := bestProgram
 
 	// Main optimization loop (sequential processing)
 	for step := 0; step < s.config.MaxSteps; step++ {
@@ -459,7 +468,7 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 		s.mu.Unlock()
 
 		// Generate candidate programs
-		candidates, err := s.generateCandidates(stepCtx, bestProgram)
+		candidates, err := s.generateCandidates(stepCtx, incumbentProgram)
 		if err != nil {
 			stepSpan.WithError(err)
 			core.EndSpan(stepCtx)
@@ -470,7 +479,7 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 		}
 
 		// Process mini-batch and evaluate candidates
-		batch, err := s.sampleMiniBatch(stepCtx, dataset)
+		batch, err := s.sampleMiniBatchFromExamples(stepCtx, examples)
 		if err != nil {
 			stepSpan.WithError(err)
 			core.EndSpan(stepCtx)
@@ -480,20 +489,24 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 			)
 		}
 
+		// generateCandidates includes the incumbent as its first candidate, so it
+		// is scored on the exact same sampled batch as every proposed replacement.
 		scores := s.evaluateCandidates(stepCtx, candidates, batch)
 
 		// Select best candidate using temperature-controlled sampling
-		selectedProgram, selectedScore := s.selectBestCandidate(candidates, scores)
+		selectedProgram, _ := s.selectBestCandidate(candidates, scores)
+		incumbentProgram = selectedProgram.Clone()
 
-		// Update best program if improvement found
-		improvement := selectedScore - s.state.BestScore
-		if selectedScore > s.state.BestScore {
+		// Full-evaluate only the minibatch winner so globally returned programs are
+		// ranked using comparable full-dataset measurements.
+		selectedFullScore := s.evaluateProgramOnExamples(stepCtx, selectedProgram, examples)
+		improvement := selectedFullScore - s.state.BestScore
+		if selectedFullScore > s.state.BestScore {
 			s.mu.Lock()
-			s.state.BestScore = selectedScore
+			s.state.BestScore = selectedFullScore
 			s.state.BestProgram = selectedProgram.Clone()
-			bestProgram = s.state.BestProgram
 			s.mu.Unlock()
-			s.logger.Info(stepCtx, "New best score: %.4f (improvement: +%.4f)", selectedScore, improvement)
+			s.logger.Info(stepCtx, "New best full-dataset score: %.4f (improvement: +%.4f)", selectedFullScore, improvement)
 		}
 
 		// Record step metrics
@@ -581,21 +594,19 @@ func (s *SIMBA) resetState() {
 
 // evaluateProgram evaluates a program against the full dataset.
 func (s *SIMBA) evaluateProgram(ctx context.Context, program core.Program, dataset core.Dataset) float64 {
+	return s.evaluateProgramOnExamples(ctx, program, core.DatasetToSlice(dataset))
+}
+
+func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Program, examples []core.Example) float64 {
 	var totalScore float64
 	var count int
+	failed := false
 
-	dataset.Reset()
-	for {
-		example, hasNext := dataset.Next()
-		if !hasNext {
-			break
-		}
-
+	for _, example := range examples {
 		prediction, err := program.Forward(ctx, example.Inputs)
 		if err != nil {
 			s.logger.Debug(ctx, "Program evaluation failed for example: %v", err)
-			// Assign penalty score for failed predictions
-			totalScore += 0.0
+			failed = true
 			count++
 			continue
 		}
@@ -607,6 +618,9 @@ func (s *SIMBA) evaluateProgram(ctx context.Context, program core.Program, datas
 
 	if count == 0 {
 		return 0.0
+	}
+	if failed {
+		return math.Inf(-1)
 	}
 	return totalScore / float64(count)
 }
@@ -1097,25 +1111,26 @@ Enhanced Instruction:`, originalInstruction, selectedRule)
 
 // sampleMiniBatch creates a random mini-batch from the dataset.
 func (s *SIMBA) sampleMiniBatch(ctx context.Context, dataset core.Dataset) ([]core.Example, error) {
-	// Collect all examples first
-	allExamples := core.DatasetToSlice(dataset)
+	return s.sampleMiniBatchFromExamples(ctx, core.DatasetToSlice(dataset))
+}
 
-	if len(allExamples) == 0 {
+func (s *SIMBA) sampleMiniBatchFromExamples(_ context.Context, examples []core.Example) ([]core.Example, error) {
+	if len(examples) == 0 {
 		return nil, errors.New(errors.ValidationFailed, "dataset is empty")
 	}
 
 	// Sample random batch
 	batchSize := s.config.BatchSize
-	if batchSize > len(allExamples) {
-		batchSize = len(allExamples)
+	if batchSize > len(examples) {
+		batchSize = len(examples)
 	}
 
 	batch := make([]core.Example, 0, batchSize)
 	for i := 0; i < batchSize; i++ {
 		s.mu.Lock()
-		idx := s.rng.Intn(len(allExamples))
+		idx := s.rng.Intn(len(examples))
 		s.mu.Unlock()
-		batch = append(batch, allExamples[idx])
+		batch = append(batch, examples[idx])
 	}
 
 	return batch, nil
@@ -1154,8 +1169,8 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 		programID = fmt.Sprintf("prog_%d_%d", s.state.CurrentStep, s.rng.Int63())
 		s.mu.Unlock()
 	}
-	var mu sync.Mutex
-	var successCount int
+	var resultMu sync.Mutex
+	failed := false
 
 	p := s.createLLMPool()
 
@@ -1168,7 +1183,9 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 
 			if err != nil {
 				s.logger.Debug(ctx, "Candidate evaluation failed for example: %v", err)
-				scores[i] = 0.0 // penalty score for failed predictions
+				resultMu.Lock()
+				failed = true
+				resultMu.Unlock()
 				if !s.config.DisableTrajectoryTracking {
 					trajectories[i] = Trajectory{
 						Example:       example,
@@ -1197,9 +1214,6 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 				}
 			}
 
-			mu.Lock()
-			successCount++
-			mu.Unlock()
 		})
 	}
 
@@ -1218,14 +1232,14 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 		s.mu.Unlock()
 	}
 
+	if failed {
+		return math.Inf(-1)
+	}
+
 	// Calculate average score
 	var totalScore float64
 	for _, score := range scores {
 		totalScore += score
-	}
-
-	if len(batch) == 0 {
-		return 0.0
 	}
 	return totalScore / float64(len(batch))
 }
@@ -1233,8 +1247,29 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 // selectBestCandidate uses bucket sorting or temperature-controlled sampling to select program.
 func (s *SIMBA) selectBestCandidate(candidates []core.Program, scores []float64) (core.Program, float64) {
 	if len(candidates) == 0 || len(scores) == 0 {
-		return candidates[0], scores[0]
+		return core.Program{}, math.Inf(-1)
 	}
+
+	// Failed evaluations use -Inf so they cannot outrank valid negative metric
+	// values. Remove them before bucket normalization or temperature sampling.
+	limit := min(len(candidates), len(scores))
+	validCandidates := make([]core.Program, 0, limit)
+	validScores := make([]float64, 0, limit)
+	for i := 0; i < limit; i++ {
+		score := scores[i]
+		if math.IsInf(score, 1) {
+			return candidates[i], score
+		}
+		if math.IsInf(score, -1) || math.IsNaN(score) {
+			continue
+		}
+		validCandidates = append(validCandidates, candidates[i])
+		validScores = append(validScores, score)
+	}
+	if len(validCandidates) == 0 {
+		return candidates[0], math.Inf(-1)
+	}
+	candidates, scores = validCandidates, validScores
 
 	// Use bucket sorting if enabled
 	if s.config.UseBucketSorting {
@@ -1418,10 +1453,13 @@ func (s *SIMBA) calculateCompositeScore(score, maxScore, minScore, avgScore floa
 			}
 		case "max_score":
 			// Favor candidates with higher scores
-			if maxScore > 0 {
-				criterionScore = score / maxScore
+			// Min/max normalization preserves ordering for negative and mixed
+			// scores; dividing by max either collapsed non-positive inputs or
+			// inverted ordering when max was negative.
+			if maxScore > minScore {
+				criterionScore = (score - minScore) / (maxScore - minScore)
 			} else {
-				criterionScore = 0.0
+				criterionScore = 1.0
 			}
 		case "max_to_avg_gap":
 			// Favor candidates above average
@@ -1981,7 +2019,7 @@ func (s *SIMBA) closePipelineChannels() {
 }
 
 // runPipelineProcessing executes the optimization using pipeline processing.
-func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program, dataset core.Dataset) (core.Program, error) {
+func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program, examples []core.Example) (core.Program, error) {
 	s.initializePipelineChannels()
 	// Don't use defer for channel closing since we manage it manually
 
@@ -1996,13 +2034,13 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 	wg.Go(func() { s.candidateGenerationWorker(pipelineCtx, program) })
 
 	// Start batch sampling worker
-	wg.Go(func() { s.batchSamplingWorker(pipelineCtx, dataset) })
+	wg.Go(func() { s.batchSamplingWorker(pipelineCtx, examples) })
 
 	// Start candidate evaluation worker
 	wg.Go(func() { s.candidateEvaluationWorker(pipelineCtx) })
 
 	// Start pipeline coordinator
-	return s.pipelineCoordinator(ctx, program, &wg, pipelineCancel)
+	return s.pipelineCoordinator(ctx, program, examples, &wg, pipelineCancel)
 }
 
 // candidateGenerationWorker generates candidates in parallel for multiple steps.
@@ -2066,7 +2104,7 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 
 // batchSamplingWorker samples mini-batches in parallel.
 // Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
-func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset) {
+func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -2093,7 +2131,7 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, dataset core.Dataset) {
 			}
 
 			startTime := time.Now()
-			batch, err := s.sampleMiniBatch(ctx, dataset)
+			batch, err := s.sampleMiniBatchFromExamples(ctx, examples)
 			stage.Batch = batch
 			stage.Error = err
 
@@ -2194,7 +2232,7 @@ func (s *SIMBA) candidateEvaluationWorker(ctx context.Context) {
 }
 
 // pipelineCoordinator coordinates the pipeline and collects results.
-func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Program, wg *sync.WaitGroup, pipelineCancel context.CancelFunc) (core.Program, error) {
+func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Program, examples []core.Example, wg *sync.WaitGroup, pipelineCancel context.CancelFunc) (core.Program, error) {
 	bestProgram := initialProgram.Clone()
 	bestScore := s.state.BestScore
 	processedSteps := 0
@@ -2258,20 +2296,22 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			stageTimings[fmt.Sprintf("step_%d", stage.StepIndex)] = processingTime
 
 			// Select best candidate from this step
-			selectedProgram, selectedScore := s.selectBestCandidate(stage.Candidates, stage.Scores)
+			selectedProgram, _ := s.selectBestCandidate(stage.Candidates, stage.Scores)
 
-			// Update global best if improvement found
-			improvement := selectedScore - bestScore
-			if selectedScore > bestScore {
+			// As in sequential mode, only compare full-dataset scores globally.
+			// Candidate/incumbent step selection above remains batch-local.
+			selectedFullScore := s.evaluateProgramOnExamples(ctx, selectedProgram, examples)
+			improvement := selectedFullScore - bestScore
+			if selectedFullScore > bestScore {
 				s.mu.Lock()
-				s.state.BestScore = selectedScore
+				s.state.BestScore = selectedFullScore
 				s.state.BestProgram = selectedProgram.Clone()
 				bestProgram = s.state.BestProgram
-				bestScore = selectedScore
+				bestScore = selectedFullScore
 				s.mu.Unlock()
 
 				s.logger.Info(ctx, "Pipeline: New best score: %.4f (improvement: +%.4f) at step %d",
-					selectedScore, improvement, stage.StepIndex)
+					selectedFullScore, improvement, stage.StepIndex)
 			}
 
 			// Record step metrics

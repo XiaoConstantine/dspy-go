@@ -3,6 +3,8 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -642,7 +644,31 @@ func testSIMBAEdgeCases(t *testing.T) {
 		dataset := createSIMBATestDataset()
 		score := simba.evaluateProgram(context.Background(), failingProgram, dataset)
 
-		assert.Equal(t, 0.0, score) // Should return 0 for failed evaluation
+		assert.True(t, math.IsInf(score, -1), "failed evaluation must rank below every finite metric score")
+	})
+
+	t.Run("Failed candidates do not outrank valid negative scores", func(t *testing.T) {
+		simba := NewSIMBA(WithFastMode(true), WithSamplingTemperature(0))
+		simba.metric = func(expected, actual map[string]any) float64 { return -1 }
+		batch := []core.Example{{
+			Inputs:  map[string]any{"question": "test"},
+			Outputs: map[string]any{"answer": "expected"},
+		}}
+		validProgram := core.NewProgram(map[string]core.Module{}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			return map[string]any{"answer": "valid"}, nil
+		})
+		failingProgram := core.NewProgram(map[string]core.Module{}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			return nil, fmt.Errorf("generation failed")
+		})
+
+		scores := []float64{
+			simba.evaluateCandidateOnBatch(context.Background(), validProgram, batch),
+			simba.evaluateCandidateOnBatch(context.Background(), failingProgram, batch),
+		}
+		_, selectedScore := simba.selectBestCandidate([]core.Program{validProgram, failingProgram}, scores)
+
+		assert.Less(t, scores[1], scores[0], "an evaluation failure must rank below a valid metric score")
+		assert.Equal(t, -1.0, selectedScore, "the valid candidate should remain selectable for negative-valued metrics")
 	})
 
 	t.Run("Handles zero or negative scores", func(t *testing.T) {
@@ -928,7 +954,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		ctx := context.Background()
 		score := simba.evaluateCandidateOnBatch(ctx, failingProgram, batch)
 
-		assert.Equal(t, 0.0, score)
+		assert.True(t, math.IsInf(score, -1), "failed evaluation must rank below every finite metric score")
 
 		// Check that failed trajectories are recorded
 		state := simba.GetState()
@@ -1568,6 +1594,37 @@ func createSIMBATestDataset() core.Dataset {
 	return dataset
 }
 
+type snapshotTrackingDataset struct {
+	mu       sync.Mutex
+	examples []core.Example
+	index    int
+	resets   int
+}
+
+func (d *snapshotTrackingDataset) Next() (core.Example, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.index >= len(d.examples) {
+		return core.Example{}, false
+	}
+	example := d.examples[d.index]
+	d.index++
+	return example, true
+}
+
+func (d *snapshotTrackingDataset) Reset() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.index = 0
+	d.resets++
+}
+
+func (d *snapshotTrackingDataset) ResetCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.resets
+}
+
 // testSIMBABucketSortingConfiguration tests bucket sorting configuration options.
 func testSIMBABucketSortingConfiguration(t *testing.T) {
 	t.Run("Default configuration has bucket sorting disabled", func(t *testing.T) {
@@ -1628,6 +1685,19 @@ func testSIMBABucketSortingConfiguration(t *testing.T) {
 
 // testSIMBAMultiCriteriaScoring tests multi-criteria scoring functionality.
 func testSIMBAMultiCriteriaScoring(t *testing.T) {
+	t.Run("max_score preserves ordering for non-positive scores", func(t *testing.T) {
+		simba := NewSIMBA(
+			WithBucketSortingCriteria([]string{"max_score"}),
+			WithBucketSortingWeights([]float64{1}),
+		)
+		candidates := []core.Program{createSIMBATestProgram(), createSIMBATestProgram(), createSIMBATestProgram()}
+		metadata := simba.calculateMultiCriteriaScore(candidates, []float64{-5, -2, -1})
+		assert.Less(t, metadata[0].CompositeScore, metadata[1].CompositeScore)
+		assert.Less(t, metadata[1].CompositeScore, metadata[2].CompositeScore)
+		assert.Equal(t, 0.0, metadata[0].CompositeScore)
+		assert.Equal(t, 1.0, metadata[2].CompositeScore)
+	})
+
 	t.Run("Calculates multi-criteria scores correctly", func(t *testing.T) {
 		simba := NewSIMBA()
 
@@ -2047,6 +2117,30 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		state := simba.GetState()
 		assert.True(t, state.CurrentStep >= 0)
 		assert.True(t, len(state.PerformanceLog) > 0)
+	})
+
+	t.Run("Pipeline snapshots dataset and evaluates incumbent once", func(t *testing.T) {
+		program := createSIMBATestProgram()
+		dataset := &snapshotTrackingDataset{examples: []core.Example{
+			{Inputs: map[string]any{"question": "one"}, Outputs: map[string]any{"answer": "one"}},
+			{Inputs: map[string]any{"question": "two"}, Outputs: map[string]any{"answer": "two"}},
+		}}
+		simba := NewSIMBA(
+			WithFastMode(true),
+			WithPipelineProcessing(true),
+			WithSIMBAMaxSteps(2),
+		)
+
+		_, err := simba.Compile(context.Background(), program, dataset, func(expected, actual map[string]any) float64 {
+			return 0.8
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, dataset.ResetCount())
+		assert.NotEmpty(t, simba.state.PerformanceLog)
+		for _, step := range simba.state.PerformanceLog {
+			assert.Len(t, step.CandidateScores, 1, "the incumbent should appear exactly once")
+		}
 	})
 
 	t.Run("Sequential vs pipeline processing comparison", func(t *testing.T) {
