@@ -161,6 +161,16 @@ func ParseSignature(signatureStr string) (Signature, error) {
 
 	inputs := parseInputFields(strings.TrimSpace(parts[0]))
 	outputs := parseOutputFields(strings.TrimSpace(parts[1]))
+	for _, field := range inputs {
+		if field.Name == "" {
+			return Signature{}, errors.New(errors.InvalidInput, "signature field name cannot be empty")
+		}
+	}
+	for _, field := range outputs {
+		if field.Name == "" {
+			return Signature{}, errors.New(errors.InvalidInput, "signature field name cannot be empty")
+		}
+	}
 
 	return NewSignature(inputs, outputs), nil
 }
@@ -170,7 +180,7 @@ func parseInputFields(fieldsStr string) []InputField {
 	fields := make([]InputField, len(fieldStrs))
 	for i, fieldStr := range fieldStrs {
 		fieldStr = strings.TrimSpace(fieldStr)
-		fields[i] = InputField{Field: Field{Name: fieldStr}}
+		fields[i] = InputField{Field: NewField(fieldStr)}
 	}
 	return fields
 }
@@ -180,7 +190,7 @@ func parseOutputFields(fieldsStr string) []OutputField {
 	fields := make([]OutputField, len(fieldStrs))
 	for i, fieldStr := range fieldStrs {
 		fieldStr = strings.TrimSpace(fieldStr)
-		fields[i] = OutputField{Field: Field{Name: fieldStr}}
+		fields[i] = OutputField{Field: NewField(fieldStr)}
 	}
 	return fields
 }

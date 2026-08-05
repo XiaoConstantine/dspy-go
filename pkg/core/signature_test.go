@@ -79,7 +79,11 @@ func TestSignatureParser(t *testing.T) {
 		assert.Len(t, sig.Inputs, 2)
 		assert.Len(t, sig.Outputs, 2)
 		assert.Equal(t, "input1", sig.Inputs[0].Name)
+		assert.Equal(t, "input1:", sig.Inputs[0].Prefix)
+		assert.Equal(t, FieldTypeText, sig.Inputs[0].Type)
 		assert.Equal(t, "output1", sig.Outputs[0].Name)
+		assert.Equal(t, "output1:", sig.Outputs[0].Prefix)
+		assert.Equal(t, FieldTypeText, sig.Outputs[0].Type)
 	})
 
 	t.Run("ParseSignature invalid", func(t *testing.T) {
@@ -108,6 +112,19 @@ func TestSignatureParser(t *testing.T) {
 		assert.Len(t, sig.Outputs, 2)
 		assert.Equal(t, "input1", sig.Inputs[0].Name)
 		assert.Equal(t, "output1", sig.Outputs[0].Name)
+	})
+
+	t.Run("ParseSignature rejects empty fields", func(t *testing.T) {
+		for _, signatureStr := range []string{
+			" -> output",
+			"input -> ",
+			"input, -> output",
+			"input -> output,",
+		} {
+			_, err := ParseSignature(signatureStr)
+			assert.Error(t, err, signatureStr)
+			assert.Contains(t, err.Error(), "field name cannot be empty")
+		}
 	})
 }
 
