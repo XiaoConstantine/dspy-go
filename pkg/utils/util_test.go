@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -618,12 +619,24 @@ func TestConvertToInt(t *testing.T) {
 		{"int64", int64(42), 42, true},
 		{"float32", float32(42.0), 42, true},
 		{"float64", float64(42.0), 42, true},
-		{"float32 max safe value", float32(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64 as float32
-		{"float32 overflow positive", float32(1e20), 0, false},                              // Large positive float32, should fail
-		{"float32 overflow negative", float32(-1e20), 0, false},                             // Large negative float32, should fail
-		{"float64 max safe value", float64(9223372036854775807), 9223372036854775807, true}, // math.MaxInt64 as float64
-		{"float64 overflow positive", float64(1e20), 0, false},                              // Large positive float64, should fail
-		{"float64 overflow negative", float64(-1e20), 0, false},                             // Large negative float64, should fail
+		{"float32 largest in-range value", math.Nextafter32(float32(0x1p63), 0), 9223371487098961920, true},
+		{"float32 positive boundary", float32(0x1p63), 0, false},
+		{"float32 minimum value", float32(-0x1p63), math.MinInt64, true},
+		{"float32 below minimum", math.Nextafter32(float32(-0x1p63), float32(math.Inf(-1))), 0, false},
+		{"float32 overflow positive", float32(1e20), 0, false},
+		{"float32 overflow negative", float32(-1e20), 0, false},
+		{"float32 NaN", float32(math.NaN()), 0, false},
+		{"float32 positive infinity", float32(math.Inf(1)), 0, false},
+		{"float32 negative infinity", float32(math.Inf(-1)), 0, false},
+		{"float64 largest in-range value", math.Nextafter(0x1p63, 0), 9223372036854774784, true},
+		{"float64 positive boundary", float64(0x1p63), 0, false},
+		{"float64 minimum value", float64(-0x1p63), math.MinInt64, true},
+		{"float64 below minimum", math.Nextafter(-0x1p63, math.Inf(-1)), 0, false},
+		{"float64 overflow positive", float64(1e20), 0, false},
+		{"float64 overflow negative", float64(-1e20), 0, false},
+		{"float64 NaN", math.NaN(), 0, false},
+		{"float64 positive infinity", math.Inf(1), 0, false},
+		{"float64 negative infinity", math.Inf(-1), 0, false},
 		{"string number", "42", 42, true},
 		{"string with whitespace", "  42  ", 42, true},
 		{"string partial number (strconv improvement)", "42abc", 0, false}, // strconv.ParseInt is stricter than fmt.Sscanf
@@ -893,6 +906,20 @@ func TestSetFieldValueEdgeCases(t *testing.T) {
 			fieldName: "StringField",
 			value:     struct{ Name string }{Name: "test"}, // struct that will use fmt.Sprintf
 			wantErr:   false,
+		},
+		{
+			name:      "int field with float64 positive boundary",
+			fieldName: "IntField",
+			value:     float64(0x1p63),
+			wantErr:   true,
+			errMsg:    "cannot convert",
+		},
+		{
+			name:      "int field with NaN",
+			fieldName: "IntField",
+			value:     math.NaN(),
+			wantErr:   true,
+			errMsg:    "cannot convert",
 		},
 		{
 			name:      "int8 field with overflow value",

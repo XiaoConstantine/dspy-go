@@ -268,13 +268,15 @@ func SetFieldValue(fieldValue reflect.Value, value any) error {
 		fieldValue.SetString(fmt.Sprintf("%v", value))
 		return nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if intVal, ok := convertToInt(value); ok {
-			if fieldValue.OverflowInt(intVal) {
-				return fmt.Errorf("value %v overflows field of type %s", value, fieldType)
-			}
-			fieldValue.SetInt(intVal)
-			return nil
+		intVal, ok := convertToInt(value)
+		if !ok {
+			return fmt.Errorf("cannot convert %T to %s", value, fieldType)
 		}
+		if fieldValue.OverflowInt(intVal) {
+			return fmt.Errorf("value %v overflows field of type %s", value, fieldType)
+		}
+		fieldValue.SetInt(intVal)
+		return nil
 	case reflect.Float32, reflect.Float64:
 		if floatVal, ok := convertToFloat(value); ok {
 			if fieldValue.OverflowFloat(floatVal) {
@@ -301,50 +303,41 @@ func SetFieldValue(fieldValue reflect.Value, value any) error {
 
 // Helper conversion functions.
 func convertToInt(value any) (int64, bool) {
-	switch v := value.(type) {
-	case int:
-		return int64(v), true
-	case int8:
-		return int64(v), true
-	case int16:
-		return int64(v), true
-	case int32:
-		return int64(v), true
-	case int64:
-		return v, true
-	case uint:
-		if uint64(v) > math.MaxInt64 {
+	if value == nil {
+		return 0, false
+	}
+
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		unsigned := v.Uint()
+		if unsigned > math.MaxInt64 {
 			return 0, false
 		}
-		return int64(v), true
-	case uint8:
-		return int64(v), true
-	case uint16:
-		return int64(v), true
-	case uint32:
-		return int64(v), true
-	case uint64:
-		if v > math.MaxInt64 {
-			return 0, false
-		}
-		return int64(v), true
-	case float32:
-		if v > math.MaxInt64 || v < math.MinInt64 {
-			return 0, false
-		}
-		return int64(v), true
-	case float64:
-		if v > math.MaxInt64 || v < math.MinInt64 {
-			return 0, false
-		}
-		return int64(v), true
-	case string:
-		// Use strconv for robust and idiomatic integer parsing
-		if i, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+		return int64(unsigned), true
+	case reflect.Float32, reflect.Float64:
+		return floatToInt64(v.Float())
+	case reflect.String:
+		// Use strconv for robust and idiomatic integer parsing.
+		if i, err := strconv.ParseInt(strings.TrimSpace(v.String()), 10, 64); err == nil {
 			return i, true
 		}
 	}
 	return 0, false
+}
+
+func floatToInt64(value float64) (int64, bool) {
+	const (
+		minInt64Float          = -0x1p63
+		maxInt64FloatExclusive = 0x1p63
+	)
+
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < minInt64Float || value >= maxInt64FloatExclusive {
+		return 0, false
+	}
+	return int64(value), true
 }
 
 func convertToFloat(value any) (float64, bool) {
