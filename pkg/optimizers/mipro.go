@@ -60,9 +60,13 @@ type TeacherStudentOptimizer struct {
 
 // Initialize sets up the teacher-student optimization.
 func (t *TeacherStudentOptimizer) Initialize(ctx context.Context, program core.Program, dataset core.Dataset) error {
+	t.reset()
+	return nil
+}
+
+func (t *TeacherStudentOptimizer) reset() {
 	t.state.demonstrations = make([]core.Example, 0)
 	t.state.teacherScores = make(map[string]float64)
-	return nil
 }
 
 // GenerateDemonstration creates a high-quality demonstration using the teacher.
@@ -216,10 +220,12 @@ type OptimizationStep struct {
 	FailurePoints []string
 }
 
+type miproMetric = func(example, prediction map[string]any, ctx context.Context) float64
+
 // MIPRO is the main optimizer implementing multi-step interactive prompt optimization.
 type MIPRO struct {
 	// Core components
-	metric               func(example, prediction map[string]any, ctx context.Context) float64
+	metric               miproMetric
 	searchStrategy       SearchStrategy
 	searchConfig         SearchConfig
 	teacherStudent       *TeacherStudentOptimizer
@@ -242,6 +248,11 @@ type MIPRO struct {
 	logger *logging.Logger
 	mu     sync.RWMutex
 }
+
+var (
+	_ core.Optimizer        = (*MIPRO)(nil)
+	_ core.ExamplesCompiler = (*MIPRO)(nil)
+)
 
 // MIPROOption defines a function type for configuring MIPRO.
 type MIPROOption func(*MIPRO)
@@ -474,42 +485,86 @@ func (m *MIPRO) compileSearchConfig() SearchConfig {
 	return config
 }
 
-// Compile implements the main optimization loop.
+// Compile implements the legacy cursor-based Optimizer API. It consumes the
+// dataset once, then optimizes from materialized examples so later phases never
+// share or reset the caller's mutable cursor.
 func (m *MIPRO) Compile(
 	ctx context.Context,
 	program core.Program,
 	dataset core.Dataset,
 	metric core.Metric,
 ) (core.Program, error) {
+	compileMetric, err := m.prepareCompile(ctx, metric)
+	if err != nil {
+		return program, err
+	}
+	examples, err := core.MaterializeDatasetContext(ctx, dataset)
+	if err != nil {
+		return program, fmt.Errorf("failed to materialize dataset: %w", err)
+	}
+	return m.compileExamples(ctx, program, examples, compileMetric)
+}
+
+// CompileExamples optimizes a program from materialized, read-only examples.
+func (m *MIPRO) CompileExamples(
+	ctx context.Context,
+	program core.Program,
+	examples []core.Example,
+	metric core.Metric,
+) (core.Program, error) {
+	compileMetric, err := m.prepareCompile(ctx, metric)
+	if err != nil {
+		return program, err
+	}
+	return m.compileExamples(ctx, program, examples, compileMetric)
+}
+
+func (m *MIPRO) prepareCompile(ctx context.Context, metric core.Metric) (miproMetric, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	compileMetric := m.metric
+	if metric != nil {
+		compileMetric = func(example, prediction map[string]any, _ context.Context) float64 {
+			return metric(example, prediction)
+		}
+	}
+	if compileMetric == nil {
+		return nil, fmt.Errorf("MIPRO requires a metric function")
+	}
+
 	m.resetCompileState()
 	if err := m.searchStrategy.Initialize(m.compileSearchConfig()); err != nil {
-		return program, fmt.Errorf("failed to initialize search strategy: %w", err)
+		return nil, fmt.Errorf("failed to initialize search strategy: %w", err)
 	}
 	m.logger.Info(ctx, "Starting MIPRO optimization with configuration: %+v", m.config)
+	m.teacherStudent.reset()
+	return compileMetric, nil
+}
 
+func (m *MIPRO) compileExamples(
+	ctx context.Context,
+	program core.Program,
+	examples []core.Example,
+	metric miproMetric,
+) (core.Program, error) {
 	originalForward := program.Forward
-	// Step 1: Initialize teacher-student learning
-	if err := m.teacherStudent.Initialize(ctx, program, dataset); err != nil {
-		return program, fmt.Errorf("failed to initialize teacher-student: %w", err)
-	}
 
-	// Each compile owns a fresh traversal, including demonstration generation.
-	dataset.Reset()
-
-	// Step 2: Generate initial demonstrations
-	demos, err := m.generateDemonstrations(ctx, program, dataset)
+	// Step 1: Generate initial demonstrations.
+	demos, err := m.generateDemonstrations(ctx, examples)
 	if err != nil {
 		return program, fmt.Errorf("failed to generate demonstrations: %w", err)
 	}
 
-	// Step 3: Generate instruction candidates
+	// Step 2: Generate instruction candidates.
 	instructions, err := m.instructionGenerator.GenerateCandidates(ctx, program, demos)
 	if err != nil {
 		return program, fmt.Errorf("failed to generate instructions: %w", err)
 	}
 
-	// Step 4: Run main optimization loop
-	bestProgram, err := m.runOptimizationLoop(ctx, program, dataset, demos, instructions)
+	// Step 3: Run main optimization loop.
+	bestProgram, err := m.runOptimizationLoop(ctx, program, examples, demos, instructions, metric)
 	if err != nil {
 		return program, fmt.Errorf("optimization failed: %w", err)
 	}
@@ -527,16 +582,17 @@ func (m *MIPRO) Compile(
 		return program, nil
 	}
 
-	// Step 5: Finalize and validate best program
-	return m.finalizeProgram(ctx, bestProgram, dataset)
+	// Step 4: Finalize and validate best program.
+	return m.finalizeProgram(ctx, bestProgram, examples, metric)
 }
 
 func (m *MIPRO) runOptimizationLoop(
 	ctx context.Context,
 	program core.Program,
-	dataset core.Dataset,
+	examples []core.Example,
 	demos []core.Example,
 	instructions map[int][]string,
+	metric miproMetric,
 ) (core.Program, error) {
 	var bestProgram core.Program
 	// Start at -Inf so the first successful trial is always accepted, even
@@ -558,10 +614,10 @@ func (m *MIPRO) runOptimizationLoop(
 		var score float64
 		if m.config.MiniBatchSize > 0 && iteration < m.config.NumTrials-1 {
 			// Use minibatch for all but the last iteration
-			score, err = m.evaluateOnMinibatch(ctx, candidate, dataset, m.config.MiniBatchSize)
+			score, err = m.evaluateOnMinibatch(ctx, candidate, examples, m.config.MiniBatchSize, metric)
 		} else {
 			// Use full evaluation for the final iteration or if minibatching is disabled
-			score, err = m.evaluateCandidate(ctx, candidate, dataset)
+			score, err = m.evaluateCandidate(ctx, candidate, examples, metric)
 		}
 		if err != nil {
 			return program, fmt.Errorf("failed to evaluate candidate: %w", err)
@@ -595,7 +651,7 @@ func (m *MIPRO) runOptimizationLoop(
 		// We'll now handle nil values in the createCandidateProgram function,
 		// so we don't need to validate extensively here
 		finalCandidate := m.createCandidateProgram(program, bestParams, demos, instructions)
-		finalScore, err := m.evaluateCandidate(ctx, finalCandidate, dataset)
+		finalScore, err := m.evaluateCandidate(ctx, finalCandidate, examples, metric)
 		if err != nil {
 			m.logger.Error(ctx, "Failed to evaluate final candidate: %v", err)
 		} else if finalScore > bestScore {
@@ -689,17 +745,12 @@ func (m *MIPRO) updateMetrics(score float64, tokenUsage *core.TokenInfo) {
 // generateDemonstrations creates initial demonstrations.
 func (m *MIPRO) generateDemonstrations(
 	ctx context.Context,
-	program core.Program,
-	dataset core.Dataset,
+	examples []core.Example,
 ) ([]core.Example, error) {
-	demos := make([]core.Example, 0, m.maxBootstrappedDemos)
+	limit := min(m.maxBootstrappedDemos, len(examples))
+	demos := make([]core.Example, 0, limit)
 
-	for i := 0; i < m.maxBootstrappedDemos; i++ {
-		example, ok := dataset.Next()
-		if !ok {
-			break
-		}
-
+	for _, example := range examples[:limit] {
 		demo, err := m.teacherStudent.GenerateDemonstration(ctx, example)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate demonstration: %w", err)
@@ -772,41 +823,33 @@ func (m *MIPRO) createCandidateProgram(
 func (m *MIPRO) evaluateCandidate(
 	ctx context.Context,
 	program core.Program,
-	dataset core.Dataset,
+	examples []core.Example,
+	metric miproMetric,
 ) (float64, error) {
+	if len(examples) == 0 {
+		return 0, fmt.Errorf("no examples evaluated")
+	}
+
 	var totalScore float64
-	var count int
-
-	dataset.Reset()
-	for {
-		example, ok := dataset.Next()
-
-		if !ok {
-			break
-		}
-
+	for _, example := range examples {
 		result, err := program.Execute(ctx, example.Inputs)
 		if err != nil {
 			return 0, fmt.Errorf("failed to execute program: %w", err)
 		}
 
-		score := m.metric(example.Outputs, result, ctx)
+		score := metric(example.Outputs, result, ctx)
 		totalScore += score
-		count++
 	}
 
-	if count == 0 {
-		return 0, fmt.Errorf("no examples evaluated")
-	}
-
-	return totalScore / float64(count), nil
+	return totalScore / float64(len(examples)), nil
 }
 
 // finalizeProgram performs final validation and cleanup.
 func (m *MIPRO) finalizeProgram(
 	ctx context.Context,
 	program core.Program,
-	dataset core.Dataset,
+	examples []core.Example,
+	metric miproMetric,
 ) (core.Program, error) {
 	// Check if the program is nil or missing Forward function
 	if program.Forward == nil {
@@ -815,7 +858,7 @@ func (m *MIPRO) finalizeProgram(
 		return program, fmt.Errorf("program has nil Forward function")
 	}
 
-	score, err := m.evaluateCandidate(ctx, program, dataset)
+	score, err := m.evaluateCandidate(ctx, program, examples, metric)
 	if err != nil {
 		return program, fmt.Errorf("final validation failed: %w", err)
 	}
@@ -838,25 +881,15 @@ func (m *MIPRO) updateConvergence(score float64) {
 func (m *MIPRO) evaluateOnMinibatch(
 	ctx context.Context,
 	program core.Program,
-	fullDataset core.Dataset,
+	examples []core.Example,
 	batchSize int,
+	metric miproMetric,
 ) (float64, error) {
-	// Clone the dataset to avoid affecting the original
-	fullDataset.Reset()
-
-	// Create a minibatch by sampling from the dataset
-	var batch []core.Example
-	for i := 0; i < batchSize; i++ {
-		example, ok := fullDataset.Next()
-		if !ok {
-			break
-		}
-		batch = append(batch, example)
-	}
-
-	if len(batch) == 0 {
+	if batchSize <= 0 || len(examples) == 0 {
 		return 0, fmt.Errorf("no examples in minibatch")
 	}
+	batchSize = min(batchSize, len(examples))
+	batch := examples[:batchSize]
 
 	// Evaluate on the minibatch
 	var totalScore float64
@@ -867,7 +900,7 @@ func (m *MIPRO) evaluateOnMinibatch(
 			continue
 		}
 
-		score := m.metric(example.Outputs, result, ctx)
+		score := metric(example.Outputs, result, ctx)
 		totalScore += score
 	}
 

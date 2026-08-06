@@ -105,6 +105,57 @@ func TestBootstrapFewShot(t *testing.T) {
 	}
 }
 
+func TestMaterializeDataset(t *testing.T) {
+	dataset := &MockDataset{
+		data: []Example{
+			{Inputs: map[string]any{"id": 1}},
+			{Inputs: map[string]any{"id": 2}},
+		},
+		index: 1,
+	}
+
+	examples := MaterializeDataset(dataset)
+	if len(examples) != 2 {
+		t.Fatalf("MaterializeDataset() returned %d examples, want 2", len(examples))
+	}
+	if got := examples[0].Inputs["id"]; got != 1 {
+		t.Fatalf("first example id = %v, want 1", got)
+	}
+	if got := examples[1].Inputs["id"]; got != 2 {
+		t.Fatalf("second example id = %v, want 2", got)
+	}
+}
+
+func TestMaterializeDatasetContextDoesNotConsumeCanceledDataset(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dataset := &MockDataset{data: []Example{{Inputs: map[string]any{"id": 1}}}}
+
+	_, err := MaterializeDatasetContext(ctx, dataset)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("MaterializeDatasetContext() error = %v, want context.Canceled", err)
+	}
+	if dataset.resetCalls != 0 || dataset.nextCalls != 0 {
+		t.Fatalf("canceled materialization consumed dataset: Reset=%d Next=%d", dataset.resetCalls, dataset.nextCalls)
+	}
+}
+
+func TestMaterializeDatasetContextStopsDuringTraversal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dataset := &MockDataset{
+		data:   []Example{{Inputs: map[string]any{"id": 1}}, {Inputs: map[string]any{"id": 2}}},
+		onNext: cancel,
+	}
+
+	_, err := MaterializeDatasetContext(ctx, dataset)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("MaterializeDatasetContext() error = %v, want context.Canceled", err)
+	}
+	if dataset.resetCalls != 1 || dataset.nextCalls != 1 {
+		t.Fatalf("materialization calls: Reset=%d Next=%d, want Reset=1 Next=1", dataset.resetCalls, dataset.nextCalls)
+	}
+}
+
 func TestBaseOptimizerCompileReturnsUnsupportedOperation(t *testing.T) {
 	optimizer := &BaseOptimizer{Name: "base"}
 
@@ -130,11 +181,18 @@ func (m *MockOptimizer) Compile(ctx context.Context, program Program, dataset Da
 
 // MockDataset is a mock implementation of the Dataset interface for testing.
 type MockDataset struct {
-	data  []Example
-	index int
+	data       []Example
+	index      int
+	resetCalls int
+	nextCalls  int
+	onNext     func()
 }
 
 func (m *MockDataset) Next() (Example, bool) {
+	m.nextCalls++
+	if m.onNext != nil {
+		m.onNext()
+	}
 	if m.index >= len(m.data) {
 		return Example{}, false
 	}
@@ -144,5 +202,6 @@ func (m *MockDataset) Next() (Example, bool) {
 }
 
 func (m *MockDataset) Reset() {
+	m.resetCalls++
 	m.index = 0
 }

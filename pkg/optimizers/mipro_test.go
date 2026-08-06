@@ -185,8 +185,8 @@ func TestMIPRO(t *testing.T) {
 			assert.Equal(t, 0.8, mipro.state.BestScore)
 			mockModule.AssertExpectations(t)
 			mockStrategy.AssertExpectations(t)
-			dataset.AssertNumberOfCalls(t, "Reset", 3) // Demonstrations, trial evaluation, and final validation
-			dataset.AssertNumberOfCalls(t, "Next", 6)  // Expect 4 Next calls (2 per evaluateCandidate)
+			dataset.AssertNumberOfCalls(t, "Reset", 1)
+			dataset.AssertNumberOfCalls(t, "Next", 2)
 		})
 
 		t.Run("Handles optimization failures gracefully", func(t *testing.T) {
@@ -280,17 +280,10 @@ func TestMIPRO(t *testing.T) {
 			mockMod.On("GetSignature").Return(program.Modules["test"].GetSignature()).Maybe()
 			mockMod.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"output": "test"}, nil).Maybe()
 			mockDataset.On("Reset").Return().Once()
-			mockDataset.On("Next").Return(sampleExample, true).Once()   // 1st example
-			mockDataset.On("Next").Return(sampleExample, true).Once()   // 2nd example
-			mockDataset.On("Next").Return(core.Example{}, false).Once() // End loop
+			mockDataset.On("Next").Return(sampleExample, true).Twice()
+			mockDataset.On("Next").Return(core.Example{}, false).Once()
 
 			mockStrategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Maybe()
-
-			mockDataset.On("Reset").Return().Twice()
-			mockDataset.On("Next").Return(sampleExample, true).Once() // 1st example again
-
-			mockDataset.On("Next").Return(sampleExample, true).Once()    // 2nd example
-			mockDataset.On("Next").Return(core.Example{}, false).Maybe() // End loop
 
 			start := time.Now()
 			optimizedProgram, err := mipro.Compile(ctx, program, dataset, nil)
@@ -333,9 +326,10 @@ func TestMIPRO(t *testing.T) {
 			best, err := mipro.runOptimizationLoop(
 				context.Background(),
 				program,
-				dataset,
+				dataset.Examples,
 				nil,
 				map[int][]string{0: {"negative candidate"}},
+				mipro.metric,
 			)
 
 			require.NoError(t, err)
@@ -390,9 +384,9 @@ func TestMIPRO(t *testing.T) {
 			mipro.teacherStudent.Teacher = mockLLM
 			mipro.instructionGenerator.PromptModel = mockLLM
 
-			// Add Reset expectation for the mock dataset
+			// The legacy cursor is consumed once at the Compile boundary.
 			mockDataset := dataset.(*testutil.MockDataset)
-			mockDataset.On("Reset").Return().Times(4)
+			mockDataset.On("Reset").Return().Once()
 			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"prompt": "tpe_test"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{Inputs: map[string]any{"prompt": "tpe_test2"}}, true).Maybe()
 			mockDataset.On("Next").Return(core.Example{}, false).Maybe()
@@ -532,7 +526,7 @@ func TestMIPROCreateCandidateProgram_UsesDeterministicModuleOrder(t *testing.T) 
 	}
 }
 
-func TestMIPROCompileResetsReusedSearchState(t *testing.T) {
+func TestMIPROCompileResetsStateAndMaterializesLegacyDatasetOnce(t *testing.T) {
 	strategy := new(MockSearchStrategy)
 	strategy.On("Initialize", mock.Anything).Return(nil).Twice()
 	strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Twice()
@@ -563,6 +557,8 @@ func TestMIPROCompileResetsReusedSearchState(t *testing.T) {
 		Inputs:  map[string]any{"input": "sample"},
 		Outputs: map[string]any{"output": "ok"},
 	}})
+	dataset.On("Reset").Return().Twice()
+	dataset.On("Next").Return().Times(4)
 
 	_, firstErr := mipro.Compile(context.Background(), program, dataset, nil)
 	_, secondErr := mipro.Compile(context.Background(), program, dataset, nil)
@@ -571,6 +567,147 @@ func TestMIPROCompileResetsReusedSearchState(t *testing.T) {
 	strategy.AssertNumberOfCalls(t, "Initialize", 2)
 	assert.Equal(t, 1, mipro.state.CurrentIteration, "each Compile should start with fresh optimization state")
 	strategy.AssertExpectations(t)
+	dataset.AssertExpectations(t)
+}
+
+func TestMIPROCompileExamples(t *testing.T) {
+	strategy := new(MockSearchStrategy)
+	strategy.On("Initialize", mock.Anything).Return(nil).Once()
+	strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Once()
+	strategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Once()
+	strategy.On("GetBestParams").Return(map[string]any{}, 0.8).Once()
+
+	model := new(testutil.MockLLM)
+	mipro := NewMIPRO(
+		func(example, prediction map[string]any, ctx context.Context) float64 { return 0.8 },
+		WithNumTrials(1),
+		WithSearchStrategy(strategy),
+		WithModels(model, model),
+	)
+	mipro.maxBootstrappedDemos = 0
+	mipro.instructionGenerator.MaxCandidates = 0
+
+	program := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"test": newInstructionModule("test", "base")},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return modules["test"].Process(ctx, inputs)
+			}
+		},
+	)
+	examples := []core.Example{{
+		Inputs:  map[string]any{"input": "sample"},
+		Outputs: map[string]any{"output": "ok"},
+	}}
+
+	var compiler core.ExamplesCompiler = mipro
+	optimized, err := compiler.CompileExamples(context.Background(), program, examples, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, optimized.Modules)
+	strategy.AssertExpectations(t)
+}
+
+func TestMIPROCompileExamplesUsesInvocationMetric(t *testing.T) {
+	tests := []struct {
+		name              string
+		constructorMetric miproMetric
+	}{
+		{
+			name: "overrides constructor metric",
+			constructorMetric: func(example, prediction map[string]any, ctx context.Context) float64 {
+				return -1
+			},
+		},
+		{name: "works without constructor metric"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			strategy := new(MockSearchStrategy)
+			strategy.On("Initialize", mock.Anything).Return(nil).Once()
+			strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Once()
+			strategy.On("UpdateResults", mock.Anything, 0.25).Return(nil).Once()
+			strategy.On("GetBestParams").Return(map[string]any{}, 0.25).Once()
+
+			model := new(testutil.MockLLM)
+			mipro := NewMIPRO(
+				tt.constructorMetric,
+				WithNumTrials(1),
+				WithSearchStrategy(strategy),
+				WithModels(model, model),
+			)
+			mipro.maxBootstrappedDemos = 0
+			mipro.instructionGenerator.MaxCandidates = 0
+
+			program := core.NewProgramWithForwardFactory(
+				map[string]core.Module{"test": newInstructionModule("test", "base")},
+				func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+					return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+						return modules["test"].Process(ctx, inputs)
+					}
+				},
+			)
+			examples := []core.Example{{
+				Inputs:  map[string]any{"input": "sample"},
+				Outputs: map[string]any{"output": "ok"},
+			}}
+
+			_, err := mipro.CompileExamples(
+				context.Background(),
+				program,
+				examples,
+				func(expected, actual map[string]any) float64 { return 0.25 },
+			)
+			require.NoError(t, err)
+			assert.Equal(t, 0.25, mipro.state.BestScore)
+			strategy.AssertExpectations(t)
+		})
+	}
+}
+
+func TestMIPROCompileDoesNotConsumeDatasetBeforePreparationSucceeds(t *testing.T) {
+	newDataset := func() *testutil.MockDataset {
+		dataset := testutil.NewMockDataset([]core.Example{{
+			Inputs:  map[string]any{"input": "sample"},
+			Outputs: map[string]any{"output": "ok"},
+		}})
+		dataset.On("Reset").Return().Maybe()
+		dataset.On("Next").Return().Maybe()
+		return dataset
+	}
+
+	t.Run("canceled context", func(t *testing.T) {
+		strategy := new(MockSearchStrategy)
+		mipro := NewMIPRO(
+			func(example, prediction map[string]any, ctx context.Context) float64 { return 1 },
+			WithSearchStrategy(strategy),
+		)
+		dataset := newDataset()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := mipro.Compile(ctx, core.Program{}, dataset, nil)
+		assert.ErrorIs(t, err, context.Canceled)
+		dataset.AssertNotCalled(t, "Reset")
+		dataset.AssertNotCalled(t, "Next")
+	})
+
+	t.Run("search initialization failure", func(t *testing.T) {
+		initErr := fmt.Errorf("initialize search")
+		strategy := new(MockSearchStrategy)
+		strategy.On("Initialize", mock.Anything).Return(initErr).Once()
+		mipro := NewMIPRO(
+			func(example, prediction map[string]any, ctx context.Context) float64 { return 1 },
+			WithSearchStrategy(strategy),
+		)
+		dataset := newDataset()
+
+		_, err := mipro.Compile(context.Background(), core.Program{}, dataset, nil)
+		assert.ErrorIs(t, err, initErr)
+		dataset.AssertNotCalled(t, "Reset")
+		dataset.AssertNotCalled(t, "Next")
+		strategy.AssertExpectations(t)
+	})
 }
 
 func TestMIPRORunOptimizationLoop_PropagatesUpdateResultsError(t *testing.T) {
@@ -599,9 +736,10 @@ func TestMIPRORunOptimizationLoop_PropagatesUpdateResultsError(t *testing.T) {
 	_, err := mipro.runOptimizationLoop(
 		context.Background(),
 		program,
-		dataset,
+		dataset.Examples,
 		nil,
 		map[int][]string{0: {"candidate"}},
+		mipro.metric,
 	)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, updateErr)

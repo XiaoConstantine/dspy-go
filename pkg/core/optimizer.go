@@ -9,8 +9,17 @@ import (
 
 // Optimizer represents an interface for optimizing DSPy programs.
 type Optimizer interface {
-	// Compile optimizes a given program using the provided dataset and metric
+	// Compile optimizes a given program using the provided dataset and metric.
 	Compile(ctx context.Context, program Program, dataset Dataset, metric Metric) (Program, error)
+}
+
+// ExamplesCompiler optimizes a program from a materialized collection of
+// examples. Implementations must treat the slice and its examples as read-only.
+//
+// Optimizers should implement this interface alongside Optimizer while callers
+// migrate away from Dataset's shared mutable cursor.
+type ExamplesCompiler interface {
+	CompileExamples(ctx context.Context, program Program, examples []Example, metric Metric) (Program, error)
 }
 
 // Metric is a function type that evaluates the performance of a program.
@@ -30,19 +39,44 @@ type Example struct {
 	Outputs map[string]any
 }
 
-// DatasetToSlice converts a Dataset to a slice of Examples.
-// This is a helper function to avoid repeated iteration patterns.
-func DatasetToSlice(dataset Dataset) []Example {
+// MaterializeDataset consumes a legacy cursor-based Dataset into a slice.
+// Callers must have exclusive access to dataset while it is being consumed.
+func MaterializeDataset(dataset Dataset) []Example {
+	examples, _ := MaterializeDatasetContext(context.Background(), dataset)
+	return examples
+}
+
+// MaterializeDatasetContext consumes a legacy cursor-based Dataset into a
+// slice, stopping if ctx is canceled between cursor operations. Callers must
+// have exclusive access to dataset while it is being consumed.
+func MaterializeDatasetContext(ctx context.Context, dataset Dataset) ([]Example, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	var examples []Example
 	dataset.Reset()
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		example, hasNext := dataset.Next()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !hasNext {
-			break
+			return examples, nil
 		}
 		examples = append(examples, example)
 	}
-	return examples
+}
+
+// DatasetToSlice converts a Dataset to a slice of Examples.
+//
+// Deprecated: use MaterializeDataset while migrating legacy Dataset callers,
+// or pass []Example directly to an ExamplesCompiler.
+func DatasetToSlice(dataset Dataset) []Example {
+	return MaterializeDataset(dataset)
 }
 
 // BaseOptimizer provides a basic implementation of the Optimizer interface.
