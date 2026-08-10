@@ -3,6 +3,8 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -281,7 +283,9 @@ func TestCOPROCompile_NoPredictModules(t *testing.T) {
 			return inputs, nil
 		},
 	)
-	dataset := createCOPROTestDataset()
+	dataset := testutil.NewMockDataset([]core.Example{{Inputs: map[string]any{"input": "unused"}}})
+	dataset.On("Reset").Return().Maybe()
+	dataset.On("Next").Return().Maybe()
 
 	metric := func(expected, actual map[string]any) float64 { return 1.0 }
 	copro := NewCOPRO(metric)
@@ -292,6 +296,144 @@ func TestCOPROCompile_NoPredictModules(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, optimizedProgram)
 	assert.Equal(t, 0, len(optimizedProgram.Modules))
+	dataset.AssertNotCalled(t, "Reset")
+	dataset.AssertNotCalled(t, "Next")
+}
+
+func TestCOPROCompile_DoesNotConsumeCanceledDataset(t *testing.T) {
+	dataset := testutil.NewMockDataset([]core.Example{{Inputs: map[string]any{"question": "unused"}}})
+	dataset.On("Reset").Return().Maybe()
+	dataset.On("Next").Return().Maybe()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1 })
+	_, err := copro.Compile(ctx, createCOPROTestProgram(), dataset, nil)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	dataset.AssertNotCalled(t, "Reset")
+	dataset.AssertNotCalled(t, "Next")
+}
+
+func TestCOPROCompileExamples_PropagatesCancellationAndStopsPredictors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	).WithInstruction("Answer the question")
+
+	firstLLM := &MockLLM{}
+	firstLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+		Run(func(mock.Arguments) { cancel() }).
+		Return(&core.LLMResponse{}, context.Canceled).
+		Once()
+	firstLLM.On("GetModelName").Return("first-model").Maybe()
+	firstLLM.On("ModelID").Return("first-model").Maybe()
+	firstLLM.On("ProviderName").Return("test-provider").Maybe()
+	firstLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion}).Maybe()
+	secondLLM := &MockLLM{}
+
+	first := modules.NewPredict(signature)
+	first.SetLLM(firstLLM)
+	second := modules.NewPredict(signature)
+	second.SetLLM(secondLLM)
+	program := core.NewProgram(map[string]core.Module{
+		"a_first":  first,
+		"b_second": second,
+	}, nil)
+
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1 }, WithBreadth(1), WithDepth(0))
+	_, err := copro.CompileExamples(ctx, program, []core.Example{{
+		Inputs:  map[string]any{"question": "What is 2+2?"},
+		Outputs: map[string]any{"answer": "4"},
+	}}, nil)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	firstLLM.AssertExpectations(t)
+	secondLLM.AssertNotCalled(t, "Generate")
+}
+
+func TestCOPROCompileExamples_EmptyDataset(t *testing.T) {
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1 })
+	var compiler core.ExamplesCompiler = copro
+
+	_, err := compiler.CompileExamples(context.Background(), createCOPROTestProgram(), nil, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no examples in dataset for optimization")
+}
+
+func TestCOPROCompile_MaterializesLegacyDatasetOnce(t *testing.T) {
+	firstSignature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("first_question")}},
+		[]core.OutputField{{Field: core.NewField("first_answer")}},
+	).WithInstruction("Answer the first question")
+	secondSignature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("second_question")}},
+		[]core.OutputField{{Field: core.NewField("second_answer")}},
+	).WithInstruction("Answer the second question")
+
+	var firstGeneratorCalls atomic.Int64
+	var secondGeneratorCalls atomic.Int64
+	newLLM := func(name string, generatorCalls *atomic.Int64) *MockLLM {
+		llm := &MockLLM{}
+		llm.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				if prompt, ok := args.Get(1).(string); ok && strings.Contains(prompt, "expert prompt engineer") {
+					generatorCalls.Add(1)
+				}
+			}).
+			Return(&core.LLMResponse{Content: "Use a concise and accurate answer"}, nil).
+			Maybe()
+		llm.On("GetModelName").Return(name).Maybe()
+		llm.On("ModelID").Return(name).Maybe()
+		llm.On("ProviderName").Return("test-provider").Maybe()
+		llm.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion}).Maybe()
+		return llm
+	}
+	firstLLM := newLLM("first-model", &firstGeneratorCalls)
+	secondLLM := newLLM("second-model", &secondGeneratorCalls)
+
+	first := modules.NewPredict(firstSignature)
+	first.SetLLM(firstLLM)
+	second := modules.NewPredict(secondSignature)
+	second.SetLLM(secondLLM)
+	program := core.NewProgram(map[string]core.Module{
+		"first":  first,
+		"second": second,
+	}, nil)
+
+	examples := []core.Example{
+		{
+			Inputs:  map[string]any{"first_question": "What is 2+2?", "second_question": "What is 3+3?"},
+			Outputs: map[string]any{"first_answer": "4", "second_answer": "6"},
+		},
+		{
+			Inputs:  map[string]any{"first_question": "What is 4+4?", "second_question": "What is 5+5?"},
+			Outputs: map[string]any{"first_answer": "8", "second_answer": "10"},
+		},
+	}
+	dataset := testutil.NewMockDataset(examples)
+	dataset.On("Reset").Return().Once()
+	dataset.On("Next").Return().Times(len(examples) + 1)
+
+	var constructorMetricCalls atomic.Int64
+	var invocationMetricCalls atomic.Int64
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 {
+		constructorMetricCalls.Add(1)
+		return -1
+	}, WithBreadth(1), WithDepth(0))
+	_, err := copro.Compile(context.Background(), program, dataset, func(expected, actual map[string]any) float64 {
+		invocationMetricCalls.Add(1)
+		return 1
+	})
+
+	require.NoError(t, err)
+	dataset.AssertExpectations(t)
+	assert.Zero(t, constructorMetricCalls.Load())
+	assert.Positive(t, invocationMetricCalls.Load())
+	assert.Positive(t, firstGeneratorCalls.Load())
+	assert.Positive(t, secondGeneratorCalls.Load())
 }
 
 func TestCOPROCompile_EmptyDataset(t *testing.T) {
@@ -339,7 +481,7 @@ func TestGenerateInitialCandidates(t *testing.T) {
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
 
-	candidates := copro.generateInitialCandidates(ctx, predictor, "base instruction")
+	candidates := copro.generateInitialCandidates(ctx, predictor, "base instruction", copro.newPromptState(ctx, predictor))
 
 	assert.Len(t, candidates, 3)
 	for _, candidate := range candidates {
@@ -359,7 +501,7 @@ func TestRefineCandidates(t *testing.T) {
 		{Instruction: "Test instruction 2", Score: 0.8, Generation: 1},
 	}
 
-	refined := copro.refineCandidates(ctx, predictor, topCandidates, 2)
+	refined := copro.refineCandidates(ctx, predictor, topCandidates, 2, copro.newPromptState(ctx, predictor))
 
 	assert.Greater(t, len(refined), 0)
 	for _, candidate := range refined {
@@ -383,7 +525,7 @@ func TestRefineCandidates_DeterministicFallbackStillGeneratesCandidates(t *testi
 		{Instruction: "Test instruction 2", Score: 0.8, Generation: 1},
 	}
 
-	refined := copro.refineCandidates(ctx, predictor, topCandidates, 2)
+	refined := copro.refineCandidates(ctx, predictor, topCandidates, 2, copro.newPromptState(ctx, predictor))
 
 	require.NotEmpty(t, refined)
 	for _, candidate := range refined {
@@ -429,8 +571,9 @@ func TestEvaluateCandidate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	score := copro.evaluateCandidate(ctx, predictor, candidate, examples)
+	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, copro.Metric)
 
+	require.NoError(t, err)
 	assert.GreaterOrEqual(t, score, 0.0)
 	assert.LessOrEqual(t, score, 1.0)
 }
@@ -459,9 +602,37 @@ func TestEvaluateCandidate_LLMError(t *testing.T) {
 	}}
 
 	ctx := context.Background()
-	score := copro.evaluateCandidate(ctx, predictor, candidate, examples)
+	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, copro.Metric)
 
+	require.NoError(t, err)
 	assert.Equal(t, 0.0, score) // Should return 0 when no valid evaluations
+}
+
+func TestEvaluateCandidate_ProviderTimeoutIsInvalidScore(t *testing.T) {
+	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1 })
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	predictor := modules.NewPredict(signature)
+
+	mockLLM := &MockLLM{}
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{}, context.DeadlineExceeded)
+	mockLLM.On("GetModelName").Return("test-model")
+	mockLLM.On("ModelID").Return("test-model")
+	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
+	predictor.SetLLM(mockLLM)
+
+	score, err := copro.evaluateCandidate(
+		context.Background(),
+		predictor,
+		PromptCandidate{Instruction: "Test"},
+		[]core.Example{{Inputs: map[string]any{"question": "test"}, Outputs: map[string]any{"answer": "test"}}},
+		copro.Metric,
+	)
+
+	require.NoError(t, err)
+	assert.Zero(t, score)
 }
 
 func TestEvaluateCandidatesParallel(t *testing.T) {
@@ -494,7 +665,7 @@ func TestEvaluateCandidatesParallel(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples)
+	require.NoError(t, copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, copro.Metric))
 
 	// All candidates should have been evaluated (score set)
 	for _, candidate := range candidates {
@@ -817,7 +988,9 @@ func BenchmarkCOPROConcurrency(b *testing.B) {
 				for j := range candidates {
 					candidates[j].Score = 0.0
 				}
-				copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples)
+				if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, copro.Metric); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}
@@ -892,7 +1065,7 @@ func TestGenerateInitialCandidates_MoreThanTemplates(t *testing.T) {
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
 
-	candidates := copro.generateInitialCandidates(ctx, predictor, "base instruction")
+	candidates := copro.generateInitialCandidates(ctx, predictor, "base instruction", copro.newPromptState(ctx, predictor))
 
 	// Should generate candidates up to breadth (may be less if LLM generation fails in tests)
 	assert.GreaterOrEqual(t, len(candidates), 5, "Should generate at least 5 candidates")
@@ -908,10 +1081,8 @@ func TestOptimizePredictor_EmptyDataset(t *testing.T) {
 	// Test direct call to optimizePredictor with empty dataset
 	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 	predictor := modules.NewPredict(core.Signature{})
-	emptyDataset := datasets.NewSimpleDataset([]core.Example{})
-
 	ctx := context.Background()
-	err := copro.optimizePredictor(ctx, predictor, emptyDataset)
+	err := copro.optimizePredictor(ctx, predictor, nil, copro.Metric)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no examples in dataset for optimization")
@@ -937,7 +1108,7 @@ func TestOptimizePredictor_WithCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, predictor, dataset)
+	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), copro.Metric)
 
 	assert.NoError(t, err)
 }
@@ -962,7 +1133,7 @@ func TestOptimizePredictor_NoCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, predictor, dataset)
+	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), copro.Metric)
 
 	assert.NoError(t, err)
 }
@@ -1007,6 +1178,8 @@ func BenchmarkEvaluateCandidatesParallel(b *testing.B) {
 		for j := range candidates {
 			candidates[j].Score = 0.0
 		}
-		copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples)
+		if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, copro.Metric); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

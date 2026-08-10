@@ -23,10 +23,16 @@ type COPRO struct {
 	InitTemperature float64 // Randomness in prompt generation
 	TrackStats      bool    // Optional performance tracking
 
-	// LLM-assisted prompt generation components
+	// LLM-assisted prompt generation seeds. Each predictor receives independent
+	// operation-local state derived from these values.
 	PromptGenerator  *LLMPromptGenerator
-	CandidateHistory []PromptCandidate // Track previous attempts for learning
+	CandidateHistory []PromptCandidate
 }
+
+var (
+	_ core.Optimizer        = (*COPRO)(nil)
+	_ core.ExamplesCompiler = (*COPRO)(nil)
+)
 
 // PromptCandidate represents a candidate prompt configuration.
 type PromptCandidate struct {
@@ -38,6 +44,11 @@ type PromptCandidate struct {
 	Diversity       float64 // Semantic diversity score
 	Rank            int     // Performance ranking
 	AttemptID       string  // Unique identifier for tracking
+}
+
+type coproPromptState struct {
+	generator *LLMPromptGenerator
+	history   []PromptCandidate
 }
 
 // COPROOptions provides configuration options for COPRO.
@@ -111,22 +122,57 @@ func NewCOPRO(metric core.Metric, options ...COPROOption) *COPRO {
 	}
 }
 
-// Compile implements the core.Optimizer interface.
+// Compile implements the legacy cursor-based Optimizer API. It materializes
+// the dataset once before optimizing any predictors.
 func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
-	if metric != nil {
-		c.Metric = metric
+	ctx, compileMetric, err := c.prepareCompile(ctx, metric)
+	if err != nil {
+		return program, err
 	}
 
-	if c.Metric == nil {
-		return program, fmt.Errorf("COPRO requires a metric function")
+	// Preserve the legacy behavior of returning immediately when there is
+	// nothing to optimize without consuming the dataset.
+	if len(c.extractPredictors(program)) == 0 {
+		return c.compileExamples(ctx, program, nil, compileMetric)
 	}
 
-	// Ensure execution state exists
+	examples, err := core.MaterializeDatasetContext(ctx, dataset)
+	if err != nil {
+		return program, fmt.Errorf("failed to materialize dataset: %w", err)
+	}
+	return c.compileExamples(ctx, program, examples, compileMetric)
+}
+
+// CompileExamples optimizes a program from materialized, read-only examples.
+func (c *COPRO) CompileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
+	ctx, compileMetric, err := c.prepareCompile(ctx, metric)
+	if err != nil {
+		return program, err
+	}
+	return c.compileExamples(ctx, program, examples, compileMetric)
+}
+
+func (c *COPRO) prepareCompile(ctx context.Context, metric core.Metric) (context.Context, core.Metric, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
+	if metric == nil {
+		metric = c.Metric
+	}
+	if metric == nil {
+		return ctx, nil, fmt.Errorf("COPRO requires a metric function")
+	}
 	if core.GetExecutionState(ctx) == nil {
 		ctx = core.WithExecutionState(ctx)
 	}
-	logger := logging.GetLogger()
+	return ctx, metric, nil
+}
 
+func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
+	logger := logging.GetLogger()
 	ctx, span := core.StartSpan(ctx, "COPROCompilation")
 	defer core.EndSpan(ctx)
 
@@ -142,11 +188,21 @@ func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.
 
 	logger.Info(ctx, "COPRO: Found %d Predict modules to optimize", len(predictors))
 
-	// Optimize each predictor's prompts
-	for moduleName, predictor := range predictors {
+	moduleNames := make([]string, 0, len(predictors))
+	for moduleName := range predictors {
+		moduleNames = append(moduleNames, moduleName)
+	}
+	sort.Strings(moduleNames)
+
+	// Optimize each predictor's prompts in deterministic order.
+	for _, moduleName := range moduleNames {
+		if err := ctx.Err(); err != nil {
+			return optimizedProgram, err
+		}
+		predictor := predictors[moduleName]
 		moduleCtx, moduleSpan := core.StartSpan(ctx, fmt.Sprintf("OptimizePredictor_%s", moduleName))
 
-		err := c.optimizePredictor(moduleCtx, predictor, dataset)
+		err := c.optimizePredictor(moduleCtx, predictor, examples, metric)
 		if err != nil {
 			moduleSpan.WithError(err)
 			core.EndSpan(moduleCtx)
@@ -174,13 +230,14 @@ func (c *COPRO) extractPredictors(program core.Program) map[string]*modules.Pred
 }
 
 // optimizePredictor optimizes prompts for a single Predict module.
-func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predict, dataset core.Dataset) error {
+func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predict, examples []core.Example, metric core.Metric) error {
 	ctx, span := core.StartSpan(ctx, "OptimizePredictorPrompts")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
 
-	// Convert dataset to examples for evaluation
-	examples := core.DatasetToSlice(dataset)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(examples) == 0 {
 		return fmt.Errorf("no examples in dataset for optimization")
 	}
@@ -193,6 +250,8 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	trainExamples := examples[:trainSize]
 	validationExamples := examples[trainSize:]
 	logger.Info(ctx, "COPRO: Using %d examples for training, %d for validation", len(trainExamples), len(validationExamples))
+
+	promptState := c.newPromptState(ctx, predictor)
 
 	// Get current instruction and prefix as baseline
 	signature := predictor.GetSignature()
@@ -209,16 +268,25 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 			Prefix:      currentPrefix,
 			Generation:  0,
 		}
-		baseline.Score = c.evaluateCandidate(ctx, predictor, baseline, trainExamples)
+		var err error
+		baseline.Score, err = c.evaluateCandidate(ctx, predictor, baseline, trainExamples, metric)
+		if err != nil {
+			return err
+		}
 		candidates = append(candidates, baseline)
 		logger.Info(ctx, "COPRO: Baseline score: %.3f", baseline.Score)
 	}
 
 	// Generate initial candidates
-	initialCandidates := c.generateInitialCandidates(ctx, predictor, currentInstruction)
+	initialCandidates := c.generateInitialCandidates(ctx, predictor, currentInstruction, promptState)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Evaluate initial candidates in parallel on training data
-	c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, trainExamples)
+	if err := c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, trainExamples, metric); err != nil {
+		return err
+	}
 
 	candidates = append(candidates, initialCandidates...)
 
@@ -236,10 +304,17 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 		topCandidates := candidates[:topK]
 
 		// Generate refined candidates
-		refinedCandidates := c.refineCandidates(depthCtx, predictor, topCandidates, depth)
+		refinedCandidates := c.refineCandidates(depthCtx, predictor, topCandidates, depth, promptState)
+		if err := depthCtx.Err(); err != nil {
+			core.EndSpan(depthCtx)
+			return err
+		}
 
 		// Evaluate refined candidates in parallel on training data
-		c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, trainExamples)
+		if err := c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, trainExamples, metric); err != nil {
+			core.EndSpan(depthCtx)
+			return err
+		}
 
 		// Add refined candidates to pool
 		candidates = append(candidates, refinedCandidates...)
@@ -262,7 +337,11 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	// Validate all candidates on validation set to prevent overfitting
 	logger.Info(ctx, "COPRO: Validating %d candidates on %d validation examples", len(candidates), len(validationExamples))
 	for i := range candidates {
-		candidates[i].ValidationScore = c.evaluateCandidate(ctx, predictor, candidates[i], validationExamples)
+		var err error
+		candidates[i].ValidationScore, err = c.evaluateCandidate(ctx, predictor, candidates[i], validationExamples, metric)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Select candidate with best validation score (not training score)
@@ -294,23 +373,16 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 }
 
 // generateInitialCandidates generates sophisticated initial prompt candidates using LLM assistance.
-func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *modules.Predict, baseInstruction string) []PromptCandidate {
+func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *modules.Predict, baseInstruction string, state *coproPromptState) []PromptCandidate {
 	// Get the signature to understand the task
 	signature := predictor.GetSignature()
 	logger := logging.GetLogger()
-	// Initialize LLM prompt generator if not already done
-	if c.PromptGenerator == nil {
-		promptLLM := c.resolvePromptLLM(ctx, predictor)
-		if promptLLM != nil {
-			c.PromptGenerator = NewLLMPromptGenerator(promptLLM, signature)
-		}
-	}
 
 	taskDescription := c.getTaskDescription(signature, baseInstruction)
 	instructions := []string{}
-	if c.PromptGenerator != nil {
+	if state.generator != nil {
 		// Generate sophisticated instructions using LLM assistance with retry logic
-		generated, err := c.PromptGenerator.generateBasicInstructionsWithRetry(ctx, taskDescription, c.Breadth, c.InitTemperature)
+		generated, err := state.generator.generateBasicInstructionsWithRetry(ctx, taskDescription, c.Breadth, c.InitTemperature)
 		logger.Info(ctx, "COPRO: Generated %d initial candidates", len(generated))
 		if err != nil {
 			logger.Error(ctx, "COPRO: Failed to generate LLM-assisted instructions after retries, falling back to enhanced templates: %v", err)
@@ -319,7 +391,7 @@ func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *module
 		}
 	}
 	if len(instructions) == 0 {
-		if c.PromptGenerator == nil {
+		if state.generator == nil {
 			logger.Info(ctx, "COPRO: No prompt generation model resolved, falling back to enhanced templates")
 		}
 		instructions = c.getEnhancedInstructionTemplates(signature, baseInstruction)
@@ -356,15 +428,35 @@ func (c *COPRO) resolvePromptLLM(ctx context.Context, predictor *modules.Predict
 	return core.ResolveDefaultLLM(ctx, info)
 }
 
+func (c *COPRO) newPromptState(ctx context.Context, predictor *modules.Predict) *coproPromptState {
+	state := &coproPromptState{
+		history: append([]PromptCandidate(nil), c.CandidateHistory...),
+	}
+
+	var promptLLM core.PromptModel
+	if c.PromptGenerator != nil && c.PromptGenerator.llm != nil {
+		promptLLM = c.PromptGenerator.llm
+	} else {
+		promptLLM = c.resolvePromptLLM(ctx, predictor)
+	}
+	if promptLLM != nil {
+		state.generator = NewLLMPromptGenerator(promptLLM, predictor.GetSignature())
+		if c.PromptGenerator != nil {
+			state.generator.diversityThreshold = c.PromptGenerator.diversityThreshold
+		}
+	}
+	return state
+}
+
 // refineCandidates generates sophisticated refined candidates using performance feedback.
-func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict, topCandidates []PromptCandidate, depth int) []PromptCandidate {
-	// Add current candidates to history for learning
-	c.CandidateHistory = append(c.CandidateHistory, topCandidates...)
+func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict, topCandidates []PromptCandidate, depth int, state *coproPromptState) []PromptCandidate {
+	// Add current candidates to this predictor's history for learning.
+	state.history = append(state.history, topCandidates...)
 
 	// Try LLM-assisted refinement first
-	if c.PromptGenerator != nil && len(c.CandidateHistory) >= 3 {
+	if state.generator != nil && len(state.history) >= 3 {
 		// Use LLM to generate refined instructions based on performance history
-		refinedInstructions, err := c.PromptGenerator.generateRefinedInstructions(ctx, c.CandidateHistory, c.Breadth, c.InitTemperature*math.Pow(0.8, float64(depth)))
+		refinedInstructions, err := state.generator.generateRefinedInstructions(ctx, state.history, c.Breadth, c.InitTemperature*math.Pow(0.8, float64(depth)))
 		if err == nil && len(refinedInstructions) > 0 {
 			var refined []PromptCandidate
 			for i, instruction := range refinedInstructions {
@@ -418,7 +510,11 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 }
 
 // evaluateCandidate evaluates a prompt candidate using the metric.
-func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predict, candidate PromptCandidate, examples []core.Example) float64 {
+func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predict, candidate PromptCandidate, examples []core.Example, metric core.Metric) (float64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
 	// Temporarily apply the candidate prompt
 	originalSignature := predictor.GetSignature()
 	tempSignature := originalSignature.WithInstruction(candidate.Instruction)
@@ -432,6 +528,13 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	valid := make([]bool, len(examples))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var errOnce sync.Once
+	var evaluationErr error
+	recordError := func(err error) {
+		errOnce.Do(func() {
+			evaluationErr = err
+		})
+	}
 
 	// Use a semaphore to limit concurrent LLM calls per candidate
 	semaphore := make(chan struct{}, 10) // Allow 10 concurrent evaluations per candidate
@@ -439,23 +542,32 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	for i, example := range examples {
 		idx, ex := i, example // Capture loop variables for Go 1.25 closure
 		wg.Go(func() {
-			semaphore <- struct{}{}        // Acquire semaphore
-			defer func() { <-semaphore }() // Release semaphore
+			select {
+			case semaphore <- struct{}{}: // Acquire semaphore
+				defer func() { <-semaphore }() // Release semaphore
+			case <-ctx.Done():
+				recordError(ctx.Err())
+				return
+			}
 
 			// Get prediction with candidate prompt
 			prediction, err := tempPredictor.Process(ctx, ex.Inputs)
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					recordError(ctxErr)
+					return
+				}
 				logger := logging.GetLogger()
 				logger.Error(ctx, "COPRO: Error evaluating candidate: %v", err)
-				mu.Lock()
-				scores[idx] = 0.0
-				valid[idx] = false
-				mu.Unlock()
+				return
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				recordError(ctxErr)
 				return
 			}
 
 			// Evaluate using metric
-			score := c.Metric(ex.Outputs, prediction)
+			score := metric(ex.Outputs, prediction)
 			mu.Lock()
 			scores[idx] = score
 			valid[idx] = true
@@ -464,6 +576,12 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	}
 
 	wg.Wait()
+	if evaluationErr != nil {
+		return 0, evaluationErr
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 
 	// Calculate average score
 	var totalScore float64
@@ -476,30 +594,48 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 	}
 
 	if validEvaluations == 0 {
-		return 0.0
+		return 0, nil
 	}
 
-	return totalScore / float64(validEvaluations)
+	return totalScore / float64(validEvaluations), nil
 }
 
 // evaluateCandidatesParallel evaluates multiple candidates in parallel for better performance.
-func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modules.Predict, candidates []PromptCandidate, examples []core.Example) {
+func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modules.Predict, candidates []PromptCandidate, examples []core.Example, metric core.Metric) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	const maxGoroutines = 20 // Increased concurrency for better performance
 	semaphore := make(chan struct{}, maxGoroutines)
 	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var evaluationErr error
 
 	for i := range candidates {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire semaphore
-			defer func() { <-semaphore }() // Release semaphore
+		wg.Go(func() {
+			select {
+			case semaphore <- struct{}{}: // Acquire semaphore
+				defer func() { <-semaphore }() // Release semaphore
+			case <-ctx.Done():
+				errOnce.Do(func() { evaluationErr = ctx.Err() })
+				return
+			}
 
-			candidates[idx].Score = c.evaluateCandidate(ctx, predictor, candidates[idx], examples)
-		}(i)
+			score, err := c.evaluateCandidate(ctx, predictor, candidates[i], examples, metric)
+			if err != nil {
+				errOnce.Do(func() { evaluationErr = err })
+				return
+			}
+			candidates[i].Score = score
+		})
 	}
 
 	wg.Wait()
+	if evaluationErr != nil {
+		return evaluationErr
+	}
+	return ctx.Err()
 }
 
 // LLMPromptGenerator handles sophisticated prompt generation using LLM assistance.
