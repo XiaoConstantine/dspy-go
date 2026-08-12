@@ -13,6 +13,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestSIMBA contains comprehensive tests for the SIMBA optimizer.
@@ -286,7 +287,7 @@ func testSIMBAMiniBatchProcessing(t *testing.T) {
 		dataset := createSIMBATestDataset()
 		ctx := context.Background()
 
-		batch, err := simba.sampleMiniBatch(ctx, dataset)
+		batch, err := simba.sampleMiniBatchFromExamples(ctx, core.MaterializeDataset(dataset))
 
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(batch))
@@ -304,7 +305,7 @@ func testSIMBAMiniBatchProcessing(t *testing.T) {
 		dataset := createSIMBATestDataset() // Has only 3 examples
 		ctx := context.Background()
 
-		batch, err := simba.sampleMiniBatch(ctx, dataset)
+		batch, err := simba.sampleMiniBatchFromExamples(ctx, core.MaterializeDataset(dataset))
 
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(batch)) // Should return all available examples
@@ -319,7 +320,7 @@ func testSIMBAMiniBatchProcessing(t *testing.T) {
 
 		ctx := context.Background()
 
-		_, err := simba.sampleMiniBatch(ctx, emptyDataset)
+		_, err := simba.sampleMiniBatchFromExamples(ctx, core.MaterializeDataset(emptyDataset))
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "dataset is empty")
@@ -517,6 +518,91 @@ func testSIMBAIntrospectiveAnalysis(t *testing.T) {
 
 // testSIMBAOptimizationWorkflow tests the complete optimization workflow.
 func testSIMBAOptimizationWorkflow(t *testing.T) {
+	t.Run("Materializes legacy dataset once", func(t *testing.T) {
+		program := createSIMBATestProgram()
+		dataset := &snapshotTrackingDataset{examples: []core.Example{{
+			Inputs:  map[string]any{"question": "one"},
+			Outputs: map[string]any{"answer": "one"},
+		}}}
+		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(1))
+
+		_, err := simba.Compile(context.Background(), program, dataset, func(expected, actual map[string]any) float64 { return 0.8 })
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, dataset.ResetCount())
+	})
+
+	t.Run("CompileExamples serializes same-instance operations", func(t *testing.T) {
+		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(1))
+		examples := []core.Example{{
+			Inputs:  map[string]any{"question": "one"},
+			Outputs: map[string]any{"answer": "one"},
+		}}
+		firstStarted := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		secondStarted := make(chan struct{})
+		firstDone := make(chan error, 1)
+		secondDone := make(chan error, 1)
+		var firstOnce sync.Once
+		var secondOnce sync.Once
+
+		go func() {
+			_, err := simba.CompileExamples(context.Background(), createSIMBATestProgram(), examples, func(expected, actual map[string]any) float64 {
+				firstOnce.Do(func() { close(firstStarted) })
+				<-releaseFirst
+				return -0.25
+			})
+			firstDone <- err
+		}()
+		<-firstStarted
+		go func() {
+			_, err := simba.CompileExamples(context.Background(), createSIMBATestProgram(), examples, func(expected, actual map[string]any) float64 {
+				secondOnce.Do(func() { close(secondStarted) })
+				return 0.75
+			})
+			secondDone <- err
+		}()
+
+		select {
+		case <-secondStarted:
+			t.Fatal("second compile started before first compile released the instance")
+		case <-time.After(20 * time.Millisecond):
+		}
+		close(releaseFirst)
+		require.NoError(t, <-firstDone)
+		require.NoError(t, <-secondDone)
+		assert.Equal(t, 0.75, simba.GetState().BestScore)
+	})
+
+	t.Run("Compile admission honors canceled context", func(t *testing.T) {
+		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(1))
+		examples := []core.Example{{
+			Inputs:  map[string]any{"question": "one"},
+			Outputs: map[string]any{"answer": "one"},
+		}}
+		firstStarted := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		firstDone := make(chan error, 1)
+		var once sync.Once
+		go func() {
+			_, err := simba.CompileExamples(context.Background(), createSIMBATestProgram(), examples, func(expected, actual map[string]any) float64 {
+				once.Do(func() { close(firstStarted) })
+				<-releaseFirst
+				return 1
+			})
+			firstDone <- err
+		}()
+		<-firstStarted
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := simba.CompileExamples(ctx, createSIMBATestProgram(), examples, func(expected, actual map[string]any) float64 { return 1 })
+
+		assert.ErrorIs(t, err, context.Canceled)
+		close(releaseFirst)
+		require.NoError(t, <-firstDone)
+	})
+
 	t.Run("Completes full optimization cycle", func(t *testing.T) {
 		metric := func(expected, actual map[string]any) float64 {
 			// Simple metric that always returns 0.8
@@ -596,6 +682,79 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 
 // testSIMBAEdgeCases tests edge cases and error handling.
 func testSIMBAEdgeCases(t *testing.T) {
+	t.Run("Canceled context does not consume dataset", func(t *testing.T) {
+		dataset := &snapshotTrackingDataset{examples: []core.Example{{Inputs: map[string]any{"question": "unused"}}}}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := NewSIMBA().Compile(ctx, createSIMBATestProgram(), dataset, func(expected, actual map[string]any) float64 { return 1 })
+
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Zero(t, dataset.ResetCount())
+	})
+
+	t.Run("Cancellation during sampling preserves error identity", func(t *testing.T) {
+		simba := NewSIMBA(WithSIMBABatchSize(3))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := simba.sampleMiniBatchFromExamples(ctx, []core.Example{{Inputs: map[string]any{"question": "unused"}}})
+
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("Cancellation during sequential evaluation stops the compile", func(t *testing.T) {
+		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(3))
+		examples := []core.Example{
+			{Inputs: map[string]any{"question": "one"}, Outputs: map[string]any{"answer": "one"}},
+			{Inputs: map[string]any{"question": "two"}, Outputs: map[string]any{"answer": "two"}},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		calls := 0
+
+		_, err := simba.CompileExamples(ctx, createSIMBATestProgram(), examples, func(expected, actual map[string]any) float64 {
+			calls++
+			cancel()
+			return 1
+		})
+
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("Failed materialization clears previous state", func(t *testing.T) {
+		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(1))
+		_, firstErr := simba.CompileExamples(context.Background(), createSIMBATestProgram(), []core.Example{{
+			Inputs:  map[string]any{"question": "one"},
+			Outputs: map[string]any{"answer": "one"},
+		}}, func(expected, actual map[string]any) float64 { return 0.9 })
+		require.NoError(t, firstErr)
+		assert.Equal(t, 0.9, simba.GetState().BestScore)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		dataset := &cancelingDataset{
+			examples: []core.Example{{Inputs: map[string]any{"question": "unused"}}},
+			cancel:   cancel,
+		}
+		_, err := simba.Compile(ctx, createSIMBATestProgram(), dataset, func(expected, actual map[string]any) float64 { return 1 })
+
+		assert.ErrorIs(t, err, context.Canceled)
+		state := simba.GetState()
+		assert.Zero(t, state.BestScore)
+		assert.Nil(t, state.BestProgram.Modules)
+		assert.Empty(t, state.PerformanceLog)
+	})
+
+	t.Run("Rejects nil metric before consuming dataset", func(t *testing.T) {
+		dataset := &snapshotTrackingDataset{examples: []core.Example{{Inputs: map[string]any{"question": "unused"}}}}
+
+		_, err := NewSIMBA().Compile(context.Background(), createSIMBATestProgram(), dataset, nil)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires a metric")
+		assert.Zero(t, dataset.ResetCount())
+	})
+
 	t.Run("Handles nil context gracefully", func(t *testing.T) {
 		simba := NewSIMBA()
 
@@ -642,14 +801,20 @@ func testSIMBAEdgeCases(t *testing.T) {
 		)
 
 		dataset := createSIMBATestDataset()
-		score := simba.evaluateProgram(context.Background(), failingProgram, dataset)
+		score, err := simba.evaluateProgramOnExamples(
+			context.Background(),
+			failingProgram,
+			core.MaterializeDataset(dataset),
+			func(expected, actual map[string]any) float64 { return 1 },
+		)
 
+		require.NoError(t, err)
 		assert.True(t, math.IsInf(score, -1), "failed evaluation must rank below every finite metric score")
 	})
 
 	t.Run("Failed candidates do not outrank valid negative scores", func(t *testing.T) {
 		simba := NewSIMBA(WithFastMode(true), WithSamplingTemperature(0))
-		simba.metric = func(expected, actual map[string]any) float64 { return -1 }
+		metric := func(expected, actual map[string]any) float64 { return -1 }
 		batch := []core.Example{{
 			Inputs:  map[string]any{"question": "test"},
 			Outputs: map[string]any{"answer": "expected"},
@@ -661,10 +826,11 @@ func testSIMBAEdgeCases(t *testing.T) {
 			return nil, fmt.Errorf("generation failed")
 		})
 
-		scores := []float64{
-			simba.evaluateCandidateOnBatch(context.Background(), validProgram, batch),
-			simba.evaluateCandidateOnBatch(context.Background(), failingProgram, batch),
-		}
+		validScore, validErr := simba.evaluateCandidateOnBatch(context.Background(), validProgram, batch, metric)
+		failedScore, failedErr := simba.evaluateCandidateOnBatch(context.Background(), failingProgram, batch, metric)
+		require.NoError(t, validErr)
+		require.NoError(t, failedErr)
+		scores := []float64{validScore, failedScore}
 		_, selectedScore := simba.selectBestCandidate([]core.Program{validProgram, failingProgram}, scores)
 
 		assert.Less(t, scores[1], scores[0], "an evaluation failure must rank below a valid metric score")
@@ -838,8 +1004,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 	t.Run("Records trajectories during evaluation", func(t *testing.T) {
 		simba := NewSIMBA()
 
-		// Initialize the metric function
-		simba.metric = func(expected, actual map[string]any) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			return 0.8 // Return a fixed score for testing
 		}
 
@@ -852,8 +1017,9 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		score := simba.evaluateCandidateOnBatch(ctx, program, batch)
+		score, err := simba.evaluateCandidateOnBatch(ctx, program, batch, metric)
 
+		require.NoError(t, err)
 		assert.True(t, score >= 0)
 
 		// Check that trajectories were recorded
@@ -872,8 +1038,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 	t.Run("Maintains sliding window of trajectories", func(t *testing.T) {
 		simba := NewSIMBA()
 
-		// Initialize the metric function
-		simba.metric = func(expected, actual map[string]any) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			return 0.7 // Return a fixed score for testing
 		}
 
@@ -889,7 +1054,8 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 
 		// Add more than 100 trajectories (sliding window limit)
 		for i := 0; i < 55; i++ {
-			simba.evaluateCandidateOnBatch(ctx, program, batch)
+			_, err := simba.evaluateCandidateOnBatch(ctx, program, batch, metric)
+			require.NoError(t, err)
 		}
 
 		state := simba.GetState()
@@ -900,7 +1066,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		simba := NewSIMBA()
 
 		// Mock metric to control success/failure
-		simba.metric = func(expected, actual map[string]any) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			if actual != nil {
 				return 0.8 // Success (> 0.5)
 			}
@@ -916,7 +1082,8 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		simba.evaluateCandidateOnBatch(ctx, program, batch)
+		_, err := simba.evaluateCandidateOnBatch(ctx, program, batch, metric)
+		require.NoError(t, err)
 
 		state := simba.GetState()
 		assert.True(t, len(state.Trajectories) > 0)
@@ -931,8 +1098,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 	t.Run("Handles program evaluation failures", func(t *testing.T) {
 		simba := NewSIMBA()
 
-		// Initialize the metric function
-		simba.metric = func(expected, actual map[string]any) float64 {
+		metric := func(expected, actual map[string]any) float64 {
 			return 0.5 // Return a fixed score for testing
 		}
 
@@ -952,8 +1118,9 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		score := simba.evaluateCandidateOnBatch(ctx, failingProgram, batch)
+		score, err := simba.evaluateCandidateOnBatch(ctx, failingProgram, batch, metric)
 
+		require.NoError(t, err)
 		assert.True(t, math.IsInf(score, -1), "failed evaluation must rank below every finite metric score")
 
 		// Check that failed trajectories are recorded
@@ -1625,6 +1792,26 @@ func (d *snapshotTrackingDataset) ResetCount() int {
 	return d.resets
 }
 
+type cancelingDataset struct {
+	examples []core.Example
+	index    int
+	cancel   context.CancelFunc
+}
+
+func (d *cancelingDataset) Next() (core.Example, bool) {
+	if d.index >= len(d.examples) {
+		return core.Example{}, false
+	}
+	example := d.examples[d.index]
+	d.index++
+	d.cancel()
+	return example, true
+}
+
+func (d *cancelingDataset) Reset() {
+	d.index = 0
+}
+
 // testSIMBABucketSortingConfiguration tests bucket sorting configuration options.
 func testSIMBABucketSortingConfiguration(t *testing.T) {
 	t.Run("Default configuration has bucket sorting disabled", func(t *testing.T) {
@@ -2225,40 +2412,41 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 	})
 
 	t.Run("Pipeline context cancellation", func(t *testing.T) {
-		program := createSIMBATestProgram()
-		dataset := createSIMBATestDataset()
-		metric := func(expected, actual map[string]any) float64 { return 0.5 }
-
+		ctx, cancel := context.WithCancel(context.Background())
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var once sync.Once
+		program := core.NewProgram(map[string]core.Module{}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			once.Do(func() { close(started) })
+			select {
+			case <-release:
+				return map[string]any{"answer": "ok"}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		})
 		simba := NewSIMBA(
-			WithSIMBAMaxSteps(5), // Longer optimization
-			WithSIMBANumCandidates(4),
+			WithSIMBAMaxSteps(5),
+			WithSIMBANumCandidates(1),
 			WithPipelineProcessing(true),
 			WithPipelineBufferSize(2),
 		)
-
-		// Create cancellable context with a CI-friendly timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		// Start optimization in a goroutine to test cancellation
-		done := make(chan bool, 1)
-		var err error
+		done := make(chan error, 1)
 		go func() {
-			defer func() { done <- true }()
-			_, err = simba.Compile(ctx, program, dataset, metric)
+			_, err := simba.CompileExamples(ctx, program, []core.Example{{
+				Inputs:  map[string]any{"question": "one"},
+				Outputs: map[string]any{"answer": "one"},
+			}}, func(expected, actual map[string]any) float64 { return 0.5 })
+			done <- err
 		}()
 
-		// Cancel after a short time to ensure cancellation works
-		time.Sleep(50 * time.Millisecond)
+		<-started
 		cancel()
+		close(release)
 
-		// Wait for completion with timeout - increased for CI race detection overhead
 		select {
-		case <-done:
-			// Should handle context cancellation gracefully
-			if err != nil {
-				assert.Contains(t, err.Error(), "context")
-			}
+		case err := <-done:
+			assert.ErrorIs(t, err, context.Canceled)
 		case <-time.After(10 * time.Second):
 			t.Fatal("Pipeline context cancellation test timed out - workers not shutting down properly")
 		}
