@@ -269,6 +269,45 @@ func TestConvertCoreChatMessagesToOpenAI_ToolRoleFlattensImage(t *testing.T) {
 	assert.Equal(t, "call_1", messages[0].ToolCallID)
 }
 
+func TestConvertCoreChatMessagesToOpenAI_ToolRoleWithoutToolResultUsesMessageContent(t *testing.T) {
+	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+		{
+			Role: "tool",
+			Content: []core.ContentBlock{
+				core.NewTextBlock("plain tool payload"),
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "tool", messages[0].Role)
+	assert.False(t, messages[0].Content.IsMultimodal())
+	assert.Equal(t, "plain tool payload", messages[0].Content.Text())
+	assert.Empty(t, messages[0].ToolCallID)
+}
+
+func TestConvertCoreChatMessagesToOpenAI_ToolResultWinsOverMessageContent(t *testing.T) {
+	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+		{
+			Role: "tool",
+			Content: []core.ContentBlock{
+				core.NewTextBlock("ignored message content"),
+			},
+			ToolResult: &core.ChatToolResult{
+				ToolCallID: "call_2",
+				Name:       "vision_tool",
+				Content: []core.ContentBlock{
+					core.NewTextBlock("from tool result"),
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "from tool result", messages[0].Content.Text())
+	assert.Equal(t, "call_2", messages[0].ToolCallID)
+}
+
 func TestContentBlocksToOpenAIParts_ImageOnlyAddsText(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
@@ -277,7 +316,34 @@ func TestContentBlocksToOpenAIParts_ImageOnlyAddsText(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, parts, 2)
 	assert.Equal(t, "text", parts[0].Type)
-	assert.Equal(t, "Describe the attached image(s).", parts[0].Text)
+	assert.Equal(t, openAIImageOnlyFallbackText, parts[0].Text)
+	assert.Equal(t, "image_url", parts[1].Type)
+}
+
+func TestContentBlocksToOpenAIParts_WhitespaceTextWithImagePreserved(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
+		core.NewTextBlock("   \t"),
+		core.NewImageBlock(pngBytes, "image/png"),
+	})
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "   \t", parts[0].Text)
+	assert.NotEqual(t, openAIImageOnlyFallbackText, parts[0].Text)
+	assert.Equal(t, "image_url", parts[1].Type)
+}
+
+func TestContentBlocksToOpenAIParts_EmptyTextWithImageAddsFallback(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
+		core.NewTextBlock(""),
+		core.NewImageBlock(pngBytes, "image/png"),
+	})
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, openAIImageOnlyFallbackText, parts[0].Text)
 	assert.Equal(t, "image_url", parts[1].Type)
 }
 

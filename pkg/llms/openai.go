@@ -495,12 +495,16 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 
 	for messageIndex, message := range messages {
 		role := strings.TrimSpace(message.Role)
+		// Tool-role content must stay a plain string for OpenAI-compatible APIs.
+		// Prefer ToolResult.Content when present; otherwise flatten message.Content once.
 		var content openai.MessageContent
 		var err error
-		// Tool-role content must stay a plain string for OpenAI-compatible APIs.
-		if role == "tool" {
+		switch {
+		case role == "tool" && message.ToolResult != nil:
+			content = openai.TextContent(flattenCoreChatMessageContent(message.ToolResult.Content))
+		case role == "tool":
 			content = openai.TextContent(flattenCoreChatMessageContent(message.Content))
-		} else {
+		default:
 			content, err = coreContentBlocksToMessageContent(message.Content)
 			if err != nil {
 				return nil, err
@@ -545,8 +549,6 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 			}
 		case "tool":
 			if message.ToolResult != nil {
-				// Always flatten tool results to a string (never multimodal parts).
-				openAIMessage.Content = openai.TextContent(flattenCoreChatMessageContent(message.ToolResult.Content))
 				openAIMessage.ToolCallID = strings.TrimSpace(message.ToolResult.ToolCallID)
 				if openAIMessage.ToolCallID == "" {
 					switch len(pendingToolCallIDs) {
@@ -594,12 +596,18 @@ func contentBlocksHaveNonText(blocks []core.ContentBlock) bool {
 	return false
 }
 
+// openAIImageOnlyFallbackText is prepended only when the multimodal payload has
+// image parts and no text parts at all (including whitespace-only text).
+const openAIImageOnlyFallbackText = "Describe the attached image(s)."
+
 func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatCompletionContentPart, error) {
 	parts := make([]openai.ChatCompletionContentPart, 0, len(blocks))
 	for _, block := range blocks {
 		switch block.Type {
 		case core.FieldTypeText:
-			if strings.TrimSpace(block.Text) == "" {
+			// Keep caller-provided text as-is, including whitespace-only.
+			// Only drop truly empty strings so we do not invent or replace content.
+			if block.Text == "" {
 				continue
 			}
 			parts = append(parts, openai.ChatCompletionContentPart{
@@ -633,16 +641,15 @@ func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatComple
 }
 
 // ensureOpenAIMultimodalTextPart prepends a short text part when the payload has
-// images but no text. Some OpenAI-compatible gateways reject image-only messages.
+// images but no text parts. Some OpenAI-compatible gateways reject image-only messages.
+// Whitespace-only text parts count as text so caller content is never replaced.
 func ensureOpenAIMultimodalTextPart(parts []openai.ChatCompletionContentPart) []openai.ChatCompletionContentPart {
 	hasText := false
 	hasImage := false
 	for _, part := range parts {
 		switch part.Type {
 		case "text":
-			if strings.TrimSpace(part.Text) != "" {
-				hasText = true
-			}
+			hasText = true
 		case "image_url":
 			hasImage = true
 		}
@@ -652,7 +659,7 @@ func ensureOpenAIMultimodalTextPart(parts []openai.ChatCompletionContentPart) []
 	}
 	return append([]openai.ChatCompletionContentPart{{
 		Type: "text",
-		Text: "Describe the attached image(s).",
+		Text: openAIImageOnlyFallbackText,
 	}}, parts...)
 }
 
