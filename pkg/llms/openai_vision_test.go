@@ -223,6 +223,64 @@ func TestOpenAILLM_StreamGenerateWithContent(t *testing.T) {
 	assert.Equal(t, []string{"seen", " image"}, parts)
 }
 
+func TestConvertCoreChatMessagesToOpenAI_PreservesUserImage(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+		{
+			Role: "user",
+			Content: []core.ContentBlock{
+				core.NewTextBlock("what is this?"),
+				core.NewImageBlock(pngBytes, "image/png"),
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.True(t, messages[0].Content.IsMultimodal())
+	parts := messages[0].Content.Parts()
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	assert.True(t, strings.HasPrefix(parts[1].ImageURL.URL, "data:image/png;base64,"))
+}
+
+func TestConvertCoreChatMessagesToOpenAI_ToolRoleFlattensImage(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+		{
+			Role: "tool",
+			ToolResult: &core.ChatToolResult{
+				ToolCallID: "call_1",
+				Name:       "vision_tool",
+				Content: []core.ContentBlock{
+					core.NewTextBlock("tool says"),
+					core.NewImageBlock(pngBytes, "image/png"),
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "tool", messages[0].Role)
+	assert.False(t, messages[0].Content.IsMultimodal())
+	assert.Contains(t, messages[0].Content.Text(), "tool says")
+	assert.Contains(t, messages[0].Content.Text(), "[Image:")
+	assert.Equal(t, "call_1", messages[0].ToolCallID)
+}
+
+func TestContentBlocksToOpenAIParts_ImageOnlyAddsText(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
+		core.NewImageBlock(pngBytes, "image/png"),
+	})
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "Describe the attached image(s).", parts[0].Text)
+	assert.Equal(t, "image_url", parts[1].Type)
+}
+
 func TestOpenAIGenerateWithContentLive(t *testing.T) {
 	if os.Getenv("DSPY_GO_OPENAI_VISION_LIVE") != "1" {
 		t.Skip("set DSPY_GO_OPENAI_VISION_LIVE=1 to run live OpenAI vision test")
@@ -251,8 +309,7 @@ func TestOpenAIGenerateWithContentLive(t *testing.T) {
 	llm, err := NewOpenAILLM(core.ModelID(model), opts...)
 	require.NoError(t, err)
 
-	// Prefer a small >=10px PNG (Cloudflare Workers AI rejects tiny images).
-	// Fall back to examples/multimodal/cat.jpeg when present.
+	// Default fixture is a small synthetic PNG (>=10px for Cloudflare Workers AI).
 	imageData, mimeType := loadOpenAIVisionFixtureImage(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -269,8 +326,8 @@ func TestOpenAIGenerateWithContentLive(t *testing.T) {
 
 func loadOpenAIVisionFixtureImage(t *testing.T) ([]byte, string) {
 	t.Helper()
-	// Prefer a compact synthetic PNG (>=10px for Cloudflare Workers AI).
-	// Override with examples/multimodal/cat.jpeg when DSPY_GO_OPENAI_VISION_USE_CAT=1.
+	// Default: compact synthetic PNG (>=10px for Cloudflare Workers AI).
+	// Use examples/multimodal/cat.jpeg only when DSPY_GO_OPENAI_VISION_USE_CAT=1.
 	if os.Getenv("DSPY_GO_OPENAI_VISION_USE_CAT") == "1" {
 		_, thisFile, _, ok := runtime.Caller(0)
 		if ok {

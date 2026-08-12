@@ -89,6 +89,8 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 		core.CapabilityStreaming,
 		core.CapabilityEmbedding,
 		core.CapabilityToolCalling,
+		// Provider-level: client can send multimodal payloads (matches Gemini/Anthropic).
+		// Individual model IDs behind an OpenAI-compatible proxy may still reject vision.
 		core.CapabilityMultimodal,
 		core.CapabilityVision,
 	}
@@ -492,12 +494,20 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 	pendingToolCallIDs := make([]string, 0, 1)
 
 	for messageIndex, message := range messages {
-		content, err := coreContentBlocksToMessageContent(message.Content)
-		if err != nil {
-			return nil, err
+		role := strings.TrimSpace(message.Role)
+		var content openai.MessageContent
+		var err error
+		// Tool-role content must stay a plain string for OpenAI-compatible APIs.
+		if role == "tool" {
+			content = openai.TextContent(flattenCoreChatMessageContent(message.Content))
+		} else {
+			content, err = coreContentBlocksToMessageContent(message.Content)
+			if err != nil {
+				return nil, err
+			}
 		}
 		openAIMessage := openai.ChatCompletionMessage{
-			Role:    strings.TrimSpace(message.Role),
+			Role:    role,
 			Content: content,
 		}
 
@@ -535,11 +545,8 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 			}
 		case "tool":
 			if message.ToolResult != nil {
-				toolContent, err := coreContentBlocksToMessageContent(message.ToolResult.Content)
-				if err != nil {
-					return nil, err
-				}
-				openAIMessage.Content = toolContent
+				// Always flatten tool results to a string (never multimodal parts).
+				openAIMessage.Content = openai.TextContent(flattenCoreChatMessageContent(message.ToolResult.Content))
 				openAIMessage.ToolCallID = strings.TrimSpace(message.ToolResult.ToolCallID)
 				if openAIMessage.ToolCallID == "" {
 					switch len(pendingToolCallIDs) {
@@ -622,7 +629,31 @@ func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatComple
 			)
 		}
 	}
-	return parts, nil
+	return ensureOpenAIMultimodalTextPart(parts), nil
+}
+
+// ensureOpenAIMultimodalTextPart prepends a short text part when the payload has
+// images but no text. Some OpenAI-compatible gateways reject image-only messages.
+func ensureOpenAIMultimodalTextPart(parts []openai.ChatCompletionContentPart) []openai.ChatCompletionContentPart {
+	hasText := false
+	hasImage := false
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) != "" {
+				hasText = true
+			}
+		case "image_url":
+			hasImage = true
+		}
+	}
+	if !hasImage || hasText {
+		return parts
+	}
+	return append([]openai.ChatCompletionContentPart{{
+		Type: "text",
+		Text: "Describe the attached image(s).",
+	}}, parts...)
 }
 
 func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.MessageContent, error) {
@@ -805,6 +836,8 @@ func (o *OpenAILLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 }
 
 // GenerateWithContent implements multimodal content generation for OpenAI-compatible APIs.
+// CapabilityMultimodal/CapabilityVision on OpenAILLM mean this client can send multimodal
+// payloads (same provider-level pattern as Gemini/Anthropic); individual model IDs may still reject vision.
 func (o *OpenAILLM) GenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
