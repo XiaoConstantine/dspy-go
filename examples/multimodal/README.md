@@ -2,6 +2,8 @@
 
 This example demonstrates how to use Google's Gemini model for multimodal tasks including image analysis, vision-based question answering, and multimodal chat capabilities.
 
+OpenAI-compatible providers (`OpenAILLM`) also implement `GenerateWithContent` / `StreamGenerateWithContent` (text + `image_url` data URLs). This example stays Gemini-focused; use `NewOpenAILLM` with the same `core.ContentBlock` APIs for OpenAI, Polypus, LiteLLM, and similar proxies.
+
 ## Features
 
 - **Image Analysis**: Analyze images and answer questions about them

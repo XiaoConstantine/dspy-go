@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
@@ -88,6 +89,8 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 		core.CapabilityStreaming,
 		core.CapabilityEmbedding,
 		core.CapabilityToolCalling,
+		core.CapabilityMultimodal,
+		core.CapabilityVision,
 	}
 
 	baseLLM := core.NewBaseLLM("openai", modelID, capabilities, endpointCfg, core.WithHTTPClient(config.httpClient))
@@ -254,7 +257,7 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 	}
@@ -276,7 +279,7 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 	}
 
 	return &core.LLMResponse{
-		Content: response.Choices[0].Message.Content,
+		Content: response.Choices[0].Message.Content.Text(),
 		Usage:   usage,
 		Metadata: map[string]any{
 			"finish_reason": response.Choices[0].FinishReason,
@@ -298,7 +301,7 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 		ResponseFormat: &openai.ResponseFormat{
@@ -316,7 +319,7 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
 	}
 
-	return utils.ParseJSONResponse(response.Choices[0].Message.Content)
+	return utils.ParseJSONResponse(response.Choices[0].Message.Content.Text())
 }
 
 // GenerateWithFunctions implements the core.LLM interface.
@@ -340,7 +343,7 @@ func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 		Tools:      tools,
@@ -489,9 +492,13 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 	pendingToolCallIDs := make([]string, 0, 1)
 
 	for messageIndex, message := range messages {
+		content, err := coreContentBlocksToMessageContent(message.Content)
+		if err != nil {
+			return nil, err
+		}
 		openAIMessage := openai.ChatCompletionMessage{
 			Role:    strings.TrimSpace(message.Role),
-			Content: flattenCoreChatMessageContent(message.Content),
+			Content: content,
 		}
 
 		switch openAIMessage.Role {
@@ -528,7 +535,11 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 			}
 		case "tool":
 			if message.ToolResult != nil {
-				openAIMessage.Content = flattenCoreChatMessageContent(message.ToolResult.Content)
+				toolContent, err := coreContentBlocksToMessageContent(message.ToolResult.Content)
+				if err != nil {
+					return nil, err
+				}
+				openAIMessage.Content = toolContent
 				openAIMessage.ToolCallID = strings.TrimSpace(message.ToolResult.ToolCallID)
 				if openAIMessage.ToolCallID == "" {
 					switch len(pendingToolCallIDs) {
@@ -567,6 +578,67 @@ func removePendingToolCallID(ids []string, target string) []string {
 	return ids
 }
 
+func contentBlocksHaveNonText(blocks []core.ContentBlock) bool {
+	for _, block := range blocks {
+		if block.Type != core.FieldTypeText {
+			return true
+		}
+	}
+	return false
+}
+
+func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatCompletionContentPart, error) {
+	parts := make([]openai.ChatCompletionContentPart, 0, len(blocks))
+	for _, block := range blocks {
+		switch block.Type {
+		case core.FieldTypeText:
+			if strings.TrimSpace(block.Text) == "" {
+				continue
+			}
+			parts = append(parts, openai.ChatCompletionContentPart{
+				Type: "text",
+				Text: block.Text,
+			})
+		case core.FieldTypeImage:
+			if len(block.Data) == 0 {
+				return nil, errors.New(errors.InvalidInput, "image content block has empty data")
+			}
+			mimeType := strings.TrimSpace(block.MimeType)
+			if mimeType == "" {
+				mimeType = "image/png"
+			}
+			parts = append(parts, openai.ChatCompletionContentPart{
+				Type: "image_url",
+				ImageURL: &openai.ChatCompletionImageURLPart{
+					URL: fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(block.Data)),
+				},
+			})
+		case core.FieldTypeAudio:
+			return nil, errors.New(errors.UnsupportedOperation, "audio content blocks are not supported by OpenAILLM")
+		default:
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "unsupported content block type"),
+				errors.Fields{"type": string(block.Type)},
+			)
+		}
+	}
+	return parts, nil
+}
+
+func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.MessageContent, error) {
+	if !contentBlocksHaveNonText(blocks) {
+		return openai.TextContent(flattenCoreChatMessageContent(blocks)), nil
+	}
+	parts, err := contentBlocksToOpenAIParts(blocks)
+	if err != nil {
+		return openai.MessageContent{}, err
+	}
+	if len(parts) == 0 {
+		return openai.TextContent(""), nil
+	}
+	return openai.PartsContent(parts...), nil
+}
+
 func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
 	if len(blocks) == 0 {
 		return ""
@@ -586,7 +658,7 @@ func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
 func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsage, mode string) (map[string]any, error) {
 	result := map[string]any{}
 
-	if content := strings.TrimSpace(choice.Message.Content); content != "" {
+	if content := strings.TrimSpace(choice.Message.Content.Text()); content != "" {
 		result["content"] = content
 	}
 
@@ -732,9 +804,59 @@ func (o *OpenAILLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 	}, nil
 }
 
+// GenerateWithContent implements multimodal content generation for OpenAI-compatible APIs.
+func (o *OpenAILLM) GenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.LLMResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	messageContent, err := coreContentBlocksToMessageContent(content)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(messageContent.Text()) == "" && !messageContent.IsMultimodal() {
+		return nil, errors.New(errors.InvalidInput, "no content provided")
+	}
+
+	request := &openai.ChatCompletionRequest{
+		Model: o.ModelID(),
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    "user",
+				Content: messageContent,
+			},
+		},
+	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
+
+	response, err := o.makeRequest(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if len(response.Choices) == 0 {
+		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
+	}
+
+	usage := &core.TokenInfo{
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+	}
+
+	return &core.LLMResponse{
+		Content: response.Choices[0].Message.Content.Text(),
+		Usage:   usage,
+		Metadata: map[string]any{
+			"finish_reason": response.Choices[0].FinishReason,
+			"id":            response.ID,
+			"model":         response.Model,
+		},
+	}, nil
+}
+
 // StreamGenerate implements the core.LLM interface.
 func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
-	logger := logging.GetLogger()
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -745,20 +867,49 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 		Stream: true,
 	}
 	request.ApplyOptions(coreOptsToOpenAI(opts))
+	return o.streamChatCompletion(ctx, request)
+}
 
-	// Create a channel for the stream chunks
+// StreamGenerateWithContent implements multimodal streaming for OpenAI-compatible APIs.
+func (o *OpenAILLM) StreamGenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	messageContent, err := coreContentBlocksToMessageContent(content)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(messageContent.Text()) == "" && !messageContent.IsMultimodal() {
+		return nil, errors.New(errors.InvalidInput, "no content provided")
+	}
+
+	request := &openai.ChatCompletionRequest{
+		Model: o.ModelID(),
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    "user",
+				Content: messageContent,
+			},
+		},
+		Stream: true,
+	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
+	return o.streamChatCompletion(ctx, request)
+}
+
+func (o *OpenAILLM) streamChatCompletion(ctx context.Context, request *openai.ChatCompletionRequest) (*core.StreamResponse, error) {
+	logger := logging.GetLogger()
 	chunkChan := make(chan core.StreamChunk)
-
-	// Create a cancellable context
 	streamCtx, cancelFunc := context.WithCancel(ctx)
 
-	// Start a goroutine to handle the streaming request
 	go func() {
 		defer close(chunkChan)
 		defer cancelFunc()
@@ -783,28 +934,17 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 			default:
 			}
 
-			line := scanner.Text()
-			line = strings.TrimSpace(line)
-
-			if line == "" {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || !strings.HasPrefix(line, "data: ") {
 				continue
 			}
 
-			// Skip lines that don't start with "data: "
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-
-			// Remove "data: " prefix
 			data := strings.TrimPrefix(line, "data: ")
-
-			// Check for end marker
 			if data == "[DONE]" {
 				sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
 				return
 			}
 
-			// Parse the JSON response
 			var streamResponse openai.ChatCompletionStreamResponse
 			if err := jsonv2.Unmarshal([]byte(data), &streamResponse); err != nil {
 				logger.Debug(ctx, "Error parsing stream chunk: %v", err)
@@ -814,22 +954,19 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 				return
 			}
 
-			// Process the response
-			if len(streamResponse.Choices) > 0 {
-				choice := streamResponse.Choices[0]
-				content := choice.Delta.Content
-
-				if content != "" {
-					if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: content}) {
-						return
-					}
-				}
-
-				// Check for finish reason
-				if choice.FinishReason != nil && *choice.FinishReason != "" {
-					sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
+			if len(streamResponse.Choices) == 0 {
+				continue
+			}
+			choice := streamResponse.Choices[0]
+			content := choice.Delta.Content.Text()
+			if content != "" {
+				if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: content}) {
 					return
 				}
+			}
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
+				return
 			}
 		}
 
@@ -906,7 +1043,7 @@ func summarizeOpenAIRequest(request *openai.ChatCompletionRequest, jsonData []by
 		for _, message := range request.Messages {
 			summary.Messages = append(summary.Messages, openAIMessageDebugSummary{
 				Role:            message.Role,
-				ContentBytes:    len(message.Content),
+				ContentBytes:    message.Content.ByteLen(),
 				ToolCalls:       len(message.ToolCalls),
 				HasFunctionCall: message.FunctionCall != nil,
 				HasToolCallID:   strings.TrimSpace(message.ToolCallID) != "",

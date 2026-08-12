@@ -156,6 +156,8 @@ func TestNewOpenAILLM(t *testing.T) {
 				core.CapabilityStreaming,
 				core.CapabilityEmbedding,
 				core.CapabilityToolCalling,
+				core.CapabilityMultimodal,
+				core.CapabilityVision,
 			}
 
 			if len(capabilities) != len(expectedCapabilities) {
@@ -350,8 +352,8 @@ func TestOpenAILLM_Generate(t *testing.T) {
 		if req.Messages[0].Role != "user" {
 			t.Errorf("expected role user, got %s", req.Messages[0].Role)
 		}
-		if req.Messages[0].Content != "Hello, world!" {
-			t.Errorf("expected content 'Hello, world!', got %s", req.Messages[0].Content)
+		if req.Messages[0].Content.Text() != "Hello, world!" {
+			t.Errorf("expected content 'Hello, world!', got %s", req.Messages[0].Content.Text())
 		}
 
 		// Send mock response
@@ -365,7 +367,7 @@ func TestOpenAILLM_Generate(t *testing.T) {
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: "Hello! How can I help you today?",
+						Content: openai.TextContent("Hello! How can I help you today?"),
 					},
 					FinishReason: "stop",
 				},
@@ -459,7 +461,7 @@ func TestOpenAILLM_GenerateWithJSON(t *testing.T) {
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: `{"result": "success", "data": {"key": "value"}}`,
+						Content: openai.TextContent(`{"result": "success", "data": {"key": "value"}}`),
 					},
 					FinishReason: "stop",
 				},
@@ -915,7 +917,7 @@ func TestOpenAILLM_GenerateWithOptions(t *testing.T) {
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: "Test response",
+						Content: openai.TextContent("Test response"),
 					},
 					FinishReason: "stop",
 				},
@@ -1002,7 +1004,7 @@ func TestOpenAILLM_GenerateWithOptions_GPT5UsesMaxCompletionTokens(t *testing.T)
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: "Test response",
+						Content: openai.TextContent("Test response"),
 					},
 					FinishReason: "stop",
 				},
@@ -1273,14 +1275,14 @@ func TestOpenAILLM_GenerateWithTools(t *testing.T) {
 
 	require.Len(t, capturedRequest.Messages, 3)
 	assert.Equal(t, "user", capturedRequest.Messages[0].Role)
-	assert.Equal(t, "Solve task", capturedRequest.Messages[0].Content)
+	assert.Equal(t, "Solve task", capturedRequest.Messages[0].Content.Text())
 	assert.Equal(t, "assistant", capturedRequest.Messages[1].Role)
 	require.Len(t, capturedRequest.Messages[1].ToolCalls, 1)
 	assert.Equal(t, "call_write", capturedRequest.Messages[1].ToolCalls[0].ID)
 	assert.Equal(t, "write_file", capturedRequest.Messages[1].ToolCalls[0].Function.Name)
 	assert.Equal(t, "tool", capturedRequest.Messages[2].Role)
 	assert.Equal(t, "call_write", capturedRequest.Messages[2].ToolCallID)
-	assert.Equal(t, "ok", capturedRequest.Messages[2].Content)
+	assert.Equal(t, "ok", capturedRequest.Messages[2].Content.Text())
 	require.Len(t, capturedRequest.Tools, 1)
 	assert.Equal(t, "auto", capturedRequest.ToolChoice)
 
