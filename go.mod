@@ -1,6 +1,6 @@
 module github.com/XiaoConstantine/dspy-go
 
-go 1.25.12
+go 1.25.13
 
 require (
 	github.com/XiaoConstantine/mcp-go v0.3.1
