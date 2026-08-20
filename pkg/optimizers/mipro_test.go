@@ -22,14 +22,12 @@ type instructionModule struct {
 
 func newInstructionModule(name, instruction string) *instructionModule {
 	return &instructionModule{
-		BaseModule: core.BaseModule{
-			Signature: core.NewSignature(
-				[]core.InputField{{Field: core.Field{Name: "input"}}},
-				[]core.OutputField{{Field: core.Field{Name: "output"}}},
-			).WithInstruction(instruction),
-			DisplayName: name,
-			ModuleType:  "test",
-		},
+		Signature: core.NewSignature(
+			[]core.InputField{{Name: "input"}},
+			[]core.OutputField{{Name: "output"}},
+		).WithInstruction(instruction),
+		DisplayName: name,
+		ModuleType:  "test",
 	}
 }
 
@@ -39,12 +37,10 @@ func (m *instructionModule) Process(ctx context.Context, inputs map[string]any, 
 
 func (m *instructionModule) Clone() core.Module {
 	return &instructionModule{
-		BaseModule: core.BaseModule{
-			Signature:   m.Signature,
-			LLM:         m.LLM,
-			DisplayName: m.DisplayName,
-			ModuleType:  m.ModuleType,
-		},
+		Signature:   m.Signature,
+		LLM:         m.LLM,
+		DisplayName: m.DisplayName,
+		ModuleType:  m.ModuleType,
 	}
 }
 
@@ -440,8 +436,8 @@ func createTestMIPRO(t *testing.T) *MIPRO {
 func createTestProgram() core.Program {
 	mockModule := new(MockModule)
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
-		[]core.OutputField{{Field: core.Field{Name: "output"}}},
+		[]core.InputField{{Name: "input"}},
+		[]core.OutputField{{Name: "output"}},
 	).WithInstruction("Test Instruction")
 
 	mockModule.On("GetSignature").Return(signature).Maybe()

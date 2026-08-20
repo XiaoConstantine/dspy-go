@@ -152,8 +152,8 @@ type BootstrapFewShot struct {
 // NewBootstrapFewShot creates a new BootstrapFewShot optimizer.
 func NewBootstrapFewShot(maxExamples int) *BootstrapFewShot {
 	return &BootstrapFewShot{
-		BaseOptimizer: BaseOptimizer{Name: "BootstrapFewShot"},
-		MaxExamples:   maxExamples,
+		Name:        "BootstrapFewShot",
+		MaxExamples: maxExamples,
 	}
 }
 

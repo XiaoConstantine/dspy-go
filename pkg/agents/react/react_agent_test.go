@@ -85,8 +85,8 @@ func TestReActAgent_Initialize(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	agent := NewReActAgent("test-agent", "Test Agent")
@@ -140,8 +140,8 @@ result: Task completed successfully
 	agent := NewReActAgent("test-agent", "Test Agent", WithExecutionMode(ModeReAct))
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	err := agent.Initialize(mockLLM, signature)
@@ -186,8 +186,8 @@ result: Task completed
 	agent := NewReActAgent("test-agent", "Test Agent", WithReflection(true, 3))
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	err := agent.Initialize(mockLLM, signature)
@@ -237,8 +237,8 @@ result: complete
 
 	agent := NewReActAgent("test-agent", "Test Agent")
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	require.NoError(t, agent.Initialize(mockLLM, signature))
@@ -291,8 +291,8 @@ result: complete
 		WithSkillDomain("repo:test"),
 	)
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	require.NoError(t, agent.Initialize(mockLLM, signature))
@@ -323,8 +323,8 @@ func TestNewReActAgent_RecordsSkillLoadFailure(t *testing.T) {
 func TestReActAgent_Clone_PreservesArtifactsAndInitialization(t *testing.T) {
 	mockLLM := new(testutil.MockLLM)
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	agent := NewReActAgent("test-agent", "Test Agent")
@@ -383,8 +383,8 @@ result: done
 
 	agent := NewReActAgent("test-agent", "Test Agent", WithExecutionMode(ModeHybrid))
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	require.NoError(t, agent.Initialize(mockLLM, signature))
@@ -421,8 +421,8 @@ func TestReActAgent_Execute_Timeout(t *testing.T) {
 	agent := NewReActAgent("test-agent", "Test Agent", WithTimeout(10*time.Millisecond))
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	err := agent.Initialize(mockLLM, signature)
@@ -513,8 +513,8 @@ result: Task completed
 	agent := NewReActAgent("test-agent", "Test Agent", WithExecutionMode(ModeHybrid))
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 
 	err := agent.Initialize(mockLLM, signature)
@@ -602,8 +602,8 @@ result: Done
 
 	agent := NewReActAgent("bench-agent", "Benchmark Agent")
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
-		[]core.OutputField{{Field: core.Field{Name: "result"}}},
+		[]core.InputField{{Name: "task"}},
+		[]core.OutputField{{Name: "result"}},
 	)
 	_ = agent.Initialize(mockLLM, signature)
 
@@ -652,7 +652,7 @@ func TestReActAgent_XMLParsing(t *testing.T) {
 
 	// Create signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.InputField{{Name: "task"}},
 		[]core.OutputField{{Field: core.NewField("result")}},
 	)
 
@@ -764,7 +764,7 @@ Integration test successful
 
 	// Create signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.InputField{{Name: "task"}},
 		[]core.OutputField{{Field: core.NewField("result")}},
 	)
 
@@ -846,7 +846,7 @@ answer: The user is Alice with ID 123
 
 	// Initialize the agent with the mock LLM
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.InputField{{Name: "query"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	err = agent.Initialize(mockLLM, signature)
@@ -879,7 +879,7 @@ func TestReActAgent_ModuleHasConversationContextInput(t *testing.T) {
 	agent := NewReActAgent("context-test-agent", "Context Test Agent")
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.InputField{{Name: "query"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	err := agent.Initialize(mockLLM, signature)

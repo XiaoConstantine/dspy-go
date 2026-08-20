@@ -36,12 +36,12 @@ func TestField(t *testing.T) {
 func TestSignature(t *testing.T) {
 	t.Run("NewSignature", func(t *testing.T) {
 		inputs := []InputField{
-			{Field: Field{Name: "input1"}},
-			{Field: Field{Name: "input2"}},
+			{Name: "input1"},
+			{Name: "input2"},
 		}
 		outputs := []OutputField{
-			{Field: Field{Name: "output1"}},
-			{Field: Field{Name: "output2"}},
+			{Name: "output1"},
+			{Name: "output2"},
 		}
 
 		sig := NewSignature(inputs, outputs)
@@ -132,8 +132,8 @@ func TestSignatureAppendInput(t *testing.T) {
 	t.Run("AppendInput basic functionality", func(t *testing.T) {
 		// Create initial signature
 		sig := NewSignature(
-			[]InputField{{Field: Field{Name: "original_input"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "original_input"}},
+			[]OutputField{{Name: "output"}},
 		)
 
 		// Append a new input field
@@ -156,8 +156,8 @@ func TestSignatureAppendInput(t *testing.T) {
 
 	t.Run("AppendInput multiple times", func(t *testing.T) {
 		sig := NewSignature(
-			[]InputField{{Field: Field{Name: "input1"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "input1"}},
+			[]OutputField{{Name: "output"}},
 		)
 
 		// Chain multiple AppendInput calls
@@ -195,8 +195,8 @@ func TestSignaturePrependOutput(t *testing.T) {
 	t.Run("PrependOutput basic functionality", func(t *testing.T) {
 		// Create initial signature
 		sig := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "original_output"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "original_output"}},
 		)
 
 		// Prepend a new output field
@@ -219,8 +219,8 @@ func TestSignaturePrependOutput(t *testing.T) {
 
 	t.Run("PrependOutput multiple times", func(t *testing.T) {
 		sig := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "output1"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "output1"}},
 		)
 
 		// Chain multiple PrependOutput calls
@@ -257,8 +257,8 @@ func TestSignaturePrependOutput(t *testing.T) {
 func TestSignatureChaining(t *testing.T) {
 	t.Run("Chain AppendInput and PrependOutput", func(t *testing.T) {
 		sig := NewSignature(
-			[]InputField{{Field: Field{Name: "input1"}}},
-			[]OutputField{{Field: Field{Name: "output1"}}},
+			[]InputField{{Name: "input1"}},
+			[]OutputField{{Name: "output1"}},
 		).WithInstruction("Original instruction")
 
 		// Chain operations
@@ -287,8 +287,8 @@ func TestSignatureChaining(t *testing.T) {
 	t.Run("MultiChainComparison use case", func(t *testing.T) {
 		// Simulate the MultiChainComparison signature modification
 		originalSig := NewSignature(
-			[]InputField{{Field: Field{Name: "question"}}},
-			[]OutputField{{Field: Field{Name: "answer"}}},
+			[]InputField{{Name: "question"}},
+			[]OutputField{{Name: "answer"}},
 		).WithInstruction("Answer the question")
 
 		M := 3
@@ -336,8 +336,8 @@ func TestSignatureChaining(t *testing.T) {
 func TestSignatureImmutability(t *testing.T) {
 	t.Run("Original signature unchanged after AppendInput", func(t *testing.T) {
 		original := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "output"}},
 		)
 
 		// Store original state
@@ -353,10 +353,10 @@ func TestSignatureImmutability(t *testing.T) {
 
 	t.Run("AppendInput does not mutate shared backing array", func(t *testing.T) {
 		inputs := make([]InputField, 1, 4)
-		inputs[0] = InputField{Field: Field{Name: "input"}}
+		inputs[0] = InputField{Name: "input"}
 		original := NewSignature(
 			inputs,
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]OutputField{{Name: "output"}},
 		)
 
 		modified := original.AppendInput("new_input", "prefix", "desc")
@@ -369,8 +369,8 @@ func TestSignatureImmutability(t *testing.T) {
 
 	t.Run("Original signature unchanged after PrependOutput", func(t *testing.T) {
 		original := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "output"}},
 		)
 
 		// Store original state
@@ -386,9 +386,9 @@ func TestSignatureImmutability(t *testing.T) {
 
 	t.Run("PrependOutput does not mutate shared backing array", func(t *testing.T) {
 		outputs := make([]OutputField, 1, 4)
-		outputs[0] = OutputField{Field: Field{Name: "output"}}
+		outputs[0] = OutputField{Name: "output"}
 		original := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
+			[]InputField{{Name: "input"}},
 			outputs,
 		)
 

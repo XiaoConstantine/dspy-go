@@ -52,19 +52,17 @@ type gepaArtifactModule struct {
 
 func newGEPAArtifactModule(name, instruction string) *gepaArtifactModule {
 	return &gepaArtifactModule{
-		BaseModule: core.BaseModule{
-			Signature: core.Signature{
-				Instruction: instruction,
-				Inputs: []core.InputField{
-					{Field: core.Field{Name: "artifact_input", Description: "Synthetic GEPA artifact input"}},
-				},
-				Outputs: []core.OutputField{
-					{Field: core.Field{Name: "artifact_output", Description: "Synthetic GEPA artifact output"}},
-				},
+		Signature: core.Signature{
+			Instruction: instruction,
+			Inputs: []core.InputField{
+				{Name: "artifact_input", Description: "Synthetic GEPA artifact input"},
 			},
-			DisplayName: name,
-			ModuleType:  "GEPAArtifactModule",
+			Outputs: []core.OutputField{
+				{Name: "artifact_output", Description: "Synthetic GEPA artifact output"},
+			},
 		},
+		DisplayName: name,
+		ModuleType:  "GEPAArtifactModule",
 	}
 }
 
@@ -74,12 +72,10 @@ func (m *gepaArtifactModule) Process(context.Context, map[string]any, ...core.Op
 
 func (m *gepaArtifactModule) Clone() core.Module {
 	return &gepaArtifactModule{
-		BaseModule: core.BaseModule{
-			Signature:   m.Signature,
-			LLM:         m.LLM,
-			DisplayName: m.DisplayName,
-			ModuleType:  m.ModuleType,
-		},
+		Signature:   m.Signature,
+		LLM:         m.LLM,
+		DisplayName: m.DisplayName,
+		ModuleType:  m.ModuleType,
 	}
 }
 

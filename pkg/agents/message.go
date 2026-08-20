@@ -129,8 +129,8 @@ func (m Message) ToChatMessage() core.ChatMessage {
 		Role:      string(m.Role),
 		Content:   cloneContentBlocks(m.Content),
 		ToolCalls: cloneToolCalls(m.ToolCalls),
-	}
-	cm.ProviderData = cloneAnyMap(m.ProviderData)
+
+		ProviderData: cloneAnyMap(m.ProviderData)}
 	if m.ToolResult != nil {
 		cm.ToolResult = &core.ChatToolResult{
 			ToolCallID: m.ToolResult.ToolCallID,
@@ -166,8 +166,8 @@ func MessageFromChatMessage(message core.ChatMessage) Message {
 		Role:      MessageRole(message.Role),
 		Content:   cloneContentBlocks(message.Content),
 		ToolCalls: cloneToolCalls(message.ToolCalls),
-	}
-	converted.ProviderData = cloneAnyMap(message.ProviderData)
+
+		ProviderData: cloneAnyMap(message.ProviderData)}
 	if message.ToolResult != nil {
 		converted.ToolResult = &MessageToolResult{
 			ToolCallID:     message.ToolResult.ToolCallID,

@@ -18,8 +18,8 @@ func TestStep(t *testing.T) {
 	setupStep := func() (*Step, *MockModule) {
 		module := new(MockModule)
 		module.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "output"}},
 		})
 
 		return &Step{

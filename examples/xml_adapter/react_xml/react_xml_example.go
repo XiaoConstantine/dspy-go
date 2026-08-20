@@ -119,7 +119,7 @@ func main() {
 
 	// Create signature for the ReAct module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 

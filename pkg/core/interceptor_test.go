@@ -619,11 +619,9 @@ func TestChainToolInterceptors(t *testing.T) {
 
 func TestBaseModuleInterceptorMethods(t *testing.T) {
 	module := &TestModule{
-		BaseModule: BaseModule{
-			Signature:   Signature{},
-			DisplayName: "TestModule",
-			ModuleType:  "Test",
-		},
+		Signature:   Signature{},
+		DisplayName: "TestModule",
+		ModuleType:  "Test",
 	}
 
 	assert.Empty(t, module.GetInterceptors())
@@ -644,11 +642,9 @@ func TestBaseModuleInterceptorMethods(t *testing.T) {
 
 func TestBaseModuleProcessWithInterceptors(t *testing.T) {
 	module := &TestModule{
-		BaseModule: BaseModule{
-			Signature:   Signature{},
-			DisplayName: "TestModule",
-			ModuleType:  "Test",
-		},
+		Signature:   Signature{},
+		DisplayName: "TestModule",
+		ModuleType:  "Test",
 	}
 
 	ctx := context.Background()
@@ -734,11 +730,9 @@ func TestBaseModuleProcessWithInterceptors(t *testing.T) {
 
 	t.Run("interceptor can handle errors", func(t *testing.T) {
 		errorModule := &ErrorModule{
-			BaseModule: BaseModule{
-				Signature:   Signature{},
-				DisplayName: "ErrorModule",
-				ModuleType:  "Error",
-			},
+			Signature:   Signature{},
+			DisplayName: "ErrorModule",
+			ModuleType:  "Error",
 		}
 
 		var interceptorCalled bool
@@ -761,11 +755,9 @@ func TestBaseModuleProcessWithInterceptors(t *testing.T) {
 
 func TestModuleInterceptorClone(t *testing.T) {
 	original := &TestModule{
-		BaseModule: BaseModule{
-			Signature:   Signature{},
-			DisplayName: "Original",
-			ModuleType:  "Test",
-		},
+		Signature:   Signature{},
+		DisplayName: "Original",
+		ModuleType:  "Test",
 	}
 
 	interceptor := func(ctx context.Context, inputs map[string]any, info *ModuleInfo, handler ModuleHandler, opts ...Option) (map[string]any, error) {

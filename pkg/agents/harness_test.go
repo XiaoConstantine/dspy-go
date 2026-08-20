@@ -158,8 +158,8 @@ func TestHarness_WithInstructionsAcceptsCompatiblePredictAndRejectsRuntimeBehavi
 	assert.Contains(t, model.requests[0].Messages[0].TextContent(), "answer [text]")
 
 	zeroValuePredict := modules.NewPredict(core.Signature{
-		Inputs:  []core.InputField{{Field: core.Field{Name: "task"}}},
-		Outputs: []core.OutputField{{Field: core.Field{Name: "answer"}}},
+		Inputs:  []core.InputField{{Name: "task"}},
+		Outputs: []core.OutputField{{Name: "answer"}},
 	}.WithInstruction("Literal policy"))
 	zeroModel := &loopTestModel{responses: []ModelResponse{{Message: NewTextMessage(RoleAssistant, "done")}}}
 	zeroHarness, err := NewHarness(zeroModel, nil, WithInstructions(zeroValuePredict), WithHarnessCompletion(TextCompletion()))

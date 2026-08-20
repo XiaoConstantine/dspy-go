@@ -38,8 +38,8 @@ func TestReActAgent_IntegrationTestsClean(t *testing.T) {
 action: <action><tool_name>Finish</tool_name></action>`}, nil)
 
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "task"}}},
-			[]core.OutputField{{Field: core.Field{Name: "result"}}},
+			[]core.InputField{{Name: "task"}},
+			[]core.OutputField{{Name: "result"}},
 		)
 
 		err = agent.Initialize(mockLLM, signature)
@@ -76,8 +76,8 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 action: <action><tool_name>Finish</tool_name></action>`}, nil)
 
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "task"}}},
-			[]core.OutputField{{Field: core.Field{Name: "result"}}},
+			[]core.InputField{{Name: "task"}},
+			[]core.OutputField{{Name: "result"}},
 		)
 
 		err := agent.Initialize(mockLLM, signature)
@@ -107,8 +107,8 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 action: <action><tool_name>Finish</tool_name></action>`}, nil)
 
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "task"}}},
-			[]core.OutputField{{Field: core.Field{Name: "result"}}},
+			[]core.InputField{{Name: "task"}},
+			[]core.OutputField{{Name: "result"}},
 		)
 
 		err := agent.Initialize(mockLLM, signature)
@@ -135,8 +135,8 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		mockLLM := new(testutil.MockLLM)
 
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "task"}}},
-			[]core.OutputField{{Field: core.Field{Name: "result"}}},
+			[]core.InputField{{Name: "task"}},
+			[]core.OutputField{{Name: "result"}},
 		)
 
 		err := agent.Initialize(mockLLM, signature)
@@ -181,8 +181,8 @@ action: <action><tool_name>Finish</tool_name></action>`}, nil)
 		// Test plan step execution
 		mockLLM := new(testutil.MockLLM)
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "input"}}},
-			[]core.OutputField{{Field: core.Field{Name: "output"}}},
+			[]core.InputField{{Name: "input"}},
+			[]core.OutputField{{Name: "output"}},
 		)
 		err = agent.Initialize(mockLLM, signature)
 		require.NoError(t, err)

@@ -642,10 +642,10 @@ func NewMockModule(instruction string) *MockModule {
 	return &MockModule{
 		signature: core.Signature{
 			Inputs: []core.InputField{
-				{Field: core.Field{Name: "input", Description: "Test input"}},
+				{Name: "input", Description: "Test input"},
 			},
 			Outputs: []core.OutputField{
-				{Field: core.Field{Name: "output", Description: "Test output"}},
+				{Name: "output", Description: "Test output"},
 			},
 			Instruction: instruction,
 		},
@@ -721,20 +721,16 @@ func (m *MockModule) Clone() core.Module {
 	// Deep copy inputs
 	for i, input := range m.signature.Inputs {
 		signatureCopy.Inputs[i] = core.InputField{
-			Field: core.Field{
-				Name:        input.Name,
-				Description: input.Description,
-			},
+			Name:        input.Name,
+			Description: input.Description,
 		}
 	}
 
 	// Deep copy outputs
 	for i, output := range m.signature.Outputs {
 		signatureCopy.Outputs[i] = core.OutputField{
-			Field: core.Field{
-				Name:        output.Name,
-				Description: output.Description,
-			},
+			Name:        output.Name,
+			Description: output.Description,
 		}
 	}
 

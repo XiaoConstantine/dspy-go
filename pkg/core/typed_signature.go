@@ -156,24 +156,20 @@ func (ts *typedSignatureImpl[TInput, TOutput]) ToLegacySignature() Signature {
 	inputs := make([]InputField, len(ts.metadata.Inputs))
 	for i, field := range ts.metadata.Inputs {
 		inputs[i] = InputField{
-			Field: Field{
-				Name:        field.Name,
-				Description: field.Description,
-				Prefix:      field.Prefix,
-				Type:        field.Type,
-			},
+			Name:        field.Name,
+			Description: field.Description,
+			Prefix:      field.Prefix,
+			Type:        field.Type,
 		}
 	}
 
 	outputs := make([]OutputField, len(ts.metadata.Outputs))
 	for i, field := range ts.metadata.Outputs {
 		outputs[i] = OutputField{
-			Field: Field{
-				Name:        field.Name,
-				Description: field.Description,
-				Prefix:      field.Prefix,
-				Type:        field.Type,
-			},
+			Name:        field.Name,
+			Description: field.Description,
+			Prefix:      field.Prefix,
+			Type:        field.Type,
 		}
 	}
 

@@ -26,10 +26,10 @@ func newCompatFixtureModule(instruction string) *compatFixtureModule {
 		signature: core.Signature{
 			Instruction: instruction,
 			Inputs: []core.InputField{
-				{Field: core.Field{Name: "input", Description: "Fixture input"}},
+				{Name: "input", Description: "Fixture input"},
 			},
 			Outputs: []core.OutputField{
-				{Field: core.Field{Name: "output", Description: "Fixture output"}},
+				{Name: "output", Description: "Fixture output"},
 			},
 		},
 	}

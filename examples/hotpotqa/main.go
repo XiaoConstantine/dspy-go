@@ -180,7 +180,7 @@ func RunHotPotQAExample(apiKey string) {
 	testExamples := examples[trainSize+valSize:]
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 

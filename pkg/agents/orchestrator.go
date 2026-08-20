@@ -161,8 +161,8 @@ func NewFlexibleOrchestrator(memory Memory, config OrchestrationConfig) *Flexibl
 	// Create analyzer with a flexible prompt that can adapt to different domains
 	analyzerSig := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "task"}},
-			{Field: core.Field{Name: "context"}},
+			{Name: "task"},
+			{Name: "context"},
 		},
 		[]core.OutputField{
 			{Field: core.NewField("analysis")},

@@ -173,7 +173,7 @@ func NewMCPOptimizerWithConfig(config *MCPOptimizerConfig, embeddingService Embe
 	}
 
 	return &MCPOptimizer{
-		BaseOptimizer:     core.BaseOptimizer{Name: "MCPOptimizer"},
+		Name:              "MCPOptimizer",
 		PatternCollector:  patternCollector,
 		SimilarityMatcher: similarityMatcher,
 		ExampleSelector:   exampleSelector,

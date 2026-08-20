@@ -26,11 +26,11 @@ func NewSearchAgent() (*SearchAgent, error) {
 	// Create signature for search query generation and results
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "topic", Description: "The research topic or question"}},
+			{Name: "topic", Description: "The research topic or question"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "search_queries", Description: "List of 3-5 specific search queries to gather comprehensive information", Prefix: "search queries:"}},
-			{Field: core.Field{Name: "search_results", Description: "Simulated search results with relevant information", Prefix: "results:"}},
+			{Name: "search_queries", Description: "List of 3-5 specific search queries to gather comprehensive information", Prefix: "search queries:"},
+			{Name: "search_results", Description: "Simulated search results with relevant information", Prefix: "results:"},
 		},
 	).WithInstruction(`You are a skilled research assistant specializing in information gathering.
 Your task is to:
@@ -75,14 +75,14 @@ type AnalysisAgent struct {
 func NewAnalysisAgent() (*AnalysisAgent, error) {
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "topic", Description: "The research topic"}},
-			{Field: core.Field{Name: "search_results", Description: "Search results to analyze"}},
+			{Name: "topic", Description: "The research topic"},
+			{Name: "search_results", Description: "Search results to analyze"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "key_findings", Description: "5-7 key findings extracted from the search results", Prefix: "key findings:"}},
-			{Field: core.Field{Name: "patterns", Description: "Common patterns or themes identified", Prefix: "patterns:"}},
-			{Field: core.Field{Name: "contradictions", Description: "Any contradictions or disagreements found", Prefix: "contradictions:"}},
-			{Field: core.Field{Name: "gaps", Description: "Information gaps that need further research", Prefix: "gaps:"}},
+			{Name: "key_findings", Description: "5-7 key findings extracted from the search results", Prefix: "key findings:"},
+			{Name: "patterns", Description: "Common patterns or themes identified", Prefix: "patterns:"},
+			{Name: "contradictions", Description: "Any contradictions or disagreements found", Prefix: "contradictions:"},
+			{Name: "gaps", Description: "Information gaps that need further research", Prefix: "gaps:"},
 		},
 	).WithInstruction(`You are an expert analytical researcher.
 Analyze the provided search results and:
@@ -128,17 +128,17 @@ type SynthesisAgent struct {
 func NewSynthesisAgent() (*SynthesisAgent, error) {
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "topic", Description: "The research topic"}},
-			{Field: core.Field{Name: "key_findings", Description: "Key findings from analysis"}},
-			{Field: core.Field{Name: "patterns", Description: "Identified patterns"}},
-			{Field: core.Field{Name: "contradictions", Description: "Contradictions found"}},
-			{Field: core.Field{Name: "gaps", Description: "Information gaps"}},
+			{Name: "topic", Description: "The research topic"},
+			{Name: "key_findings", Description: "Key findings from analysis"},
+			{Name: "patterns", Description: "Identified patterns"},
+			{Name: "contradictions", Description: "Contradictions found"},
+			{Name: "gaps", Description: "Information gaps"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "executive_summary", Description: "2-3 paragraph executive summary", Prefix: "executive summary:"}},
-			{Field: core.Field{Name: "detailed_report", Description: "Comprehensive research report with sections", Prefix: "detailed report:"}},
-			{Field: core.Field{Name: "conclusions", Description: "Evidence-based conclusions", Prefix: "conclusions:"}},
-			{Field: core.Field{Name: "recommendations", Description: "Recommendations for further research or action", Prefix: "recommendations:"}},
+			{Name: "executive_summary", Description: "2-3 paragraph executive summary", Prefix: "executive summary:"},
+			{Name: "detailed_report", Description: "Comprehensive research report with sections", Prefix: "detailed report:"},
+			{Name: "conclusions", Description: "Evidence-based conclusions", Prefix: "conclusions:"},
+			{Name: "recommendations", Description: "Recommendations for further research or action", Prefix: "recommendations:"},
 		},
 	).WithInstruction(`You are a senior research analyst specializing in synthesizing complex information.
 Create a comprehensive research report that:

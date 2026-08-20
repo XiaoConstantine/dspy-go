@@ -209,7 +209,7 @@ func (m *orderTrackingModule) Clone() core.Module {
 
 func (m *orderTrackingModule) GetSignature() core.Signature {
 	return core.Signature{
-		Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-		Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+		Inputs:  []core.InputField{{Name: "input"}},
+		Outputs: []core.OutputField{{Name: "output"}},
 	}
 }

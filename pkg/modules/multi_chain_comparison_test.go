@@ -15,7 +15,7 @@ import (
 func TestNewMultiChainComparison(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -57,7 +57,7 @@ After analyzing all attempts, the correct answer is 42</rationale><answer>42</an
 
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -105,7 +105,7 @@ After analyzing all attempts, the correct answer is 42</rationale><answer>42</an
 func TestMultiChainComparison_Process_InvalidCompletions(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -139,7 +139,7 @@ func TestMultiChainComparison_Process_InvalidCompletions(t *testing.T) {
 func TestMultiChainComparison_Process_WrongNumberOfCompletions(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -174,7 +174,7 @@ func TestMultiChainComparison_Process_WrongNumberOfCompletions(t *testing.T) {
 func TestMultiChainComparison_ProcessCompletions(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -209,7 +209,7 @@ func TestMultiChainComparison_ProcessCompletions(t *testing.T) {
 func TestMultiChainComparison_ProcessCompletions_EmptyFields(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -238,7 +238,7 @@ func TestMultiChainComparison_ProcessCompletions_EmptyFields(t *testing.T) {
 func TestMultiChainComparison_Clone(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -259,7 +259,7 @@ func TestMultiChainComparison_Clone(t *testing.T) {
 func TestMultiChainComparison_SetLLM(t *testing.T) {
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -287,7 +287,7 @@ func TestMultiChainComparison_WithLLMError(t *testing.T) {
 
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -340,7 +340,7 @@ func TestMultiChainComparison_WithStreamHandler(t *testing.T) {
 
 	// Create a basic signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -400,12 +400,12 @@ func TestMultiChainComparison_SignatureModification(t *testing.T) {
 			// Create signature with specified number of input fields
 			inputs := make([]core.InputField, tc.inputFields)
 			for i := 0; i < tc.inputFields; i++ {
-				inputs[i] = core.InputField{Field: core.Field{Name: fmt.Sprintf("input_%d", i)}}
+				inputs[i] = core.InputField{Name: fmt.Sprintf("input_%d", i)}
 			}
 
 			outputs := make([]core.OutputField, tc.inputFields)
 			for i := 0; i < tc.inputFields; i++ {
-				outputs[i] = core.OutputField{Field: core.Field{Name: fmt.Sprintf("output_%d", i)}}
+				outputs[i] = core.OutputField{Name: fmt.Sprintf("output_%d", i)}
 			}
 
 			signature := core.NewSignature(inputs, outputs)

@@ -67,7 +67,7 @@ func TestReAct(t *testing.T) {
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	// Removed old tool slice initialization
@@ -138,7 +138,7 @@ answer:
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 2)
@@ -212,7 +212,7 @@ func TestReAct_WithErroredTool(t *testing.T) {
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 5)
@@ -308,7 +308,7 @@ func TestReAct_MaxIterations(t *testing.T) {
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 2)
@@ -359,7 +359,7 @@ func TestReAct_InvalidAction(t *testing.T) {
 	registry := tools.NewInMemoryToolRegistry()
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 5)
@@ -413,7 +413,7 @@ func TestReAct_NoMatchingTool(t *testing.T) {
 	registry := tools.NewInMemoryToolRegistry()
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 5)
@@ -456,7 +456,7 @@ func TestReAct_ToolValidationError(t *testing.T) {
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "data"}}},
+		[]core.InputField{{Name: "data"}},
 		[]core.OutputField{{Field: core.NewField("status")}},
 	)
 	react := NewReAct(signature, registry, 5)
@@ -497,7 +497,7 @@ func TestReAct_ToolValidationError(t *testing.T) {
 
 func TestReAct_Clone(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	mockTool := testutil.NewMockTool("test_tool")
@@ -543,7 +543,7 @@ func TestReAct_Clone(t *testing.T) {
 
 func TestReAct_WithDefaultOptions(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	// Create empty registry
@@ -628,7 +628,7 @@ The weather in New York is sunny, 75°F
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -682,7 +682,7 @@ Failed due to malformed action
 	registry := tools.NewInMemoryToolRegistry()
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -738,7 +738,7 @@ Action size exceeded limit
 	registry := tools.NewInMemoryToolRegistry()
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -810,7 +810,7 @@ Success
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -892,7 +892,7 @@ My next step would be to provide a detailed explanation...
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -955,7 +955,7 @@ action:
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -1161,7 +1161,7 @@ The main function is in cmd/main.go
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -1188,7 +1188,7 @@ The main function is in cmd/main.go
 func TestReAct_ConversationContextInSignature(t *testing.T) {
 	registry := tools.NewInMemoryToolRegistry()
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 3)
@@ -1255,7 +1255,7 @@ answer: The answer based on search
 	require.NoError(t, err)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	react := NewReAct(signature, registry, 5)

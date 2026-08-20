@@ -26,10 +26,10 @@ type MockModule struct {
 func NewMockModule(shouldFail bool, processingTime time.Duration) *MockModule {
 	signature := core.Signature{
 		Inputs: []core.InputField{
-			{Field: core.Field{Name: "input"}},
+			{Name: "input"},
 		},
 		Outputs: []core.OutputField{
-			{Field: core.Field{Name: "output"}},
+			{Name: "output"},
 		},
 	}
 
@@ -230,10 +230,10 @@ func TestParallelMixedSuccessFailure(t *testing.T) {
 	mockModule := &ConditionalModule{
 		BaseModule: *core.NewModule(core.Signature{
 			Inputs: []core.InputField{
-				{Field: core.Field{Name: "input"}},
+				{Name: "input"},
 			},
 			Outputs: []core.OutputField{
-				{Field: core.Field{Name: "output"}},
+				{Name: "output"},
 			},
 		}),
 		failInputs: map[string]bool{"item2": true, "item4": true},

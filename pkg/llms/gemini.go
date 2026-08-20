@@ -1125,16 +1125,15 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		// Prepare batch request
 		reqBody := geminiBatchEmbeddingRequest{
 			Model: fmt.Sprintf("models/%s", opts.Model),
-		}
 
-		// Add each input to the batch request
-		reqBody.Requests = make([]struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		}, len(batch))
+			// Add each input to the batch request
+			Requests: make([]struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			}, len(batch))}
 
 		for j, input := range batch {
 			reqBody.Requests[j].Content.Parts = []struct {

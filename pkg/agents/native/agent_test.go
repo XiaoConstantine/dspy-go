@@ -408,14 +408,12 @@ func TestAgent_Execute_ProcessesMultipleToolCallsInOneResponse(t *testing.T) {
 
 func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	llm := &nativeStubLLM{
-		stubLLM: stubLLM{
-			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
-			results: []map[string]any{
-				{
-					"function_call": map[string]any{
-						"name":      "Finish",
-						"arguments": map[string]any{"answer": "done"},
-					},
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
 				},
 			},
 		},
@@ -432,41 +430,39 @@ func TestAgent_Execute_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 
 func TestAgent_Execute_PreservesToolCallMetadataAcrossNativeRounds(t *testing.T) {
 	llm := &nativeStubLLM{
-		stubLLM: stubLLM{
-			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
-			results: []map[string]any{
-				{
-					"content_blocks": []core.ContentBlock{
-						{
-							Type: core.FieldTypeText,
-							Text: "Need to inspect package layout",
-							Metadata: map[string]any{
-								"gemini_thought":           true,
-								"gemini_thought_signature": "sig-thought",
-							},
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"content_blocks": []core.ContentBlock{
+					{
+						Type: core.FieldTypeText,
+						Text: "Need to inspect package layout",
+						Metadata: map[string]any{
+							"gemini_thought":           true,
+							"gemini_thought_signature": "sig-thought",
 						},
-					},
-					"tool_calls": []core.ToolCall{
-						{
-							ID:        "call-1",
-							Name:      "write_note",
-							Arguments: map[string]any{"content": "done"},
-							Metadata: map[string]any{
-								"gemini_thought":           true,
-								"gemini_thought_signature": "sig-call",
-							},
-						},
-					},
-					"function_call": map[string]any{
-						"name":      "write_note",
-						"arguments": map[string]any{"content": "done"},
 					},
 				},
-				{
-					"function_call": map[string]any{
-						"name":      "Finish",
-						"arguments": map[string]any{"answer": "done"},
+				"tool_calls": []core.ToolCall{
+					{
+						ID:        "call-1",
+						Name:      "write_note",
+						Arguments: map[string]any{"content": "done"},
+						Metadata: map[string]any{
+							"gemini_thought":           true,
+							"gemini_thought_signature": "sig-call",
+						},
 					},
+				},
+				"function_call": map[string]any{
+					"name":      "write_note",
+					"arguments": map[string]any{"content": "done"},
+				},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
 				},
 			},
 		},
@@ -508,31 +504,29 @@ func TestAgent_Execute_PreservesToolCallMetadataAcrossNativeRounds(t *testing.T)
 
 func TestAgent_Execute_GroupsMultipleToolCallsFromOneNativeTurn(t *testing.T) {
 	llm := &nativeStubLLM{
-		stubLLM: stubLLM{
-			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
-			results: []map[string]any{
-				{
-					"tool_calls": []core.ToolCall{
-						{
-							ID:        "call-1",
-							Name:      "write_note",
-							Arguments: map[string]any{"content": "first"},
-							Metadata: map[string]any{
-								"gemini_thought_signature": "sig-call",
-							},
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"tool_calls": []core.ToolCall{
+					{
+						ID:        "call-1",
+						Name:      "write_note",
+						Arguments: map[string]any{"content": "first"},
+						Metadata: map[string]any{
+							"gemini_thought_signature": "sig-call",
 						},
-						{
-							ID:        "call-2",
-							Name:      "write_note",
-							Arguments: map[string]any{"content": "second"},
-						},
+					},
+					{
+						ID:        "call-2",
+						Name:      "write_note",
+						Arguments: map[string]any{"content": "second"},
 					},
 				},
-				{
-					"function_call": map[string]any{
-						"name":      "Finish",
-						"arguments": map[string]any{"answer": "done"},
-					},
+			},
+			{
+				"function_call": map[string]any{
+					"name":      "Finish",
+					"arguments": map[string]any{"answer": "done"},
 				},
 			},
 		},

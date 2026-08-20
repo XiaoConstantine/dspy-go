@@ -29,8 +29,8 @@ func NewStateTestMockModule(name string) *StateTestMockModule {
 	llmIdentifier := map[string]string{"provider": "mock", "model": name + "-model"}
 	return &StateTestMockModule{
 		Sig: NewSignature(
-			[]InputField{{Field: Field{Name: name + "_in"}}},
-			[]OutputField{{Field: Field{Name: name + "_out"}}},
+			[]InputField{{Name: name + "_in"}},
+			[]OutputField{{Name: name + "_out"}},
 		),
 		// CurrentLLM can be left nil for many state tests, or set if needed for LM identifier tests
 		MyDemos:        []Example{},
@@ -139,12 +139,10 @@ type AnotherMockModule struct {
 
 func NewAnotherMockModule(name string) *AnotherMockModule {
 	return &AnotherMockModule{
-		BaseModule: BaseModule{
-			Signature: NewSignature(
-				[]InputField{{Field: Field{Name: name + "_in"}}},
-				[]OutputField{{Field: Field{Name: name + "_out"}}},
-			),
-		},
+		Signature: NewSignature(
+			[]InputField{{Name: name + "_in"}},
+			[]OutputField{{Name: name + "_out"}},
+		),
 	}
 }
 
@@ -165,8 +163,8 @@ type StateValueModule struct {
 func NewStateValueModule(name string) StateValueModule {
 	return StateValueModule{
 		Sig: NewSignature(
-			[]InputField{{Field: Field{Name: name + "_in"}}},
-			[]OutputField{{Field: Field{Name: name + "_out"}}},
+			[]InputField{{Name: name + "_in"}},
+			[]OutputField{{Name: name + "_out"}},
 		),
 	}
 }

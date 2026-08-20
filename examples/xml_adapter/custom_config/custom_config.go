@@ -44,10 +44,8 @@ func strictExample() {
 	)
 
 	module := &StrictModule{
-		BaseModule: core.BaseModule{
-			Signature:  signature,
-			ModuleType: "StrictModule",
-		},
+		Signature:  signature,
+		ModuleType: "StrictModule",
 	}
 
 	// Apply strict XML interceptor
@@ -84,10 +82,8 @@ func performanceExample() {
 	)
 
 	module := &PerformanceModule{
-		BaseModule: core.BaseModule{
-			Signature:  signature,
-			ModuleType: "PerformanceModule",
-		},
+		Signature:  signature,
+		ModuleType: "PerformanceModule",
 	}
 
 	// Apply performance XML interceptor
@@ -130,10 +126,8 @@ func customTagsExample() {
 	)
 
 	module := &CustomTagsModule{
-		BaseModule: core.BaseModule{
-			Signature:  signature,
-			ModuleType: "CustomTagsModule",
-		},
+		Signature:  signature,
+		ModuleType: "CustomTagsModule",
 	}
 
 	// Apply custom XML interceptor

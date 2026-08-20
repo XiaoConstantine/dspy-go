@@ -136,28 +136,26 @@ func TestNativeAgent_BuildTaskPrompt_IncludesFinishGuidance(t *testing.T) {
 
 func TestNativeAgent_RunTask_UsesNativeToolCallingWhenAvailable(t *testing.T) {
 	llm := &nativeToolCallingStubLLM{
-		toolCallingStubLLM: toolCallingStubLLM{
-			capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
-			results: []map[string]any{
-				{
-					"function_call": map[string]any{
-						"name": "write_file",
-						"arguments": map[string]any{
-							"path":    "answer.txt",
-							"content": "done",
-						},
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
+		results: []map[string]any{
+			{
+				"function_call": map[string]any{
+					"name": "write_file",
+					"arguments": map[string]any{
+						"path":    "answer.txt",
+						"content": "done",
 					},
-					"_usage": &core.TokenInfo{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
 				},
-				{
-					"function_call": map[string]any{
-						"name": "Finish",
-						"arguments": map[string]any{
-							"answer": "updated answer.txt",
-						},
+				"_usage": &core.TokenInfo{PromptTokens: 5, CompletionTokens: 3, TotalTokens: 8},
+			},
+			{
+				"function_call": map[string]any{
+					"name": "Finish",
+					"arguments": map[string]any{
+						"answer": "updated answer.txt",
 					},
-					"_usage": &core.TokenInfo{PromptTokens: 4, CompletionTokens: 2, TotalTokens: 6},
 				},
+				"_usage": &core.TokenInfo{PromptTokens: 4, CompletionTokens: 2, TotalTokens: 6},
 			},
 		},
 	}

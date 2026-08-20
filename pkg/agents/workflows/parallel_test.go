@@ -28,8 +28,8 @@ func TestParallelWorkflow(t *testing.T) {
 		createModule := func(id string, delay time.Duration) *MockModule {
 			module := new(MockModule)
 			module.On("GetSignature").Return(core.Signature{
-				Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-				Outputs: []core.OutputField{{Field: core.Field{Name: id}}},
+				Inputs:  []core.InputField{{Name: "input"}},
+				Outputs: []core.OutputField{{Name: id}},
 			})
 			module.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 				mu.Lock()
@@ -82,8 +82,8 @@ func TestParallelWorkflow(t *testing.T) {
 
 			module := new(MockModule)
 			module.On("GetSignature").Return(core.Signature{
-				Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-				Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+				Inputs:  []core.InputField{{Name: "input"}},
+				Outputs: []core.OutputField{{Name: "output"}},
 			})
 			module.On("Process", mock.Anything, mock.Anything).Return(map[string]any{"output": "done"}, nil)
 
@@ -110,8 +110,8 @@ func TestParallelWorkflow(t *testing.T) {
 			id := "step" + string(rune('a'+i))
 			module := new(MockModule)
 			module.On("GetSignature").Return(core.Signature{
-				Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-				Outputs: []core.OutputField{{Field: core.Field{Name: id}}},
+				Inputs:  []core.InputField{{Name: "input"}},
+				Outputs: []core.OutputField{{Name: id}},
 			})
 			module.On("Process", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
 				n := atomic.AddInt32(&active, 1)
@@ -163,8 +163,8 @@ func TestParallelWorkflow(t *testing.T) {
 		for _, id := range []string{"boom1", "boom2", "boom3", "boom4"} {
 			module := new(MockModule)
 			module.On("GetSignature").Return(core.Signature{
-				Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-				Outputs: []core.OutputField{{Field: core.Field{Name: id}}},
+				Inputs:  []core.InputField{{Name: "input"}},
+				Outputs: []core.OutputField{{Name: id}},
 			})
 			module.On("Process", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
 				panic("kaboom: " + id)
@@ -183,8 +183,8 @@ func TestParallelWorkflow(t *testing.T) {
 
 		failingModule := new(MockModule)
 		failingModule.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "output"}},
 		})
 		failingModule.On("Process", mock.Anything, mock.Anything).Return(
 			map[string]any{}, errors.New("step failed"),
@@ -243,8 +243,8 @@ func TestParallelWorkflowIsolatesExecutionState(t *testing.T) {
 	for _, id := range []string{"step1", "step2"} {
 		module := new(MockModule)
 		module.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: id}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: id}},
 		})
 		module.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 			stepCtx := args.Get(0).(context.Context)

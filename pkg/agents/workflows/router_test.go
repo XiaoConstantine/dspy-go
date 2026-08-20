@@ -20,9 +20,9 @@ func TestRouterWorkflow(t *testing.T) {
 		// Create classifier module
 		classifier := new(MockModule)
 		classifier.On("GetSignature").Return(core.Signature{
-			Inputs: []core.InputField{{Field: core.Field{Name: "input"}}},
+			Inputs: []core.InputField{{Name: "input"}},
 			Outputs: []core.OutputField{
-				{Field: core.Field{Name: "classification"}},
+				{Name: "classification"},
 			},
 		})
 		classifier.On("Process", mock.Anything, mock.Anything).Return(
@@ -32,8 +32,8 @@ func TestRouterWorkflow(t *testing.T) {
 		// Create handler module
 		handler := new(MockModule)
 		handler.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "output"}},
 		})
 		handler.On("Process", mock.Anything, mock.Anything).Return(
 			map[string]any{"output": "handled"}, nil,
@@ -65,8 +65,8 @@ func TestRouterWorkflow(t *testing.T) {
 
 		classifier := new(MockModule)
 		classifier.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "classification"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "classification"}},
 		})
 		classifier.On("Process", mock.Anything, mock.Anything).Return(
 			map[string]any{"classification": "unknown"}, nil,
@@ -89,8 +89,8 @@ func TestRouterWorkflow(t *testing.T) {
 
 		classifier := new(MockModule)
 		classifier.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "classification"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "classification"}},
 		})
 		classifier.On("Process", mock.Anything, mock.Anything).Return(
 			map[string]any{"classification": 123}, nil,
@@ -113,8 +113,8 @@ func TestRouterWorkflow(t *testing.T) {
 
 		classifier := new(MockModule)
 		classifier.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "classification"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "classification"}},
 		})
 		// Return empty map to simulate missing classification
 		classifier.On("Process", mock.Anything, mock.Anything).Return(
@@ -139,8 +139,8 @@ func TestRouterWorkflow(t *testing.T) {
 
 		classifier := new(MockModule)
 		classifier.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "classification"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "classification"}},
 		})
 		// Return empty map with error for failure case
 		classifier.On("Process", mock.Anything, mock.Anything).Return(
@@ -165,8 +165,8 @@ func TestRouterWorkflow(t *testing.T) {
 		// Classifier returns valid route
 		classifier := new(MockModule)
 		classifier.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "classification"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "classification"}},
 		})
 		classifier.On("Process", mock.Anything, mock.Anything).Return(
 			map[string]any{"classification": "route1"}, nil,
@@ -175,8 +175,8 @@ func TestRouterWorkflow(t *testing.T) {
 		// Handler fails
 		handler := new(MockModule)
 		handler.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "output"}},
 		})
 		// Return empty map with error for failure case
 		handler.On("Process", mock.Anything, mock.Anything).Return(

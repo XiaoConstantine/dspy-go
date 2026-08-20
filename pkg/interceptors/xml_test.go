@@ -368,13 +368,11 @@ func TestApplyXMLInterceptors(t *testing.T) {
 
 	// Create test module that implements InterceptableModule
 	module := &TestInterceptableModule{
-		BaseModule: core.BaseModule{
-			Signature: core.NewSignature(
-				[]core.InputField{{Field: core.NewField("input")}},
-				[]core.OutputField{{Field: core.NewField("output")}},
-			),
-			ModuleType: "TestModule",
-		},
+		Signature: core.NewSignature(
+			[]core.InputField{{Field: core.NewField("input")}},
+			[]core.OutputField{{Field: core.NewField("output")}},
+		),
+		ModuleType: "TestModule",
 	}
 
 	// Apply XML interceptors

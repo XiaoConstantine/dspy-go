@@ -202,7 +202,7 @@ func main() {
 
 	// 4. Create and configure ReAct module from config
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.InputField{{Name: "query"}},
 		[]core.OutputField{
 			{Field: core.NewField("answer")},
 		},

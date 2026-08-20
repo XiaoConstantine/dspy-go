@@ -79,7 +79,7 @@ func RunGSM8KExample(configPath string, apiKey string) {
 
 	// Create signature for ChainOfThought
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 

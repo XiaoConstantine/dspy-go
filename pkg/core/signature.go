@@ -204,11 +204,9 @@ func ShorthandNotation(notation string) (Signature, error) {
 // AppendInput adds an input field to the signature.
 func (s Signature) AppendInput(name string, prefix string, description string) Signature {
 	newInput := InputField{
-		Field: Field{
-			Name:        name,
-			Prefix:      prefix,
-			Description: description,
-		},
+		Name:        name,
+		Prefix:      prefix,
+		Description: description,
 	}
 	s.Inputs = append(append([]InputField(nil), s.Inputs...), newInput)
 	return s
@@ -217,11 +215,9 @@ func (s Signature) AppendInput(name string, prefix string, description string) S
 // PrependOutput adds an output field to the beginning of the outputs.
 func (s Signature) PrependOutput(name string, prefix string, description string) Signature {
 	newOutput := OutputField{
-		Field: Field{
-			Name:        name,
-			Prefix:      prefix,
-			Description: description,
-		},
+		Name:        name,
+		Prefix:      prefix,
+		Description: description,
 	}
 	s.Outputs = append(append([]OutputField(nil), newOutput), s.Outputs...)
 	return s

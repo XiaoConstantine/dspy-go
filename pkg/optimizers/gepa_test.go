@@ -104,10 +104,10 @@ func newStaticCandidateTestModule(instruction string) *staticCandidateTestModule
 		signature: core.Signature{
 			Instruction: instruction,
 			Inputs: []core.InputField{
-				{Field: core.Field{Name: "input", Description: "Test input"}},
+				{Name: "input", Description: "Test input"},
 			},
 			Outputs: []core.OutputField{
-				{Field: core.Field{Name: "output", Description: "Test output"}},
+				{Name: "output", Description: "Test output"},
 			},
 		},
 	}

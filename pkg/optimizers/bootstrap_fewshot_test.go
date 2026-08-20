@@ -16,7 +16,7 @@ import (
 
 func createProgram() core.Program {
 	predict := modules.NewPredict(core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	))
 

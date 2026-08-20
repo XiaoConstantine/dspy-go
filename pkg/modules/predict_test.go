@@ -35,7 +35,7 @@ func TestPredict(t *testing.T) {
 
 	// Create a Predict module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -80,7 +80,7 @@ func TestPredict_WithLLMError(t *testing.T) {
 
 	// Create a Predict module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -108,7 +108,7 @@ func TestPredict_WithMissingInput(t *testing.T) {
 
 	// Create a Predict module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -144,7 +144,7 @@ func TestPredict_WithGenerateOptions(t *testing.T) {
 
 	// Create a Predict module with default options
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -318,7 +318,7 @@ func TestPredict_ClonePreservesStructuredOutputMode(t *testing.T) {
 
 func TestPredict_SetLLMUpdatesEmbeddedBaseModule(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -333,7 +333,7 @@ func TestPredict_SetLLMUpdatesEmbeddedBaseModule(t *testing.T) {
 
 func TestPredict_ClonePreservesEmbeddedLLM(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -349,7 +349,7 @@ func TestPredict_ClonePreservesEmbeddedLLM(t *testing.T) {
 
 func TestPredict_ProcessUsesRuntimeLLMWhenModuleLLMUnset(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -380,7 +380,7 @@ func TestPredict_ProcessUsesRuntimeLLMWhenModuleLLMUnset(t *testing.T) {
 
 func TestPredict_ProcessResolvesGlobalDefaultAtExecutionTime(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -410,7 +410,7 @@ func TestPredict_ProcessResolvesGlobalDefaultAtExecutionTime(t *testing.T) {
 
 func TestPredict_GetLLMIdentifierFallsBackToGlobalDefault(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -451,7 +451,7 @@ func TestPredict_WithStreamHandler(t *testing.T) {
 
 	// Create a Predict module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -483,7 +483,7 @@ func TestPredict_WithStreamHandler(t *testing.T) {
 func TestParseJSONResponse(t *testing.T) {
 	// Create a test signature with multiple output fields
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.InputField{{Name: "input"}},
 		[]core.OutputField{
 			{Field: core.NewField("rationale", core.WithCustomPrefix("Rationale:"))},
 			{Field: core.NewField("answer", core.WithCustomPrefix("Answer:"))},
@@ -559,7 +559,7 @@ func TestParseJSONResponse(t *testing.T) {
 func TestParseJSONResponse_EmptySignature(t *testing.T) {
 	// Test with signature that has no output fields
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.InputField{{Name: "input"}},
 		[]core.OutputField{},
 	)
 
@@ -572,7 +572,7 @@ func TestParseJSONResponse_EmptySignature(t *testing.T) {
 func TestParseJSONResponse_FieldOrderPreservation(t *testing.T) {
 	// Test that fields are processed in signature order, not JSON order
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.InputField{{Name: "input"}},
 		[]core.OutputField{
 			{Field: core.NewField("third", core.WithCustomPrefix("Third:"))},
 			{Field: core.NewField("first", core.WithCustomPrefix("First:"))},
@@ -885,7 +885,7 @@ func BenchmarkPredictLegacy(b *testing.B) {
 func TestPredict_WithXMLOutput(t *testing.T) {
 	// Test XML output functionality in Predict module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -946,7 +946,7 @@ func TestPredict_WithXMLOutput(t *testing.T) {
 func TestPredict_XMLOutputIntegration(t *testing.T) {
 	// Integration test to ensure XML output works with the underlying module processing
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.InputField{{Name: "task"}},
 		[]core.OutputField{{Field: core.NewField("result")}},
 	)
 
@@ -983,7 +983,7 @@ func TestPredict_XMLOutputIntegration(t *testing.T) {
 func TestPredict_XMLOutputClone(t *testing.T) {
 	// Test that XML configuration is properly cloned
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.InputField{{Name: "input"}},
 		[]core.OutputField{{Field: core.NewField("output")}},
 	)
 
@@ -1016,7 +1016,7 @@ func TestPredict_XMLOutputBackwardCompatibility(t *testing.T) {
 
 	// Create a standard Predict module (no XML)
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	predict := NewPredict(signature)
@@ -1040,7 +1040,7 @@ func TestPredict_XMLOutputBackwardCompatibility(t *testing.T) {
 func TestPredict_XMLModeBypassesParsing(t *testing.T) {
 	// Test that XML mode bypasses traditional parsing logic for better performance
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
+		[]core.InputField{{Name: "input"}},
 		[]core.OutputField{{Field: core.NewField("output")}},
 	)
 
@@ -1085,10 +1085,10 @@ func TestPredict_XMLMode_RawResponseFix(t *testing.T) {
 	}, nil)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{
-			{Field: core.Field{Name: "answer"}},
-			{Field: core.Field{Name: "confidence"}},
+			{Name: "answer"},
+			{Name: "confidence"},
 		},
 	)
 
@@ -1134,7 +1134,7 @@ func TestPredict_TextMode_NoRawResponse(t *testing.T) {
 	}, nil)
 
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}}, // Use NewField like other tests
 	)
 
@@ -1157,8 +1157,8 @@ func TestPredict_TextMode_NoRawResponse(t *testing.T) {
 // TestPredict_XMLMode_ToggleMode tests switching between XML and text modes.
 func TestPredict_XMLMode_ToggleMode(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "input"}}},
-		[]core.OutputField{{Field: core.Field{Name: "output"}}},
+		[]core.InputField{{Name: "input"}},
+		[]core.OutputField{{Name: "output"}},
 	)
 
 	predict := NewPredict(signature)
@@ -1183,7 +1183,7 @@ func TestPredict_XMLMode_ToggleMode(t *testing.T) {
 func TestPredict_AnalyzerTasksParsing(t *testing.T) {
 	// Signature mirrors what the orchestrator analyzer expects
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "task"}}},
+		[]core.InputField{{Name: "task"}},
 		[]core.OutputField{
 			{Field: core.NewField("analysis")},
 			{Field: core.NewField("tasks")},

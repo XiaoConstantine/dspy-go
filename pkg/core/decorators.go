@@ -23,7 +23,7 @@ type ModelContextDecorator struct {
 // wrapping LLM implementations with decorators.
 func NewModelContextDecorator(base LLM) *ModelContextDecorator {
 	return &ModelContextDecorator{
-		BaseDecorator: BaseDecorator{LLM: base},
+		LLM: base,
 	}
 }
 

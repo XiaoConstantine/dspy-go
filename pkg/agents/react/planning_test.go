@@ -290,8 +290,8 @@ action: <action><tool_name>Finish</tool_name></action>`,
 		}
 
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "task"}}},
-			[]core.OutputField{{Field: core.Field{Name: "result"}}},
+			[]core.InputField{{Name: "task"}},
+			[]core.OutputField{{Name: "result"}},
 		)
 
 		err := agent.Initialize(mockLLM, signature)
@@ -355,8 +355,8 @@ action: <action><tool_name>Finish</tool_name></action>`,
 		// Initialize
 		mockLLM := &mockLLM{}
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "input"}}},
-			[]core.OutputField{{Field: core.Field{Name: "output"}}},
+			[]core.InputField{{Name: "input"}},
+			[]core.OutputField{{Name: "output"}},
 		)
 		err = agent.Initialize(mockLLM, signature)
 		require.NoError(t, err)
@@ -389,8 +389,8 @@ action: <action><tool_name>Finish</tool_name></action>`,
 
 		mockLLM := &mockLLM{}
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "input"}}},
-			[]core.OutputField{{Field: core.Field{Name: "output"}}},
+			[]core.InputField{{Name: "input"}},
+			[]core.OutputField{{Name: "output"}},
 		)
 		err = agent.Initialize(mockLLM, signature)
 		require.NoError(t, err)
@@ -425,8 +425,8 @@ action: <action><tool_name>Finish</tool_name></action>`,
 
 		mockLLM := &mockLLM{}
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "input"}}},
-			[]core.OutputField{{Field: core.Field{Name: "output"}}},
+			[]core.InputField{{Name: "input"}},
+			[]core.OutputField{{Name: "output"}},
 		)
 		err = agent.Initialize(mockLLM, signature)
 		require.NoError(t, err)
@@ -460,8 +460,8 @@ action: <action><tool_name>Finish</tool_name></action>`,
 
 		mockLLM := &mockLLM{}
 		signature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "input"}}},
-			[]core.OutputField{{Field: core.Field{Name: "output"}}},
+			[]core.InputField{{Name: "input"}},
+			[]core.OutputField{{Name: "output"}},
 		)
 		err = agent.Initialize(mockLLM, signature)
 		require.NoError(t, err)

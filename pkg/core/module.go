@@ -277,11 +277,9 @@ func NewModuleChain(modules ...Module) *ModuleChain {
 	}
 
 	return &ModuleChain{
-		BaseModule: BaseModule{
-			Signature:  Signature{Inputs: inputs, Outputs: outputs},
-			ModuleType: "ModuleChain",
-		},
-		Modules: modules,
+		Signature:  Signature{Inputs: inputs, Outputs: outputs},
+		ModuleType: "ModuleChain",
+		Modules:    modules,
 	}
 }
 

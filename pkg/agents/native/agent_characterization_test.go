@@ -165,9 +165,8 @@ func TestAgent_Execute_CharacterizesMaxTurnExhaustion(t *testing.T) {
 }
 
 func TestAgent_Execute_CharacterizesCanceledModelCall(t *testing.T) {
-	llm := &cancelAwareLLM{stubLLM: stubLLM{
-		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling},
-	}}
+	llm := &cancelAwareLLM{
+		capabilities: []core.Capability{core.CapabilityCompletion, core.CapabilityToolCalling}}
 
 	var events []agents.ExecutionEvent
 	agent, err := NewAgent(llm, Config{

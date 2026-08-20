@@ -114,8 +114,8 @@ func (m *MockLLM) StreamGenerateWithContent(ctx context.Context, content []Conte
 // // TestBaseModule tests the BaseModule struct and its methods.
 func TestBaseModule(t *testing.T) {
 	sig := NewSignature(
-		[]InputField{{Field: Field{Name: "input"}}},
-		[]OutputField{{Field: Field{Name: "output"}}},
+		[]InputField{{Name: "input"}},
+		[]OutputField{{Name: "output"}},
 	)
 	bm := NewModule(sig)
 
@@ -146,8 +146,8 @@ func TestBaseModule(t *testing.T) {
 
 func TestBaseModuleValidateInputsReturnsValidationError(t *testing.T) {
 	sig := NewSignature(
-		[]InputField{{Field: Field{Name: "input"}}},
-		[]OutputField{{Field: Field{Name: "output"}}},
+		[]InputField{{Name: "input"}},
+		[]OutputField{{Name: "output"}},
 	)
 	bm := NewModule(sig)
 
@@ -165,12 +165,12 @@ func TestBaseModuleValidateInputsReturnsValidationError(t *testing.T) {
 // TestModuleChain tests the ModuleChain struct and its methods.
 func TestModuleChain(t *testing.T) {
 	module1 := NewModule(NewSignature(
-		[]InputField{{Field: Field{Name: "input1"}}},
-		[]OutputField{{Field: Field{Name: "output1"}}},
+		[]InputField{{Name: "input1"}},
+		[]OutputField{{Name: "output1"}},
 	))
 	module2 := NewModule(NewSignature(
-		[]InputField{{Field: Field{Name: "input2"}}},
-		[]OutputField{{Field: Field{Name: "output2"}}},
+		[]InputField{{Name: "input2"}},
+		[]OutputField{{Name: "output2"}},
 	))
 
 	chain := NewModuleChain(module1, module2)
@@ -210,13 +210,13 @@ func (m *moduleChainStub) Clone() Module {
 
 func TestModuleChainProcessAndClone(t *testing.T) {
 	module1 := newModuleChainStub(NewSignature(
-		[]InputField{{Field: Field{Name: "input"}}},
-		[]OutputField{{Field: Field{Name: "middle"}}},
+		[]InputField{{Name: "input"}},
+		[]OutputField{{Name: "middle"}},
 	), map[string]any{"middle": "value"})
 
 	module2 := newModuleChainStub(NewSignature(
-		[]InputField{{Field: Field{Name: "middle"}}},
-		[]OutputField{{Field: Field{Name: "final"}}},
+		[]InputField{{Name: "middle"}},
+		[]OutputField{{Name: "final"}},
 	), map[string]any{"final": "done"})
 
 	chain := NewModuleChain(module1, module2)

@@ -15,12 +15,12 @@ func CreateClassifierStep() *workflows.Step {
 	// Create a signature for classification that captures reasoning and selection
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "input"}},
+			{Name: "input"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "reasoning", Prefix: "reasoning"}},
-			{Field: core.Field{Name: "selection", Prefix: "selection"}},
-			{Field: core.Field{Name: "classification", Prefix: "classification"}}, // Required by RouterWorkflow
+			{Name: "reasoning", Prefix: "reasoning"},
+			{Name: "selection", Prefix: "selection"},
+			{Name: "classification", Prefix: "classification"}, // Required by RouterWorkflow
 		},
 	).WithInstruction(`Analyze the input and select the most appropriate support team.
     First explain your reasoning, then provide your selection.
@@ -40,10 +40,10 @@ func CreateHandlerStep(routeType string, prompt string) *workflows.Step {
 	// Create signature for handling tickets
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "input"}},
+			{Name: "input"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "response"}},
+			{Name: "response"},
 		},
 	).WithInstruction(prompt)
 
@@ -85,10 +85,10 @@ func CreateParallelWorkflow(stakeholders []string) (*workflows.ParallelWorkflow,
 func NewStakeholderAnalysis(index int) core.Module {
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: fmt.Sprintf("analyze_stakeholder_%d_stakeholder_info", index)}},
+			{Name: fmt.Sprintf("analyze_stakeholder_%d_stakeholder_info", index)},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "response"}},
+			{Name: "response"},
 		},
 	).WithInstruction(`Analyze how market changes will impact this stakeholder group.
         Provide specific impacts and recommended actions.
@@ -103,8 +103,8 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 
 	// Step 1: Extract numerical values
 	extractSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "raw_text"}}},
-		[]core.OutputField{{Field: core.Field{Name: "extracted_values", Prefix: "extracted_values:"}}},
+		[]core.InputField{{Name: "raw_text"}},
+		[]core.OutputField{{Name: "extracted_values", Prefix: "extracted_values:"}},
 	).WithInstruction(`Extract only the numerical values and their associated metrics from the text.
         Format each as 'value: metric' on a new line.
 		Example: extracted_values:
@@ -117,8 +117,8 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 
 	// Step 2: Standardize to percentages
 	standardizeSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "extracted_values"}}},
-		[]core.OutputField{{Field: core.Field{Name: "standardized_values", Prefix: "standardized_values:"}}},
+		[]core.InputField{{Name: "extracted_values"}},
+		[]core.OutputField{{Name: "standardized_values", Prefix: "standardized_values:"}},
 	).WithInstruction(`Convert all numerical values to percentages where possible.
         If not a percentage or points, convert to decimal (e.g., 92 points -> 92%).
         Keep one number per line.
@@ -135,8 +135,8 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 
 	// Step 3: Sort values
 	sortSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "standardized_values"}}},
-		[]core.OutputField{{Field: core.Field{Name: "sorted_values", Prefix: "sorted_values:"}}},
+		[]core.InputField{{Name: "standardized_values"}},
+		[]core.OutputField{{Name: "sorted_values", Prefix: "sorted_values:"}},
 	).WithInstruction(`Sort all lines in descending order by numerical value.
                 Keep the format 'value: metric' on each line.
 		`)
@@ -147,8 +147,8 @@ func CreateDataProcessingWorkflow() (*workflows.ChainWorkflow, error) {
 
 	// Step 4: Format as table
 	tableSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "sorted_values"}}},
-		[]core.OutputField{{Field: core.Field{Name: "markdown_table", Prefix: "markdown_table:"}}},
+		[]core.InputField{{Name: "sorted_values"}},
+		[]core.OutputField{{Name: "markdown_table", Prefix: "markdown_table:"}},
 	).WithInstruction(`Format the sorted values as a markdown table with two columns:
     - First column: Metric
     - Second column: Value

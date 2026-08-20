@@ -76,7 +76,7 @@ func TestLLMAdapter_CompleteUsesTypedChatBoundary(t *testing.T) {
 	}}
 	usage := &core.TokenInfo{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5}
 
-	llm := &chatAdapterTestLLM{adapterTestLLM: adapterTestLLM{
+	llm := &chatAdapterTestLLM{
 		result: map[string]any{
 			"content":        "I will read the file.",
 			"content_blocks": []core.ContentBlock{core.NewTextBlock("I will read the file.")},
@@ -91,8 +91,7 @@ func TestLLMAdapter_CompleteUsesTypedChatBoundary(t *testing.T) {
 			"provider_diagnostic":  rawDiagnostic,
 			"thought_blocks":       rawThoughtBlocks,
 			"thoughts_token_count": 4,
-		},
-	}}
+		}}
 	adapter, err := NewLLMAdapter(llm)
 	require.NoError(t, err)
 
@@ -215,9 +214,9 @@ func TestLLMAdapter_CompleteDispatchesWrappedModelsByUnderlyingCapability(t *tes
 	require.NoError(t, err)
 	assert.Equal(t, "wrapped function prompt", functionOnly.prompt)
 
-	chat := &chatAdapterTestLLM{adapterTestLLM: adapterTestLLM{result: map[string]any{
+	chat := &chatAdapterTestLLM{result: map[string]any{
 		"tool_calls": []core.ToolCall{{Name: "read"}},
-	}}}
+	}}
 	wrappedChat := core.NewModelContextDecorator(chat)
 	adapter, err = NewLLMAdapter(wrappedChat)
 	require.NoError(t, err)

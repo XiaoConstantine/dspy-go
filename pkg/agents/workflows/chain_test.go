@@ -22,16 +22,16 @@ func TestChainWorkflow(t *testing.T) {
 
 		// Setup mock responses
 		module1.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input1"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "output1"}}},
+			Inputs:  []core.InputField{{Name: "input1"}},
+			Outputs: []core.OutputField{{Name: "output1"}},
 		})
 		module1.On("Process", mock.Anything, mock.Anything, mock.Anything).Return(
 			map[string]any{"output1": "intermediate"}, nil,
 		)
 
 		module2.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "output1"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "final"}}},
+			Inputs:  []core.InputField{{Name: "output1"}},
+			Outputs: []core.OutputField{{Name: "final"}},
 		})
 		module2.On("Process", mock.Anything, mock.Anything, mock.Anything).Return(
 			map[string]any{"final": "result"}, nil,
@@ -63,8 +63,8 @@ func TestChainWorkflow(t *testing.T) {
 
 		module := new(MockModule)
 		module.On("GetSignature").Return(core.Signature{
-			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
-			Outputs: []core.OutputField{{Field: core.Field{Name: "output"}}},
+			Inputs:  []core.InputField{{Name: "input"}},
+			Outputs: []core.OutputField{{Name: "output"}},
 		})
 		module.On("Process", mock.Anything, mock.Anything).Return(
 			map[string]any{}, errors.New("step failed"),

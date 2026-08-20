@@ -26,10 +26,8 @@ func main() {
 
 	// Create module
 	module := &SentimentModule{
-		BaseModule: core.BaseModule{
-			Signature:  signature,
-			ModuleType: "SentimentModule",
-		},
+		Signature:  signature,
+		ModuleType: "SentimentModule",
 	}
 
 	// Create XML interceptor configuration
@@ -87,10 +85,8 @@ func (m *SentimentModule) Process(ctx context.Context, inputs map[string]any, op
 // Clone creates a copy of the sentiment module.
 func (m *SentimentModule) Clone() core.Module {
 	return &SentimentModule{
-		BaseModule: core.BaseModule{
-			Signature:  m.Signature,
-			ModuleType: m.ModuleType,
-		},
+		Signature:  m.Signature,
+		ModuleType: m.ModuleType,
 	}
 }
 

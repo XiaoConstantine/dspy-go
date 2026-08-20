@@ -26,10 +26,8 @@ func main() {
 
 	// Create a mock module (in real usage, this would be your actual module)
 	module := &MockModule{
-		BaseModule: core.BaseModule{
-			Signature:  signature,
-			ModuleType: "QAModule",
-		},
+		Signature:  signature,
+		ModuleType: "QAModule",
 	}
 
 	// Create XML interceptor with default configuration
@@ -80,10 +78,8 @@ func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ..
 // Clone creates a copy of the mock module.
 func (m *MockModule) Clone() core.Module {
 	return &MockModule{
-		BaseModule: core.BaseModule{
-			Signature:  m.Signature,
-			ModuleType: m.ModuleType,
-		},
+		Signature:  m.Signature,
+		ModuleType: m.ModuleType,
 	}
 }
 

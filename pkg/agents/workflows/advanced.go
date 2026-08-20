@@ -425,10 +425,10 @@ func (ccm *conditionalClassifierModule) Process(ctx context.Context, inputs map[
 func (ccm *conditionalClassifierModule) GetSignature() core.Signature {
 	return core.Signature{
 		Inputs: []core.InputField{
-			{Field: core.Field{Name: "input", Description: "input for conditional evaluation"}},
+			{Name: "input", Description: "input for conditional evaluation"},
 		},
 		Outputs: []core.OutputField{
-			{Field: core.Field{Name: "classification", Description: "true or false classification result"}},
+			{Name: "classification", Description: "true or false classification result"},
 		},
 	}
 }

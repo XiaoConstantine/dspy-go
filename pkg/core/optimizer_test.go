@@ -49,8 +49,8 @@ func TestCompileOptions(t *testing.T) {
 	teacherProgram := &Program{
 		Modules: map[string]Module{
 			"test": NewModule(NewSignature(
-				[]InputField{{Field: Field{Name: "input"}}},
-				[]OutputField{{Field: Field{Name: "output"}}},
+				[]InputField{{Name: "input"}},
+				[]OutputField{{Name: "output"}},
 			)),
 		},
 		Forward: func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
@@ -82,8 +82,8 @@ func TestBootstrapFewShot(t *testing.T) {
 	// Create a simple program for testing
 	program := NewProgram(map[string]Module{
 		"test": NewModule(NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "output"}},
 		)),
 	}, nil)
 

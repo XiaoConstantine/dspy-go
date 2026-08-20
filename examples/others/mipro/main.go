@@ -57,7 +57,7 @@ func RunMIPROExample(apiKey string) {
 	// Create modules for our program
 	// 1. Chain of Thought for reasoning
 	cotSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "prompt"}}},
+		[]core.InputField{{Name: "prompt"}},
 		[]core.OutputField{{Field: core.NewField("completion")}},
 	).WithInstruction("Think step by step to solve this math problem.")
 
@@ -66,7 +66,7 @@ func RunMIPROExample(apiKey string) {
 
 	// 2. Answer extractor to get the final answer
 	extractorSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "prompt"}}},
+		[]core.InputField{{Name: "prompt"}},
 		[]core.OutputField{{Field: core.NewField("completion")}},
 	).WithInstruction("Extract the final numerical answer from the reasoning.")
 

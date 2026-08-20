@@ -41,8 +41,8 @@ func (m *advancedMockModule) Process(ctx context.Context, inputs map[string]any,
 
 func (m *advancedMockModule) GetSignature() core.Signature {
 	return core.Signature{
-		Inputs:  []core.InputField{{Field: core.Field{Name: "input", Description: "test input"}}},
-		Outputs: []core.OutputField{{Field: core.Field{Name: "output", Description: "test output"}}},
+		Inputs:  []core.InputField{{Name: "input", Description: "test input"}},
+		Outputs: []core.OutputField{{Name: "output", Description: "test output"}},
 	}
 }
 
@@ -555,8 +555,8 @@ func (m *slowMockModule) Process(ctx context.Context, inputs map[string]any, opt
 
 func (m *slowMockModule) GetSignature() core.Signature {
 	return core.Signature{
-		Inputs:  []core.InputField{{Field: core.Field{Name: "input", Description: "test input"}}},
-		Outputs: []core.OutputField{{Field: core.Field{Name: "output", Description: "test output"}}},
+		Inputs:  []core.InputField{{Name: "input", Description: "test input"}},
+		Outputs: []core.OutputField{{Name: "output", Description: "test output"}},
 	}
 }
 
@@ -589,8 +589,8 @@ func (m *errorMockModule) Process(ctx context.Context, inputs map[string]any, op
 
 func (m *errorMockModule) GetSignature() core.Signature {
 	return core.Signature{
-		Inputs:  []core.InputField{{Field: core.Field{Name: "input", Description: "test input"}}},
-		Outputs: []core.OutputField{{Field: core.Field{Name: "output", Description: "test output"}}},
+		Inputs:  []core.InputField{{Name: "input", Description: "test input"}},
+		Outputs: []core.OutputField{{Name: "output", Description: "test output"}},
 	}
 }
 

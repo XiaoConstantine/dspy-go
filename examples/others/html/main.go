@@ -17,7 +17,7 @@ import (
 func createHTMLParsingProgram() core.Program {
 	// Create a signature for extracting structured data from HTML
 	extractSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "document"}}},
+		[]core.InputField{{Name: "document"}},
 		[]core.OutputField{
 			{Field: core.NewField("title")},
 			{Field: core.NewField("headings")},
@@ -52,12 +52,12 @@ func createMetricFunc() func(example, prediction map[string]any, ctx context.Con
 	// Create a signature for our judge module
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "document"}},
-			{Field: core.Field{Name: "predicted_metadata"}},
+			{Name: "document"},
+			{Name: "predicted_metadata"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "rationale", Prefix: "rationale"}},
-			{Field: core.Field{Name: "is_correct", Prefix: "is_correct"}},
+			{Name: "rationale", Prefix: "rationale"},
+			{Name: "is_correct", Prefix: "is_correct"},
 		},
 	).WithInstruction(`You are evaluating whether the predicted metadata correctly extracts information from the HTML document.
     First, analyze the document and identify the key information.
@@ -125,7 +125,7 @@ func main() {
 	// Q2: But I don't have HTML documents to use for optimization.
 	// Create modules to synthesize data
 	synthesizeTopicsSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "count"}}},
+		[]core.InputField{{Name: "count"}},
 		[]core.OutputField{{Field: core.NewField("random_technical_topics")}},
 	).WithInstruction(`Generate a list of diverse technical topics.
 Each topic should be something that could have a web page with headings and entities.
@@ -133,7 +133,7 @@ Format your response as a list, DO NOT wrap response in json format`)
 	synthesize_topics := modules.NewPredict(synthesizeTopicsSignature).WithStructuredOutput()
 
 	synthesizeDocSignature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "topic"}}},
+		[]core.InputField{{Name: "topic"}},
 		[]core.OutputField{{Field: core.NewField("html_document")}},
 	).WithInstruction(`Generate a realistic HTML document about the given topic.
 The HTML should include a title tag in the head, multiple heading tags (h1, h2, etc.),

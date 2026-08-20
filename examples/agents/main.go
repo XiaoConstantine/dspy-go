@@ -187,10 +187,10 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
 	// Create signature for our task - simpler now that we don't need dataset support
 	signature := core.NewSignature(
 		[]core.InputField{
-			{Field: core.Field{Name: "task"}},
+			{Name: "task"},
 		},
 		[]core.OutputField{
-			{Field: core.Field{Name: "solution", Prefix: "solution"}},
+			{Name: "solution", Prefix: "solution"},
 		},
 	).WithInstruction(`
         Your task is to implement the requested data structure.

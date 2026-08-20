@@ -49,7 +49,7 @@ func main() {
 	logger.Info(ctx, "Running traditional Predict example")
 
 	signature1 := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -73,11 +73,11 @@ func main() {
 	// XML Mode: Can use simple core.Field{} instead of core.NewField()
 	// because XML interceptors handle structure, no prefixes needed!
 	signature2 := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "topic"}}},
+		[]core.InputField{{Name: "topic"}},
 		[]core.OutputField{
-			{Field: core.Field{Name: "summary"}},
-			{Field: core.Field{Name: "key_points"}},
-			{Field: core.Field{Name: "conclusion"}},
+			{Name: "summary"},
+			{Name: "key_points"},
+			{Name: "conclusion"},
 		},
 	)
 
@@ -113,10 +113,10 @@ func main() {
 	logger.Info(ctx, "Running Predict with performance-optimized XML configuration")
 
 	signature3 := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "scenario"}}},
+		[]core.InputField{{Name: "scenario"}},
 		[]core.OutputField{
-			{Field: core.Field{Name: "analysis"}},
-			{Field: core.Field{Name: "recommendations"}},
+			{Name: "analysis"},
+			{Name: "recommendations"},
 		},
 	)
 
@@ -150,10 +150,10 @@ func main() {
 	logger.Info(ctx, "Running Predict with secure XML configuration")
 
 	signature4 := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "data"}}},
+		[]core.InputField{{Name: "data"}},
 		[]core.OutputField{
-			{Field: core.Field{Name: "processed_result"}},
-			{Field: core.Field{Name: "security_assessment"}},
+			{Name: "processed_result"},
+			{Name: "security_assessment"},
 		},
 	)
 

@@ -23,7 +23,7 @@ func TestChainOfThought(t *testing.T) {
 
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
@@ -70,7 +70,7 @@ func TestChainOfThought_WithLLMError(t *testing.T) {
 
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
@@ -103,7 +103,7 @@ func TestChainOfThought_WithMissingInput(t *testing.T) {
 
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
@@ -128,7 +128,7 @@ func TestChainOfThought_WithMissingInput(t *testing.T) {
 func TestChainOfThought_RationaleAdded(t *testing.T) {
 	// Test that the rationale field is automatically added to the signature
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -163,7 +163,7 @@ Test response
 
 	// Create a ChainOfThought module with default options
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
@@ -248,7 +248,7 @@ func TestChainOfThought_WithStreamHandler(t *testing.T) {
 
 	// Create a ChainOfThought module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)
@@ -279,7 +279,7 @@ func TestChainOfThought_WithStreamHandler(t *testing.T) {
 
 func TestChainOfThought_ProcessWithInterceptors_PopulatesModuleLLM(t *testing.T) {
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 
@@ -306,7 +306,7 @@ func TestChainOfThought_ProcessWithInterceptors_PopulatesModuleLLM(t *testing.T)
 func TestChainOfThought_Clone(t *testing.T) {
 	// Create original instance
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	original := NewChainOfThought(signature)
@@ -329,13 +329,13 @@ func TestChainOfThought_Clone(t *testing.T) {
 func TestChainOfThought_Compose(t *testing.T) {
 	// Create two modules
 	signature1 := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature1)
 
 	signature2 := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "answer"}}},
+		[]core.InputField{{Name: "answer"}},
 		[]core.OutputField{{Field: core.NewField("summary")}},
 	)
 	predict := NewPredict(signature2)
@@ -356,7 +356,7 @@ func TestChainOfThought_Compose(t *testing.T) {
 func TestChainOfThought_GetSetSubModules(t *testing.T) {
 	// Create original module
 	signature := core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 	cot := NewChainOfThought(signature)

@@ -665,17 +665,17 @@ func TestBatchExecutor(t *testing.T) {
 
 	calls := []ToolCall{
 		{
-			ToolCall: core.ToolCall{Name: "parser", Arguments: map[string]any{"data": "test1"}},
+			Name: "parser", Arguments: map[string]any{"data": "test1"},
 			Priority: 1,
 			Timeout:  1 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "validator", Arguments: map[string]any{"data": "test2"}},
+			Name: "validator", Arguments: map[string]any{"data": "test2"},
 			Priority: 2,
 			Timeout:  1 * time.Second,
 		},
 		{
-			ToolCall: core.ToolCall{Name: "transformer", Arguments: map[string]any{"data": "test3"}},
+			Name: "transformer", Arguments: map[string]any{"data": "test3"},
 			Priority: 3,
 			Timeout:  1 * time.Second,
 		},
@@ -723,14 +723,12 @@ func TestBatchExecutor_PrefersEmbeddedCoreToolCallFields(t *testing.T) {
 
 	calls := []ToolCall{
 		{
-			ToolCall: core.ToolCall{
-				Name:      "parser",
-				Arguments: map[string]any{"data": "preferred"},
-			},
-			ToolName: "error_tool",
-			Input:    map[string]any{"data": "deprecated"},
-			Priority: 1,
-			Timeout:  1 * time.Second,
+			Name:      "parser",
+			Arguments: map[string]any{"data": "preferred"},
+			ToolName:  "error_tool",
+			Input:     map[string]any{"data": "deprecated"},
+			Priority:  1,
+			Timeout:   1 * time.Second,
 		},
 	}
 
@@ -748,16 +746,14 @@ func TestBatchExecutor_PrefersEmbeddedCoreToolCallFields(t *testing.T) {
 
 func TestToolCallJSONRoundTripUsesCanonicalFields(t *testing.T) {
 	call := ToolCall{
-		ToolCall: core.ToolCall{
-			ID:        "call-1",
-			Name:      "parser",
-			Arguments: map[string]any{"data": "preferred"},
-		},
-		ToolName: "validator",
-		Input:    map[string]any{"data": "deprecated"},
-		Priority: 2,
-		Timeout:  time.Second,
-		Retries:  3,
+		ID:        "call-1",
+		Name:      "parser",
+		Arguments: map[string]any{"data": "preferred"},
+		ToolName:  "validator",
+		Input:     map[string]any{"data": "deprecated"},
+		Priority:  2,
+		Timeout:   time.Second,
+		Retries:   3,
 	}
 
 	encoded, err := json.Marshal(call)

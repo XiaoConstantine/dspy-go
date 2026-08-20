@@ -124,8 +124,8 @@ func TestProgram(t *testing.T) {
 	t.Run("GetSignature", func(t *testing.T) {
 		mockModule := new(MockModule)
 		expectedSig := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "output"}},
 		)
 		mockModule.On("GetSignature").Return(expectedSig)
 
@@ -138,8 +138,8 @@ func TestProgram(t *testing.T) {
 	t.Run("GetSignature is deterministic across multiple modules", func(t *testing.T) {
 		alphaModule := new(MockModule)
 		alphaSig := NewSignature(
-			[]InputField{{Field: Field{Name: "alpha_in"}}},
-			[]OutputField{{Field: Field{Name: "alpha_out"}}},
+			[]InputField{{Name: "alpha_in"}},
+			[]OutputField{{Name: "alpha_out"}},
 		)
 		alphaModule.On("GetSignature").Return(alphaSig).Times(2)
 
@@ -158,8 +158,8 @@ func TestProgram(t *testing.T) {
 
 	t.Run("Clone", func(t *testing.T) {
 		expectedSig := NewSignature(
-			[]InputField{{Field: Field{Name: "input"}}},
-			[]OutputField{{Field: Field{Name: "output"}}},
+			[]InputField{{Name: "input"}},
+			[]OutputField{{Name: "output"}},
 		)
 
 		// Create and configure the original mock module
@@ -249,8 +249,8 @@ func TestProgram(t *testing.T) {
 	t.Run("Equal with different programs", func(t *testing.T) {
 		mockModule1 := new(MockModule)
 		mockModule2 := new(MockModule)
-		sig1 := NewSignature([]InputField{{Field: Field{Name: "input1"}}}, nil)
-		sig2 := NewSignature([]InputField{{Field: Field{Name: "input2"}}}, nil)
+		sig1 := NewSignature([]InputField{{Name: "input1"}}, nil)
+		sig2 := NewSignature([]InputField{{Name: "input2"}}, nil)
 
 		mockModule1.On("GetSignature").Return(sig1)
 		mockModule2.On("GetSignature").Return(sig2)

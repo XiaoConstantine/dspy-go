@@ -25,8 +25,8 @@ func (m *testModule) Process(ctx context.Context, inputs map[string]any, opts ..
 
 func (m *testModule) GetSignature() core.Signature {
 	return core.Signature{
-		Inputs:  []core.InputField{{Field: core.Field{Name: "input", Description: "test input"}}},
-		Outputs: []core.OutputField{{Field: core.Field{Name: "output", Description: "test output"}}},
+		Inputs:  []core.InputField{{Name: "input", Description: "test input"}},
+		Outputs: []core.OutputField{{Name: "output", Description: "test output"}},
 	}
 }
 
