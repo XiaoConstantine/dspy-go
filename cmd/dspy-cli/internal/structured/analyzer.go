@@ -310,11 +310,9 @@ func (pa *PromptAnalyzer) ConvertToSignature(components []PromptComponent) core.
 			}
 
 			inputs = append(inputs, core.InputField{
-				Field: core.Field{
-					Name:        fieldName,
-					Type:        "string",
-					Description: fmt.Sprintf("%s extracted from prompt", componentType),
-				},
+				Name:        fieldName,
+				Type:        "string",
+				Description: fmt.Sprintf("%s extracted from prompt", componentType),
 			})
 		}
 	}
@@ -322,32 +320,26 @@ func (pa *PromptAnalyzer) ConvertToSignature(components []PromptComponent) core.
 	// Add default input if no specific inputs found
 	if len(inputs) == 0 {
 		inputs = append(inputs, core.InputField{
-			Field: core.Field{
-				Name:        "prompt",
-				Type:        "string",
-				Description: "The input prompt to process",
-			},
+			Name:        "prompt",
+			Type:        "string",
+			Description: "The input prompt to process",
 		})
 	}
 
 	// Define outputs based on detected output format
 	if _, hasFormat := componentGroups["Output Format"]; hasFormat {
 		outputs = append(outputs, core.OutputField{
-			Field: core.Field{
-				Name:        "structured_response",
-				Type:        "string",
-				Prefix:      "Response:",
-				Description: "Structured response following the specified format",
-			},
+			Name:        "structured_response",
+			Type:        "string",
+			Prefix:      "Response:",
+			Description: "Structured response following the specified format",
 		})
 	} else {
 		outputs = append(outputs, core.OutputField{
-			Field: core.Field{
-				Name:        "response",
-				Type:        "string",
-				Prefix:      "Response:",
-				Description: "Generated response",
-			},
+			Name:        "response",
+			Type:        "string",
+			Prefix:      "Response:",
+			Description: "Generated response",
 		})
 	}
 
@@ -461,54 +453,54 @@ func (pa *PromptAnalyzer) generateOptimizedSignature(original core.Signature, ex
 			if !pa.hasInputField(optimizedInputs, "task_context") {
 				content := pa.generateTaskContext(domain, complexity)
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "task_context", Type: core.FieldTypeText, Description: content},
+					Name: "task_context", Type: core.FieldTypeText, Description: content,
 				})
 			}
 		case "Tone Context":
 			if !pa.hasInputField(optimizedInputs, "tone_context") {
 				content := pa.generateToneContext(tone, domain)
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "tone_context", Type: core.FieldTypeText, Description: content},
+					Name: "tone_context", Type: core.FieldTypeText, Description: content,
 				})
 			}
 		case "Background Data":
 			if !pa.hasInputField(optimizedInputs, "background_data") {
 				content := pa.generateBackgroundContext(domain)
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "background_data", Type: core.FieldTypeText, Description: content},
+					Name: "background_data", Type: core.FieldTypeText, Description: content,
 				})
 			}
 		case "Task Rules":
 			if !pa.hasInputField(optimizedInputs, "task_rules") {
 				content := pa.generateTaskRules(domain, complexity)
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "task_rules", Type: core.FieldTypeText, Description: content},
+					Name: "task_rules", Type: core.FieldTypeText, Description: content,
 				})
 			}
 		case "Examples":
 			if !pa.hasInputField(optimizedInputs, "examples") {
 				content := pa.generateExamplesContext(domain)
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "examples", Type: core.FieldTypeText, Description: content},
+					Name: "examples", Type: core.FieldTypeText, Description: content,
 				})
 			}
 		case "Conversation History":
 			if !pa.hasInputField(optimizedInputs, "conversation_history") {
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "conversation_history", Type: core.FieldTypeText, Description: "Previous conversation context"},
+					Name: "conversation_history", Type: core.FieldTypeText, Description: "Previous conversation context",
 				})
 			}
 		case "User Request":
 			if !pa.hasInputField(optimizedInputs, "user_request") {
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "user_request", Type: core.FieldTypeText, Description: "Current user query or task"},
+					Name: "user_request", Type: core.FieldTypeText, Description: "Current user query or task",
 				})
 			}
 		case "Thinking Steps":
 			if !pa.hasInputField(optimizedInputs, "thinking_steps") {
 				content := pa.generateThinkingSteps(complexity)
 				optimizedInputs = append(optimizedInputs, core.InputField{
-					Field: core.Field{Name: "thinking_steps", Type: core.FieldTypeText, Description: content},
+					Name: "thinking_steps", Type: core.FieldTypeText, Description: content,
 				})
 			}
 		}
@@ -517,7 +509,7 @@ func (pa *PromptAnalyzer) generateOptimizedSignature(original core.Signature, ex
 	// Ensure we have appropriate outputs
 	if len(optimizedOutputs) == 0 {
 		optimizedOutputs = append(optimizedOutputs, core.OutputField{
-			Field: core.Field{Name: "response", Type: core.FieldTypeText, Prefix: "Response:"},
+			Name: "response", Type: core.FieldTypeText, Prefix: "Response:",
 		})
 	}
 

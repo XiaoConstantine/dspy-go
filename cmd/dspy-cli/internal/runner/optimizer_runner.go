@@ -120,7 +120,7 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 	if config.OptimizerName == "mipro" {
 		// Create extractor module for MIPRO (2-module architecture)
 		extractorSignature := core.NewSignature(
-			[]core.InputField{{Field: core.Field{Name: "prompt"}}},
+			[]core.InputField{{Name: "prompt"}},
 			[]core.OutputField{{Field: core.NewField("completion")}},
 		).WithInstruction("Extract the final numerical answer from the reasoning.")
 		extractor := modules.NewChainOfThought(extractorSignature)
@@ -280,7 +280,7 @@ func setupLLM(config OptimizerConfig) error {
 func createSignature() core.Signature {
 	// Standard question->answer signature for most tasks
 	return core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.InputField{{Name: "question"}},
 		[]core.OutputField{{Field: core.NewField("answer")}},
 	)
 }
@@ -288,7 +288,7 @@ func createSignature() core.Signature {
 func createSignatureForMIPRO() core.Signature {
 	// MIPRO-compatible signature using prompt/completion format
 	return core.NewSignature(
-		[]core.InputField{{Field: core.Field{Name: "prompt"}}},
+		[]core.InputField{{Name: "prompt"}},
 		[]core.OutputField{{Field: core.NewField("completion")}},
 	).WithInstruction("Think step by step to answer this question.")
 }
