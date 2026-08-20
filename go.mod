@@ -15,8 +15,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20230526161137-0005af68ea54
-
 require (
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
