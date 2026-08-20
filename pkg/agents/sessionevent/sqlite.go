@@ -18,6 +18,15 @@ import (
 
 const defaultBranchName = "main"
 
+func defaultForkBranchName(branchID string) string {
+	const suffixLength = 8
+	if len(branchID) < suffixLength {
+		return "branch-" + branchID
+	}
+	// A UUIDv7 prefix contains its timestamp; the suffix is random.
+	return "branch-" + branchID[len(branchID)-suffixLength:]
+}
+
 type SQLiteStore struct {
 	db *sql.DB
 }
@@ -656,7 +665,7 @@ func (s *SQLiteStore) ForkBranch(ctx context.Context, sessionID, fromEntryID, na
 		Metadata:      maps.Clone(metadata),
 	}
 	if branch.Name == "" {
-		branch.Name = "branch-" + branch.ID[:8]
+		branch.Name = defaultForkBranchName(branch.ID)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)

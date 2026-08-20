@@ -238,6 +238,22 @@ func TestSQLiteStoreAppendSummaryAndForkBranch(t *testing.T) {
 	assert.Equal(t, forked.ID, updatedSession.ActiveBranchID)
 }
 
+func TestDefaultForkBranchNameUsesUUIDV7RandomTail(t *testing.T) {
+	t.Parallel()
+
+	firstID := "018f47a2-4c00-7abc-8123-456789abcdef"
+	secondID := "018f47a2-4c00-7abc-8123-4567fedcba98"
+	assertUUIDVersion7(t, firstID)
+	assertUUIDVersion7(t, secondID)
+	require.Equal(t, firstID[:13], secondID[:13], "fixtures must have identical UUIDv7 timestamps")
+
+	firstName := defaultForkBranchName(firstID)
+	secondName := defaultForkBranchName(secondID)
+	assert.Equal(t, "branch-89abcdef", firstName)
+	assert.Equal(t, "branch-fedcba98", secondName)
+	assert.NotEqual(t, firstName, secondName)
+}
+
 func assertUUIDVersion7(t *testing.T, value string) {
 	t.Helper()
 
