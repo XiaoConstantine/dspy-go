@@ -22,6 +22,27 @@ func TestStreamCancelClosesStalledRequest(t *testing.T) {
 		new  func(string) (core.LLM, error)
 	}{
 		{
+			name: "openai",
+			new: func(url string) (core.LLM, error) {
+				return NewOpenAILLM(
+					core.ModelOpenAIGPT4o,
+					WithAPIKey("test-key"),
+					WithOpenAIBaseURL(url),
+				)
+			},
+		},
+		{
+			name: "anthropic",
+			new: func(url string) (core.LLM, error) {
+				return NewAnthropicLLMFromConfig(context.Background(), core.ProviderConfig{
+					APIKey: "test-key",
+					Endpoint: &core.EndpointConfig{
+						BaseURL: url,
+					},
+				}, core.ModelID("claude-sonnet-4-5"))
+			},
+		},
+		{
 			name: "gemini",
 			new: func(url string) (core.LLM, error) {
 				llm, err := NewGeminiLLM("key", core.ModelGoogleGeminiFlash)
@@ -50,14 +71,22 @@ func TestStreamCancelClosesStalledRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			requestStarted := make(chan struct{})
 			requestCanceled := make(chan struct{})
+			releaseRequest := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.(http.Flusher).Flush()
 				close(requestStarted)
-				<-r.Context().Done()
-				close(requestCanceled)
+				select {
+				case <-r.Context().Done():
+					close(requestCanceled)
+				case <-releaseRequest:
+				}
 			}))
-			defer server.Close()
+			defer func() {
+				close(releaseRequest)
+				server.CloseClientConnections()
+				server.Close()
+			}()
 
 			llm, err := tt.new(server.URL)
 			require.NoError(t, err)
@@ -66,6 +95,122 @@ func TestStreamCancelClosesStalledRequest(t *testing.T) {
 			requireChannelSignal(t, requestStarted, "HTTP request did not start")
 
 			stream.Cancel()
+			requireChannelSignal(t, requestCanceled, "Cancel did not cancel HTTP request")
+			requireStreamClosed(t, stream.ChunkChannel)
+		})
+	}
+}
+
+func TestSendStreamChunkReturnsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := make(chan bool, 1)
+	go func() {
+		result <- sendStreamChunk(ctx, make(chan core.StreamChunk), core.StreamChunk{Content: "blocked"})
+	}()
+
+	select {
+	case sent := <-result:
+		require.False(t, sent)
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream send remained blocked after cancellation")
+	}
+}
+
+// TestStreamCancelUnblocksPendingSend verifies the cancellation lifecycle after
+// each provider has emitted a frame while its output channel remains unread.
+func TestStreamCancelUnblocksPendingSend(t *testing.T) {
+	const (
+		openAIFrame    = "data: {\"id\":\"test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"blocked\"},\"finish_reason\":null}]}\n\n"
+		anthropicFrame = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"blocked\"}}\n\n"
+	)
+
+	newAnthropic := func(url string) (*AnthropicLLM, error) {
+		return NewAnthropicLLMFromConfig(context.Background(), core.ProviderConfig{
+			APIKey: "test-key",
+			Endpoint: &core.EndpointConfig{
+				BaseURL: url,
+			},
+		}, core.ModelID("claude-sonnet-4-5"))
+	}
+
+	tests := []struct {
+		name  string
+		frame string
+		start func(string) (*core.StreamResponse, error)
+	}{
+		{
+			name:  "openai",
+			frame: openAIFrame,
+			start: func(url string) (*core.StreamResponse, error) {
+				llm, err := NewOpenAILLM(
+					core.ModelOpenAIGPT4o,
+					WithAPIKey("test-key"),
+					WithOpenAIBaseURL(url),
+				)
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerate(context.Background(), "prompt")
+			},
+		},
+		{
+			name:  "anthropic-text",
+			frame: anthropicFrame,
+			start: func(url string) (*core.StreamResponse, error) {
+				llm, err := newAnthropic(url)
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerate(context.Background(), "prompt")
+			},
+		},
+		{
+			name:  "anthropic-content",
+			frame: anthropicFrame,
+			start: func(url string) (*core.StreamResponse, error) {
+				llm, err := newAnthropic(url)
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerateWithContent(context.Background(), []core.ContentBlock{
+					core.NewTextBlock("prompt"),
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			frameWritten := make(chan struct{})
+			requestCanceled := make(chan struct{})
+			releaseRequest := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.frame))
+				w.(http.Flusher).Flush()
+				close(frameWritten)
+				select {
+				case <-r.Context().Done():
+					close(requestCanceled)
+				case <-releaseRequest:
+				}
+			}))
+			defer func() {
+				close(releaseRequest)
+				server.CloseClientConnections()
+				server.Close()
+			}()
+
+			stream, err := tt.start(server.URL)
+			require.NoError(t, err)
+			requireChannelSignal(t, frameWritten, "provider frame was not written")
+
+			// Deliberately leave ChunkChannel unread until cancellation.
+			stream.Cancel()
+
 			requireChannelSignal(t, requestCanceled, "Cancel did not cancel HTTP request")
 			requireStreamClosed(t, stream.ChunkChannel)
 		})

@@ -765,9 +765,12 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 
 		resp, err := o.makeStreamingRequest(streamCtx, request)
 		if err != nil {
-			chunkChan <- core.StreamChunk{
-				Error: errors.Wrap(err, errors.LLMGenerationFailed, "streaming request failed"),
+			if streamCtx.Err() != nil {
+				return
 			}
+			sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
+				Error: errors.Wrap(err, errors.LLMGenerationFailed, "streaming request failed"),
+			})
 			return
 		}
 		defer resp.Body.Close()
@@ -797,7 +800,7 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 
 			// Check for end marker
 			if data == "[DONE]" {
-				chunkChan <- core.StreamChunk{Done: true}
+				sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
 				return
 			}
 
@@ -814,21 +817,26 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 				content := choice.Delta.Content
 
 				if content != "" {
-					chunkChan <- core.StreamChunk{Content: content}
+					if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: content}) {
+						return
+					}
 				}
 
 				// Check for finish reason
 				if choice.FinishReason != nil && *choice.FinishReason != "" {
-					chunkChan <- core.StreamChunk{Done: true}
+					sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
 					return
 				}
 			}
 		}
 
 		if err := scanner.Err(); err != nil {
-			chunkChan <- core.StreamChunk{
-				Error: errors.Wrap(err, errors.LLMGenerationFailed, "error reading stream"),
+			if streamCtx.Err() != nil {
+				return
 			}
+			sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
+				Error: errors.Wrap(err, errors.LLMGenerationFailed, "error reading stream"),
+			})
 		}
 	}()
 

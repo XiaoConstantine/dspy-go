@@ -551,7 +551,9 @@ func (a *AnthropicLLM) StreamGenerate(ctx context.Context, prompt string, option
 			case anthropic.ContentBlockDeltaEvent:
 				// Handle text delta
 				if textDelta := variant.Delta.AsTextDelta(); textDelta.Text != "" {
-					chunkChan <- core.StreamChunk{Content: textDelta.Text}
+					if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: textDelta.Text}) {
+						return
+					}
 				}
 
 			case anthropic.MessageStartEvent:
@@ -563,13 +565,17 @@ func (a *AnthropicLLM) StreamGenerate(ctx context.Context, prompt string, option
 				tokenInfo.CompletionTokens = int(variant.Usage.OutputTokens)
 				tokenInfo.TotalTokens = tokenInfo.PromptTokens + tokenInfo.CompletionTokens
 
-				chunkChan <- core.StreamChunk{
+				if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
 					Usage: &tokenInfo,
+				}) {
+					return
 				}
 
 			case anthropic.MessageStopEvent:
 				// End of message
-				chunkChan <- core.StreamChunk{Done: true}
+				if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true}) {
+					return
+				}
 
 			case anthropic.ContentBlockStartEvent:
 				// Beginning of a content block, nothing to do
@@ -581,13 +587,16 @@ func (a *AnthropicLLM) StreamGenerate(ctx context.Context, prompt string, option
 		}
 
 		if err := stream.Err(); err != nil {
+			if streamCtx.Err() != nil {
+				return
+			}
 			var apiErr *anthropic.Error
 			if errors.As(err, &apiErr) {
 				logger.Error(streamCtx, "Anthropic streaming error: status code %d", apiErr.StatusCode)
 			}
-			chunkChan <- core.StreamChunk{
+			sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
 				Error: errs.Wrap(err, errs.LLMGenerationFailed, "streaming failed"),
-			}
+			})
 		}
 	}()
 
@@ -695,30 +704,39 @@ func (a *AnthropicLLM) StreamGenerateWithContent(ctx context.Context, content []
 			switch variant := event.AsAny().(type) {
 			case anthropic.ContentBlockDeltaEvent:
 				if textDelta := variant.Delta.AsTextDelta(); textDelta.Text != "" {
-					chunkChan <- core.StreamChunk{Content: textDelta.Text}
+					if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: textDelta.Text}) {
+						return
+					}
 				}
 
 			case anthropic.MessageStopEvent:
-				chunkChan <- core.StreamChunk{Done: true}
+				if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true}) {
+					return
+				}
 
 			case anthropic.MessageDeltaEvent:
 				tokenInfo.CompletionTokens = int(variant.Usage.OutputTokens)
 				tokenInfo.TotalTokens = tokenInfo.PromptTokens + tokenInfo.CompletionTokens
 
-				chunkChan <- core.StreamChunk{
+				if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
 					Usage: &tokenInfo,
+				}) {
+					return
 				}
 			}
 		}
 
 		if err := stream.Err(); err != nil {
+			if streamCtx.Err() != nil {
+				return
+			}
 			var apiErr *anthropic.Error
 			if errors.As(err, &apiErr) {
 				logger.Error(streamCtx, "Anthropic streaming error: status code %d", apiErr.StatusCode)
 			}
-			chunkChan <- core.StreamChunk{
+			sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
 				Error: errs.Wrap(err, errs.LLMGenerationFailed, "streaming with content failed"),
-			}
+			})
 		}
 	}()
 
