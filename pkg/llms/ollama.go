@@ -529,6 +529,14 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			send(core.StreamChunk{Error: errors.WithFields(
+				errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d", resp.StatusCode)),
+				errors.Fields{"model": o.ModelID(), "status_code": resp.StatusCode},
+			)})
+			return
+		}
+
 		// Ollama returns JSONL stream
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {

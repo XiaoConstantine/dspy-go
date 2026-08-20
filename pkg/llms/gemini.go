@@ -1337,6 +1337,14 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			send(core.StreamChunk{Error: errors.WithFields(
+				errors.New(errors.LLMGenerationFailed, fmt.Sprintf("API request failed with status code %d", resp.StatusCode)),
+				errors.Fields{"model": g.ModelID(), "statusCode": resp.StatusCode},
+			)})
+			return
+		}
+
 		reader := bufio.NewReader(resp.Body)
 		for {
 			line, readErr := reader.ReadString('\n')
