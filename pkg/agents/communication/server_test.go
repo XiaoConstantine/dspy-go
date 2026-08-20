@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -120,6 +122,173 @@ func TestNewServer_Defaults(t *testing.T) {
 	}
 	if server.config.Name != "dspy-go-agent" {
 		t.Error("expected default name")
+	}
+}
+
+func TestServerExternalShutdownUnblocksStart(t *testing.T) {
+	server := createTestServer(t, nil)
+	server.server.Addr = "127.0.0.1:0"
+
+	serveStarted := make(chan struct{})
+	server.server.BaseContext = func(net.Listener) context.Context {
+		close(serveStarted)
+		return context.Background()
+	}
+
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	defer cancelStart()
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- server.Start(startCtx)
+	}()
+
+	select {
+	case <-serveStarted:
+	case err := <-startDone:
+		t.Fatalf("Start returned before serving: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not begin serving")
+	}
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelShutdown()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatalf("Start() error after external Shutdown = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("external Shutdown did not unblock Start")
+	}
+
+	server.mu.Lock()
+	run := server.run
+	server.mu.Unlock()
+	if run == nil {
+		t.Fatal("server run was not initialized")
+	}
+	select {
+	case <-run.cleanupDone:
+	default:
+		t.Fatal("Shutdown returned before the cleanup loop stopped")
+	}
+}
+
+func TestWaitForServerShutdownJoinsRunAfterError(t *testing.T) {
+	shutdownErr := errors.New("shutdown failed")
+	run := &serverRun{
+		done:        make(chan struct{}),
+		cleanupDone: make(chan struct{}),
+	}
+	forceCloseCalled := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- waitForServerShutdown(
+			run,
+			func() error { return shutdownErr },
+			func() error {
+				close(forceCloseCalled)
+				return nil
+			},
+		)
+	}()
+
+	select {
+	case <-forceCloseCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown error did not trigger a forced close")
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("waitForServerShutdown returned before run.done: %v", err)
+	default:
+	}
+
+	close(run.done)
+	select {
+	case err := <-result:
+		t.Fatalf("waitForServerShutdown returned before cleanupDone: %v", err)
+	default:
+	}
+
+	close(run.cleanupDone)
+	select {
+	case err := <-result:
+		if !errors.Is(err, shutdownErr) {
+			t.Fatalf("waitForServerShutdown() error = %v, want %v", err, shutdownErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForServerShutdown did not return after the run stopped")
+	}
+}
+
+func TestServerShutdownDuringStart(t *testing.T) {
+	server := createTestServer(t, nil)
+	server.server.Addr = "127.0.0.1:0"
+
+	baseContextEntered := make(chan struct{})
+	releaseBaseContext := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseBaseContext) }) }
+	defer release()
+
+	server.server.BaseContext = func(net.Listener) context.Context {
+		close(baseContextEntered)
+		<-releaseBaseContext
+		return context.Background()
+	}
+	shutdownStarted := make(chan struct{})
+	server.server.RegisterOnShutdown(func() { close(shutdownStarted) })
+
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	defer cancelStart()
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- server.Start(startCtx)
+	}()
+
+	select {
+	case <-baseContextEntered:
+	case err := <-startDone:
+		t.Fatalf("Start returned during startup: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not enter BaseContext")
+	}
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelShutdown()
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- server.Shutdown(shutdownCtx)
+	}()
+
+	select {
+	case <-shutdownStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not overlap server startup")
+	}
+	release()
+
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("Shutdown() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown blocked during server startup")
+	}
+
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatalf("Start() error after startup shutdown = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start remained blocked after startup shutdown")
 	}
 }
 

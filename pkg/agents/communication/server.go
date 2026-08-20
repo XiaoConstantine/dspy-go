@@ -3,6 +3,7 @@ package communication
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -38,8 +39,17 @@ type Server struct {
 	server      *http.Server
 	tasks       *taskRegistry
 	subscribers *subscriberRegistry
-	mu          sync.RWMutex
-	running     bool
+	mu          sync.Mutex
+	shutdownMu  sync.Mutex
+	run         *serverRun
+}
+
+type serverRun struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	cleanupDone chan struct{}
+	err         error
 }
 
 // ============================================================================
@@ -231,47 +241,99 @@ func (s *Server) registerHandlers(mux *http.ServeMux) {
 // Start begins serving the a2a protocol.
 func (s *Server) Start(ctx context.Context) error {
 	s.mu.Lock()
-	if s.running {
+	if s.run != nil {
+		run := s.run
 		s.mu.Unlock()
-		return fmt.Errorf("server already running")
+		select {
+		case <-run.done:
+			return fmt.Errorf("server cannot be restarted after shutdown")
+		default:
+			return fmt.Errorf("server already running")
+		}
 	}
-	s.running = true
+
+	runCtx, cancel := context.WithCancel(ctx)
+	run := &serverRun{
+		ctx:         runCtx,
+		cancel:      cancel,
+		done:        make(chan struct{}),
+		cleanupDone: make(chan struct{}),
+	}
+	s.run = run
 	s.mu.Unlock()
 
-	// Start cleanup goroutine for old tasks
-	go s.cleanupLoop(ctx)
-
-	// Start server
-	errCh := make(chan error, 1)
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+		defer close(run.cleanupDone)
+		s.cleanupLoop(run.ctx)
+	}()
+
+	go func() {
+		err := s.server.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
 		}
+		run.err = err
+		run.cancel()
+		close(run.done)
 	}()
 
 	fmt.Printf("🚀 a2a server started at %s\n", s.server.Addr)
 	fmt.Printf("📋 AgentCard: http://%s%s/.well-known/agent.json\n", s.server.Addr, s.config.PathPrefix)
 
-	// Wait for context cancellation or server error
 	select {
 	case <-ctx.Done():
-		return s.Shutdown(context.Background())
-	case err := <-errCh:
-		return err
+		if err := waitForServerShutdown(
+			run,
+			func() error { return s.Shutdown(context.Background()) },
+			s.server.Close,
+		); err != nil {
+			return err
+		}
+	case <-run.done:
 	}
+
+	<-run.done
+	<-run.cleanupDone
+	return run.err
+}
+
+func waitForServerShutdown(run *serverRun, shutdown, forceClose func() error) error {
+	err := shutdown()
+	if err != nil {
+		// A graceful shutdown error must not release ownership while the serve
+		// and cleanup goroutines can still be running.
+		_ = forceClose()
+	}
+	<-run.done
+	<-run.cleanupDone
+	return err
 }
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.running {
+	run := s.run
+	s.mu.Unlock()
+	if run == nil {
 		return nil
 	}
 
-	s.running = false
-	return s.server.Shutdown(ctx)
+	run.cancel()
+
+	// Serialize calls into http.Server.Shutdown. If one attempt times out,
+	// another caller can retry with its own context.
+	s.shutdownMu.Lock()
+	defer s.shutdownMu.Unlock()
+
+	if err := s.server.Shutdown(ctx); err != nil {
+		return err
+	}
+
+	// Shutdown closes the listener before returning. Waiting here also covers a
+	// shutdown that wins the race before Serve begins tracking the listener.
+	<-run.done
+	<-run.cleanupDone
+	return nil
 }
 
 // cleanupLoop periodically removes old completed tasks.
