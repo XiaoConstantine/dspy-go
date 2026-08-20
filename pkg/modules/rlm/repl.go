@@ -276,6 +276,10 @@ func newAsyncBatchHandle(handles []*AsyncQueryHandle) *AsyncBatchHandle {
 		allDone:    make(chan struct{}),
 		totalCount: int32(len(handles)),
 	}
+	if bh.totalCount == 0 {
+		close(bh.allDone)
+		return bh
+	}
 
 	// Start a goroutine to track completion
 	go bh.trackCompletion()

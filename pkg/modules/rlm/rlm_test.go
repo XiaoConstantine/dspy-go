@@ -1201,6 +1201,35 @@ func TestAsyncBatchHandle(t *testing.T) {
 	assert.Equal(t, 3, batchHandle.CompletedCount())
 }
 
+func TestAsyncBatchHandleEmpty(t *testing.T) {
+	repl, err := NewYaegiREPL(&mockSubLLMClient{})
+	require.NoError(t, err)
+
+	batchHandle := repl.QueryBatchedAsync(nil)
+	require.True(t, batchHandle.Ready())
+	require.Zero(t, batchHandle.TotalCount())
+	require.Zero(t, batchHandle.CompletedCount())
+	require.Empty(t, batchHandle.Handles())
+
+	type waitResult struct {
+		results []string
+		err     error
+	}
+	waited := make(chan waitResult, 1)
+	go func() {
+		results, err := batchHandle.WaitAll()
+		waited <- waitResult{results: results, err: err}
+	}()
+
+	select {
+	case result := <-waited:
+		require.NoError(t, result.err)
+		require.Empty(t, result.results)
+	case <-time.After(time.Second):
+		t.Fatal("empty async batch did not complete")
+	}
+}
+
 // TestAsyncQueryFromInterpreter tests async queries from interpreted code.
 func TestAsyncQueryFromInterpreter(t *testing.T) {
 	mockSub := &mockSubLLMClient{
