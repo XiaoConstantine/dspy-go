@@ -21,6 +21,19 @@ import (
 // Test Helpers
 // ============================================================================
 
+type flushSignalRecorder struct {
+	*httptest.ResponseRecorder
+	flushed chan struct{}
+}
+
+func (r *flushSignalRecorder) Flush() {
+	r.ResponseRecorder.Flush()
+	select {
+	case r.flushed <- struct{}{}:
+	default:
+	}
+}
+
 // testAgent is a simple agent for server testing.
 type testAgent struct {
 	name     string
@@ -1048,6 +1061,39 @@ func TestSubscriberRegistry_MultipleSubscribers(t *testing.T) {
 	}
 }
 
+func TestSubscriberRegistry_ReservesCapacityForFinalStatus(t *testing.T) {
+	registry := newSubscriberRegistry()
+	taskID := "task-123"
+	sub := registry.subscribe(taskID)
+	defer registry.unsubscribe(sub)
+
+	for range cap(sub.channel) {
+		registry.notify(taskID, NewTaskStatusUpdateEvent(taskID, NewTaskStatus(TaskStateWorking), false))
+	}
+	if got, want := len(sub.channel), cap(sub.channel)-1; got != want {
+		t.Fatalf("queued ordinary updates = %d, want %d", got, want)
+	}
+
+	final := NewTaskStatusUpdateEvent(taskID, NewTaskStatus(TaskStateCompleted), true)
+	registry.notify(taskID, final)
+	if got, want := len(sub.channel), cap(sub.channel); got != want {
+		t.Fatalf("queued updates after final status = %d, want %d", got, want)
+	}
+
+	for i := range cap(sub.channel) {
+		event := <-sub.channel
+		if i < cap(sub.channel)-1 {
+			if event == final {
+				t.Fatalf("final status appeared at queue index %d", i)
+			}
+			continue
+		}
+		if event != final {
+			t.Fatalf("last queued event = %#v, want final status", event)
+		}
+	}
+}
+
 // ============================================================================
 // SSE Streaming Tests
 // ============================================================================
@@ -1100,6 +1146,82 @@ func TestHandleStream_CompletedTask(t *testing.T) {
 	body := rec.Body.String()
 	if !contains(body, "event: status") {
 		t.Error("expected status event")
+	}
+}
+
+func TestHandleStream_LastArtifactPrecedesFinalStatus(t *testing.T) {
+	server := createTestServer(t, nil)
+	task := server.tasks.create()
+	task.UpdateStatus(TaskStateWorking)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/stream/"+task.ID, nil).WithContext(ctx)
+	rec := &flushSignalRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		flushed:          make(chan struct{}, 1),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.handleStream(rec, req)
+	}()
+
+	// The initial flush proves that the stream subscribed before publication.
+	select {
+	case <-rec.flushed:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("stream did not emit its initial status")
+	}
+
+	artifact := NewArtifact(NewTextPart("final result"))
+	if !server.transitionTask(task, NewTaskStatus(TaskStateCompleted), &artifact) {
+		cancel()
+		<-done
+		t.Fatal("completed transition was rejected")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("stream did not close after the final status")
+	}
+
+	frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n")
+	if len(frames) != 3 {
+		t.Fatalf("SSE frame count = %d, want 3; body:\n%s", len(frames), rec.Body.String())
+	}
+	if !strings.HasPrefix(frames[0], "event: status\n") {
+		t.Fatalf("first SSE frame = %q, want initial status", frames[0])
+	}
+
+	frameData := func(index int, eventType string) []byte {
+		prefix := "event: " + eventType + "\ndata: "
+		if !strings.HasPrefix(frames[index], prefix) {
+			t.Fatalf("SSE frame %d = %q, want %s event", index, frames[index], eventType)
+		}
+		return []byte(strings.TrimPrefix(frames[index], prefix))
+	}
+
+	var artifactEvent TaskArtifactUpdateEvent
+	if err := json.Unmarshal(frameData(1, "artifact"), &artifactEvent); err != nil {
+		t.Fatalf("decode artifact event: %v", err)
+	}
+	if artifactEvent.TaskID != task.ID || !artifactEvent.LastChunk {
+		t.Fatalf("artifact event = %+v, want task %q with lastChunk=true", artifactEvent, task.ID)
+	}
+
+	var statusEvent TaskStatusUpdateEvent
+	if err := json.Unmarshal(frameData(2, "status"), &statusEvent); err != nil {
+		t.Fatalf("decode final status event: %v", err)
+	}
+	if statusEvent.TaskID != task.ID || !statusEvent.Final || statusEvent.Status.State != TaskStateCompleted {
+		t.Fatalf("status event = %+v, want final completed status for task %q", statusEvent, task.ID)
 	}
 }
 

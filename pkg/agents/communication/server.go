@@ -131,6 +131,7 @@ func (r *taskRegistry) delete(id string) {
 type subscriber struct {
 	taskID  string
 	channel chan any // Can send TaskStatusUpdateEvent or TaskArtifactUpdateEvent
+	mu      sync.Mutex
 }
 
 type subscriberRegistry struct {
@@ -175,12 +176,29 @@ func (r *subscriberRegistry) notify(taskID string, event any) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	final := false
+	switch update := event.(type) {
+	case *TaskStatusUpdateEvent:
+		final = update.Final
+	case TaskStatusUpdateEvent:
+		final = update.Final
+	}
+
 	for _, sub := range r.subscribers[taskID] {
+		sub.mu.Lock()
+		// Keep one queue slot reserved for the terminal status. A task accepts
+		// only one terminal transition, so its final update cannot be dropped
+		// even when ordinary updates have saturated the subscriber.
+		if !final && len(sub.channel) >= cap(sub.channel)-1 {
+			sub.mu.Unlock()
+			continue
+		}
 		select {
 		case sub.channel <- event:
 		default:
 			// Channel full, skip this update
 		}
+		sub.mu.Unlock()
 	}
 }
 
@@ -831,9 +849,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				}
 			case *TaskArtifactUpdateEvent:
 				s.sendSSEEvent(w, flusher, "artifact", e)
-				if e.LastChunk {
-					return
-				}
 			}
 		}
 	}
