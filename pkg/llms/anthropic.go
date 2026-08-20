@@ -3,7 +3,7 @@ package llms
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"os"
 	"strings"
@@ -343,7 +343,7 @@ func (a *AnthropicLLM) GenerateWithFunctions(ctx context.Context, prompt string,
 			toolUse := block.AsToolUse()
 			arguments := map[string]any{}
 			if len(toolUse.Input) > 0 {
-				if err := json.Unmarshal(toolUse.Input, &arguments); err != nil {
+				if err := jsonv2.Unmarshal(toolUse.Input, &arguments); err != nil {
 					return nil, errs.WithFields(
 						errs.Wrap(err, errs.InvalidResponse, "failed to parse tool input"),
 						errs.Fields{

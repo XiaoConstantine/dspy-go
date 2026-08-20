@@ -3,7 +3,8 @@ package optimizers
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -311,9 +312,7 @@ func exampleCacheKey(example core.Example) string {
 }
 
 func stableHashStringAnyMap(value map[string]any) string {
-	// json.Marshal currently emits deterministic map-key ordering for string
-	// keys, which is the stability guarantee this cache key depends on.
-	rendered, err := json.Marshal(value)
+	rendered, err := jsonv2.Marshal(value, jsonv1.DefaultOptionsV1(), jsonv2.Deterministic(true))
 	if err != nil {
 		return fmt.Sprintf("fallback:%v", value)
 	}

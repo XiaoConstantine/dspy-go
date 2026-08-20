@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -276,7 +277,7 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 	}
 
 	var openaiResp openai.ChatCompletionResponse
-	if err := json.Unmarshal(body, &openaiResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &openaiResp); err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
 			errors.Fields{
@@ -366,7 +367,7 @@ func (o *OllamaLLM) generateNative(ctx context.Context, prompt string, options .
 	}
 
 	var ollamaResp ollamaResponse
-	err = json.Unmarshal(body, &ollamaResp)
+	err = jsonv2.Unmarshal(body, &ollamaResp)
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
@@ -545,7 +546,7 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 					Done     bool   `json:"done"`
 				}
 
-				if err := json.Unmarshal([]byte(line), &response); err != nil {
+				if err := jsonv2.Unmarshal([]byte(line), &response); err != nil {
 					continue
 				}
 
@@ -625,7 +626,7 @@ func (o *OllamaLLM) createEmbeddingOpenAI(ctx context.Context, input string, opt
 	}
 
 	var embeddingResp openai.EmbeddingResponse
-	if err := json.Unmarshal(body, &embeddingResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &embeddingResp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
@@ -693,7 +694,7 @@ func (o *OllamaLLM) createEmbeddingNative(ctx context.Context, input string, opt
 	}
 
 	var ollamaResp ollamaEmbeddingResponse
-	if err := json.Unmarshal(body, &ollamaResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &ollamaResp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
@@ -798,7 +799,7 @@ func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	}
 
 	var openAIResp openai.ChatCompletionResponse
-	if err := json.Unmarshal(body, &openAIResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &openAIResp); err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
 			errors.Fields{
@@ -961,7 +962,7 @@ func (o *OllamaLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		}
 
 		var embeddingResp openai.EmbeddingResponse
-		if err := json.Unmarshal(body, &embeddingResp); err != nil {
+		if err := jsonv2.Unmarshal(body, &embeddingResp); err != nil {
 			return nil, errors.Wrap(err, errors.InvalidResponse, "failed to parse embedding response")
 		}
 
@@ -1043,7 +1044,7 @@ func (o *OllamaLLM) parseOpenAIStreamResponse(ctx context.Context, body io.Reade
 			}
 
 			var streamResp openai.ChatCompletionStreamResponse
-			if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+			if err := jsonv2.Unmarshal([]byte(data), &streamResp); err != nil {
 				continue
 			}
 

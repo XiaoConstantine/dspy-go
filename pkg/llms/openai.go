@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -455,7 +456,7 @@ func parseOpenAIFunctionArguments(raw string) (map[string]any, error) {
 	}
 
 	var parsed any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+	if err := jsonv2.Unmarshal([]byte(trimmed), &parsed); err != nil {
 		return nil, err
 	}
 
@@ -802,7 +803,7 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 
 			// Parse the JSON response
 			var streamResponse openai.ChatCompletionStreamResponse
-			if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
+			if err := jsonv2.Unmarshal([]byte(data), &streamResponse); err != nil {
 				logger.Debug(ctx, "Error parsing stream chunk: %v", err)
 				continue
 			}
@@ -982,7 +983,7 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 
 	if resp.StatusCode != http.StatusOK {
 		var errorResp openai.ErrorResponse
-		if err := json.Unmarshal(body, &errorResp); err != nil {
+		if err := jsonv2.Unmarshal(body, &errorResp); err != nil {
 			return nil, errors.WithFields(
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
@@ -1034,7 +1035,7 @@ func (o *OpenAILLM) makeRequestWithRetry(ctx context.Context, request *openai.Ch
 	}
 
 	var response openai.ChatCompletionResponse
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := jsonv2.Unmarshal(body, &response); err != nil {
 		return nil, errors.Wrap(err, errors.InvalidResponse, "failed to parse response")
 	}
 
@@ -1082,7 +1083,7 @@ func (o *OpenAILLM) makeEmbeddingRequest(ctx context.Context, request *openai.Em
 
 	if resp.StatusCode != http.StatusOK {
 		var errorResp openai.ErrorResponse
-		if err := json.Unmarshal(body, &errorResp); err != nil {
+		if err := jsonv2.Unmarshal(body, &errorResp); err != nil {
 			return nil, errors.WithFields(
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})
@@ -1093,7 +1094,7 @@ func (o *OpenAILLM) makeEmbeddingRequest(ctx context.Context, request *openai.Em
 	}
 
 	var response openai.EmbeddingResponse
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := jsonv2.Unmarshal(body, &response); err != nil {
 		return nil, errors.Wrap(err, errors.InvalidResponse, "failed to parse response")
 	}
 
@@ -1129,7 +1130,7 @@ func (o *OpenAILLM) makeStreamingRequest(ctx context.Context, request *openai.Ch
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		var errorResp openai.ErrorResponse
-		if err := json.Unmarshal(body, &errorResp); err != nil {
+		if err := jsonv2.Unmarshal(body, &errorResp); err != nil {
 			return nil, errors.WithFields(
 				errors.New(errors.LLMGenerationFailed, "API request failed"),
 				errors.Fields{"status": resp.StatusCode, "body": string(body)})

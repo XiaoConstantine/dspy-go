@@ -3,6 +3,7 @@ package oauth
 import (
 	"bytes"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -69,7 +70,7 @@ func ExchangeCode(code, verifier string) (*TokenResponse, error) {
 	}
 
 	var result TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonv2.UnmarshalRead(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -100,7 +101,7 @@ func RefreshAccessToken(refreshToken string) (*TokenResponse, error) {
 	}
 
 	var result TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonv2.UnmarshalRead(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 

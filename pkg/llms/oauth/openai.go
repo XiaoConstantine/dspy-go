@@ -2,7 +2,7 @@ package oauth
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -77,7 +77,7 @@ func ExchangeOpenAICode(code, verifier string) (*OpenAITokenResponse, error) {
 	}
 
 	var result OpenAITokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonv2.UnmarshalRead(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -111,7 +111,7 @@ func postOpenAITokenContext(ctx context.Context, payload url.Values, action stri
 		return nil, fmt.Errorf("token %s failed: %s", action, resp.Status)
 	}
 	var result OpenAITokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonv2.UnmarshalRead(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return &result, nil
@@ -136,7 +136,7 @@ func RefreshOpenAIAccessToken(refreshToken string) (*OpenAITokenResponse, error)
 	}
 
 	var result OpenAITokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonv2.UnmarshalRead(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 

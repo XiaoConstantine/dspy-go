@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,7 +215,7 @@ func (o *LlamacppLLM) Generate(ctx context.Context, prompt string, options ...co
 			})
 	}
 	var llamacppResp llamacppResponse
-	err = json.Unmarshal(body, &llamacppResp)
+	err = jsonv2.Unmarshal(body, &llamacppResp)
 	if err != nil {
 		return &core.LLMResponse{}, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
@@ -304,7 +305,7 @@ func (o *LlamacppLLM) CreateEmbedding(ctx context.Context, input string, options
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
 	}
-	if err := json.Unmarshal(body, &rawResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &rawResp); err != nil {
 		return nil, fmt.Errorf("failed to parse raw JSON response: %w", err)
 	}
 
@@ -413,7 +414,7 @@ func (o *LlamacppLLM) CreateEmbeddings(ctx context.Context, inputs []string, opt
 			Embedding [][]float32 `json:"embedding"`
 		}
 
-		if err := json.Unmarshal(body, &rawResp); err != nil {
+		if err := jsonv2.Unmarshal(body, &rawResp); err != nil {
 			if firstError == nil {
 				firstError = fmt.Errorf("failed to unmarshal batch response: %w", err)
 				errorIndex = i
@@ -578,7 +579,7 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 
 			// Parse the streaming response
 			var streamResp llamacppResponse
-			if err := json.Unmarshal([]byte(line), &streamResp); err != nil {
+			if err := jsonv2.Unmarshal([]byte(line), &streamResp); err != nil {
 				// Skip lines that aren't valid JSON
 				continue
 			}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -201,7 +202,7 @@ func OpenAICodexAccountIDFromToken(token string) (string, error) {
 			AccountID string `json:"chatgpt_account_id"`
 		} `json:"https://api.openai.com/auth"`
 	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	if err := jsonv2.Unmarshal(payload, &claims); err != nil {
 		return "", errors.Wrap(err, errors.InvalidInput, "decode OpenAI Codex access token claims")
 	}
 	if strings.TrimSpace(claims.Auth.AccountID) == "" {
@@ -519,7 +520,7 @@ func parseOpenAICodexSSE(reader io.Reader) (*openAICodexResult, error) {
 			continue
 		}
 		var event map[string]any
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		if err := jsonv2.Unmarshal([]byte(data), &event); err != nil {
 			return nil, errors.Wrap(err, errors.InvalidResponse, "decode OpenAI Codex SSE event")
 		}
 		typeName, _ := event["type"].(string)
@@ -694,7 +695,7 @@ func appendCodexToolCall(result *openAICodexResult, builder *codexToolBuilder) e
 	raw := builder.Arguments.String()
 	if raw == "" {
 		arguments = map[string]any{}
-	} else if err := json.Unmarshal([]byte(raw), &arguments); err != nil {
+	} else if err := jsonv2.Unmarshal([]byte(raw), &arguments); err != nil {
 		return errors.Wrap(err, errors.InvalidResponse, "decode OpenAI Codex tool arguments")
 	}
 	result.toolCalls = append(result.toolCalls, core.ToolCall{ID: builder.ID, Name: builder.Name, Arguments: arguments})

@@ -209,6 +209,7 @@ func TestParseOpenAICodexSSERequiresCompletedTerminal(t *testing.T) {
 		{name: "terminal failed status", sse: `data: {"type":"response.completed","response":{"status":"failed"}}\n\n`},
 		{name: "terminal missing response", sse: `data: {"type":"response.completed"}\n\n`},
 		{name: "terminal missing status", sse: `data: {"type":"response.completed","response":{}}\n\n`},
+		{name: "duplicate JSON member", sse: `data: {"type":"response.completed","type":"response.failed","response":{"status":"completed"}}\n\n`},
 		{name: "duplicate index conflicting call id", sse: `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"first","arguments":"{}"}}\n\ndata: {"type":"response.output_item.completed","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_2","name":"second","arguments":"{}"}}\n\n`},
 		{name: "duplicate index malformed type", sse: `data: {"type":"response.output_item.done","output_index":0,"item":{"type":["message"],"id":"msg_1"}}\n\ndata: {"type":"response.output_item.completed","output_index":0,"item":{"type":["message"],"id":"msg_1"}}\n\n`},
 	}

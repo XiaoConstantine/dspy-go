@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -613,7 +614,7 @@ func (g *GeminiLLM) doGeminiRequest(ctx context.Context, reqBody any, dest any) 
 			errors.Fields{"model": g.ModelID(), "statusCode": resp.StatusCode},
 		)
 	}
-	if err := json.Unmarshal(body, dest); err != nil {
+	if err := jsonv2.Unmarshal(body, dest); err != nil {
 		return errors.WithFields(
 			errors.New(errors.InvalidResponse, fmt.Sprintf("InvalidResponse: failed to unmarshal Gemini response: %v", err)),
 			errors.Fields{"model": g.ModelID(), "body": string(body)},
@@ -1058,7 +1059,7 @@ func (g *GeminiLLM) CreateEmbedding(ctx context.Context, input string, options .
 	}
 
 	var geminiResp geminiEmbeddingResponse
-	if err := json.Unmarshal(body, &geminiResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &geminiResp); err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal response"),
 			errors.Fields{
@@ -1234,7 +1235,7 @@ func (g *GeminiLLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 		}
 
 		var batchResp geminiBatchEmbeddingResponse
-		if err := json.Unmarshal(body, &batchResp); err != nil {
+		if err := jsonv2.Unmarshal(body, &batchResp); err != nil {
 			if firstError == nil {
 				firstError = errors.WithFields(
 					errors.Wrap(err, errors.InvalidResponse, "failed to unmarshal batch response"),
@@ -1365,7 +1366,7 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 				}
 
 				var chunk geminiResponse
-				if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				if err := jsonv2.Unmarshal([]byte(data), &chunk); err != nil {
 					continue
 				}
 
@@ -1511,7 +1512,7 @@ func (g *GeminiLLM) GenerateWithContent(ctx context.Context, content []core.Cont
 	}
 
 	var geminiResp geminiResponse
-	if err := json.Unmarshal(body, &geminiResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &geminiResp); err != nil {
 		return nil, errors.WithFields(
 			errors.New(errors.InvalidResponse, fmt.Sprintf("failed to unmarshal response: %v", err)),
 			errors.Fields{

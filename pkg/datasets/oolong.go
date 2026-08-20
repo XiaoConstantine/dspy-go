@@ -2,6 +2,7 @@ package datasets
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -202,7 +203,7 @@ func FetchOolongTasksFromHuggingFaceRange(offset, limit int) ([]OolongTask, erro
 			Row OolongTask `json:"row"`
 		} `json:"rows"`
 	}
-	if err := json.Unmarshal(body, &hfResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &hfResp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -223,7 +224,7 @@ func fetchTBLiteTasksFromHuggingFaceRangeContext(ctx context.Context, endpoint, 
 			Row TBLiteTask `json:"row"`
 		} `json:"rows"`
 	}
-	if err := json.Unmarshal(body, &hfResp); err != nil {
+	if err := jsonv2.Unmarshal(body, &hfResp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
