@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -521,6 +522,8 @@ func TestDefaultMCPDiscoveryService_RestartUsesFreshCancellation(t *testing.T) {
 }
 
 func TestDefaultMCPDiscoveryService_StopCancelsAndJoinsDiscovery(t *testing.T) {
+	testutil.CheckGoroutineLeaks(t)
+
 	synctest.Test(t, func(t *testing.T) {
 		server := &blockingDiscoveryMCPServer{
 			listStarted:       make(chan struct{}),

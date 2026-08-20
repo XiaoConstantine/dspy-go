@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
@@ -184,6 +185,8 @@ func TestNewServer_Defaults(t *testing.T) {
 }
 
 func TestServerExternalShutdownUnblocksStart(t *testing.T) {
+	testutil.CheckGoroutineLeaks(t)
+
 	server := createTestServer(t, nil)
 	server.server.Addr = "127.0.0.1:0"
 

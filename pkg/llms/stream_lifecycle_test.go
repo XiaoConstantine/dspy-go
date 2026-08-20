@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/require"
 )
@@ -17,6 +18,8 @@ import (
 // boundary: Cancel must reach a request stalled after Do has returned, and the
 // producer must then close its output channel without requiring a receiver.
 func TestStreamCancelClosesStalledRequest(t *testing.T) {
+	testutil.CheckGoroutineLeaks(t)
+
 	tests := []struct {
 		name string
 		new  func(string) (core.LLM, error)
@@ -121,6 +124,8 @@ func TestSendStreamChunkReturnsOnCancellation(t *testing.T) {
 // TestStreamCancelUnblocksPendingSend verifies the cancellation lifecycle after
 // each provider has emitted a frame while its output channel remains unread.
 func TestStreamCancelUnblocksPendingSend(t *testing.T) {
+	testutil.CheckGoroutineLeaks(t)
+
 	const (
 		openAIFrame    = "data: {\"id\":\"test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"blocked\"},\"finish_reason\":null}]}\n\n"
 		anthropicFrame = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"blocked\"}}\n\n"

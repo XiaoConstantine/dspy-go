@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -306,6 +307,8 @@ func TestParallelExecutor_ContextCancellation(t *testing.T) {
 }
 
 func TestParallelExecutor_CallerCancellationWaitsForTaskExit(t *testing.T) {
+	testutil.CheckGoroutineLeaks(t)
+
 	synctest.Test(t, func(t *testing.T) {
 		const (
 			callerKey parallelExecutorContextKey = "caller"

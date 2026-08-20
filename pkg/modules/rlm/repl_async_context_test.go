@@ -6,6 +6,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,6 +27,8 @@ func (c *contextCapturingSubLLMClient) QueryBatched(context.Context, []string) (
 }
 
 func TestYaegiREPLAsyncQuerySnapshotsExecutionContext(t *testing.T) {
+	testutil.CheckGoroutineLeaks(t)
+
 	for _, tt := range []struct {
 		name  string
 		start func(*YaegiREPL, context.Context) (*AsyncQueryHandle, error)
