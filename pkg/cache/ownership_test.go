@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,27 @@ func newTestMemoryCache(t *testing.T, maxSize int64) *MemoryCache {
 	require.NoError(t, err)
 	t.Cleanup(func() { cache.Close() })
 	return cache
+}
+
+func newTestSQLiteCache(t *testing.T, maxSize int64) *SQLiteCache {
+	t.Helper()
+	cache, err := NewSQLiteCache(CacheConfig{
+		Type:    "sqlite",
+		MaxSize: maxSize,
+		SQLiteConfig: SQLiteConfig{
+			Path: t.TempDir() + "/cache.db",
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, cache.Close()) })
+	return cache
+}
+
+func sqliteStoredSize(t *testing.T, cache *SQLiteCache) int64 {
+	t.Helper()
+	var size int64
+	require.NoError(t, cache.db.QueryRow(`SELECT COALESCE(SUM(size), 0) FROM cache_entries`).Scan(&size))
+	return size
 }
 
 func TestMemoryCache_ValueIsolation(t *testing.T) {
@@ -65,6 +87,80 @@ func TestMemoryCache_ReplacementRespectsMaxSize(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found, "the updated entry must survive its own growth eviction")
 	assert.Len(t, got, 90)
+}
+
+func TestSQLiteCache_RejectsValueLargerThanMaxSize(t *testing.T) {
+	cache := newTestSQLiteCache(t, 100)
+	ctx := context.Background()
+	require.NoError(t, cache.Set(ctx, "existing", make([]byte, 40), 0))
+
+	err := cache.Set(ctx, "existing", make([]byte, 101), 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds max cache size")
+
+	value, found, getErr := cache.Get(ctx, "existing")
+	require.NoError(t, getErr)
+	require.True(t, found)
+	assert.Len(t, value, 40)
+	assert.Equal(t, int64(40), cache.Stats().Size)
+	assert.Equal(t, int64(40), sqliteStoredSize(t, cache))
+}
+
+func TestSQLiteCache_ReplacementEvictsOtherEntries(t *testing.T) {
+	cache := newTestSQLiteCache(t, 100)
+	ctx := context.Background()
+	require.NoError(t, cache.Set(ctx, "updated", make([]byte, 40), 0))
+	require.NoError(t, cache.Set(ctx, "other", make([]byte, 40), 0))
+
+	require.NoError(t, cache.Set(ctx, "updated", make([]byte, 90), 0))
+
+	value, found, err := cache.Get(ctx, "updated")
+	require.NoError(t, err)
+	require.True(t, found, "an entry must not evict itself while it is being replaced")
+	assert.Len(t, value, 90)
+	_, found, err = cache.Get(ctx, "other")
+	require.NoError(t, err)
+	assert.False(t, found)
+	assert.Equal(t, int64(90), cache.Stats().Size)
+	assert.Equal(t, int64(90), sqliteStoredSize(t, cache))
+}
+
+func TestSQLiteCache_ConcurrentSetsRespectMaxSize(t *testing.T) {
+	cache := newTestSQLiteCache(t, 100)
+	ctx := context.Background()
+	start := make(chan struct{})
+	const writers = 20
+	errs := make(chan error, writers)
+
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Go(func() {
+			<-start
+			errs <- cache.Set(ctx, fmt.Sprintf("key-%d", i), make([]byte, 30), 0)
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	assert.LessOrEqual(t, cache.Stats().Size, int64(100))
+	assert.LessOrEqual(t, sqliteStoredSize(t, cache), int64(100))
+}
+
+func TestSQLiteCache_ImportRespectsMaxSize(t *testing.T) {
+	cache := newTestSQLiteCache(t, 100)
+	entries := []CacheEntry{
+		{Key: "one", Value: make([]byte, 60)},
+		{Key: "two", Value: make([]byte, 60)},
+		{Key: "three", Value: make([]byte, 60)},
+	}
+
+	require.NoError(t, cache.Import(context.Background(), entries))
+	assert.LessOrEqual(t, cache.Stats().Size, int64(100))
+	assert.LessOrEqual(t, sqliteStoredSize(t, cache), int64(100))
 }
 
 func TestMemoryCache_ExportValueIsolation(t *testing.T) {

@@ -14,15 +14,16 @@ import (
 
 // SQLiteCache implements Cache interface using SQLite as storage.
 type SQLiteCache struct {
-	db        *sql.DB
-	config    CacheConfig
-	stats     CacheStats
-	mu        sync.RWMutex
-	closeChan chan struct{}
-	closeOnce sync.Once
-	closeErr  error
-	cleanupWG sync.WaitGroup
-	vacuumWG  sync.WaitGroup
+	db         *sql.DB
+	config     CacheConfig
+	stats      CacheStats
+	mu         sync.RWMutex
+	mutationMu sync.Mutex
+	closeChan  chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
+	cleanupWG  sync.WaitGroup
+	vacuumWG   sync.WaitGroup
 }
 
 // NewSQLiteCache creates a new SQLite-based cache.
@@ -79,6 +80,15 @@ func NewSQLiteCache(config CacheConfig) (*SQLiteCache, error) {
 		}
 	}
 
+	// Load initial stats
+	cache.loadStats()
+	if config.MaxSize > 0 {
+		if err := cache.evictEntries(context.Background(), 0, nil); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to enforce initial cache size: %w", err)
+		}
+	}
+
 	// Start cleanup goroutine
 	cache.cleanupWG.Add(1)
 	go cache.cleanupRoutine()
@@ -88,9 +98,6 @@ func NewSQLiteCache(config CacheConfig) (*SQLiteCache, error) {
 		cache.vacuumWG.Add(1)
 		go cache.vacuumRoutine()
 	}
-
-	// Load initial stats
-	cache.loadStats()
 
 	return cache, nil
 }
@@ -162,12 +169,21 @@ func (c *SQLiteCache) Set(ctx context.Context, key string, value []byte, ttl tim
 	}
 
 	size := int64(len(value))
+	if c.config.MaxSize > 0 && size > c.config.MaxSize {
+		return fmt.Errorf("value size %d exceeds max cache size %d", size, c.config.MaxSize)
+	}
+
+	c.mutationMu.Lock()
+	defer c.mutationMu.Unlock()
 
 	// Check if key already exists to handle replacement correctly
 	var existingSize int64
 	existingQuery := `SELECT size FROM cache_entries WHERE key = ?`
 	err := c.db.QueryRowContext(ctx, existingQuery, key).Scan(&existingSize)
 	exists := err == nil
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("failed to get existing cache entry size: %w", err)
+	}
 
 	// Check size limit if configured
 	if c.config.MaxSize > 0 {
@@ -178,7 +194,11 @@ func (c *SQLiteCache) Set(ctx context.Context, key string, value []byte, ttl tim
 		}
 		if currentSize+neededSize > c.config.MaxSize {
 			// Need to evict entries
-			if err := c.evictEntries(ctx, neededSize); err != nil {
+			var protectedKey *string
+			if exists {
+				protectedKey = &key
+			}
+			if err := c.evictEntries(ctx, neededSize, protectedKey); err != nil {
 				return fmt.Errorf("failed to evict entries: %w", err)
 			}
 		}
@@ -209,6 +229,9 @@ func (c *SQLiteCache) Set(ctx context.Context, key string, value []byte, ttl tim
 }
 
 func (c *SQLiteCache) Delete(ctx context.Context, key string) error {
+	c.mutationMu.Lock()
+	defer c.mutationMu.Unlock()
+
 	// Get size before deletion
 	var size int64
 	sizeQuery := `SELECT size FROM cache_entries WHERE key = ?`
@@ -233,6 +256,9 @@ func (c *SQLiteCache) Delete(ctx context.Context, key string) error {
 }
 
 func (c *SQLiteCache) Clear(ctx context.Context) error {
+	c.mutationMu.Lock()
+	defer c.mutationMu.Unlock()
+
 	query := `DELETE FROM cache_entries`
 	_, err := c.db.ExecContext(ctx, query)
 	if err != nil {
@@ -284,7 +310,7 @@ func (c *SQLiteCache) Close() error {
 	return c.closeErr
 }
 
-func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64) error {
+func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64, protectedKey *string) error {
 	// Simple LRU eviction - remove entries until we have enough space
 	for {
 		// Get current total size
@@ -297,12 +323,16 @@ func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64) error
 		var oldestKey string
 		var deletedSize int64
 		selectQuery := `SELECT key, size FROM cache_entries ORDER BY accessed_at ASC LIMIT 1`
+		queryArgs := []any(nil)
+		if protectedKey != nil {
+			selectQuery = `SELECT key, size FROM cache_entries WHERE key != ? ORDER BY accessed_at ASC LIMIT 1`
+			queryArgs = append(queryArgs, *protectedKey)
+		}
 
-		err := c.db.QueryRowContext(ctx, selectQuery).Scan(&oldestKey, &deletedSize)
+		err := c.db.QueryRowContext(ctx, selectQuery, queryArgs...).Scan(&oldestKey, &deletedSize)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				// No more entries to evict
-				break
+				return fmt.Errorf("cache size limit cannot be satisfied without evicting the updated entry")
 			}
 			return err
 		}
@@ -327,6 +357,33 @@ func (c *SQLiteCache) evictEntries(ctx context.Context, neededSpace int64) error
 	return nil
 }
 
+func (c *SQLiteCache) enforceTransactionSize(ctx context.Context, tx *sql.Tx) error {
+	if c.config.MaxSize <= 0 {
+		return nil
+	}
+
+	for {
+		var currentSize int64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM cache_entries`).Scan(&currentSize); err != nil {
+			return err
+		}
+		if currentSize <= c.config.MaxSize {
+			return nil
+		}
+
+		var oldestKey string
+		if err := tx.QueryRowContext(ctx, `SELECT key FROM cache_entries ORDER BY accessed_at ASC LIMIT 1`).Scan(&oldestKey); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("cache size limit cannot be satisfied")
+			}
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM cache_entries WHERE key = ?`, oldestKey); err != nil {
+			return err
+		}
+	}
+}
+
 func (c *SQLiteCache) cleanupRoutine() {
 	defer c.cleanupWG.Done()
 
@@ -344,6 +401,9 @@ func (c *SQLiteCache) cleanupRoutine() {
 }
 
 func (c *SQLiteCache) cleanupExpired() {
+	c.mutationMu.Lock()
+	defer c.mutationMu.Unlock()
+
 	// Get the sum of sizes of expired entries before deleting
 	var deletedSize int64
 	sumQuery := `SELECT COALESCE(SUM(size), 0) FROM cache_entries WHERE expires_at > 0 AND expires_at < ?`
@@ -432,6 +492,9 @@ func (c *SQLiteCache) Export(ctx context.Context, writer func(entry CacheEntry) 
 
 // Import imports cache entries from a source.
 func (c *SQLiteCache) Import(ctx context.Context, entries []CacheEntry) error {
+	c.mutationMu.Lock()
+	defer c.mutationMu.Unlock()
+
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -462,11 +525,15 @@ func (c *SQLiteCache) Import(ctx context.Context, entries []CacheEntry) error {
 			expiresAt = entry.ExpiresAt.UnixNano()
 		}
 
+		size := int64(len(entry.Value))
 		_, err := stmt.ExecContext(ctx, entry.Key, entry.Value, expiresAt,
-			entry.CreatedAt.UnixNano(), entry.AccessedAt.UnixNano(), entry.Size)
+			entry.CreatedAt.UnixNano(), entry.AccessedAt.UnixNano(), size)
 		if err != nil {
 			return fmt.Errorf("failed to insert entry: %w", err)
 		}
+	}
+	if err := c.enforceTransactionSize(ctx, tx); err != nil {
+		return fmt.Errorf("failed to enforce cache size during import: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
