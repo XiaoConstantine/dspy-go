@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -41,6 +42,56 @@ type ParallelTask struct {
 	Context    context.Context     // Task-specific context
 	ResultChan chan ParallelResult // Channel to receive results
 	SubmitTime time.Time           // When the task was submitted
+}
+
+// parallelTaskContext uses the task context as the primary source for values
+// and deadlines while falling back to caller values. Its embedded context is
+// also canceled when the caller is canceled.
+type parallelTaskContext struct {
+	context.Context
+	caller context.Context
+}
+
+func (c parallelTaskContext) Value(key any) any {
+	if value := c.Context.Value(key); value != nil {
+		return value
+	}
+	return c.caller.Value(key)
+}
+
+func newParallelTaskContext(caller, task context.Context) (context.Context, context.CancelFunc) {
+	if task == nil {
+		return context.WithCancel(caller)
+	}
+
+	execution, cancel := context.WithCancelCause(task)
+	stopCaller := context.AfterFunc(caller, func() {
+		cancel(context.Cause(caller))
+	})
+	if cause := context.Cause(caller); cause != nil {
+		cancel(cause)
+	}
+
+	return parallelTaskContext{Context: execution, caller: caller}, func() {
+		stopCaller()
+		cancel(context.Canceled)
+	}
+}
+
+func parallelTaskContextError(ctx context.Context) error {
+	if merged, ok := ctx.(parallelTaskContext); ok {
+		if err := merged.caller.Err(); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func normalizeParallelTaskError(ctx context.Context, err error) error {
+	if ctx.Err() == nil || (!stderrors.Is(err, context.Canceled) && !stderrors.Is(err, context.DeadlineExceeded)) {
+		return err
+	}
+	return parallelTaskContextError(ctx)
 }
 
 // ParallelResult contains the result of parallel task execution.
@@ -147,6 +198,8 @@ func NewParallelExecutor(registry core.ToolRegistry, maxWorkers int) *ParallelEx
 }
 
 // ExecuteParallel executes multiple tasks in parallel with advanced scheduling.
+// Cancellation is cooperative: it cancels every task context, then waits for all
+// tools to return before exposing the result slice to the caller.
 func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*ParallelTask, scheduler TaskScheduler) ([]ParallelResult, error) {
 	if len(tasks) == 0 {
 		return []ParallelResult{}, nil
@@ -172,8 +225,8 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 	for _, task := range scheduledTasks {
 		wg.Add(1)
 		go func(t *ParallelTask) {
+			defer wg.Done()
 			defer func() {
-				wg.Done()
 				// Ensure goroutine cleanup on panic
 				if r := recover(); r != nil {
 					// Create an error result for the panic
@@ -227,47 +280,29 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 		}(task)
 	}
 
-	// Wait for completion or context cancellation
-	done := make(chan struct{})
-	go func() {
-		defer func() {
-			// Ensure goroutine cleanup on panic
-			if r := recover(); r != nil {
-				// Log panic but continue
-				_ = r
-			}
-		}()
-
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return results, nil
-	case <-ctx.Done():
-		return results, ctx.Err()
+	// Results are returned by value, so every writer must be finished before
+	// the slice becomes visible to the caller.
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return results, err
 	}
+	return results, nil
 }
 
 // executeWithWorkerPool executes a task using the worker pool.
 func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *ParallelTask) ParallelResult {
 	waitStart := time.Now()
+	executionCtx, cancelExecution := newParallelTaskContext(ctx, task.Context)
+	defer cancelExecution()
 
 	// Acquire worker
 	select {
 	case pe.workerPool <- struct{}{}:
 		// Got a worker
-	case <-ctx.Done():
+	case <-executionCtx.Done():
 		return ParallelResult{
 			TaskID:   task.ID,
-			Error:    ctx.Err(),
-			WaitTime: time.Since(waitStart),
-		}
-	case <-task.Context.Done():
-		return ParallelResult{
-			TaskID:   task.ID,
-			Error:    task.Context.Err(),
+			Error:    parallelTaskContextError(executionCtx),
 			WaitTime: time.Since(waitStart),
 		}
 	}
@@ -285,17 +320,19 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 	var err error
 	retries := 0
 
+retryLoop:
 	for attempt := 0; attempt <= task.Retries; attempt++ {
 		// Set up task timeout
-		taskCtx := task.Context
+		attemptCtx := executionCtx
+		cancelAttempt := func() {}
 		if task.Timeout > 0 {
-			var cancel context.CancelFunc
-			taskCtx, cancel = context.WithTimeout(task.Context, task.Timeout)
-			defer cancel()
+			attemptCtx, cancelAttempt = context.WithTimeout(executionCtx, task.Timeout)
 		}
 
 		// Execute tool
-		result, err = pe.executeTool(taskCtx, task.ToolName, task.Input)
+		result, err = pe.executeTool(attemptCtx, task.ToolName, task.Input)
+		attemptErr := attemptCtx.Err()
+		cancelAttempt()
 		if err == nil {
 			break // Success
 		}
@@ -303,7 +340,8 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 		retries = attempt
 
 		// Don't retry on context cancellation
-		if taskCtx.Err() != nil {
+		if attemptErr != nil {
+			err = normalizeParallelTaskError(executionCtx, err)
 			break
 		}
 
@@ -312,9 +350,9 @@ func (pe *ParallelExecutor) executeWithWorkerPool(ctx context.Context, task *Par
 			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
 			select {
 			case <-time.After(backoff):
-			case <-taskCtx.Done():
-				err = taskCtx.Err()
-				break
+			case <-executionCtx.Done():
+				err = parallelTaskContextError(executionCtx)
+				break retryLoop
 			}
 		}
 	}

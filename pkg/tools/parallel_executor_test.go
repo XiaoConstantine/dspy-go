@@ -6,12 +6,35 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type parallelExecutorFuncTool struct {
+	*mockProcessingTool
+	execute func(context.Context, map[string]any) (core.ToolResult, error)
+}
+
+func (t *parallelExecutorFuncTool) Execute(ctx context.Context, input map[string]any) (core.ToolResult, error) {
+	return t.execute(ctx, input)
+}
+
+type parallelExecutorContextKey string
+
+type blockingPanicValue struct {
+	formatting chan struct{}
+	release    chan struct{}
+}
+
+func (p *blockingPanicValue) String() string {
+	close(p.formatting)
+	<-p.release
+	return "boom"
+}
 
 func TestParallelExecutor_Basic(t *testing.T) {
 	registry := createTestRegistry()
@@ -279,6 +302,252 @@ func TestParallelExecutor_ContextCancellation(t *testing.T) {
 		assert.Error(t, result.Error)
 		assert.Equal(t, context.Canceled, result.Error)
 	}
+}
+
+func TestParallelExecutor_CallerCancellationWaitsForTaskExit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			callerKey parallelExecutorContextKey = "caller"
+			taskKey   parallelExecutorContextKey = "task"
+		)
+		type contextObservation struct {
+			callerValue any
+			taskValue   any
+		}
+		type outcome struct {
+			results []ParallelResult
+			err     error
+		}
+
+		started := make(chan struct{})
+		canceled := make(chan error, 1)
+		release := make(chan struct{})
+		observed := make(chan contextObservation, 1)
+
+		tool := &parallelExecutorFuncTool{
+			mockProcessingTool: &mockProcessingTool{name: "blocking_tool"},
+			execute: func(ctx context.Context, _ map[string]any) (core.ToolResult, error) {
+				observed <- contextObservation{
+					callerValue: ctx.Value(callerKey),
+					taskValue:   ctx.Value(taskKey),
+				}
+				close(started)
+				<-ctx.Done()
+				canceled <- context.Cause(ctx)
+				<-release
+				return core.ToolResult{}, ctx.Err()
+			},
+		}
+		registry := createTestRegistry()
+		require.NoError(t, registry.Register(tool))
+		executor := NewParallelExecutor(registry, 1)
+
+		callerBase := context.WithValue(t.Context(), callerKey, "caller-value")
+		callerCtx, cancelCaller := context.WithCancelCause(callerBase)
+		defer cancelCaller(context.Canceled)
+
+		taskCtx := context.WithValue(context.Background(), taskKey, "task-value")
+		task := &ParallelTask{
+			ID:       "blocking-task",
+			ToolName: tool.Name(),
+			Context:  taskCtx,
+		}
+
+		done := make(chan outcome)
+		go func() {
+			results, err := executor.ExecuteParallel(callerCtx, []*ParallelTask{task}, nil)
+			done <- outcome{results: results, err: err}
+		}()
+
+		<-started
+		gotContext := <-observed
+		assert.Equal(t, "caller-value", gotContext.callerValue)
+		assert.Equal(t, "task-value", gotContext.taskValue)
+
+		cancelCause := fmt.Errorf("caller stopped execution")
+		cancelCaller(cancelCause)
+		assert.ErrorIs(t, <-canceled, cancelCause)
+
+		// The tool has observed cancellation but deliberately has not exited.
+		// ExecuteParallel must still own the workers that write its result slice.
+		synctest.Wait()
+		select {
+		case got := <-done:
+			t.Fatalf("ExecuteParallel returned before its task exited: %+v", got)
+		default:
+		}
+
+		close(release)
+		got := <-done
+		assert.ErrorIs(t, got.err, context.Canceled)
+		require.Len(t, got.results, 1)
+		assert.ErrorIs(t, got.results[0].Error, context.Canceled)
+	})
+}
+
+func TestParallelExecutor_NilTaskContext(t *testing.T) {
+	executor := NewParallelExecutor(createTestRegistry(), 1)
+	task := &ParallelTask{
+		ID:       "nil-context",
+		ToolName: "parser",
+		Input:    map[string]any{"data": "test"},
+	}
+
+	results, err := executor.ExecuteParallel(context.Background(), []*ParallelTask{task}, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.NoError(t, results[0].Error)
+}
+
+func TestParallelExecutor_TaskContextCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := make(chan struct{})
+		observedCause := make(chan error, 1)
+		tool := &parallelExecutorFuncTool{
+			mockProcessingTool: &mockProcessingTool{name: "task_cancel_tool"},
+			execute: func(ctx context.Context, _ map[string]any) (core.ToolResult, error) {
+				close(started)
+				<-ctx.Done()
+				observedCause <- context.Cause(ctx)
+				return core.ToolResult{}, ctx.Err()
+			},
+		}
+		registry := createTestRegistry()
+		require.NoError(t, registry.Register(tool))
+		executor := NewParallelExecutor(registry, 1)
+
+		taskCtx, cancelTask := context.WithCancelCause(context.Background())
+		defer cancelTask(context.Canceled)
+		task := &ParallelTask{ID: "task-cancel", ToolName: tool.Name(), Context: taskCtx}
+		type outcome struct {
+			results []ParallelResult
+			err     error
+		}
+		done := make(chan outcome)
+		go func() {
+			results, err := executor.ExecuteParallel(context.Background(), []*ParallelTask{task}, nil)
+			done <- outcome{results: results, err: err}
+		}()
+
+		<-started
+		cancelCause := fmt.Errorf("task stopped execution")
+		cancelTask(cancelCause)
+		got := <-done
+
+		require.NoError(t, got.err)
+		require.Len(t, got.results, 1)
+		assert.ErrorIs(t, got.results[0].Error, context.Canceled)
+		assert.ErrorIs(t, <-observedCause, cancelCause)
+	})
+}
+
+func TestParallelExecutor_CallerDeadlinePreservesResultError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tool := &parallelExecutorFuncTool{
+			mockProcessingTool: &mockProcessingTool{name: "caller_deadline_tool"},
+			execute: func(ctx context.Context, _ map[string]any) (core.ToolResult, error) {
+				<-ctx.Done()
+				return core.ToolResult{}, ctx.Err()
+			},
+		}
+		registry := createTestRegistry()
+		require.NoError(t, registry.Register(tool))
+		executor := NewParallelExecutor(registry, 1)
+
+		callerCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		task := &ParallelTask{
+			ID:       "caller-deadline",
+			ToolName: tool.Name(),
+			Context:  context.Background(),
+		}
+
+		results, err := executor.ExecuteParallel(callerCtx, []*ParallelTask{task}, nil)
+
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Len(t, results, 1)
+		assert.ErrorIs(t, results[0].Error, context.DeadlineExceeded)
+	})
+}
+
+func TestParallelExecutor_CancellationStopsRetryBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		tool := &parallelExecutorFuncTool{
+			mockProcessingTool: &mockProcessingTool{name: "retry_cancel_tool"},
+			execute: func(context.Context, map[string]any) (core.ToolResult, error) {
+				calls++
+				return core.ToolResult{}, fmt.Errorf("attempt failed")
+			},
+		}
+		registry := createTestRegistry()
+		require.NoError(t, registry.Register(tool))
+		executor := NewParallelExecutor(registry, 1)
+		task := &ParallelTask{
+			ID:       "retry-cancel",
+			ToolName: tool.Name(),
+			Context:  context.Background(),
+			Retries:  3,
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go func() {
+			synctest.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		results, err := executor.ExecuteParallel(ctx, []*ParallelTask{task}, nil)
+		assert.ErrorIs(t, err, context.Canceled)
+		require.Len(t, results, 1)
+		assert.ErrorIs(t, results[0].Error, context.Canceled)
+		assert.Equal(t, 1, calls)
+	})
+}
+
+func TestParallelExecutor_PanicResultStoredBeforeReturn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		type outcome struct {
+			results []ParallelResult
+			err     error
+		}
+
+		panicValue := &blockingPanicValue{
+			formatting: make(chan struct{}),
+			release:    make(chan struct{}),
+		}
+		tool := &parallelExecutorFuncTool{
+			mockProcessingTool: &mockProcessingTool{name: "panic_tool"},
+			execute: func(context.Context, map[string]any) (core.ToolResult, error) {
+				panic(panicValue)
+			},
+		}
+		registry := createTestRegistry()
+		require.NoError(t, registry.Register(tool))
+		executor := NewParallelExecutor(registry, 1)
+		task := &ParallelTask{ID: "panic-task", ToolName: tool.Name()}
+
+		done := make(chan outcome)
+		go func() {
+			results, err := executor.ExecuteParallel(context.Background(), []*ParallelTask{task}, nil)
+			done <- outcome{results: results, err: err}
+		}()
+
+		<-panicValue.formatting
+		synctest.Wait()
+		select {
+		case got := <-done:
+			close(panicValue.release)
+			t.Fatalf("ExecuteParallel returned before formatting its panic result: %+v", got)
+		default:
+		}
+
+		close(panicValue.release)
+		got := <-done
+		require.NoError(t, got.err)
+		require.Len(t, got.results, 1)
+		assert.Equal(t, task.ID, got.results[0].TaskID)
+		assert.EqualError(t, got.results[0].Error, "task panic-task panicked: boom")
+	})
 }
 
 func TestParallelExecutor_WorkerPoolManagement(t *testing.T) {
