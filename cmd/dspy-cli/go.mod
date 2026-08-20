@@ -1,6 +1,6 @@
 module github.com/XiaoConstantine/dspy-go/cmd/dspy-cli
 
-go 1.25.13
+go 1.27.0
 
 require (
 	github.com/XiaoConstantine/dspy-go v0.0.0
@@ -35,7 +35,6 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.9.23+incompatible // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect

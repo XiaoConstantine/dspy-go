@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"uuid"
 
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,8 @@ func TestSQLiteStoreCreateSessionCreatesDefaultBranch(t *testing.T) {
 
 	require.NotEmpty(t, session.ID)
 	require.NotEmpty(t, branch.ID)
+	assertUUIDVersion7(t, session.ID)
+	assertUUIDVersion7(t, branch.ID)
 	assert.Equal(t, session.ID, branch.SessionID)
 	assert.Equal(t, branch.ID, session.ActiveBranchID)
 	assert.Equal(t, SessionStatusActive, session.Status)
@@ -114,7 +117,9 @@ func TestSQLiteStoreAppendEntriesAndLoadLineage(t *testing.T) {
 	inserted, err := store.AppendEntries(ctx, entries)
 	require.NoError(t, err)
 	require.Len(t, inserted, 3)
-	assert.NotEmpty(t, inserted[0].ID)
+	for _, entry := range inserted {
+		assertUUIDVersion7(t, entry.ID)
+	}
 	assert.Equal(t, inserted[0].ID, inserted[1].ParentID)
 	assert.Equal(t, inserted[1].ID, inserted[2].ParentID)
 
@@ -214,11 +219,13 @@ func TestSQLiteStoreAppendSummaryAndForkBranch(t *testing.T) {
 	summaries, err := store.LoadSummaries(ctx, session.ID, branch.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
+	assertUUIDVersion7(t, summaries[0].ID)
 	assert.Equal(t, "Initial branch summary", summaries[0].SummaryText)
 	assert.Equal(t, "initial", summaries[0].Metadata["stage"])
 
 	forked, err := store.ForkBranch(ctx, session.ID, head.ID, "alt-path", map[string]any{"owner": "tests"})
 	require.NoError(t, err)
+	assertUUIDVersion7(t, forked.ID)
 	assert.Equal(t, session.ID, forked.SessionID)
 	assert.Equal(t, head.ID, forked.OriginEntryID)
 	assert.Equal(t, head.ID, forked.HeadEntryID)
@@ -229,6 +236,14 @@ func TestSQLiteStoreAppendSummaryAndForkBranch(t *testing.T) {
 	updatedSession, err := store.GetSession(ctx, session.ID)
 	require.NoError(t, err)
 	assert.Equal(t, forked.ID, updatedSession.ActiveBranchID)
+}
+
+func assertUUIDVersion7(t *testing.T, value string) {
+	t.Helper()
+
+	id, err := uuid.Parse(value)
+	require.NoError(t, err)
+	assert.Equal(t, byte(7), id[6]>>4)
 }
 
 func TestSQLiteStoreLoadLineageTraversesForkAncestorsWithoutSiblingTail(t *testing.T) {

@@ -6,8 +6,7 @@ package communication
 import (
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // ============================================================================
@@ -427,7 +426,7 @@ func (e *RPCError) Error() string {
 // ============================================================================
 
 // generateID generates a unique ID for messages, tasks, and artifacts.
-// Uses Google's UUID library for production-ready unique IDs that work
+// Uses UUIDs for production-ready unique IDs that work
 // across service restarts and distributed environments.
 func generateID() string {
 	return uuid.New().String()

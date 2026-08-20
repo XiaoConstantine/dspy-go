@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"uuid"
 
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
-	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -65,9 +65,9 @@ func (s *SQLiteStore) Close() error {
 func (s *SQLiteStore) CreateSession(ctx context.Context, params CreateSessionParams) (*Session, *SessionBranch, error) {
 	sessionID := strings.TrimSpace(params.ID)
 	if sessionID == "" {
-		sessionID = uuid.NewString()
+		sessionID = uuid.NewV7().String()
 	}
-	branchID := uuid.NewString()
+	branchID := uuid.NewV7().String()
 	now := time.Now().UTC()
 	branchName := strings.TrimSpace(params.BranchName)
 	if branchName == "" {
@@ -398,7 +398,7 @@ func (s *SQLiteStore) AppendEntries(ctx context.Context, entries []SessionEntry)
 			return nil, dspyerrors.New(dspyerrors.InvalidInput, "all appended entries must share the same session_id and branch_id")
 		}
 		if entry.ID == "" {
-			entry.ID = uuid.NewString()
+			entry.ID = uuid.NewV7().String()
 		}
 		if entry.CreatedAt.IsZero() {
 			entry.CreatedAt = now
@@ -511,7 +511,7 @@ func (s *SQLiteStore) AppendSummary(ctx context.Context, summary SessionSummary)
 		return dspyerrors.New(dspyerrors.InvalidInput, "summary text is required")
 	}
 	if summary.ID == "" {
-		summary.ID = uuid.NewString()
+		summary.ID = uuid.NewV7().String()
 	}
 	if summary.CreatedAt.IsZero() {
 		summary.CreatedAt = time.Now().UTC()
@@ -645,7 +645,7 @@ func (s *SQLiteStore) ForkBranch(ctx context.Context, sessionID, fromEntryID, na
 
 	now := time.Now().UTC()
 	branch := &SessionBranch{
-		ID:            uuid.NewString(),
+		ID:            uuid.NewV7().String(),
 		SessionID:     sessionID,
 		Name:          strings.TrimSpace(name),
 		OriginEntryID: fromEntryID,

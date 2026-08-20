@@ -13,9 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"uuid"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/google/uuid"
 	"github.com/sourcegraph/conc/pool"
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"

@@ -4,8 +4,7 @@ import (
 	"regexp"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // TrajectoryRecorder is a handle for recording a single trajectory.
