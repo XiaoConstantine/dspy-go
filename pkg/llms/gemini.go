@@ -1375,7 +1375,8 @@ func (g *GeminiLLM) streamRequest(ctx context.Context, reqBody any) (*core.Strea
 
 				var chunk geminiResponse
 				if err := jsonv2.Unmarshal([]byte(data), &chunk); err != nil {
-					continue
+					send(core.StreamChunk{Error: invalidStreamJSON(g.ProviderName(), g.ModelID(), err)})
+					return
 				}
 
 				if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {

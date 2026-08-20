@@ -559,7 +559,8 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 			return
 		}
 
-		// LlamaCPP returns newline-delimited JSON objects for streaming
+		// Current llama.cpp servers frame /completion streams as SSE. Accept raw
+		// JSON lines as well for compatibility with older servers and proxies.
 		scanner := bufio.NewScanner(resp.Body)
 		var tokenCount int
 
@@ -572,16 +573,26 @@ func (o *LlamacppLLM) StreamGenerate(ctx context.Context, prompt string, options
 				// Process next chunk
 			}
 
-			line := scanner.Text()
-			if strings.TrimSpace(line) == "" {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, ":") {
 				continue
+			}
+			if strings.HasPrefix(line, "data:") {
+				line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if line == "" {
+					continue
+				}
+				if line == "[DONE]" {
+					send(core.StreamChunk{Done: true})
+					return
+				}
 			}
 
 			// Parse the streaming response
 			var streamResp llamacppResponse
 			if err := jsonv2.Unmarshal([]byte(line), &streamResp); err != nil {
-				// Skip lines that aren't valid JSON
-				continue
+				send(core.StreamChunk{Error: invalidStreamJSON(o.ProviderName(), o.ModelID(), err)})
+				return
 			}
 
 			// Only send non-empty content

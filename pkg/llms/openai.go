@@ -808,7 +808,10 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 			var streamResponse openai.ChatCompletionStreamResponse
 			if err := jsonv2.Unmarshal([]byte(data), &streamResponse); err != nil {
 				logger.Debug(ctx, "Error parsing stream chunk: %v", err)
-				continue
+				sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{
+					Error: invalidStreamJSON(o.ProviderName(), o.ModelID(), err),
+				})
+				return
 			}
 
 			// Process the response

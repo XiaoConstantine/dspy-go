@@ -555,7 +555,8 @@ func (o *OllamaLLM) streamGenerateNative(ctx context.Context, prompt string, opt
 				}
 
 				if err := jsonv2.Unmarshal([]byte(line), &response); err != nil {
-					continue
+					send(core.StreamChunk{Error: invalidStreamJSON(o.ProviderName(), o.ModelID(), err)})
+					return
 				}
 
 				if !send(core.StreamChunk{Content: response.Response}) {
@@ -1053,7 +1054,8 @@ func (o *OllamaLLM) parseOpenAIStreamResponse(ctx context.Context, body io.Reade
 
 			var streamResp openai.ChatCompletionStreamResponse
 			if err := jsonv2.Unmarshal([]byte(data), &streamResp); err != nil {
-				continue
+				send(core.StreamChunk{Error: invalidStreamJSON(o.ProviderName(), o.ModelID(), err)})
+				return
 			}
 
 			if len(streamResp.Choices) > 0 && streamResp.Choices[0].Delta.Content != "" {

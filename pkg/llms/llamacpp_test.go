@@ -439,6 +439,17 @@ func TestLlamacppLLM_StreamGenerate(t *testing.T) {
 			expectedChunks: []string{"Hello", " world", "!"},
 		},
 		{
+			name: "Successful SSE streaming",
+			streamResponse: []string{
+				`: keep-alive`,
+				`data: {"index":0,"content":"Hello","tokens_predicted":1,"tokens_evaluated":5,"stop":false}`,
+				`data: {"index":1,"content":" from SSE","tokens_predicted":3,"tokens_evaluated":5,"stop":true}`,
+			},
+			serverStatus:   http.StatusOK,
+			expectError:    false,
+			expectedChunks: []string{"Hello", " from SSE"},
+		},
+		{
 			name:           "Server error",
 			streamResponse: nil,
 			serverStatus:   http.StatusInternalServerError,
@@ -452,8 +463,8 @@ func TestLlamacppLLM_StreamGenerate(t *testing.T) {
 				`{"index":2,"content":"End","tokens_predicted":3,"tokens_evaluated":5,"stop":true}`,
 			},
 			serverStatus:   http.StatusOK,
-			expectError:    false,
-			expectedChunks: []string{"Start", "End"}, // Invalid line should be skipped
+			expectError:    true,
+			expectedChunks: []string{"Start"},
 		},
 	}
 
