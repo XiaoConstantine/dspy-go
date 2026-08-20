@@ -626,7 +626,7 @@ func TestPredictTyped(t *testing.T) {
 		Context:  "ML is a type of artificial intelligence",
 	}
 
-	outputs, err := ProcessTyped[TestQAInputs, TestQAOutputs](ctx, predict, inputs)
+	outputs, err := predict.ProcessTyped[TestQAInputs, TestQAOutputs](ctx, inputs)
 
 	// Assert the results
 	assert.NoError(t, err)
@@ -663,7 +663,7 @@ func TestPredictTypedWithValidation(t *testing.T) {
 		Context:  "Deep learning is a subset of machine learning",
 	}
 
-	outputs, err := ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, predict, validInputs)
+	outputs, err := predict.ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, validInputs)
 
 	// Assert the results
 	assert.NoError(t, err)
@@ -686,7 +686,7 @@ func TestPredictTypedWithValidation_InvalidInput(t *testing.T) {
 		// Context missing - should fail validation
 	}
 
-	outputs, err := ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, predict, invalidInputs)
+	outputs, err := predict.ProcessTypedWithValidation[TestQAInputs, TestQAOutputs](ctx, invalidInputs)
 
 	// Assert that validation failed
 	assert.Error(t, err)

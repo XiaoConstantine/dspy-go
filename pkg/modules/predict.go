@@ -953,7 +953,7 @@ func parseJSONResponse(content string, signature core.Signature) string {
 }
 
 // ProcessTyped provides type-safe processing with compile-time type validation.
-func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
+func (p *Predict) ProcessTyped[TInput, TOutput any](ctx context.Context, inputs TInput, opts ...core.Option) (TOutput, error) {
 	var zero TOutput
 
 	// Convert typed inputs to legacy format
@@ -968,7 +968,7 @@ func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, in
 	}
 
 	// Call the legacy Process method
-	legacyOutputs, err := predict.Process(ctx, legacyInputs, opts...)
+	legacyOutputs, err := p.Process(ctx, legacyInputs, opts...)
 	if err != nil {
 		return zero, err
 	}
@@ -988,8 +988,14 @@ func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, in
 	return typedOutputs, nil
 }
 
+// ProcessTyped provides type-safe processing with compile-time type validation.
+// It is retained for compatibility; new code may use predict.ProcessTyped.
+func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
+	return predict.ProcessTyped[TInput, TOutput](ctx, inputs, opts...)
+}
+
 // ProcessTypedWithValidation provides type-safe processing with input and output validation.
-func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
+func (p *Predict) ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, inputs TInput, opts ...core.Option) (TOutput, error) {
 	var zero TOutput
 
 	// Create typed signature for validation (cached for performance)
@@ -1006,7 +1012,7 @@ func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predic
 	}
 
 	// Process with type conversion
-	result, err := ProcessTyped[TInput, TOutput](ctx, predict, inputs, opts...)
+	result, err := p.ProcessTyped[TInput, TOutput](ctx, inputs, opts...)
 	if err != nil {
 		return zero, err
 	}
@@ -1022,6 +1028,12 @@ func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predic
 	}
 
 	return result, nil
+}
+
+// ProcessTypedWithValidation provides type-safe processing with input and output validation.
+// It is retained for compatibility; new code may use predict.ProcessTypedWithValidation.
+func ProcessTypedWithValidation[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
+	return predict.ProcessTypedWithValidation[TInput, TOutput](ctx, inputs, opts...)
 }
 
 // NewTypedPredict creates a new type-safe Predict module from a typed signature.
