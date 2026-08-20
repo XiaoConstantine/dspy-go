@@ -90,7 +90,7 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 		core.CapabilityToolCalling,
 	}
 
-	baseLLM := core.NewBaseLLM("openai", modelID, capabilities, endpointCfg)
+	baseLLM := core.NewBaseLLM("openai", modelID, capabilities, endpointCfg, core.WithHTTPClient(config.httpClient))
 
 	return &OpenAILLM{
 		BaseLLM: baseLLM,

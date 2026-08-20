@@ -29,6 +29,48 @@ func TestOpenAIExplicitAPIKeyPrecedesEnvironment(t *testing.T) {
 	assert.Empty(t, llm.GetEndpointConfig().Headers["openai-beta"])
 }
 
+func TestOpenAIHTTPClientOption(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(...OpenAIOption) (*OpenAILLM, error)
+	}{
+		{
+			name: "OpenAI",
+			new: func(opts ...OpenAIOption) (*OpenAILLM, error) {
+				return NewOpenAILLM(core.ModelOpenAIGPT4, append([]OpenAIOption{WithAPIKey("test-key")}, opts...)...)
+			},
+		},
+		{name: "LiteLLM", new: func(opts ...OpenAIOption) (*OpenAILLM, error) {
+			return NewLiteLLM(core.ModelOpenAIGPT4, "test-key", opts...)
+		}},
+		{name: "LocalAI", new: func(opts ...OpenAIOption) (*OpenAILLM, error) {
+			return NewLocalAI(core.ModelOpenAIGPT4, "http://localhost:8080", opts...)
+		}},
+		{name: "FastChat", new: func(opts ...OpenAIOption) (*OpenAILLM, error) {
+			return NewFastChat(core.ModelOpenAIGPT4, "http://localhost:8000", opts...)
+		}},
+		{name: "compatible", new: func(opts ...OpenAIOption) (*OpenAILLM, error) {
+			return NewOpenAICompatible("custom", core.ModelOpenAIGPT4, "http://localhost:9000", opts...)
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			custom := &http.Client{Timeout: time.Second}
+			llm, err := test.new(WithHTTPClient(custom))
+			require.NoError(t, err)
+			assert.Same(t, custom, llm.GetHTTPClient())
+		})
+	}
+
+	t.Run("nil keeps normal client", func(t *testing.T) {
+		llm, err := NewOpenAILLM(core.ModelOpenAIGPT4, WithAPIKey("test-key"), WithHTTPClient(nil))
+		require.NoError(t, err)
+		require.NotNil(t, llm.GetHTTPClient())
+		assert.Equal(t, 60*time.Second, llm.GetHTTPClient().Timeout)
+	})
+}
+
 func TestNewOpenAILLM(t *testing.T) {
 	tests := []struct {
 		name        string

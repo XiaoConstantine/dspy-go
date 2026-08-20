@@ -33,7 +33,7 @@ func NewLiteLLM(modelID core.ModelID, apiKey string, opts ...OpenAIOption) (*Ope
 	// Override provider name for clarity by creating a new BaseLLM with the correct provider name
 	endpointCfg := llm.GetEndpointConfig()
 	capabilities := llm.Capabilities()
-	newBaseLLM := core.NewBaseLLM("litellm", modelID, capabilities, endpointCfg)
+	newBaseLLM := core.NewBaseLLM("litellm", modelID, capabilities, endpointCfg, core.WithHTTPClient(llm.GetHTTPClient()))
 
 	return &OpenAILLM{
 		BaseLLM: newBaseLLM,
@@ -63,7 +63,7 @@ func NewLocalAI(modelID core.ModelID, baseURL string, opts ...OpenAIOption) (*Op
 	// Override provider name for clarity
 	endpointCfg := llm.GetEndpointConfig()
 	capabilities := llm.Capabilities()
-	newBaseLLM := core.NewBaseLLM("localai", modelID, capabilities, endpointCfg)
+	newBaseLLM := core.NewBaseLLM("localai", modelID, capabilities, endpointCfg, core.WithHTTPClient(llm.GetHTTPClient()))
 
 	return &OpenAILLM{
 		BaseLLM: newBaseLLM,
@@ -93,7 +93,7 @@ func NewFastChat(modelID core.ModelID, baseURL string, opts ...OpenAIOption) (*O
 	// Override provider name for clarity
 	endpointCfg := llm.GetEndpointConfig()
 	capabilities := llm.Capabilities()
-	newBaseLLM := core.NewBaseLLM("fastchat", modelID, capabilities, endpointCfg)
+	newBaseLLM := core.NewBaseLLM("fastchat", modelID, capabilities, endpointCfg, core.WithHTTPClient(llm.GetHTTPClient()))
 
 	return &OpenAILLM{
 		BaseLLM: newBaseLLM,
@@ -118,7 +118,7 @@ func NewOpenAICompatible(provider string, modelID core.ModelID, baseURL string, 
 	// Override provider name for clarity
 	endpointCfg := llm.GetEndpointConfig()
 	capabilities := llm.Capabilities()
-	newBaseLLM := core.NewBaseLLM(provider, modelID, capabilities, endpointCfg)
+	newBaseLLM := core.NewBaseLLM(provider, modelID, capabilities, endpointCfg, core.WithHTTPClient(llm.GetHTTPClient()))
 
 	return &OpenAILLM{
 		BaseLLM: newBaseLLM,

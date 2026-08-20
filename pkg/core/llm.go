@@ -405,6 +405,16 @@ func WithTransportConfig(config TransportConfig) BaseLLMOption {
 	}
 }
 
+// WithHTTPClient sets the HTTP client used by BaseLLM. A nil client leaves the
+// default client unchanged.
+func WithHTTPClient(client *http.Client) BaseLLMOption {
+	return func(b *BaseLLM) {
+		if client != nil {
+			b.client = client
+		}
+	}
+}
+
 // BaseLLM provides a base implementation of the LLM interface.
 type BaseLLM struct {
 	providerName string

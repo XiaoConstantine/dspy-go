@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -169,6 +170,19 @@ func TestWithTransportConfig(t *testing.T) {
 	// Verify the LLM was created (transport is internal, but we can check the client exists)
 	if llm.GetHTTPClient() == nil {
 		t.Error("Expected HTTP client to be set")
+	}
+}
+
+func TestWithHTTPClient(t *testing.T) {
+	custom := &http.Client{Timeout: time.Second}
+	llm := NewBaseLLM("openai", "test-model", nil, nil, WithHTTPClient(custom))
+	if got := llm.GetHTTPClient(); got != custom {
+		t.Fatalf("GetHTTPClient() = %p, want custom client %p", got, custom)
+	}
+
+	withNil := NewBaseLLM("openai", "test-model", nil, nil, WithHTTPClient(nil))
+	if got := withNil.GetHTTPClient(); got == nil || got == custom {
+		t.Fatalf("GetHTTPClient() with nil option = %p, want a normal client", got)
 	}
 }
 
