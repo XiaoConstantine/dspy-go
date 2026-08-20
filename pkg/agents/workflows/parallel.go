@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // ParallelWorkflow executes multiple steps concurrently.
@@ -106,8 +107,13 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 				}
 			}
 
+			// Each concurrent step needs its own mutable execution state. Sharing
+			// the parent's active span lets sibling steps become accidental parents
+			// of one another even though access to the state is mutex-protected.
+			stepCtx := core.WithFreshExecutionState(ctx)
+
 			// Execute step
-			result, err := s.Execute(ctx, stepInputs)
+			result, err := s.Execute(stepCtx, stepInputs)
 			if err != nil {
 				errors <- fmt.Errorf("step %s failed: %w", s.ID, err)
 				return

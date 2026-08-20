@@ -228,3 +228,60 @@ func TestAcquireSemaphoreCanceledWaiterDoesNotReleaseHolder(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 	assert.Equal(t, limit, len(sem), "a canceled waiter must not release a holder's permit")
 }
+
+func TestParallelWorkflowIsolatesExecutionState(t *testing.T) {
+	const stepCount = 2
+
+	workflow := NewParallelWorkflow(new(MockMemory), stepCount)
+	states := make(chan *core.ExecutionState, stepCount)
+	spans := make(chan *core.Span, stepCount)
+	started := make(chan struct{}, stepCount)
+	release := make(chan struct{})
+
+	for _, id := range []string{"step1", "step2"} {
+		module := new(MockModule)
+		module.On("GetSignature").Return(core.Signature{
+			Inputs:  []core.InputField{{Field: core.Field{Name: "input"}}},
+			Outputs: []core.OutputField{{Field: core.Field{Name: id}}},
+		})
+		module.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			stepCtx := args.Get(0).(context.Context)
+			states <- core.GetExecutionState(stepCtx)
+			spanCtx, span := core.StartSpan(stepCtx, id)
+			spans <- span
+			started <- struct{}{}
+			<-release
+			core.EndSpan(spanCtx)
+		}).Return(map[string]any{id: "done"}, nil)
+		require.NoError(t, workflow.AddStep(&Step{ID: id, Module: module}))
+	}
+
+	parentCtx := core.WithExecutionState(context.Background())
+	parentState := core.GetExecutionState(parentCtx)
+	done := make(chan error, 1)
+	go func() {
+		_, err := workflow.Execute(parentCtx, map[string]any{"input": "value"})
+		done <- err
+	}()
+
+	for range stepCount {
+		<-started
+	}
+	close(release)
+	require.NoError(t, <-done)
+
+	firstState := <-states
+	secondState := <-states
+	require.NotNil(t, firstState)
+	require.NotNil(t, secondState)
+	assert.NotSame(t, parentState, firstState)
+	assert.NotSame(t, parentState, secondState)
+	assert.NotSame(t, firstState, secondState)
+	assert.Equal(t, parentState.GetTraceID(), firstState.GetTraceID())
+	assert.Equal(t, parentState.GetTraceID(), secondState.GetTraceID())
+
+	for range stepCount {
+		assert.Empty(t, (<-spans).ParentID, "parallel steps must not become sibling span parents")
+	}
+	assert.Empty(t, core.CollectSpans(parentCtx), "parallel steps must not mutate the parent execution state")
+}
