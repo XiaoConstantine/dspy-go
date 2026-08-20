@@ -51,7 +51,7 @@ type LLMProviderConfig struct {
 	// Provider name (anthropic, google, ollama, llamacpp)
 	Provider string `yaml:"provider" validate:"required,oneof=anthropic google ollama llamacpp"`
 
-	// Model ID (e.g., claude-3-sonnet-20240229)
+	// Model ID (e.g., claude-sonnet-5)
 	ModelID string `yaml:"model_id" validate:"required"`
 
 	// API key for the provider

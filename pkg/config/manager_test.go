@@ -68,7 +68,7 @@ func TestManagerReload(t *testing.T) {
 llm:
   default:
     provider: "anthropic"
-    model_id: "claude-3-sonnet-20240229"
+    model_id: "claude-sonnet-5"
     generation:
       max_tokens: 4096
       temperature: 0.5
@@ -93,7 +93,7 @@ llm:
 llm:
   default:
     provider: "anthropic"
-    model_id: "claude-3-sonnet-20240229"
+    model_id: "claude-sonnet-5"
     generation:
       max_tokens: 8192
       temperature: 0.8
@@ -237,7 +237,7 @@ func TestManagerIsLoaded(t *testing.T) {
 llm:
   default:
     provider: "anthropic"
-    model_id: "claude-3-sonnet-20240229"
+    model_id: "claude-sonnet-5"
     generation:
       max_tokens: 4096
       temperature: 0.5
@@ -385,7 +385,7 @@ func TestManagerWatch(t *testing.T) {
 llm:
   default:
     provider: anthropic
-    model_id: claude-3-sonnet-20240229
+    model_id: claude-sonnet-5
     generation:
       max_tokens: 8192
 `
@@ -724,7 +724,7 @@ func TestManagerChangesHoldNotificationOrderLock(t *testing.T) {
 func TestManagerUpdateDeepCopies(t *testing.T) {
 	base := GetDefaultConfig()
 	base.LLM.Providers = map[string]LLMProviderConfig{
-		"anthropic": {Provider: "anthropic", ModelID: "claude-3-sonnet-20240229"},
+		"anthropic": {Provider: "anthropic", ModelID: "claude-sonnet-5"},
 	}
 	manager := &Manager{config: base}
 

@@ -322,6 +322,10 @@ func TestLLMRegistry_BackwardCompatibility(t *testing.T) {
 		t.Errorf("Expected to find 'anthropic' provider for Sonnet, got '%s', found: %v", providerName, found)
 	}
 
+	if registry.IsModelSupported(ModelID("claude-3-sonnet-20240229")) {
+		t.Error("Expected retired Anthropic models to be unsupported")
+	}
+
 	// Test with Gemini models
 	if !registry.IsModelSupported(ModelGoogleGeminiFlash) {
 		t.Error("Expected Gemini Flash to be supported via backward compatibility")

@@ -173,9 +173,12 @@ core.ModelOpenAIGPT4Turbo = "gpt-4-turbo-preview"
 core.ModelOpenAIGPT35Turbo = "gpt-3.5-turbo"
 
 // Anthropic Models
-core.ModelAnthropicOpus = "claude-3-opus-20240229"
-core.ModelAnthropicSonnet = "claude-3-sonnet-20240229"
-core.ModelAnthropicHaiku = "claude-3-haiku-20240307"
+core.ModelAnthropicOpus = "claude-opus-5"
+core.ModelAnthropicSonnet = "claude-sonnet-5"
+core.ModelAnthropicHaiku = "claude-haiku-4-5"
+core.ModelAnthropicClaude5Fable = "claude-fable-5"
+core.ModelAnthropicClaude5Mythos = "claude-mythos-5"
+core.ModelAnthropicClaude48Opus = "claude-opus-4-8"
 ```
 
 ### Error Constants

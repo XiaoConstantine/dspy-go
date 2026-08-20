@@ -13,7 +13,7 @@ func TestGetDefaultLLMProviderConfig(t *testing.T) {
 	anthropicConfig := GetDefaultLLMProviderConfig("anthropic")
 	require.NotNil(t, anthropicConfig)
 	assert.Equal(t, "anthropic", anthropicConfig.Provider)
-	assert.Equal(t, "claude-sonnet-4-6", anthropicConfig.ModelID)
+	assert.Equal(t, "claude-sonnet-5", anthropicConfig.ModelID)
 	assert.Equal(t, "https://api.anthropic.com", anthropicConfig.Endpoint.BaseURL)
 
 	// Test getting google config
@@ -323,8 +323,8 @@ func TestDefaultConfigOptimizers(t *testing.T) {
 
 	// Bootstrap Few-Shot
 	assert.Equal(t, 50, config.Optimizers.BootstrapFewShot.MaxExamples)
-	assert.Equal(t, "claude-3-opus-20240229", config.Optimizers.BootstrapFewShot.TeacherModel)
-	assert.Equal(t, "claude-3-sonnet-20240229", config.Optimizers.BootstrapFewShot.StudentModel)
+	assert.Equal(t, "claude-opus-5", config.Optimizers.BootstrapFewShot.TeacherModel)
+	assert.Equal(t, "claude-sonnet-5", config.Optimizers.BootstrapFewShot.StudentModel)
 	assert.Equal(t, 3, config.Optimizers.BootstrapFewShot.BootstrapIterations)
 
 	// MIPRO

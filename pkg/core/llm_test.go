@@ -155,6 +155,40 @@ func TestBaseLLM_WorkloadType(t *testing.T) {
 	}
 }
 
+func TestResolveAnthropicModelID(t *testing.T) {
+	for _, modelID := range ProviderModels["anthropic"] {
+		resolved, ok := ResolveAnthropicModelID(modelID)
+		if !ok || resolved != modelID {
+			t.Errorf("expected supported model %q to resolve to itself, got %q, %v", modelID, resolved, ok)
+		}
+	}
+
+	aliases := map[ModelID]ModelID{
+		"sonnet-5":  ModelAnthropicClaude5Sonnet,
+		"opus-4.8":  ModelAnthropicClaude48Opus,
+		"haiku-4.5": ModelAnthropicClaude45Haiku,
+	}
+	for alias, expected := range aliases {
+		resolved, ok := ResolveAnthropicModelID(alias)
+		if !ok || resolved != expected {
+			t.Errorf("expected alias %q to resolve to %q, got %q, %v", alias, expected, resolved, ok)
+		}
+	}
+
+	retiredModels := []ModelID{
+		"claude-3-haiku-20240307",
+		"claude-3-sonnet-20240229",
+		"claude-3-opus-20240229",
+		"claude-opus-4-1-20250805",
+		"claude-mythos-preview",
+	}
+	for _, modelID := range retiredModels {
+		if _, ok := ResolveAnthropicModelID(modelID); ok {
+			t.Errorf("expected retired model %q to be unsupported", modelID)
+		}
+	}
+}
+
 // TestWithTransportConfig tests the WithTransportConfig option.
 func TestWithTransportConfig(t *testing.T) {
 	customConfig := TransportConfig{

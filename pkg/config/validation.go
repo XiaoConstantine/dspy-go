@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -471,23 +472,8 @@ func validateExporterType(fl validator.FieldLevel) bool {
 // Note: These functions provide basic validation. Full validation is performed
 // by the provider-specific packages during LLM initialization.
 func isValidAnthropicModel(modelID string) bool {
-	validPrefixes := []string{
-		"claude-3",
-		"claude-4",
-		"claude-3.5",
-		"claude-haiku",
-		"claude-sonnet",
-		"claude-opus",
-		"opus-",
-		"sonnet-",
-		"haiku-",
-	}
-	for _, prefix := range validPrefixes {
-		if strings.HasPrefix(modelID, prefix) {
-			return true
-		}
-	}
-	return false
+	_, ok := core.ResolveAnthropicModelID(core.ModelID(modelID))
+	return ok
 }
 
 func isValidGoogleModel(modelID string) bool {

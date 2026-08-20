@@ -87,13 +87,13 @@ func TestAnthropicLLM_NewClient(t *testing.T) {
 		{
 			name:      "Valid API key",
 			apiKey:    "test-valid-key",
-			model:     anthropic.ModelClaudeOpus4_1_20250805,
+			model:     anthropic.ModelClaudeOpus5,
 			expectErr: false,
 		},
 		{
 			name:      "Valid OAuth token",
 			apiKey:    "sk-ant-oat-test-token",
-			model:     anthropic.ModelClaudeOpus4_1_20250805,
+			model:     anthropic.ModelClaudeOpus5,
 			expectErr: false,
 		},
 		// Note: The Anthropic library doesn't validate API keys at client creation time
@@ -162,7 +162,7 @@ func TestAnthropicLLM_StreamGenerate_Cancel(t *testing.T) {
 	// we'll just test that the cancel function doesn't panic
 
 	// Create an actual AnthropicLLM
-	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
+	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus5)
 	require.NoError(t, err)
 
 	// Call StreamGenerate
@@ -231,7 +231,7 @@ func TestAnthropicLLM_GenerateEdgeCases(t *testing.T) {
 func TestAnthropicLLM_Embeddings(t *testing.T) {
 	// Anthropic has no embedding API; both methods must fail with
 	// UnsupportedOperation rather than returning nil, nil.
-	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
+	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus5)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -353,7 +353,7 @@ func TestAnthropicLLM_GenerateWithFunctions(t *testing.T) {
 }
 
 func TestAnthropicLLM_GenerateWithFunctions_Validation(t *testing.T) {
-	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
+	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus5)
 	require.NoError(t, err)
 
 	_, err = llm.GenerateWithFunctions(context.Background(), "prompt", []map[string]any{})
@@ -376,7 +376,7 @@ func TestAnthropicLLM_StreamGenerate_ChunkHandling(t *testing.T) {
 	// Since we can't easily test the streaming behavior directly,
 	// we'll test that the stream response has the expected structure
 
-	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
+	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus5)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -396,14 +396,14 @@ func TestAnthropicLLM_StreamGenerate_ChunkHandling(t *testing.T) {
 
 func TestAnthropicLLM_Implementation(t *testing.T) {
 	// Test basic implementation details
-	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus4_1_20250805)
+	llm, err := NewAnthropicLLM("test-key", anthropic.ModelClaudeOpus5)
 	require.NoError(t, err)
 
 	// Check provider name
 	assert.Equal(t, "anthropic", llm.ProviderName())
 
 	// Check model ID
-	assert.Equal(t, string(anthropic.ModelClaudeOpus4_1_20250805), llm.ModelID())
+	assert.Equal(t, string(anthropic.ModelClaudeOpus5), llm.ModelID())
 }
 
 // Test the actual implementation coverage that was missing.
@@ -416,11 +416,11 @@ func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
 			APIKey: "test-api-key",
 		}
 
-		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaude_3_Haiku_20240307))
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeHaiku4_5))
 		assert.NoError(t, err)
 		assert.NotNil(t, llm)
 		assert.Equal(t, "anthropic", llm.ProviderName())
-		assert.Equal(t, string(anthropic.ModelClaude_3_Haiku_20240307), llm.ModelID())
+		assert.Equal(t, string(anthropic.ModelClaudeHaiku4_5), llm.ModelID())
 	})
 
 	t.Run("Config with custom endpoint", func(t *testing.T) {
@@ -455,7 +455,7 @@ func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
 			Name: "anthropic",
 		}
 
-		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus4_1_20250805))
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus5))
 		assert.NoError(t, err)
 		assert.NotNil(t, llm)
 	})
@@ -476,7 +476,7 @@ func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
 			APIKey: "config-api-key",
 		}
 
-		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus4_1_20250805))
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus5))
 		assert.NoError(t, err)
 		assert.NotNil(t, llm)
 	})
@@ -495,7 +495,7 @@ func TestAnthropicLLM_NewAnthropicLLMFromConfig(t *testing.T) {
 			Name: "anthropic",
 		}
 
-		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus4_1_20250805))
+		llm, err := NewAnthropicLLMFromConfig(ctx, config, core.ModelID(anthropic.ModelClaudeOpus5))
 		assert.Error(t, err)
 		assert.Nil(t, llm)
 		assert.Contains(t, err.Error(), "API key or OAuth token required")
@@ -521,29 +521,34 @@ func TestAnthropicLLM_isValidAnthropicModel(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "Valid Claude 3 model",
-			model:    string(anthropic.ModelClaude_3_Haiku_20240307),
+			name:     "Valid Claude Sonnet 5 model",
+			model:    string(anthropic.ModelClaudeSonnet5),
 			expected: true,
 		},
 		{
-			name:     "Valid Claude 4.1 model",
-			model:    string(anthropic.ModelClaudeOpus4_1_20250805),
-			expected: true,
-		},
-		{
-			name:     "Valid Claude Sonnet model",
-			model:    string(anthropic.ModelClaudeSonnet4_5_20250929),
-			expected: true,
-		},
-		{
-			name:     "Valid Claude Opus 4.7 model",
-			model:    string(anthropicModelClaudeOpus47),
+			name:     "Valid Claude Fable 5 model",
+			model:    string(anthropic.ModelClaudeFable5),
 			expected: true,
 		},
 		{
 			name:     "Valid Haiku alias",
 			model:    "haiku-4.5",
 			expected: true,
+		},
+		{
+			name:     "Retired Claude 3 model",
+			model:    "claude-3-haiku-20240307",
+			expected: false,
+		},
+		{
+			name:     "Retired Claude 4.1 model",
+			model:    "claude-opus-4-1-20250805",
+			expected: false,
+		},
+		{
+			name:     "Deprecated Mythos preview",
+			model:    "claude-mythos-preview",
+			expected: false,
 		},
 		{
 			name:     "Invalid model",
@@ -567,23 +572,18 @@ func TestAnthropicLLM_ModelNameNormalization(t *testing.T) {
 		expectNew anthropic.Model
 	}{
 		{
-			name:      "Old Sonnet model name",
-			oldName:   "claude-3-sonnet-20240229",
-			expectNew: anthropic.ModelClaudeSonnet4_6,
+			name:      "Sonnet 5 alias",
+			oldName:   "sonnet-5",
+			expectNew: anthropic.ModelClaudeSonnet5,
 		},
 		{
-			name:      "Old Opus model name",
-			oldName:   "claude-3-opus-20240229",
-			expectNew: anthropicModelClaudeOpus47,
-		},
-		{
-			name:      "Old Haiku model name",
-			oldName:   "claude-3-haiku-20240307",
-			expectNew: anthropic.ModelClaudeHaiku4_5_20251001,
+			name:      "Opus 4.8 alias",
+			oldName:   "opus-4.8",
+			expectNew: anthropic.ModelClaudeOpus4_8,
 		},
 		{
 			name:      "Haiku 4.5 alias",
-			oldName:   "claude-haiku-4-5",
+			oldName:   "haiku-4.5",
 			expectNew: anthropic.ModelClaudeHaiku4_5,
 		},
 		{
@@ -610,7 +610,7 @@ func TestAnthropicProviderFactory(t *testing.T) {
 			APIKey: "test-api-key",
 		}
 
-		llm, err := AnthropicProviderFactory(ctx, config, core.ModelID(anthropic.ModelClaude_3_Haiku_20240307))
+		llm, err := AnthropicProviderFactory(ctx, config, core.ModelID(anthropic.ModelClaudeHaiku4_5))
 		assert.NoError(t, err)
 		assert.NotNil(t, llm)
 

@@ -309,11 +309,13 @@ core.SetDefaultLLM(llm)
 
 ### Available Models
 
-| Model | Context Window | Features | Best For |
-|-------|----------------|----------|----------|
-| **claude-3.5-sonnet** | 200K | Latest, balanced, multimodal | General purpose, production |
-| **claude-3-opus** | 200K | Most capable, best reasoning | Complex analysis, research |
-| **claude-3-haiku** | 200K | Fast, efficient | Quick tasks, high volume |
+| Model ID | Best For |
+|----------|----------|
+| **claude-fable-5** | Highest-capability, long-running agents |
+| **claude-opus-5** | Complex agentic coding and enterprise work |
+| **claude-sonnet-5** | Balanced speed and intelligence |
+| **claude-haiku-4-5** | Fast, efficient workloads |
+| **claude-mythos-5** | Limited-availability Project Glasswing workloads |
 
 ### Configuration
 
@@ -350,16 +352,12 @@ result, err := llm.Generate(ctx, prompt)
 
 ### Rate Limits & Pricing
 
-| Model | TPM | Cost (Input/Output) |
-|-------|-----|---------------------|
-| claude-3.5-sonnet | 400K | $0.003 / $0.015 per 1K tokens |
-| claude-3-opus | 400K | $0.015 / $0.075 per 1K tokens |
-| claude-3-haiku | 400K | $0.00025 / $0.00125 per 1K tokens |
+See Anthropic's [models overview](https://docs.anthropic.com/en/docs/about-claude/models/overview) for current context windows, rate limits, and pricing.
 
 ### Best Practices
 
 ```go
-// ✅ Use 3.5 Sonnet for production
+// ✅ Use Sonnet 5 for production
 llm, _ := llms.NewAnthropicLLM(key, core.ModelAnthropicSonnet)
 
 // ✅ Use Haiku for fast, cheap tasks

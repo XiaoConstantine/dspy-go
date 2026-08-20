@@ -60,7 +60,7 @@ func TestValidateCustomRules(t *testing.T) {
 			Providers: map[string]LLMProviderConfig{
 				"anthropic": {
 					Provider: "anthropic",
-					ModelID:  "claude-3-sonnet-20240229",
+					ModelID:  "claude-sonnet-5",
 				},
 			},
 		},
@@ -85,7 +85,7 @@ func TestValidateLLMProviderConfig(t *testing.T) {
 			name: "valid anthropic",
 			provider: LLMProviderConfig{
 				Provider: "anthropic",
-				ModelID:  "claude-3-sonnet-20240229",
+				ModelID:  "claude-sonnet-5",
 				APIKey:   "test-key",
 			},
 			expectError: false,
@@ -94,7 +94,7 @@ func TestValidateLLMProviderConfig(t *testing.T) {
 			name: "anthropic missing API key",
 			provider: LLMProviderConfig{
 				Provider: "anthropic",
-				ModelID:  "claude-3-sonnet-20240229",
+				ModelID:  "claude-sonnet-5",
 			},
 			expectError: false, // API key validation removed for security
 		},
@@ -260,14 +260,20 @@ func TestCustomValidators(t *testing.T) {
 
 func TestIsValidAnthropicModel(t *testing.T) {
 	validModels := []string{
-		"claude-3-haiku-20240307",
-		"claude-3-sonnet-20240229",
-		"claude-3-opus-20240229",
-		"claude-3-5-sonnet-20241022",
-		"claude-3-5-haiku-20241022",
-		// Official 4.6 IDs
+		"claude-sonnet-5",
+		"claude-fable-5",
+		"claude-mythos-5",
+		"claude-opus-5",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
 		"claude-sonnet-4-6",
 		"claude-opus-4-6",
+		"claude-haiku-4-5",
+		"claude-haiku-4-5-20251001",
+		"claude-sonnet-4-5",
+		"claude-sonnet-4-5-20250929",
+		"claude-opus-4-5",
+		"claude-opus-4-5-20251101",
 		// 4.6 aliases
 		"sonnet-4.6",
 		"sonnet-4-6",
@@ -287,6 +293,12 @@ func TestIsValidAnthropicModel(t *testing.T) {
 	invalidModels := []string{
 		"invalid-model",
 		"claude-2",
+		"claude-3-haiku-20240307",
+		"claude-3-sonnet-20240229",
+		"claude-3-opus-20240229",
+		"claude-opus-4-1-20250805",
+		"claude-mythos-preview",
+		"claude-sonnet-99",
 		"gpt-4",
 	}
 
@@ -503,7 +515,7 @@ func TestValidationProviderAndModelValidation(t *testing.T) {
 	assert.Error(t, err)
 
 	// Test valid model ID
-	config.LLM.Default.ModelID = "claude-3-sonnet-20240229"
+	config.LLM.Default.ModelID = "claude-sonnet-5"
 	err = ValidateConfiguration(config)
 	assert.NoError(t, err)
 }

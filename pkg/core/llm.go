@@ -676,21 +676,27 @@ func SetDefaultLLM(llm LLM) {
 type ModelID string
 
 const (
-	// Anthropic models - current Claude 4.x series.
-	ModelAnthropicHaiku          ModelID = ModelID(anthropic.ModelClaudeHaiku4_5_20251001)
-	ModelAnthropicSonnet         ModelID = ModelID(anthropic.ModelClaudeSonnet4_6) // For backwards compatibility
-	ModelAnthropicSonnet35       ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
-	ModelAnthropicOpus           ModelID = "claude-opus-4-7"
-	ModelAnthropicClaude4Opus    ModelID = "claude-opus-4-7"
-	ModelAnthropicClaude4Sonnet  ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
-	ModelAnthropicClaude45Haiku  ModelID = ModelID(anthropic.ModelClaudeHaiku4_5_20251001)
-	ModelAnthropicClaude45Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
-	ModelAnthropicClaude45Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
+	// Anthropic models. The short names track the current model in each family.
+	ModelAnthropicHaiku  ModelID = ModelID(anthropic.ModelClaudeHaiku4_5)
+	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelClaudeSonnet5)
+	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelClaudeOpus5)
+	// Claude 4.5 series.
+	ModelAnthropicClaude45Haiku          ModelID = ModelID(anthropic.ModelClaudeHaiku4_5)
+	ModelAnthropicClaude45Haiku20251001  ModelID = ModelID(anthropic.ModelClaudeHaiku4_5_20251001)
+	ModelAnthropicClaude45Sonnet         ModelID = ModelID(anthropic.ModelClaudeSonnet4_5)
+	ModelAnthropicClaude45Sonnet20250929 ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
+	ModelAnthropicClaude45Opus           ModelID = ModelID(anthropic.ModelClaudeOpus4_5)
+	ModelAnthropicClaude45Opus20251101   ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
 	// Claude 4.6 series.
 	ModelAnthropicClaude46Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
 	ModelAnthropicClaude46Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_6)
-	// Claude 4.7 series.
-	ModelAnthropicClaude47Opus ModelID = "claude-opus-4-7"
+	ModelAnthropicClaude47Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_7)
+	ModelAnthropicClaude48Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_8)
+	// Claude 5 series.
+	ModelAnthropicClaude5Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet5)
+	ModelAnthropicClaude5Fable  ModelID = ModelID(anthropic.ModelClaudeFable5)
+	ModelAnthropicClaude5Mythos ModelID = ModelID(anthropic.ModelClaudeMythos5)
+	ModelAnthropicClaude5Opus   ModelID = ModelID(anthropic.ModelClaudeOpus5)
 
 	// Google Gemini models (existing).
 	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"
@@ -801,10 +807,12 @@ const (
 
 var ProviderModels = map[string][]ModelID{
 	"anthropic": {
-		ModelAnthropicSonnet, ModelAnthropicHaiku, ModelAnthropicOpus,
-		ModelAnthropicClaude4Opus, ModelAnthropicClaude4Sonnet, ModelAnthropicClaude45Sonnet,
-		ModelAnthropicClaude45Haiku, ModelAnthropicClaude45Opus, ModelAnthropicClaude46Sonnet,
-		ModelAnthropicClaude46Opus, ModelAnthropicClaude47Opus,
+		ModelAnthropicClaude5Sonnet, ModelAnthropicClaude5Fable, ModelAnthropicClaude5Mythos,
+		ModelAnthropicClaude5Opus, ModelAnthropicClaude48Opus, ModelAnthropicClaude47Opus,
+		ModelAnthropicClaude46Opus, ModelAnthropicClaude46Sonnet,
+		ModelAnthropicClaude45Haiku, ModelAnthropicClaude45Haiku20251001,
+		ModelAnthropicClaude45Opus, ModelAnthropicClaude45Opus20251101,
+		ModelAnthropicClaude45Sonnet, ModelAnthropicClaude45Sonnet20250929,
 	},
 	"google": {
 		ModelGoogleGeminiFlash, ModelGoogleGeminiPro, ModelGoogleGeminiFlashLite,

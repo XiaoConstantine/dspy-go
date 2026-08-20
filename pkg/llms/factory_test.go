@@ -94,6 +94,13 @@ func TestNewLLM(t *testing.T) {
 			expectErr: true,
 			errMsg:    "failed to create LLM with registry and fallback: unsupported model ID: unsupported-model",
 		},
+		{
+			name:      "Retired Anthropic model",
+			apiKey:    "test-api-key",
+			modelID:   "claude-opus-4-1-20250805",
+			expectErr: true,
+			errMsg:    "failed to create LLM with registry and fallback: unsupported model ID: claude-opus-4-1-20250805",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -156,13 +163,7 @@ func TestNewLLMForAllModels(t *testing.T) {
 
 	// Test all Anthropic models
 	t.Run("AnthropicModels", func(t *testing.T) {
-		anthropicModels := []core.ModelID{
-			core.ModelAnthropicHaiku,
-			core.ModelAnthropicSonnet,
-			core.ModelAnthropicOpus,
-		}
-
-		for _, model := range anthropicModels {
+		for _, model := range core.ProviderModels["anthropic"] {
 			llm, err := NewLLM("test-api-key", model)
 			assert.NoError(t, err)
 			assert.NotNil(t, llm)

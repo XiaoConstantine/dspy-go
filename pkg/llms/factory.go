@@ -111,41 +111,35 @@ func ensureRegistryInitialized() error {
 
 // loadDefaultModelConfigurations loads the default model configurations into the registry.
 func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
+	anthropicCapabilities := []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"}
+	anthropicModels := make(map[string]core.ModelConfig, len(core.ProviderModels["anthropic"]))
+	for modelID, name := range map[core.ModelID]string{
+		core.ModelAnthropicClaude5Sonnet:          "Claude Sonnet 5",
+		core.ModelAnthropicClaude5Fable:           "Claude Fable 5",
+		core.ModelAnthropicClaude5Mythos:          "Claude Mythos 5",
+		core.ModelAnthropicClaude5Opus:            "Claude Opus 5",
+		core.ModelAnthropicClaude48Opus:           "Claude Opus 4.8",
+		core.ModelAnthropicClaude47Opus:           "Claude Opus 4.7",
+		core.ModelAnthropicClaude46Opus:           "Claude Opus 4.6",
+		core.ModelAnthropicClaude46Sonnet:         "Claude Sonnet 4.6",
+		core.ModelAnthropicClaude45Haiku:          "Claude Haiku 4.5",
+		core.ModelAnthropicClaude45Haiku20251001:  "Claude Haiku 4.5 (2025-10-01)",
+		core.ModelAnthropicClaude45Opus:           "Claude Opus 4.5",
+		core.ModelAnthropicClaude45Opus20251101:   "Claude Opus 4.5 (2025-11-01)",
+		core.ModelAnthropicClaude45Sonnet:         "Claude Sonnet 4.5",
+		core.ModelAnthropicClaude45Sonnet20250929: "Claude Sonnet 4.5 (2025-09-29)",
+	} {
+		anthropicModels[string(modelID)] = core.ModelConfig{
+			ID:           string(modelID),
+			Name:         name,
+			Capabilities: anthropicCapabilities,
+		}
+	}
+
 	defaultConfigs := map[string]core.ProviderConfig{
 		"anthropic": {
-			Name: "anthropic",
-			Models: map[string]core.ModelConfig{
-				string(core.ModelAnthropicHaiku): {
-					ID:           string(core.ModelAnthropicHaiku),
-					Name:         "Claude Haiku 4.5",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
-				},
-				string(core.ModelAnthropicSonnet): {
-					ID:           string(core.ModelAnthropicSonnet),
-					Name:         "Claude Sonnet 4.6",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
-				},
-				string(core.ModelAnthropicOpus): {
-					ID:           string(core.ModelAnthropicOpus),
-					Name:         "Claude Opus 4.7",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
-				},
-				string(core.ModelAnthropicClaude45Opus): {
-					ID:           string(core.ModelAnthropicClaude45Opus),
-					Name:         "Claude Opus 4.5",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
-				},
-				string(core.ModelAnthropicClaude45Sonnet): {
-					ID:           string(core.ModelAnthropicClaude45Sonnet),
-					Name:         "Claude Sonnet 4.5",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
-				},
-				string(core.ModelAnthropicClaude46Opus): {
-					ID:           string(core.ModelAnthropicClaude46Opus),
-					Name:         "Claude Opus 4.6",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"},
-				},
-			},
+			Name:   "anthropic",
+			Models: anthropicModels,
 		},
 		"google": {
 			Name: "google",
@@ -365,15 +359,12 @@ func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
 	var llm core.LLM
 	var err error
 
+	if normalizedModelID, ok := core.ResolveAnthropicModelID(modelID); ok {
+		return NewAnthropicLLM(apiKey, string(normalizedModelID))
+	}
+
 	modelStr := string(modelID)
 	switch {
-	case modelID == core.ModelAnthropicHaiku || modelID == core.ModelAnthropicSonnet || modelID == core.ModelAnthropicOpus ||
-		modelID == core.ModelAnthropicClaude45Opus || modelID == core.ModelAnthropicClaude4Opus ||
-		modelID == core.ModelAnthropicClaude4Sonnet || modelID == core.ModelAnthropicClaude45Haiku ||
-		modelID == core.ModelAnthropicClaude45Sonnet || modelID == core.ModelAnthropicClaude47Opus ||
-		strings.HasPrefix(modelStr, "claude-") || strings.HasPrefix(modelStr, "opus-") ||
-		strings.HasPrefix(modelStr, "sonnet-") || strings.HasPrefix(modelStr, "haiku-"):
-		llm, err = NewAnthropicLLM(apiKey, normalizeModelName(modelStr))
 	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro ||
 		modelID == core.ModelGoogleGeminiFlashLite || modelID == core.ModelGoogleGemini31ProPreview ||
 		modelID == core.ModelGoogleGemini31ProPreviewTools || modelID == core.ModelGoogleGemini31FlashLitePreview ||

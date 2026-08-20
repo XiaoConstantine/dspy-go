@@ -33,7 +33,7 @@ Modern LLM applications need to work with more than just text:
 | Provider | Image Support | Streaming | Models |
 |----------|--------------|-----------|---------|
 | **Google Gemini** | ✅ Yes | ✅ Yes | gemini-pro-vision, gemini-1.5-pro |
-| **Anthropic Claude** | ✅ Yes | ✅ Yes | claude-3-opus, claude-3-sonnet |
+| **Anthropic Claude** | ✅ Yes | ✅ Yes | claude-opus-5, claude-sonnet-5, claude-haiku-4-5 |
 | **OpenAI** | ✅ Yes | ✅ Yes | gpt-4-vision-preview, gpt-4o |
 
 ---

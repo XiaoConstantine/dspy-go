@@ -19,7 +19,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	// Test LLM configuration
 	assert.Equal(t, "anthropic", config.LLM.Default.Provider)
-	assert.Equal(t, "claude-sonnet-4-6", config.LLM.Default.ModelID)
+	assert.Equal(t, "claude-sonnet-5", config.LLM.Default.ModelID)
 	assert.Equal(t, 8192, config.LLM.Default.Generation.MaxTokens)
 	assert.Equal(t, 0.5, config.LLM.Default.Generation.Temperature)
 
@@ -74,7 +74,7 @@ func TestConfigValidation(t *testing.T) {
 				LLM: LLMConfig{
 					Default: LLMProviderConfig{
 						Provider: "anthropic",
-						ModelID:  "claude-3-sonnet-20240229",
+						ModelID:  "claude-sonnet-5",
 						Generation: GenerationConfig{
 							Temperature: 3.0, // Invalid: > 2.0
 						},
@@ -90,7 +90,7 @@ func TestConfigValidation(t *testing.T) {
 				LLM: LLMConfig{
 					Default: LLMProviderConfig{
 						Provider: "anthropic",
-						ModelID:  "claude-3-sonnet-20240229",
+						ModelID:  "claude-sonnet-5",
 						Generation: GenerationConfig{
 							MaxTokens: 0, // Invalid: must be > 0
 						},

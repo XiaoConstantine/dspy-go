@@ -42,8 +42,8 @@ func TestEnvironmentSourceSetLLMProviderValue(t *testing.T) {
 		expectedValue any
 	}{
 		{"provider", "anthropic", "Provider", "anthropic"},
-		{"model.id", "claude-3-sonnet", "ModelID", "claude-3-sonnet"},
-		{"modelid", "claude-3-sonnet", "ModelID", "claude-3-sonnet"},
+		{"model.id", "claude-sonnet-5", "ModelID", "claude-sonnet-5"},
+		{"modelid", "claude-sonnet-5", "ModelID", "claude-sonnet-5"},
 		{"api.key", "test-key", "APIKey", "test-key"},
 		{"apikey", "test-key", "APIKey", "test-key"},
 		{"endpoint.baseurl", "https://api.example.com", "Endpoint.BaseURL", "https://api.example.com"},

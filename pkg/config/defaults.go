@@ -46,7 +46,7 @@ func getDefaultLLMConfig() LLMConfig {
 	return LLMConfig{
 		Default: LLMProviderConfig{
 			Provider:   "anthropic",
-			ModelID:    "claude-sonnet-4-6",
+			ModelID:    "claude-sonnet-5",
 			APIKey:     "", // Should be provided via environment or config file
 			Endpoint:   defaultEndpoint,
 			Generation: defaultGeneration,
@@ -78,7 +78,7 @@ func getDefaultProviders() map[string]LLMProviderConfig {
 	return map[string]LLMProviderConfig{
 		"anthropic": {
 			Provider: "anthropic",
-			ModelID:  "claude-sonnet-4-6",
+			ModelID:  "claude-sonnet-5",
 			APIKey:   "",
 			Endpoint: EndpointConfig{
 				BaseURL: "https://api.anthropic.com",
@@ -378,8 +378,8 @@ func getDefaultOptimizersConfig() OptimizersConfig {
 	return OptimizersConfig{
 		BootstrapFewShot: BootstrapFewShotConfig{
 			MaxExamples:         50,
-			TeacherModel:        "claude-3-opus-20240229",
-			StudentModel:        "claude-3-sonnet-20240229",
+			TeacherModel:        "claude-opus-5",
+			StudentModel:        "claude-sonnet-5",
 			BootstrapIterations: 3,
 		},
 		MIPRO: MIPROConfig{

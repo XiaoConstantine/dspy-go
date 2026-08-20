@@ -255,7 +255,7 @@ func buildLLM(ctx context.Context, logger *logging.Logger, provider, model, apiK
 		}
 		modelName := model
 		if modelName == "" {
-			modelName = string(anthropic.ModelClaude_3_Haiku_20240307)
+			modelName = string(anthropic.ModelClaudeHaiku4_5)
 		}
 		llm, err := llms.NewAnthropicLLM(apiKey, anthropic.Model(modelName))
 		if err != nil {
