@@ -318,24 +318,26 @@ func TestDefaultMCPDiscoveryService_DiscoverTools(t *testing.T) {
 
 func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 	t.Run("successful subscription", func(t *testing.T) {
-		config := &MCPDiscoveryConfig{
-			PollInterval: 100 * time.Millisecond,
-		}
-		service := NewDefaultMCPDiscoveryService(config)
-		defer service.Stop()
+		synctest.Test(t, func(t *testing.T) {
+			config := &MCPDiscoveryConfig{
+				PollInterval: 100 * time.Millisecond,
+			}
+			service := NewDefaultMCPDiscoveryService(config)
+			defer service.Stop()
 
-		var callbackCalled atomic.Int32
-		callback := func(tools []core.Tool) {
-			callbackCalled.Store(1)
-		}
+			var callbackCalled atomic.Int32
+			callback := func(tools []core.Tool) {
+				callbackCalled.Store(1)
+			}
 
-		err := service.Subscribe(callback)
-		assert.NoError(t, err)
+			err := service.Subscribe(callback)
+			assert.NoError(t, err)
 
-		// Wait for polling to start and callback to be called
-		time.Sleep(200 * time.Millisecond)
-		assert.Equal(t, int32(1), callbackCalled.Load())
-		assert.True(t, service.IsRunning())
+			// Wait for the initial discovery pass without advancing the clock.
+			synctest.Wait()
+			assert.Equal(t, int32(1), callbackCalled.Load())
+			assert.True(t, service.IsRunning())
+		})
 	})
 
 	t.Run("nil callback", func(t *testing.T) {
@@ -348,31 +350,32 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 	})
 
 	t.Run("multiple subscriptions", func(t *testing.T) {
-		config := &MCPDiscoveryConfig{
-			PollInterval: 100 * time.Millisecond,
-		}
-		service := NewDefaultMCPDiscoveryService(config)
-		defer service.Stop()
+		synctest.Test(t, func(t *testing.T) {
+			config := &MCPDiscoveryConfig{
+				PollInterval: 100 * time.Millisecond,
+			}
+			service := NewDefaultMCPDiscoveryService(config)
+			defer service.Stop()
 
-		var callback1Called, callback2Called int32
+			var callback1Called, callback2Called int32
 
-		callback1 := func(tools []core.Tool) {
-			atomic.StoreInt32(&callback1Called, 1)
-		}
-		callback2 := func(tools []core.Tool) {
-			atomic.StoreInt32(&callback2Called, 1)
-		}
+			callback1 := func(tools []core.Tool) {
+				atomic.StoreInt32(&callback1Called, 1)
+			}
+			callback2 := func(tools []core.Tool) {
+				atomic.StoreInt32(&callback2Called, 1)
+			}
 
-		err1 := service.Subscribe(callback1)
-		err2 := service.Subscribe(callback2)
+			err1 := service.Subscribe(callback1)
+			err2 := service.Subscribe(callback2)
 
-		assert.NoError(t, err1)
-		assert.NoError(t, err2)
+			assert.NoError(t, err1)
+			assert.NoError(t, err2)
 
-		// Wait for callbacks to be called
-		time.Sleep(200 * time.Millisecond)
-		assert.Equal(t, int32(1), atomic.LoadInt32(&callback1Called))
-		assert.Equal(t, int32(1), atomic.LoadInt32(&callback2Called))
+			synctest.Wait()
+			assert.Equal(t, int32(1), atomic.LoadInt32(&callback1Called))
+			assert.Equal(t, int32(1), atomic.LoadInt32(&callback2Called))
+		})
 	})
 }
 
@@ -440,36 +443,35 @@ func TestDefaultMCPDiscoveryService_RemoveServer(t *testing.T) {
 }
 
 func TestDefaultMCPDiscoveryService_Stop(t *testing.T) {
-	server1 := newMockMCPServer("server1")
-	server2 := newMockMCPServer("server2")
-	server1.setConnected(true)
-	server2.setConnected(true)
+	synctest.Test(t, func(t *testing.T) {
+		server1 := newMockMCPServer("server1")
+		server2 := newMockMCPServer("server2")
+		server1.setConnected(true)
+		server2.setConnected(true)
 
-	config := &MCPDiscoveryConfig{
-		Servers:      []MCPServer{server1, server2},
-		PollInterval: 100 * time.Millisecond,
-	}
-	service := NewDefaultMCPDiscoveryService(config)
+		config := &MCPDiscoveryConfig{
+			Servers:      []MCPServer{server1, server2},
+			PollInterval: 100 * time.Millisecond,
+		}
+		service := NewDefaultMCPDiscoveryService(config)
 
-	// Start the service by subscribing
-	callback := func(tools []core.Tool) {}
-	err := service.Subscribe(callback)
-	require.NoError(t, err)
+		// Start the service by subscribing and let its initial pass settle.
+		callback := func(tools []core.Tool) {}
+		err := service.Subscribe(callback)
+		require.NoError(t, err)
+		synctest.Wait()
+		assert.True(t, service.IsRunning())
 
-	// Wait for service to start
-	time.Sleep(50 * time.Millisecond)
-	assert.True(t, service.IsRunning())
+		service.Stop()
 
-	// Stop the service
-	service.Stop()
+		// Stop owns the polling goroutine and disconnects every server.
+		assert.False(t, service.IsRunning())
+		assert.False(t, server1.IsConnected())
+		assert.False(t, server2.IsConnected())
 
-	// Should stop running and disconnect all servers
-	assert.False(t, service.IsRunning())
-	assert.False(t, server1.IsConnected())
-	assert.False(t, server2.IsConnected())
-
-	// Multiple stops should be safe
-	service.Stop() // Should not panic
+		// Multiple stops should be safe.
+		service.Stop()
+	})
 }
 
 func TestDefaultMCPDiscoveryService_StopBeforePollStart(t *testing.T) {
@@ -486,8 +488,7 @@ func TestDefaultMCPDiscoveryService_StopBeforePollStart(t *testing.T) {
 		synctest.Wait()
 
 		countAfterStop := callbackCount.Load()
-		time.Sleep(pollInterval)
-		synctest.Wait()
+		synctest.Sleep(pollInterval)
 		assert.Equal(t, countAfterStop, callbackCount.Load())
 		assert.False(t, service.IsRunning())
 	})
@@ -514,8 +515,7 @@ func TestDefaultMCPDiscoveryService_RestartUsesFreshCancellation(t *testing.T) {
 		require.Equal(t, int32(2), firstCallback.Load())
 		require.Equal(t, int32(1), secondCallback.Load())
 
-		time.Sleep(pollInterval)
-		synctest.Wait()
+		synctest.Sleep(pollInterval)
 		assert.Equal(t, int32(3), firstCallback.Load())
 		assert.Equal(t, int32(2), secondCallback.Load())
 	})
@@ -610,33 +610,33 @@ func TestDefaultMCPDiscoveryService_GetConnectedServers(t *testing.T) {
 }
 
 func TestDefaultMCPDiscoveryService_CallbackPanicRecovery(t *testing.T) {
-	config := &MCPDiscoveryConfig{
-		PollInterval: 50 * time.Millisecond,
-	}
-	service := NewDefaultMCPDiscoveryService(config)
-	defer service.Stop()
+	synctest.Test(t, func(t *testing.T) {
+		config := &MCPDiscoveryConfig{
+			PollInterval: 50 * time.Millisecond,
+		}
+		service := NewDefaultMCPDiscoveryService(config)
+		defer service.Stop()
 
-	panicCallback := func(tools []core.Tool) {
-		panic("test panic")
-	}
+		panicCallback := func(tools []core.Tool) {
+			panic("test panic")
+		}
 
-	var normalCallbackCalled atomic.Int32
-	normalCallback := func(tools []core.Tool) {
-		normalCallbackCalled.Store(1)
-	}
+		var normalCallbackCalled atomic.Int32
+		normalCallback := func(tools []core.Tool) {
+			normalCallbackCalled.Store(1)
+		}
 
-	// Subscribe both callbacks
-	err1 := service.Subscribe(panicCallback)
-	err2 := service.Subscribe(normalCallback)
+		// Subscribe both callbacks.
+		err1 := service.Subscribe(panicCallback)
+		err2 := service.Subscribe(normalCallback)
 
-	assert.NoError(t, err1)
-	assert.NoError(t, err2)
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
+		synctest.Wait()
 
-	// Wait for callbacks to be called
-	time.Sleep(150 * time.Millisecond)
-
-	// Normal callback should still be called despite panic in other callback
-	assert.Equal(t, int32(1), normalCallbackCalled.Load())
+		// A panicking subscriber must not prevent the next callback.
+		assert.Equal(t, int32(1), normalCallbackCalled.Load())
+	})
 }
 
 func TestDefaultMCPDiscoveryService_ConcurrentAccess(t *testing.T) {
@@ -793,25 +793,25 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("very short poll interval", func(t *testing.T) {
-		config := &MCPDiscoveryConfig{
-			PollInterval: 10 * time.Millisecond, // Short but reasonable interval
-		}
-		service := NewDefaultMCPDiscoveryService(config)
-		defer service.Stop()
+		synctest.Test(t, func(t *testing.T) {
+			config := &MCPDiscoveryConfig{
+				PollInterval: 10 * time.Millisecond,
+			}
+			service := NewDefaultMCPDiscoveryService(config)
+			defer service.Stop()
 
-		var callbackCount atomic.Int32
-		callback := func(tools []core.Tool) {
-			callbackCount.Add(1)
-		}
+			var callbackCount atomic.Int32
+			callback := func(tools []core.Tool) {
+				callbackCount.Add(1)
+			}
 
-		err := service.Subscribe(callback)
-		assert.NoError(t, err)
+			err := service.Subscribe(callback)
+			assert.NoError(t, err)
 
-		// Wait for multiple polling cycles
-		time.Sleep(50 * time.Millisecond)
-
-		// Should have been called multiple times
-		assert.True(t, callbackCount.Load() > 1)
+			// Advance through several ticker cycles and wait for their callbacks.
+			synctest.Sleep(50 * time.Millisecond)
+			assert.True(t, callbackCount.Load() > 1)
+		})
 	})
 
 	t.Run("server with disconnect error during stop", func(t *testing.T) {
