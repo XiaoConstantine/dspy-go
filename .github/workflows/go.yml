@@ -61,3 +61,32 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
           flags: pkg
+
+  portable-build:
+    name: Build only, CGO disabled (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: "0"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: |
+            go.sum
+            cmd/dspy-cli/go.sum
+
+      - name: Build root module
+        run: go build ./...
+
+      - name: Build CLI module
+        working-directory: cmd/dspy-cli
+        run: go build ./...
