@@ -4,6 +4,7 @@
 package communication
 
 import (
+	"context"
 	"sync"
 	"time"
 	"uuid"
@@ -183,13 +184,23 @@ func (ts TaskStatus) WithMessage(msg *Message) TaskStatus {
 
 // Task represents a running or completed task.
 type Task struct {
+	ID              string         `json:"id"`
+	ContextID       string         `json:"contextId,omitempty"`
+	Status          TaskStatus     `json:"status"`
+	History         []Message      `json:"history,omitempty"`
+	Artifacts       []Artifact     `json:"artifacts,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	mu              sync.RWMutex   `json:"-"` // Protects concurrent access
+	executionCancel context.CancelFunc
+}
+
+type taskSnapshot struct {
 	ID        string         `json:"id"`
 	ContextID string         `json:"contextId,omitempty"`
 	Status    TaskStatus     `json:"status"`
 	History   []Message      `json:"history,omitempty"`
 	Artifacts []Artifact     `json:"artifacts,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	mu        sync.RWMutex   `json:"-"` // Protects concurrent access
 }
 
 // NewTask creates a new task with submitted status.
@@ -200,17 +211,49 @@ func NewTask() *Task {
 	}
 }
 
-// UpdateStatus updates the task status.
-func (t *Task) UpdateStatus(state TaskState) {
+func (t *Task) setExecutionCancel(cancel context.CancelFunc) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.Status = NewTaskStatus(state)
+	if t.Status.State.IsTerminal() {
+		t.mu.Unlock()
+		cancel()
+		return
+	}
+	t.executionCancel = cancel
+	t.mu.Unlock()
 }
 
-// AddArtifact adds an artifact to the task.
+func (t *Task) updateStatus(status TaskStatus) bool {
+	t.mu.Lock()
+	if t.Status.State.IsTerminal() {
+		t.mu.Unlock()
+		return false
+	}
+	t.Status = status
+	var cancel context.CancelFunc
+	if status.State.IsTerminal() {
+		cancel = t.executionCancel
+		t.executionCancel = nil
+	}
+	t.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	return true
+}
+
+// UpdateStatus updates the task status. A terminal task cannot transition again.
+func (t *Task) UpdateStatus(state TaskState) {
+	t.updateStatus(NewTaskStatus(state))
+}
+
+// AddArtifact adds an artifact to a non-terminal task.
 func (t *Task) AddArtifact(artifact Artifact) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.Status.State.IsTerminal() {
+		return
+	}
 	t.Artifacts = append(t.Artifacts, artifact)
 }
 
@@ -226,6 +269,24 @@ func (t *Task) GetArtifacts() []Artifact {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return append([]Artifact{}, t.Artifacts...)
+}
+
+func (t *Task) snapshot() taskSnapshot {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	metadata := make(map[string]any, len(t.Metadata))
+	for key, value := range t.Metadata {
+		metadata[key] = value
+	}
+	return taskSnapshot{
+		ID:        t.ID,
+		ContextID: t.ContextID,
+		Status:    t.Status,
+		History:   append([]Message(nil), t.History...),
+		Artifacts: append([]Artifact(nil), t.Artifacts...),
+		Metadata:  metadata,
+	}
 }
 
 // ============================================================================

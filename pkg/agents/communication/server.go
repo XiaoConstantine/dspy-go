@@ -639,7 +639,12 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 
 	// Processing outlives the HTTP request, but remains bounded by the server
 	// lifecycle. Request-scoped values are retained for tracing and metadata.
-	go s.processTask(s.taskContext(ctx), task, msg)
+	taskCtx, cancelTask := context.WithCancel(s.taskContext(ctx))
+	task.setExecutionCancel(cancelTask)
+	go func() {
+		defer cancelTask()
+		s.processTask(taskCtx, task, msg)
+	}()
 
 	// Return task info immediately
 	return NewJSONRPCResponse(req.ID, map[string]any{
@@ -660,7 +665,7 @@ func (s *Server) handleGetTask(ctx context.Context, req *JSONRPCRequest) *JSONRP
 		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Task not found")
 	}
 
-	return NewJSONRPCResponse(req.ID, task)
+	return NewJSONRPCResponse(req.ID, task.snapshot())
 }
 
 // handleCancelTask cancels a running task.
@@ -675,31 +680,49 @@ func (s *Server) handleCancelTask(ctx context.Context, req *JSONRPCRequest) *JSO
 		return NewJSONRPCError(req.ID, RPCErrorCodeInvalidParams, "Task not found")
 	}
 
-	// Mark as failed
-	task.mu.Lock()
-	task.Status = NewTaskStatus(TaskStateFailed)
-	task.Status.Message = NewAgentMessage("Task cancelled by user")
-	task.mu.Unlock()
+	status := NewTaskStatus(TaskStateFailed).WithMessage(NewAgentMessage("Task cancelled by user"))
+	s.transitionTask(task, status, nil)
 
-	s.tasks.update(task)
-
-	// Notify subscribers
-	event := NewTaskStatusUpdateEvent(task.ID, task.GetStatus(), true)
-	s.subscribers.notify(task.ID, event)
-
-	return NewJSONRPCResponse(req.ID, task)
+	return NewJSONRPCResponse(req.ID, task.snapshot())
 }
 
 // ============================================================================
 // Task Processing
 // ============================================================================
 
+// transitionTask applies a state change and publishes its events while holding
+// the task lock, so no update can be emitted after a terminal event wins.
+func (s *Server) transitionTask(task *Task, status TaskStatus, artifact *Artifact) bool {
+	task.mu.Lock()
+	defer task.mu.Unlock()
+
+	if task.Status.State.IsTerminal() {
+		return false
+	}
+
+	if artifact != nil {
+		task.Artifacts = append(task.Artifacts, *artifact)
+	}
+	task.Status = status
+
+	final := status.State.IsTerminal()
+	if final && task.executionCancel != nil {
+		task.executionCancel()
+		task.executionCancel = nil
+	}
+
+	if artifact != nil {
+		s.subscribers.notify(task.ID, NewTaskArtifactUpdateEvent(task.ID, *artifact, true))
+	}
+	s.subscribers.notify(task.ID, NewTaskStatusUpdateEvent(task.ID, status, final))
+	return true
+}
+
 // processTask executes the agent and streams results.
 func (s *Server) processTask(ctx context.Context, task *Task, msg *Message) {
-	// Update to working state
-	task.UpdateStatus(TaskStateWorking)
-	s.tasks.update(task)
-	s.subscribers.notify(task.ID, NewTaskStatusUpdateEvent(task.ID, task.GetStatus(), false))
+	if !s.transitionTask(task, NewTaskStatus(TaskStateWorking), nil) {
+		return
+	}
 
 	// Convert message to agent input
 	input, err := MessageToAgentInput(msg)
@@ -722,24 +745,12 @@ func (s *Server) processTask(ctx context.Context, task *Task, msg *Message) {
 		return
 	}
 
-	// Add artifact and complete
-	task.AddArtifact(artifact)
-	task.UpdateStatus(TaskStateCompleted)
-	s.tasks.update(task)
-
-	// Notify subscribers
-	s.subscribers.notify(task.ID, NewTaskArtifactUpdateEvent(task.ID, artifact, true))
-	s.subscribers.notify(task.ID, NewTaskStatusUpdateEvent(task.ID, task.GetStatus(), true))
+	s.transitionTask(task, NewTaskStatus(TaskStateCompleted), &artifact)
 }
 
 func (s *Server) failTask(task *Task, err error) {
-	task.mu.Lock()
-	task.Status = NewTaskStatus(TaskStateFailed)
-	task.Status.Message = CreateErrorMessage(err)
-	task.mu.Unlock()
-
-	s.tasks.update(task)
-	s.subscribers.notify(task.ID, NewTaskStatusUpdateEvent(task.ID, task.GetStatus(), true))
+	status := NewTaskStatus(TaskStateFailed).WithMessage(CreateErrorMessage(err))
+	s.transitionTask(task, status, nil)
 }
 
 // ============================================================================

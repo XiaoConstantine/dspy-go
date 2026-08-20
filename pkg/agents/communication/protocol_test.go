@@ -449,9 +449,13 @@ func TestTaskLifecycle(t *testing.T) {
 	artifact := NewArtifact(NewTextPart("intermediate result"))
 	task.AddArtifact(artifact)
 
-	task.UpdateStatus(TaskStateCompleted)
 	finalArtifact := NewArtifact(NewTextPart("final result"))
 	task.AddArtifact(finalArtifact)
+	task.UpdateStatus(TaskStateCompleted)
+
+	// Terminal state is immutable, including its artifacts.
+	task.UpdateStatus(TaskStateFailed)
+	task.AddArtifact(NewArtifact(NewTextPart("late result")))
 
 	// Verify final state
 	if task.Status.State != TaskStateCompleted {

@@ -289,8 +289,7 @@ func agentOutputCompleted(output map[string]any, trace *agents.ExecutionTrace) b
 
 // failTask marks a task as failed with an error message.
 func (e *A2AExecutor) failTask(task *Task, err error) *Task {
-	task.UpdateStatus(TaskStateFailed)
-	task.Status.Message = CreateErrorMessage(err)
+	task.updateStatus(NewTaskStatus(TaskStateFailed).WithMessage(CreateErrorMessage(err)))
 	return task
 }
 

@@ -68,6 +68,30 @@ func (a *taskContextAgent) GetMemory() agents.Memory {
 	return nil
 }
 
+type terminalRaceAgent struct {
+	started  chan struct{}
+	canceled chan struct{}
+	release  chan struct{}
+	output   map[string]any
+	err      error
+}
+
+func (a *terminalRaceAgent) Execute(ctx context.Context, _ map[string]any) (map[string]any, error) {
+	close(a.started)
+	<-ctx.Done()
+	close(a.canceled)
+	<-a.release
+	return a.output, a.err
+}
+
+func (a *terminalRaceAgent) GetCapabilities() []core.Tool {
+	return nil
+}
+
+func (a *terminalRaceAgent) GetMemory() agents.Memory {
+	return nil
+}
+
 // createTestServer creates a server with a test agent.
 func createTestServer(t *testing.T, agent agents.Agent) *Server {
 	if agent == nil {
@@ -636,6 +660,158 @@ func TestHandleCancelTask(t *testing.T) {
 	updatedTask, _ := server.tasks.get(task.ID)
 	if updatedTask.Status.State != TaskStateFailed {
 		t.Errorf("expected failed state, got %s", updatedTask.Status.State)
+	}
+}
+
+func TestCancelTaskWinsOnceAgainstLateAgentResult(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		output map[string]any
+		err    error
+	}{
+		{name: "completion", output: map[string]any{"answer": "late result"}},
+		{name: "failure", err: errors.New("late failure")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &terminalRaceAgent{
+				started:  make(chan struct{}),
+				canceled: make(chan struct{}),
+				release:  make(chan struct{}),
+				output:   tt.output,
+				err:      tt.err,
+			}
+			server := createTestServer(t, agent)
+			task := server.tasks.create()
+			taskCtx, cancelTask := context.WithCancel(context.Background())
+			defer cancelTask()
+			task.setExecutionCancel(cancelTask)
+
+			sub := server.subscribers.subscribe(task.ID)
+			defer server.subscribers.unsubscribe(sub)
+
+			processDone := make(chan struct{})
+			go func() {
+				defer close(processDone)
+				server.processTask(taskCtx, task, NewUserMessage("work"))
+			}()
+
+			select {
+			case <-agent.started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("agent execution did not start")
+			}
+
+			cancelReq := &JSONRPCRequest{
+				ID:     "cancel-1",
+				Params: map[string]any{"taskId": task.ID},
+			}
+			if resp := server.handleCancelTask(context.Background(), cancelReq); resp.Error != nil {
+				t.Fatalf("handleCancelTask() error = %v", resp.Error)
+			}
+			// A repeated cancellation must not publish another terminal event.
+			if resp := server.handleCancelTask(context.Background(), cancelReq); resp.Error != nil {
+				t.Fatalf("second handleCancelTask() error = %v", resp.Error)
+			}
+
+			select {
+			case <-agent.canceled:
+			case <-time.After(2 * time.Second):
+				t.Fatal("task cancellation did not reach the running agent")
+			}
+			close(agent.release)
+
+			select {
+			case <-processDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("task processing did not finish")
+			}
+
+			status := task.GetStatus()
+			if status.State != TaskStateFailed {
+				t.Fatalf("task state = %s, want failed", status.State)
+			}
+			if got := ExtractTextFromMessage(status.Message); got != "Task cancelled by user" {
+				t.Fatalf("task message = %q, want cancellation message", got)
+			}
+			if artifacts := task.GetArtifacts(); len(artifacts) != 0 {
+				t.Fatalf("task has %d late artifacts, want 0", len(artifacts))
+			}
+
+			finalEvents := 0
+			artifactEvents := 0
+		drainEvents:
+			for {
+				select {
+				case event := <-sub.channel:
+					switch event := event.(type) {
+					case *TaskStatusUpdateEvent:
+						if event.Final {
+							finalEvents++
+							if event.Status.State != TaskStateFailed {
+								t.Fatalf("final event state = %s, want failed", event.Status.State)
+							}
+						}
+					case *TaskArtifactUpdateEvent:
+						artifactEvents++
+					}
+				default:
+					break drainEvents
+				}
+			}
+			if finalEvents != 1 {
+				t.Fatalf("final event count = %d, want 1", finalEvents)
+			}
+			if artifactEvents != 0 {
+				t.Fatalf("artifact event count = %d, want 0", artifactEvents)
+			}
+		})
+	}
+}
+
+func TestCancelTaskDoesNotOverwriteCompletion(t *testing.T) {
+	server := createTestServer(t, nil)
+	task := server.tasks.create()
+	sub := server.subscribers.subscribe(task.ID)
+	defer server.subscribers.unsubscribe(sub)
+
+	server.processTask(context.Background(), task, NewUserMessage("work"))
+	cancelReq := &JSONRPCRequest{ID: "cancel-1", Params: map[string]any{"taskId": task.ID}}
+	server.handleCancelTask(context.Background(), cancelReq)
+	server.handleCancelTask(context.Background(), cancelReq)
+
+	if status := task.GetStatus(); status.State != TaskStateCompleted {
+		t.Fatalf("task state = %s, want completed", status.State)
+	}
+	if artifacts := task.GetArtifacts(); len(artifacts) != 1 {
+		t.Fatalf("artifact count = %d, want 1", len(artifacts))
+	}
+
+	finalEvents := 0
+	artifactEvents := 0
+drainEvents:
+	for {
+		select {
+		case event := <-sub.channel:
+			switch event := event.(type) {
+			case *TaskStatusUpdateEvent:
+				if event.Final {
+					finalEvents++
+					if event.Status.State != TaskStateCompleted {
+						t.Fatalf("final event state = %s, want completed", event.Status.State)
+					}
+				}
+			case *TaskArtifactUpdateEvent:
+				artifactEvents++
+			}
+		default:
+			break drainEvents
+		}
+	}
+	if finalEvents != 1 {
+		t.Fatalf("final event count = %d, want 1", finalEvents)
+	}
+	if artifactEvents != 1 {
+		t.Fatalf("artifact event count = %d, want 1", artifactEvents)
 	}
 }
 
