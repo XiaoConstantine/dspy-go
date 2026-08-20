@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -458,64 +459,67 @@ func TestLlamacppLLM_StreamGenerate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/completion", r.URL.Path)
-				assert.Equal(t, "POST", r.Method)
+			synctest.Test(t, func(t *testing.T) {
+				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, "/completion", r.URL.Path)
+					assert.Equal(t, "POST", r.Method)
 
-				// Parse request to verify stream parameter is set
-				var reqBody llamacppRequest
-				err := json.NewDecoder(r.Body).Decode(&reqBody)
-				assert.NoError(t, err)
-				assert.True(t, reqBody.Stream)
+					// Parse request to verify stream parameter is set
+					var reqBody llamacppRequest
+					err := json.NewDecoder(r.Body).Decode(&reqBody)
+					assert.NoError(t, err)
+					assert.True(t, reqBody.Stream)
 
-				w.WriteHeader(tt.serverStatus)
+					w.WriteHeader(tt.serverStatus)
 
-				// Stream the response line by line
-				if tt.serverStatus == http.StatusOK && len(tt.streamResponse) > 0 {
-					flusher, ok := w.(http.Flusher)
-					require.True(t, ok, "ResponseWriter must be a Flusher")
+					// Stream the response line by line
+					if tt.serverStatus == http.StatusOK && len(tt.streamResponse) > 0 {
+						flusher, ok := w.(http.Flusher)
+						require.True(t, ok, "ResponseWriter must be a Flusher")
 
-					for _, line := range tt.streamResponse {
-						fmt.Fprintln(w, line)
-						flusher.Flush()
-						// Add small delay to simulate real streaming
-						time.Sleep(10 * time.Millisecond)
+						for _, line := range tt.streamResponse {
+							fmt.Fprintln(w, line)
+							flusher.Flush()
+							// Add small delay to simulate real streaming
+							time.Sleep(10 * time.Millisecond)
+						}
+					}
+				}))
+				serverClient := server.Client()
+
+				llm, err := NewLlamacppLLM(server.URL)
+				require.NoError(t, err)
+				llm.GetHTTPClient().Transport = serverClient.Transport
+
+				stream, err := llm.StreamGenerate(context.Background(), "Test prompt")
+				require.NoError(t, err)
+
+				// Wait for and collect all stream chunks
+				var chunks []string
+				var streamError error
+
+				for chunk := range stream.ChunkChannel {
+					if chunk.Error != nil {
+						streamError = chunk.Error
+						break
+					}
+
+					if chunk.Done {
+						break
+					}
+
+					if chunk.Content != "" {
+						chunks = append(chunks, chunk.Content)
 					}
 				}
-			}))
-			defer server.Close()
 
-			llm, err := NewLlamacppLLM(server.URL)
-			require.NoError(t, err)
-
-			stream, err := llm.StreamGenerate(context.Background(), "Test prompt")
-			require.NoError(t, err)
-
-			// Wait for and collect all stream chunks
-			var chunks []string
-			var streamError error
-
-			for chunk := range stream.ChunkChannel {
-				if chunk.Error != nil {
-					streamError = chunk.Error
-					break
+				if tt.expectError {
+					assert.NotNil(t, streamError)
+				} else {
+					assert.Nil(t, streamError)
+					assert.Equal(t, tt.expectedChunks, chunks)
 				}
-
-				if chunk.Done {
-					break
-				}
-
-				if chunk.Content != "" {
-					chunks = append(chunks, chunk.Content)
-				}
-			}
-
-			if tt.expectError {
-				assert.NotNil(t, streamError)
-			} else {
-				assert.Nil(t, streamError)
-				assert.Equal(t, tt.expectedChunks, chunks)
-			}
+			})
 		})
 	}
 }

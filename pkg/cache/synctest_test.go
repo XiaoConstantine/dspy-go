@@ -1,5 +1,5 @@
 // Package cache provides synctest-based tests for concurrent cache operations.
-// These tests use Go 1.25's testing/synctest package for deterministic concurrent testing.
+// These tests use Go's testing/synctest package for deterministic concurrent testing.
 package cache
 
 import (
@@ -32,9 +32,6 @@ func TestCacheConcurrencyWithSynctest(t *testing.T) {
 				})
 			}
 			wg.Wait()
-
-			// synctest.Wait ensures all background work is complete
-			synctest.Wait()
 
 			// All keys for the same input should be identical (deterministic)
 			for i := 1; i < 10; i++ {
@@ -87,8 +84,8 @@ func TestCacheConcurrencyWithSynctest(t *testing.T) {
 			// Entry should not be expired yet
 			assert.False(t, time.Now().After(entry.expiresAt), "Entry should not be expired initially")
 
-			// Advance virtual time past TTL
-			time.Sleep(600 * time.Millisecond)
+			// Advance virtual time past TTL and let concurrent work settle.
+			synctest.Sleep(600 * time.Millisecond)
 
 			// Entry should now be expired
 			assert.True(t, time.Now().After(entry.expiresAt), "Entry should be expired after TTL")

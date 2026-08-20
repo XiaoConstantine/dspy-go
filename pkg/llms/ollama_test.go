@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -1049,62 +1050,63 @@ func TestOllamaLLM_ModelIDParsing(t *testing.T) {
 }
 
 func TestOllamaLLM_ConcurrentStreaming(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
+	synctest.Test(t, func(t *testing.T) {
+		server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
 
-		flusher := w.(http.Flusher)
-		for i := 0; i < 5; i++ {
-			streamResp := openai.ChatCompletionStreamResponse{
-				Choices: []openai.ChatChoiceStream{{
-					Delta: openai.ChatCompletionMessage{Content: fmt.Sprintf("chunk_%d ", i)},
-				}},
+			flusher := w.(http.Flusher)
+			for i := 0; i < 5; i++ {
+				streamResp := openai.ChatCompletionStreamResponse{
+					Choices: []openai.ChatChoiceStream{{
+						Delta: openai.ChatCompletionMessage{Content: fmt.Sprintf("chunk_%d ", i)},
+					}},
+				}
+				jsonData, _ := json.Marshal(streamResp)
+				fmt.Fprintf(w, "data: %s\n\n", jsonData)
+				flusher.Flush()
+				time.Sleep(10 * time.Millisecond)
 			}
-			jsonData, _ := json.Marshal(streamResp)
-			fmt.Fprintf(w, "data: %s\n\n", jsonData)
+
+			fmt.Fprintf(w, "data: [DONE]\n\n")
 			flusher.Flush()
-			time.Sleep(10 * time.Millisecond)
+		}))
+		serverClient := server.Client()
+
+		llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(server.URL))
+		assert.NoError(t, err)
+		llm.GetHTTPClient().Transport = serverClient.Transport
+
+		const numStreams = 3
+		var wg sync.WaitGroup
+		results := make([]string, numStreams)
+
+		for i := 0; i < numStreams; i++ {
+			idx := i
+			wg.Go(func() {
+				streamResp, err := llm.StreamGenerate(context.Background(), fmt.Sprintf("prompt_%d", idx))
+				assert.NoError(t, err)
+
+				var output strings.Builder
+				for chunk := range streamResp.ChunkChannel {
+					if chunk.Error != nil {
+						t.Errorf("Stream %d error: %v", idx, chunk.Error)
+						return
+					}
+					if chunk.Done {
+						break
+					}
+					output.WriteString(chunk.Content)
+				}
+
+				results[idx] = output.String()
+			})
 		}
 
-		fmt.Fprintf(w, "data: [DONE]\n\n")
-		flusher.Flush()
-	}))
-	defer server.Close()
+		wg.Wait()
 
-	llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(server.URL))
-	assert.NoError(t, err)
-
-	// Test concurrent streaming using Go 1.25's WaitGroup.Go()
-	const numStreams = 3
-	var wg sync.WaitGroup
-	results := make([]string, numStreams)
-
-	for i := 0; i < numStreams; i++ {
-		idx := i // Capture loop variable
-		wg.Go(func() {
-			streamResp, err := llm.StreamGenerate(context.Background(), fmt.Sprintf("prompt_%d", idx))
-			assert.NoError(t, err)
-
-			var output strings.Builder
-			for chunk := range streamResp.ChunkChannel {
-				if chunk.Error != nil {
-					t.Errorf("Stream %d error: %v", idx, chunk.Error)
-					return
-				}
-				if chunk.Done {
-					break
-				}
-				output.WriteString(chunk.Content)
-			}
-
-			results[idx] = output.String()
-		})
-	}
-
-	wg.Wait()
-
-	// All streams should complete successfully
-	for i, result := range results {
-		assert.Equal(t, "chunk_0 chunk_1 chunk_2 chunk_3 chunk_4 ", result, "Stream %d failed", i)
-	}
+		for i, result := range results {
+			assert.Equal(t, "chunk_0 chunk_1 chunk_2 chunk_3 chunk_4 ", result, "Stream %d failed", i)
+		}
+	})
 }

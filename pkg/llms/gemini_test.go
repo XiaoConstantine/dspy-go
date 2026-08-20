@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -1100,91 +1101,94 @@ func TestGeminiLLM_GenerateWithTools_EmptyResponseDiagnostics(t *testing.T) {
 }
 
 func TestGeminiLLM_StreamGenerate_ChunkHandling(t *testing.T) {
-	// Create test server that returns SSE responses
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set response headers for SSE
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(http.StatusOK)
+	synctest.Test(t, func(t *testing.T) {
+		// Create test server that returns SSE responses
+		server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set response headers for SSE
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.WriteHeader(http.StatusOK)
 
-		flusher, ok := w.(http.Flusher)
-		require.True(t, ok, "Flusher interface not supported")
+			flusher, ok := w.(http.Flusher)
+			require.True(t, ok, "Flusher interface not supported")
 
-		// Send a series of chunks with delays to simulate streaming
-		chunks := []string{
-			`data: {"candidates":[{"content":{"parts":[{"text":"Once"}]}}]}`,
-			`data: {"candidates":[{"content":{"parts":[{"text":" upon"}]}}]}`,
-			`data: {"candidates":[{"content":{"parts":[{"text":" a"}]}}]}`,
-			`data: {"candidates":[{"content":{"parts":[{"text":" time"}]}}]}`,
-			`data: [DONE]`,
+			// Send a series of chunks with delays to simulate streaming
+			chunks := []string{
+				`data: {"candidates":[{"content":{"parts":[{"text":"Once"}]}}]}`,
+				`data: {"candidates":[{"content":{"parts":[{"text":" upon"}]}}]}`,
+				`data: {"candidates":[{"content":{"parts":[{"text":" a"}]}}]}`,
+				`data: {"candidates":[{"content":{"parts":[{"text":" time"}]}}]}`,
+				`data: [DONE]`,
+			}
+
+			for _, chunk := range chunks {
+				fmt.Fprintln(w, chunk)
+				flusher.Flush()
+				time.Sleep(50 * time.Millisecond)
+			}
+		}))
+		serverClient := server.Client()
+
+		// Create GeminiLLM
+		endpoint := &core.EndpointConfig{
+			BaseURL:    server.URL,
+			Path:       "/models/gemini-2.5-flash:generateContent",
+			Headers:    map[string]string{"Content-Type": "application/json"},
+			TimeoutSec: 30,
+		}
+		llm := &GeminiLLM{
+			apiKey: "test-api-key",
+			BaseLLM: core.NewBaseLLM(
+				"google",
+				core.ModelGoogleGeminiFlash,
+				[]core.Capability{core.CapabilityCompletion},
+				endpoint,
+			),
+		}
+		llm.GetHTTPClient().Transport = serverClient.Transport
+
+		// Call StreamGenerate
+		stream, err := llm.StreamGenerate(context.Background(), "Tell me a story")
+		require.NoError(t, err)
+		require.NotNil(t, stream)
+
+		// Collect chunks
+		var receivedChunks []string
+		var done bool
+
+		for !done {
+			select {
+			case chunk, ok := <-stream.ChunkChannel:
+				if !ok {
+					// Channel closed
+					done = true
+					break
+				}
+
+				if chunk.Error != nil {
+					t.Fatalf("Unexpected error in stream: %v", chunk.Error)
+				}
+
+				if chunk.Done {
+					// End of stream
+					done = true
+					break
+				}
+
+				if chunk.Content != "" {
+					receivedChunks = append(receivedChunks, chunk.Content)
+				}
+
+			case <-time.After(2 * time.Second):
+				t.Fatal("Timeout waiting for chunks")
+			}
 		}
 
-		for _, chunk := range chunks {
-			fmt.Fprintln(w, chunk)
-			flusher.Flush()
-			time.Sleep(50 * time.Millisecond)
-		}
-	}))
-	defer server.Close()
-
-	// Create GeminiLLM
-	endpoint := &core.EndpointConfig{
-		BaseURL:    server.URL,
-		Path:       "/models/gemini-2.5-flash:generateContent",
-		Headers:    map[string]string{"Content-Type": "application/json"},
-		TimeoutSec: 30,
-	}
-	llm := &GeminiLLM{
-		apiKey: "test-api-key",
-		BaseLLM: core.NewBaseLLM(
-			"google",
-			core.ModelGoogleGeminiFlash,
-			[]core.Capability{core.CapabilityCompletion},
-			endpoint,
-		),
-	}
-
-	// Call StreamGenerate
-	stream, err := llm.StreamGenerate(context.Background(), "Tell me a story")
-	require.NoError(t, err)
-	require.NotNil(t, stream)
-
-	// Collect chunks
-	var receivedChunks []string
-	var done bool
-
-	for !done {
-		select {
-		case chunk, ok := <-stream.ChunkChannel:
-			if !ok {
-				// Channel closed
-				done = true
-				break
-			}
-
-			if chunk.Error != nil {
-				t.Fatalf("Unexpected error in stream: %v", chunk.Error)
-			}
-
-			if chunk.Done {
-				// End of stream
-				done = true
-				break
-			}
-
-			if chunk.Content != "" {
-				receivedChunks = append(receivedChunks, chunk.Content)
-			}
-
-		case <-time.After(2 * time.Second):
-			t.Fatal("Timeout waiting for chunks")
-		}
-	}
-
-	// Verify received chunks
-	expectedChunks := []string{"Once", " upon", " a", " time"}
-	assert.Equal(t, expectedChunks, receivedChunks)
+		// Verify received chunks
+		expectedChunks := []string{"Once", " upon", " a", " time"}
+		assert.Equal(t, expectedChunks, receivedChunks)
+	})
 }
 
 func TestGeminiLLM_EmbeddingErrors(t *testing.T) {

@@ -1,5 +1,5 @@
 // Package modules provides synctest-based tests for concurrent module execution.
-// These tests use Go 1.25's testing/synctest package for deterministic concurrent testing.
+// These tests use Go's testing/synctest package for deterministic concurrent testing.
 package modules
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestParallelWithSynctest demonstrates Go 1.25's synctest for deterministic concurrent tests.
+// TestParallelWithSynctest demonstrates synctest for deterministic concurrent tests.
 // The synctest.Test function creates an isolated "bubble" with virtualized time,
 // allowing tests to verify concurrent behavior without timing-dependent flakiness.
 func TestParallelWithSynctest(t *testing.T) {
@@ -54,7 +54,7 @@ func TestParallelWithSynctest(t *testing.T) {
 		})
 	})
 
-	t.Run("Worker completion ordering with synctest.Wait", func(t *testing.T) {
+	t.Run("Worker completion ordering", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			var completionOrder []int
 			var orderCounter atomic.Int32
@@ -78,10 +78,6 @@ func TestParallelWithSynctest(t *testing.T) {
 			result, err := parallel.Process(ctx, map[string]any{
 				"batch_inputs": batchInputs,
 			})
-
-			// synctest.Wait() ensures all goroutines in the bubble are blocked
-			// before we check results - this makes the test deterministic
-			synctest.Wait()
 
 			assert.NoError(t, err)
 			assert.NotNil(t, result)
