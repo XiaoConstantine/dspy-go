@@ -355,6 +355,7 @@ type YaegiREPL struct {
 	stderr                   *bytes.Buffer
 	llmClient                SubLLMClient
 	ctx                      context.Context
+	ctxMu                    sync.RWMutex // Protects ctx.
 	mu                       sync.Mutex
 	llmCalls                 []LLMCall
 	llmCallsMu               sync.Mutex // Separate mutex for async LLM call recording
@@ -930,7 +931,7 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 	// Get the context variable from the interpreter and include it in the prompt
 	fullPrompt := r.buildPromptWithContext(prompt)
 
-	result, err := r.llmClient.Query(r.ctx, fullPrompt)
+	result, err := r.llmClient.Query(r.executionContext(), fullPrompt)
 	duration := time.Since(start)
 
 	response := result.Response
@@ -950,7 +951,7 @@ func (r *YaegiREPL) llmQueryRaw(prompt string) string {
 	start := time.Now()
 
 	// Do NOT prepend context - send prompt as-is
-	result, err := r.llmClient.Query(r.ctx, prompt)
+	result, err := r.llmClient.Query(r.executionContext(), prompt)
 	duration := time.Since(start)
 
 	response := result.Response
@@ -976,7 +977,7 @@ func (r *YaegiREPL) llmQueryWith(contextSlice, prompt string) string {
 		fullPrompt = prompt
 	}
 
-	result, err := r.llmClient.Query(r.ctx, fullPrompt)
+	result, err := r.llmClient.Query(r.executionContext(), fullPrompt)
 	duration := time.Since(start)
 
 	response := result.Response
@@ -1013,7 +1014,7 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 		fullPrompts[i] = r.buildPromptWithContext(p)
 	}
 
-	results, err := r.llmClient.QueryBatched(r.ctx, fullPrompts)
+	results, err := r.llmClient.QueryBatched(r.executionContext(), fullPrompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
 
@@ -1045,7 +1046,7 @@ func (r *YaegiREPL) llmQueryBatchedRaw(prompts []string) []string {
 	start := time.Now()
 
 	// Do NOT prepend context - send prompts as-is
-	results, err := r.llmClient.QueryBatched(r.ctx, prompts)
+	results, err := r.llmClient.QueryBatched(r.executionContext(), prompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
 
@@ -1146,11 +1147,23 @@ func init() {
 	return err
 }
 
+func (r *YaegiREPL) setExecutionContext(ctx context.Context) {
+	r.ctxMu.Lock()
+	r.ctx = ctx
+	r.ctxMu.Unlock()
+}
+
+func (r *YaegiREPL) executionContext() context.Context {
+	r.ctxMu.RLock()
+	defer r.ctxMu.RUnlock()
+	return r.ctx
+}
+
 // SetContext sets the execution context for LLM calls.
 func (r *YaegiREPL) SetContext(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.ctx = ctx
+	r.setExecutionContext(ctx)
 }
 
 // Execute runs Go code in the interpreter. Execution errors are captured in
@@ -1162,7 +1175,7 @@ func (r *YaegiREPL) Execute(ctx context.Context, code string) (result *Execution
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.ctx = ctx
+	r.setExecutionContext(ctx)
 	r.stdout.Reset()
 	r.stderr.Reset()
 
@@ -1355,8 +1368,10 @@ func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 
 	handle := newAsyncQueryHandle()
 
-	// Build full prompt with context included (capture before goroutine)
+	// Build the prompt and snapshot the execution context before starting the
+	// goroutine. A later execution must not change this query's context.
 	fullPrompt := r.buildPromptWithContext(prompt)
+	queryCtx := r.executionContext()
 
 	// Track the handle
 	r.asyncMu.Lock()
@@ -1366,7 +1381,7 @@ func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 	// Start the async query
 	go func() {
 		start := time.Now()
-		result, err := r.llmClient.Query(r.ctx, fullPrompt)
+		result, err := r.llmClient.Query(queryCtx, fullPrompt)
 		duration := time.Since(start)
 
 		response := result.Response
@@ -1478,6 +1493,8 @@ func (r *YaegiREPL) asyncResult(handleID string) string {
 // QueryAsync starts an async query and returns a handle.
 // This is the Go API for async queries.
 func (r *YaegiREPL) QueryAsync(prompt string) *AsyncQueryHandle {
+	queryCtx := r.executionContext()
+
 	handle := newAsyncQueryHandle()
 
 	// Track the handle
@@ -1488,7 +1505,7 @@ func (r *YaegiREPL) QueryAsync(prompt string) *AsyncQueryHandle {
 	// Start the async query
 	go func() {
 		start := time.Now()
-		result, err := r.llmClient.Query(r.ctx, prompt)
+		result, err := r.llmClient.Query(queryCtx, prompt)
 		duration := time.Since(start)
 
 		response := result.Response
@@ -1620,7 +1637,7 @@ func (r *YaegiREPL) findRelevant(query string, topK int) []string {
 		return []string{}
 	}
 
-	chunks, err := idx.FindRelevant(r.ctx, query, topK)
+	chunks, err := idx.FindRelevant(r.executionContext(), query, topK)
 	if err != nil {
 		return []string{fmt.Sprintf("Error: %v", err)}
 	}
