@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil/jsonv2test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,14 +40,27 @@ func TestTBLiteTaskUnmarshalJSON_AcceptsHuggingFaceShapes(t *testing.T) {
 	assert.Equal(t, 180, task.TestTimeoutSec)
 }
 
-func TestTBLiteTaskUnmarshalJSONPreservesV2Strictness(t *testing.T) {
-	var duplicate TBLiteTask
-	err := jsonv2.Unmarshal([]byte(`{"task_name":"first","task_name":"second"}`), &duplicate)
-	require.Error(t, err)
-
-	var mismatchedCase TBLiteTask
-	require.NoError(t, jsonv2.Unmarshal([]byte(`{"TASK_NAME":"wrong"}`), &mismatchedCase))
-	assert.Empty(t, mismatchedCase.TaskName)
+func TestTBLiteTaskJSONV2Contract(t *testing.T) {
+	jsonv2test.Check(t, func(data []byte) (TBLiteTask, error) {
+		var task TBLiteTask
+		err := jsonv2.Unmarshal(data, &task)
+		return task, err
+	}, jsonv2test.Contract[TBLiteTask]{
+		Valid:           []byte(`{"task_name":"expected"}`),
+		DuplicateMember: []byte(`{"task_name":"first","task_name":"second"}`),
+		InvalidUTF8:     jsonv2test.InvalidUTF8(`{"task_name":"`, `"}`),
+		CaseMismatch:    []byte(`{"TASK_NAME":"wrong"}`),
+		UnknownMember:   []byte(`{"task_name":"expected","unknown":true}`),
+		CheckValid: func(t testing.TB, task TBLiteTask) {
+			assert.Equal(t, "expected", task.TaskName)
+		},
+		CheckCaseMismatch: func(t testing.TB, task TBLiteTask) {
+			assert.Empty(t, task.TaskName)
+		},
+		CheckUnknownMember: func(t testing.TB, task TBLiteTask) {
+			assert.Equal(t, "expected", task.TaskName)
+		},
+	})
 }
 
 func TestLoadTBLiteTasksFromFile_NormalizesTasks(t *testing.T) {

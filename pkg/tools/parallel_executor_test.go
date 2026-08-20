@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
+	"github.com/XiaoConstantine/dspy-go/internal/testutil/jsonv2test"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -753,14 +754,27 @@ func TestToolCallJSONUnmarshalAcceptsLegacyFields(t *testing.T) {
 	assert.Contains(t, string(reEncoded), "\"name\":\"parser\"")
 }
 
-func TestToolCallUnmarshalJSONPreservesV2Strictness(t *testing.T) {
-	var duplicate ToolCall
-	err := jsonv2.Unmarshal([]byte(`{"name":"first","name":"second"}`), &duplicate)
-	require.Error(t, err)
-
-	var mismatchedCase ToolCall
-	require.NoError(t, jsonv2.Unmarshal([]byte(`{"NAME":"wrong"}`), &mismatchedCase))
-	assert.Empty(t, mismatchedCase.Name)
+func TestToolCallJSONV2Contract(t *testing.T) {
+	jsonv2test.Check(t, func(data []byte) (ToolCall, error) {
+		var call ToolCall
+		err := jsonv2.Unmarshal(data, &call)
+		return call, err
+	}, jsonv2test.Contract[ToolCall]{
+		Valid:           []byte(`{"name":"expected"}`),
+		DuplicateMember: []byte(`{"name":"first","name":"second"}`),
+		InvalidUTF8:     jsonv2test.InvalidUTF8(`{"name":"`, `"}`),
+		CaseMismatch:    []byte(`{"NAME":"wrong"}`),
+		UnknownMember:   []byte(`{"name":"expected","unknown":true}`),
+		CheckValid: func(t testing.TB, call ToolCall) {
+			assert.Equal(t, "expected", call.Name)
+		},
+		CheckCaseMismatch: func(t testing.TB, call ToolCall) {
+			assert.Empty(t, call.Name)
+		},
+		CheckUnknownMember: func(t testing.TB, call ToolCall) {
+			assert.Equal(t, "expected", call.Name)
+		},
+	})
 }
 
 func TestParallelPipelineExecutor(t *testing.T) {

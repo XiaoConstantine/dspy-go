@@ -5,6 +5,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil/jsonv2test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -124,17 +125,27 @@ func TestErrorResponseUnmarshal(t *testing.T) {
 	})
 }
 
-func TestErrorResponseUnmarshalJSONPreservesV2Strictness(t *testing.T) {
-	var duplicate ErrorResponse
-	err := jsonv2.Unmarshal([]byte(`{
-		"error":{"message":"first"},
-		"error":{"message":"second"}
-	}`), &duplicate)
-	require.Error(t, err)
-
-	var mismatchedCase ErrorResponse
-	require.NoError(t, jsonv2.Unmarshal([]byte(`{"ERROR":{"MESSAGE":"wrong"}}`), &mismatchedCase))
-	assert.Empty(t, mismatchedCase.Error.Message)
+func TestErrorResponseJSONV2Contract(t *testing.T) {
+	jsonv2test.Check(t, func(data []byte) (ErrorResponse, error) {
+		var response ErrorResponse
+		err := jsonv2.Unmarshal(data, &response)
+		return response, err
+	}, jsonv2test.Contract[ErrorResponse]{
+		Valid:           []byte(`{"error":{"message":"expected"}}`),
+		DuplicateMember: []byte(`{"error":{"message":"first"},"error":{"message":"second"}}`),
+		InvalidUTF8:     jsonv2test.InvalidUTF8(`{"error":{"message":"`, `"}}`),
+		CaseMismatch:    []byte(`{"ERROR":{"MESSAGE":"wrong"}}`),
+		UnknownMember:   []byte(`{"unknown":true,"error":{"message":"expected"}}`),
+		CheckValid: func(t testing.TB, response ErrorResponse) {
+			assert.Equal(t, "expected", response.Error.Message)
+		},
+		CheckCaseMismatch: func(t testing.TB, response ErrorResponse) {
+			assert.Empty(t, response.Error.Message)
+		},
+		CheckUnknownMember: func(t testing.TB, response ErrorResponse) {
+			assert.Equal(t, "expected", response.Error.Message)
+		},
+	})
 }
 
 func TestErrorResponseGetError(t *testing.T) {

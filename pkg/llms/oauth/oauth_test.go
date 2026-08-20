@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil/jsonv2test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,6 +70,69 @@ func httpResponse(statusCode int, body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     make(http.Header),
 	}
+}
+
+func TestOAuthTokenResponsesFollowJSONV2Contract(t *testing.T) {
+	t.Run("Anthropic", func(t *testing.T) {
+		withOAuthSeams(t)
+		valid := []byte(`{"access_token":"expected","refresh_token":"refresh","expires_in":3600}`)
+		checkExpected := func(t testing.TB, response *TokenResponse) {
+			t.Helper()
+			require.NotNil(t, response)
+			assert.Equal(t, "expected", response.AccessToken)
+		}
+
+		jsonv2test.Check(t, func(payload []byte) (*TokenResponse, error) {
+			httpPost = func(string, string, io.Reader) (*http.Response, error) {
+				return httpResponse(http.StatusOK, string(payload)), nil
+			}
+			return ExchangeCode("code", "verifier")
+		}, jsonv2test.Contract[*TokenResponse]{
+			Valid:           valid,
+			DuplicateMember: jsonv2test.WithObjectMembers(valid, []byte(`"access_token":"second"`)),
+			InvalidUTF8: jsonv2test.WithObjectMembers(valid,
+				jsonv2test.InvalidUTF8(`"contract_invalid":"`, `"`)),
+			CaseMismatch:       jsonv2test.WithObjectMembers(valid, []byte(`"ACCESS_TOKEN":"wrong"`)),
+			UnknownMember:      jsonv2test.WithObjectMembers(valid, []byte(`"contract_unknown":true`)),
+			CheckValid:         checkExpected,
+			CheckCaseMismatch:  checkExpected,
+			CheckUnknownMember: checkExpected,
+		})
+	})
+
+	t.Run("OpenAI", func(t *testing.T) {
+		withOAuthSeams(t)
+		valid := []byte(`{
+			"access_token":"expected",
+			"id_token":"id",
+			"refresh_token":"refresh",
+			"expires_in":3600,
+			"token_type":"Bearer",
+			"scope":"openid"
+		}`)
+		checkExpected := func(t testing.TB, response *OpenAITokenResponse) {
+			t.Helper()
+			require.NotNil(t, response)
+			assert.Equal(t, "expected", response.AccessToken)
+		}
+
+		jsonv2test.Check(t, func(payload []byte) (*OpenAITokenResponse, error) {
+			httpPost = func(string, string, io.Reader) (*http.Response, error) {
+				return httpResponse(http.StatusOK, string(payload)), nil
+			}
+			return ExchangeOpenAICode("code", "verifier")
+		}, jsonv2test.Contract[*OpenAITokenResponse]{
+			Valid:           valid,
+			DuplicateMember: jsonv2test.WithObjectMembers(valid, []byte(`"access_token":"second"`)),
+			InvalidUTF8: jsonv2test.WithObjectMembers(valid,
+				jsonv2test.InvalidUTF8(`"contract_invalid":"`, `"`)),
+			CaseMismatch:       jsonv2test.WithObjectMembers(valid, []byte(`"ACCESS_TOKEN":"wrong"`)),
+			UnknownMember:      jsonv2test.WithObjectMembers(valid, []byte(`"contract_unknown":true`)),
+			CheckValid:         checkExpected,
+			CheckCaseMismatch:  checkExpected,
+			CheckUnknownMember: checkExpected,
+		})
+	})
 }
 
 func TestGeneratePKCE(t *testing.T) {

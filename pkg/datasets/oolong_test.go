@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil/jsonv2test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,14 +51,27 @@ func TestOolongTaskUnmarshalJSON_AcceptsNumericID(t *testing.T) {
 	assert.Equal(t, "110010000", task.ID)
 }
 
-func TestOolongTaskUnmarshalJSONPreservesV2Strictness(t *testing.T) {
-	var duplicate OolongTask
-	err := jsonv2.Unmarshal([]byte(`{"id":"first","id":"second"}`), &duplicate)
-	require.Error(t, err)
-
-	var mismatchedCase OolongTask
-	require.NoError(t, jsonv2.Unmarshal([]byte(`{"ID":"wrong"}`), &mismatchedCase))
-	assert.Empty(t, mismatchedCase.ID)
+func TestOolongTaskJSONV2Contract(t *testing.T) {
+	jsonv2test.Check(t, func(data []byte) (OolongTask, error) {
+		var task OolongTask
+		err := jsonv2.Unmarshal(data, &task)
+		return task, err
+	}, jsonv2test.Contract[OolongTask]{
+		Valid:           []byte(`{"id":"expected"}`),
+		DuplicateMember: []byte(`{"id":"first","id":"second"}`),
+		InvalidUTF8:     jsonv2test.InvalidUTF8(`{"id":"`, `"}`),
+		CaseMismatch:    []byte(`{"ID":"wrong"}`),
+		UnknownMember:   []byte(`{"id":"expected","unknown":true}`),
+		CheckValid: func(t testing.TB, task OolongTask) {
+			assert.Equal(t, "expected", task.ID)
+		},
+		CheckCaseMismatch: func(t testing.TB, task OolongTask) {
+			assert.Empty(t, task.ID)
+		},
+		CheckUnknownMember: func(t testing.TB, task OolongTask) {
+			assert.Equal(t, "expected", task.ID)
+		},
+	})
 }
 
 func TestSliceOolongTasks_UsesDeterministicOffset(t *testing.T) {

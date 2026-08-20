@@ -5,58 +5,65 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/internal/testutil/jsonv2test"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestStreamsReportMalformedJSONFrames(t *testing.T) {
-	openAIFrames := strings.Join([]string{
-		`data: {"choices":[{"delta":{"content":"partial"}}]}`,
-		`data: {"duplicate":1,"duplicate":2}`,
-	}, "\n") + "\n"
-	nativeFrames := strings.Join([]string{
-		`{"response":"partial","done":false}`,
-		`{"duplicate":1,"duplicate":2}`,
-	}, "\n") + "\n"
+type streamJSONContractResult struct {
+	contents   []string
+	doneChunks int
+}
 
-	tests := []struct {
-		name      string
-		provider  string
-		model     string
-		body      string
-		newStream func(*testing.T, string) *core.StreamResponse
+func TestStreamsFollowJSONV2Contract(t *testing.T) {
+	sseFrame := func(payload string) []byte {
+		return []byte("data: " + payload + "\n")
+	}
+	nativeFrame := func(payload string) []byte {
+		return []byte(payload + "\n")
+	}
+
+	providers := []struct {
+		name              string
+		provider          string
+		model             string
+		validFrame        string
+		caseMismatchFrame string
+		frame             func(string) []byte
+		newStream         func(string) (*core.StreamResponse, error)
+		doneOnEOF         bool
 	}{
 		{
-			name:     "OpenAI",
-			provider: "openai",
-			model:    string(core.ModelOpenAIGPT4),
-			body:     openAIFrames,
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			name:              "OpenAI",
+			provider:          "openai",
+			model:             string(core.ModelOpenAIGPT4),
+			validFrame:        `{"choices":[{"delta":{"content":"partial"}}]}`,
+			caseMismatchFrame: `{"CHOICES":[{"delta":{"content":"wrong"}}]}`,
+			frame:             sseFrame,
+			newStream: func(baseURL string) (*core.StreamResponse, error) {
 				llm, err := NewOpenAILLM(
 					core.ModelOpenAIGPT4,
 					WithAPIKey("test-key"),
 					WithOpenAIBaseURL(baseURL),
 				)
-				require.NoError(t, err)
-				stream, err := llm.StreamGenerate(context.Background(), "hello")
-				require.NoError(t, err)
-				return stream
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
 		{
-			name:     "Gemini",
-			provider: "google",
-			model:    string(core.ModelGoogleGeminiFlash),
-			body: strings.Join([]string{
-				`data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}`,
-				`data: {"duplicate":1,"duplicate":2}`,
-			}, "\n") + "\n",
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			name:              "Gemini",
+			provider:          "google",
+			model:             string(core.ModelGoogleGeminiFlash),
+			validFrame:        `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}`,
+			caseMismatchFrame: `{"CANDIDATES":[{"content":{"parts":[{"text":"wrong"}]}}]}`,
+			frame:             sseFrame,
+			newStream: func(baseURL string) (*core.StreamResponse, error) {
 				llm := &GeminiLLM{
 					apiKey: "test-key",
 					BaseLLM: core.NewBaseLLM(
@@ -71,86 +78,138 @@ func TestStreamsReportMalformedJSONFrames(t *testing.T) {
 						},
 					),
 				}
-				stream, err := llm.StreamGenerate(context.Background(), "hello")
-				require.NoError(t, err)
-				return stream
+				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
 		{
-			name:     "LlamaCPP",
-			provider: "llamacpp",
-			body: strings.Join([]string{
-				`data: {"content":"partial","stop":false}`,
-				`data: {"duplicate":1,"duplicate":2}`,
-			}, "\n") + "\n",
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			name:              "LlamaCPP",
+			provider:          "llamacpp",
+			validFrame:        `{"content":"partial","stop":false}`,
+			caseMismatchFrame: `{"CONTENT":"wrong","stop":false}`,
+			frame:             sseFrame,
+			doneOnEOF:         true,
+			newStream: func(baseURL string) (*core.StreamResponse, error) {
 				llm, err := NewLlamacppLLM(baseURL)
-				require.NoError(t, err)
-				stream, err := llm.StreamGenerate(context.Background(), "hello")
-				require.NoError(t, err)
-				return stream
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
 		{
-			name:     "Ollama native",
-			provider: "ollama",
-			model:    "llama3:8b",
-			body:     nativeFrames,
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			name:              "Ollama native",
+			provider:          "ollama",
+			model:             "llama3:8b",
+			validFrame:        `{"response":"partial","done":false}`,
+			caseMismatchFrame: `{"RESPONSE":"wrong","done":false}`,
+			frame:             nativeFrame,
+			newStream: func(baseURL string) (*core.StreamResponse, error) {
 				llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithNativeAPI())
-				require.NoError(t, err)
-				stream, err := llm.StreamGenerate(context.Background(), "hello")
-				require.NoError(t, err)
-				return stream
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
 		{
-			name:     "Ollama OpenAI compatible",
-			provider: "ollama",
-			model:    "llama3:8b",
-			body:     openAIFrames,
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			name:              "Ollama OpenAI compatible",
+			provider:          "ollama",
+			model:             "llama3:8b",
+			validFrame:        `{"choices":[{"delta":{"content":"partial"}}]}`,
+			caseMismatchFrame: `{"CHOICES":[{"delta":{"content":"wrong"}}]}`,
+			frame:             sseFrame,
+			newStream: func(baseURL string) (*core.StreamResponse, error) {
 				llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithOpenAIAPI())
-				require.NoError(t, err)
-				stream, err := llm.StreamGenerate(context.Background(), "hello")
-				require.NoError(t, err)
-				return stream
+				if err != nil {
+					return nil, err
+				}
+				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				_, _ = fmt.Fprint(w, test.body)
-			}))
-			defer server.Close()
-
-			stream := test.newStream(t, server.URL)
-			var contents []string
-			var streamErrors []error
-			doneChunks := 0
-			for chunk := range stream.ChunkChannel {
-				if chunk.Content != "" {
-					contents = append(contents, chunk.Content)
+	for _, provider := range providers {
+		t.Run(provider.name, func(t *testing.T) {
+			body := func(frames ...[]byte) []byte {
+				var joined []byte
+				for _, frame := range frames {
+					joined = append(joined, frame...)
 				}
-				if chunk.Error != nil {
-					streamErrors = append(streamErrors, chunk.Error)
-				}
-				if chunk.Done {
-					doneChunks++
-				}
+				return joined
+			}
+			valid := provider.frame(provider.validFrame)
+			contract := jsonv2test.Contract[streamJSONContractResult]{
+				Valid:           valid,
+				DuplicateMember: body(valid, provider.frame(`{"contract_duplicate":1,"contract_duplicate":2}`)),
+				InvalidUTF8: body(valid, provider.frame(string(
+					jsonv2test.InvalidUTF8(`{"contract_invalid":"`, `"}`)))),
+				CaseMismatch:  body(valid, provider.frame(provider.caseMismatchFrame)),
+				UnknownMember: body(valid, provider.frame(`{"contract_unknown":true}`)),
 			}
 
-			assert.Equal(t, []string{"partial"}, contents)
-			assert.Zero(t, doneChunks)
-			require.Len(t, streamErrors, 1)
-			var typedErr *dspyerrors.Error
-			require.ErrorAs(t, streamErrors[0], &typedErr)
-			assert.Equal(t, dspyerrors.InvalidResponse, typedErr.Code())
-			assert.Equal(t, test.provider, typedErr.Fields()["provider"])
-			assert.Equal(t, test.model, typedErr.Fields()["model"])
+			checkPartial := func(t testing.TB, result streamJSONContractResult, wantDone int) {
+				t.Helper()
+				assert.Equal(t, []string{"partial"}, result.contents)
+				assert.Equal(t, wantDone, result.doneChunks)
+			}
+			checkCompatible := func(t testing.TB, result streamJSONContractResult) {
+				t.Helper()
+				wantDone := 0
+				if provider.doneOnEOF {
+					wantDone = 1
+				}
+				checkPartial(t, result, wantDone)
+			}
+			checkStrictError := func(t testing.TB, result streamJSONContractResult, err error) {
+				t.Helper()
+				checkPartial(t, result, 0)
+				var typedErr *dspyerrors.Error
+				require.ErrorAs(t, err, &typedErr)
+				assert.Equal(t, dspyerrors.InvalidResponse, typedErr.Code())
+				assert.Equal(t, provider.provider, typedErr.Fields()["provider"])
+				assert.Equal(t, provider.model, typedErr.Fields()["model"])
+			}
+			contract.CheckValid = checkCompatible
+			contract.CheckDuplicateError = checkStrictError
+			contract.CheckInvalidUTF8Error = checkStrictError
+			contract.CheckCaseMismatch = checkCompatible
+			contract.CheckUnknownMember = checkCompatible
+
+			jsonv2test.Check(t, func(payload []byte) (streamJSONContractResult, error) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(payload)
+				}))
+				defer server.Close()
+
+				stream, err := provider.newStream(server.URL)
+				if err != nil {
+					return streamJSONContractResult{}, err
+				}
+
+				var result streamJSONContractResult
+				var streamErrors []error
+				for chunk := range stream.ChunkChannel {
+					if chunk.Content != "" {
+						result.contents = append(result.contents, chunk.Content)
+					}
+					if chunk.Error != nil {
+						streamErrors = append(streamErrors, chunk.Error)
+					}
+					if chunk.Done {
+						result.doneChunks++
+					}
+				}
+
+				switch len(streamErrors) {
+				case 0:
+					return result, nil
+				case 1:
+					return result, streamErrors[0]
+				default:
+					return result, fmt.Errorf("stream returned %d errors: %v", len(streamErrors), streamErrors)
+				}
+			}, contract)
 		})
 	}
 }
