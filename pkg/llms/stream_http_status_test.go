@@ -17,15 +17,16 @@ func TestNativeStreamsReportHTTPStatusErrors(t *testing.T) {
 		name        string
 		model       string
 		statusField string
-		newStream   func(*testing.T, string) *core.StreamResponse
+		newStream   func(*testing.T, string, *http.Client) *core.StreamResponse
 	}{
 		{
 			name:        "Ollama",
 			model:       "llama3:8b",
 			statusField: "status_code",
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			newStream: func(t *testing.T, baseURL string, client *http.Client) *core.StreamResponse {
 				llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithNativeAPI())
 				require.NoError(t, err)
+				llm.GetHTTPClient().Transport = client.Transport
 				stream, err := llm.StreamGenerate(context.Background(), "hello")
 				require.NoError(t, err)
 				return stream
@@ -35,7 +36,7 @@ func TestNativeStreamsReportHTTPStatusErrors(t *testing.T) {
 			name:        "Gemini",
 			model:       string(core.ModelGoogleGeminiFlash),
 			statusField: "statusCode",
-			newStream: func(t *testing.T, baseURL string) *core.StreamResponse {
+			newStream: func(t *testing.T, baseURL string, client *http.Client) *core.StreamResponse {
 				llm := &GeminiLLM{
 					apiKey: "test-key",
 					BaseLLM: core.NewBaseLLM(
@@ -48,6 +49,7 @@ func TestNativeStreamsReportHTTPStatusErrors(t *testing.T) {
 							Headers:    map[string]string{"Content-Type": "application/json"},
 							TimeoutSec: 30,
 						},
+						core.WithHTTPClient(client),
 					),
 				}
 				stream, err := llm.StreamGenerate(context.Background(), "hello")
@@ -59,12 +61,12 @@ func TestNativeStreamsReportHTTPStatusErrors(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, "rate limited", http.StatusTooManyRequests)
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
-			stream := test.newStream(t, server.URL)
+			stream := test.newStream(t, server.URL, serverClient)
 			var chunks []core.StreamChunk
 			for chunk := range stream.ChunkChannel {
 				chunks = append(chunks, chunk)

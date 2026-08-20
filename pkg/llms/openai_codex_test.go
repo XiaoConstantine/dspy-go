@@ -62,7 +62,7 @@ func TestOpenAICodexLive(t *testing.T) {
 
 func TestOpenAICodexGenerateWithToolsUsesResponsesProtocol(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		assert.Equal(t, "/codex/responses", r.URL.Path)
 		assert.Equal(t, "Bearer access-token", r.Header.Get("Authorization"))
@@ -99,13 +99,13 @@ func TestOpenAICodexGenerateWithToolsUsesResponsesProtocol(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}\n\n")
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":4,\"total_tokens\":14}}}\n\n")
 	}))
-	defer server.Close()
+	serverClient := server.Client()
 
 	var resolves atomic.Int32
 	llm, err := NewOpenAICodexLLM("gpt-5.2-codex",
 		WithOpenAICodexBaseURL(server.URL),
 		WithOpenAICodexOriginator("test-suite"),
-		WithOpenAICodexHTTPClient(server.Client()),
+		WithOpenAICodexHTTPClient(serverClient),
 		WithOpenAICodexCredentials(func(context.Context, string) (OpenAICodexCredentials, error) {
 			resolves.Add(1)
 			return OpenAICodexCredentials{AccessToken: "access-token", AccountID: "account-123"}, nil
@@ -143,7 +143,7 @@ func TestOpenAICodexGenerateWithToolsUsesResponsesProtocol(t *testing.T) {
 
 func TestOpenAICodexRetriesUnauthorizedWithForcedRefresh(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := requests.Add(1)
 		if request == 1 {
 			assert.Equal(t, "Bearer stale", r.Header.Get("Authorization"))
@@ -155,11 +155,11 @@ func TestOpenAICodexRetriesUnauthorizedWithForcedRefresh(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
 	}))
-	defer server.Close()
+	serverClient := server.Client()
 
 	var resolutions []string
 	llm, err := NewOpenAICodexLLM("gpt-5.2-codex",
-		WithOpenAICodexBaseURL(server.URL), WithOpenAICodexHTTPClient(server.Client()),
+		WithOpenAICodexBaseURL(server.URL), WithOpenAICodexHTTPClient(serverClient),
 		WithOpenAICodexCredentials(func(_ context.Context, rejectedAccessToken string) (OpenAICodexCredentials, error) {
 			resolutions = append(resolutions, rejectedAccessToken)
 			token := "stale"

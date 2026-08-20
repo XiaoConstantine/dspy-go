@@ -98,7 +98,7 @@ func TestLlamacppLLM_Generate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/completion", r.URL.Path)
 				assert.Equal(t, "POST", r.Method)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -126,10 +126,11 @@ func TestLlamacppLLM_Generate(t *testing.T) {
 					}
 				}
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
 			llm, err := NewLlamacppLLM(server.URL)
 			assert.NoError(t, err)
+			llm.GetHTTPClient().Transport = serverClient.Transport
 
 			response, err := llm.Generate(context.Background(), "Test prompt", core.WithMaxTokens(100), core.WithTemperature(0.7))
 
@@ -211,7 +212,7 @@ func TestLlamaCppLLM_GenerateWithJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				resp := createFullLlamaCPPResponse()
 				resp["content"] = tt.responseContent
 				if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -220,10 +221,11 @@ func TestLlamaCppLLM_GenerateWithJSON(t *testing.T) {
 					return
 				}
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
 			llm, err := NewLlamacppLLM(server.URL)
 			require.NoError(t, err)
+			llm.GetHTTPClient().Transport = serverClient.Transport
 
 			response, err := llm.GenerateWithJSON(context.Background(), "test prompt")
 
@@ -290,7 +292,7 @@ func TestLlamacppLLM_CreateEmbedding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/embedding", r.URL.Path)
 				assert.Equal(t, "POST", r.Method)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -310,10 +312,11 @@ func TestLlamacppLLM_CreateEmbedding(t *testing.T) {
 					}
 				}
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
 			llm, err := NewLlamacppLLM(server.URL)
 			assert.NoError(t, err)
+			llm.GetHTTPClient().Transport = serverClient.Transport
 
 			result, err := llm.CreateEmbedding(context.Background(), "test input", core.WithModel("test-model"))
 
@@ -372,7 +375,7 @@ func TestLlamacppLLM_CreateEmbeddings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			callCount := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/embeddings", r.URL.Path)
 				assert.Equal(t, "POST", r.Method)
 
@@ -394,10 +397,11 @@ func TestLlamacppLLM_CreateEmbeddings(t *testing.T) {
 					callCount++
 				}
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
 			llm, err := NewLlamacppLLM(server.URL)
 			assert.NoError(t, err)
+			llm.GetHTTPClient().Transport = serverClient.Transport
 
 			result, err := llm.CreateEmbeddings(context.Background(), tt.inputs, core.WithBatchSize(32))
 

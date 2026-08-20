@@ -11,12 +11,17 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
+type testHTTPClientLLM interface {
+	core.LLM
+	GetHTTPClient() *http.Client
+}
+
 func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 	providers := []struct {
 		name             string
 		valid            []byte
 		caseMismatchName string
-		newLLM           func(string) (core.LLM, error)
+		newLLM           func(string) (testHTTPClientLLM, error)
 	}{
 		{
 			name: "OpenAI",
@@ -27,7 +32,7 @@ func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 				"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
 			}`),
 			caseMismatchName: "CHOICES",
-			newLLM: func(baseURL string) (core.LLM, error) {
+			newLLM: func(baseURL string) (testHTTPClientLLM, error) {
 				return NewOpenAILLM(
 					core.ModelOpenAIGPT4,
 					WithAPIKey("test-key"),
@@ -42,7 +47,7 @@ func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 				"usageMetadata":{}
 			}`),
 			caseMismatchName: "CANDIDATES",
-			newLLM: func(baseURL string) (core.LLM, error) {
+			newLLM: func(baseURL string) (testHTTPClientLLM, error) {
 				return &GeminiLLM{
 					apiKey: "test-key",
 					BaseLLM: core.NewBaseLLM(
@@ -63,7 +68,7 @@ func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 			name:             "LlamaCPP",
 			valid:            []byte(`{"content":"expected"}`),
 			caseMismatchName: "CONTENT",
-			newLLM: func(baseURL string) (core.LLM, error) {
+			newLLM: func(baseURL string) (testHTTPClientLLM, error) {
 				return NewLlamacppLLM(baseURL)
 			},
 		},
@@ -71,7 +76,7 @@ func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 			name:             "Ollama native",
 			valid:            []byte(`{"model":"llama3:8b","response":"expected"}`),
 			caseMismatchName: "RESPONSE",
-			newLLM: func(baseURL string) (core.LLM, error) {
+			newLLM: func(baseURL string) (testHTTPClientLLM, error) {
 				return NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithNativeAPI())
 			},
 		},
@@ -84,7 +89,7 @@ func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 				"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
 			}`),
 			caseMismatchName: "CHOICES",
-			newLLM: func(baseURL string) (core.LLM, error) {
+			newLLM: func(baseURL string) (testHTTPClientLLM, error) {
 				return NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithOpenAIAPI())
 			},
 		},
@@ -94,16 +99,17 @@ func TestCompleteResponsesFollowJSONV2Contract(t *testing.T) {
 		t.Run(provider.name, func(t *testing.T) {
 			contract := completeResponseJSONV2Contract(provider.valid, provider.caseMismatchName)
 			jsonv2test.Check(t, func(payload []byte) (*core.LLMResponse, error) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					_, _ = w.Write(payload)
 				}))
-				defer server.Close()
+				serverClient := server.Client()
 
 				llm, err := provider.newLLM(server.URL)
 				if err != nil {
 					return nil, err
 				}
+				llm.GetHTTPClient().Transport = serverClient.Transport
 				return llm.Generate(context.Background(), "hello")
 			}, contract)
 		})

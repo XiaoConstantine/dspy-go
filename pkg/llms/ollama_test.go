@@ -153,7 +153,7 @@ func TestOllamaLLM_DualModeGeneration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, tt.expectedPath, r.URL.Path)
 				assert.Equal(t, "POST", r.Method)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -189,7 +189,7 @@ func TestOllamaLLM_DualModeGeneration(t *testing.T) {
 					t.Fatalf("Failed to encode response: %v", err)
 				}
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
 			var llm *OllamaLLM
 			var err error
@@ -200,6 +200,7 @@ func TestOllamaLLM_DualModeGeneration(t *testing.T) {
 				llm, err = NewOllamaLLM("llama3:8b", WithBaseURL(server.URL), WithNativeAPI())
 			}
 			assert.NoError(t, err)
+			llm.GetHTTPClient().Transport = serverClient.Transport
 
 			response, err := llm.Generate(context.Background(), "Test prompt", tt.options...)
 			assert.NoError(t, err)
@@ -241,7 +242,7 @@ func TestOllamaLLM_DualModeStreaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, tt.expectedPath, r.URL.Path)
 				assert.Equal(t, "POST", r.Method)
 
@@ -323,7 +324,7 @@ func TestOllamaLLM_DualModeStreaming(t *testing.T) {
 					flusher.Flush()
 				}
 			}))
-			defer server.Close()
+			serverClient := server.Client()
 
 			var llm *OllamaLLM
 			var err error
@@ -334,6 +335,7 @@ func TestOllamaLLM_DualModeStreaming(t *testing.T) {
 				llm, err = NewOllamaLLM("llama3:8b", WithBaseURL(server.URL), WithNativeAPI())
 			}
 			assert.NoError(t, err)
+			llm.GetHTTPClient().Transport = serverClient.Transport
 
 			streamResp, err := llm.StreamGenerate(context.Background(), "Test prompt")
 			assert.NoError(t, err)

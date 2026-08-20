@@ -19,7 +19,7 @@ import (
 
 func TestOpenAICodexRunsThroughSharedAgentLoop(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := requests.Add(1)
 		var payload map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
@@ -39,11 +39,11 @@ func TestOpenAICodexRunsThroughSharedAgentLoop(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"pong\",\"annotations\":[]}]}}\n\n")
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
 	}))
-	defer server.Close()
+	serverClient := server.Client()
 
 	llm, err := llms.NewOpenAICodexLLM("gpt-5.4",
 		llms.WithOpenAICodexBaseURL(server.URL),
-		llms.WithOpenAICodexHTTPClient(server.Client()),
+		llms.WithOpenAICodexHTTPClient(serverClient),
 		llms.WithOpenAICodexCredentials(func(context.Context, string) (llms.OpenAICodexCredentials, error) {
 			return llms.OpenAICodexCredentials{AccessToken: "token", AccountID: "account"}, nil
 		}),

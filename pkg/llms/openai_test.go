@@ -313,7 +313,7 @@ func TestIsValidOpenAIModel(t *testing.T) {
 
 func TestOpenAILLM_Generate(t *testing.T) {
 	// Create a mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request method and path
 		if r.Method != "POST" {
 			t.Errorf("expected POST request, got %s", r.Method)
@@ -382,7 +382,7 @@ func TestOpenAILLM_Generate(t *testing.T) {
 			t.Errorf("failed to encode response: %v", err)
 		}
 	}))
-	defer server.Close()
+	serverClient := server.Client()
 
 	// Create LLM with custom endpoint
 	config := core.ProviderConfig{
@@ -399,6 +399,7 @@ func TestOpenAILLM_Generate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create LLM: %v", err)
 	}
+	llm.GetHTTPClient().Transport = serverClient.Transport
 
 	// Test generation
 	response, err := llm.Generate(ctx, "Hello, world!")
@@ -721,7 +722,7 @@ func TestOpenAILLM_CreateEmbeddings(t *testing.T) {
 
 func TestOpenAILLM_StreamGenerate(t *testing.T) {
 	// Create a mock server for streaming
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Parse request body to verify streaming is enabled
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -761,7 +762,7 @@ func TestOpenAILLM_StreamGenerate(t *testing.T) {
 			flusher.Flush()
 		}
 	}))
-	defer server.Close()
+	serverClient := server.Client()
 
 	// Create LLM with custom endpoint
 	config := core.ProviderConfig{
@@ -778,6 +779,7 @@ func TestOpenAILLM_StreamGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create LLM: %v", err)
 	}
+	llm.GetHTTPClient().Transport = serverClient.Transport
 
 	// Test streaming generation
 	stream, err := llm.StreamGenerate(ctx, "Hello")

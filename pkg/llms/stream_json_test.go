@@ -34,7 +34,7 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 		validFrame        string
 		caseMismatchFrame string
 		frame             func(string) []byte
-		newStream         func(string) (*core.StreamResponse, error)
+		newStream         func(string, *http.Client) (*core.StreamResponse, error)
 		doneOnEOF         bool
 	}{
 		{
@@ -44,11 +44,12 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 			validFrame:        `{"choices":[{"delta":{"content":"partial"}}]}`,
 			caseMismatchFrame: `{"CHOICES":[{"delta":{"content":"wrong"}}]}`,
 			frame:             sseFrame,
-			newStream: func(baseURL string) (*core.StreamResponse, error) {
+			newStream: func(baseURL string, client *http.Client) (*core.StreamResponse, error) {
 				llm, err := NewOpenAILLM(
 					core.ModelOpenAIGPT4,
 					WithAPIKey("test-key"),
 					WithOpenAIBaseURL(baseURL),
+					WithHTTPClient(client),
 				)
 				if err != nil {
 					return nil, err
@@ -63,7 +64,7 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 			validFrame:        `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}`,
 			caseMismatchFrame: `{"CANDIDATES":[{"content":{"parts":[{"text":"wrong"}]}}]}`,
 			frame:             sseFrame,
-			newStream: func(baseURL string) (*core.StreamResponse, error) {
+			newStream: func(baseURL string, client *http.Client) (*core.StreamResponse, error) {
 				llm := &GeminiLLM{
 					apiKey: "test-key",
 					BaseLLM: core.NewBaseLLM(
@@ -76,6 +77,7 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 							Headers:    map[string]string{"Content-Type": "application/json"},
 							TimeoutSec: 30,
 						},
+						core.WithHTTPClient(client),
 					),
 				}
 				return llm.StreamGenerate(context.Background(), "hello")
@@ -88,11 +90,12 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 			caseMismatchFrame: `{"CONTENT":"wrong","stop":false}`,
 			frame:             sseFrame,
 			doneOnEOF:         true,
-			newStream: func(baseURL string) (*core.StreamResponse, error) {
+			newStream: func(baseURL string, client *http.Client) (*core.StreamResponse, error) {
 				llm, err := NewLlamacppLLM(baseURL)
 				if err != nil {
 					return nil, err
 				}
+				llm.GetHTTPClient().Transport = client.Transport
 				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
@@ -103,11 +106,12 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 			validFrame:        `{"response":"partial","done":false}`,
 			caseMismatchFrame: `{"RESPONSE":"wrong","done":false}`,
 			frame:             nativeFrame,
-			newStream: func(baseURL string) (*core.StreamResponse, error) {
+			newStream: func(baseURL string, client *http.Client) (*core.StreamResponse, error) {
 				llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithNativeAPI())
 				if err != nil {
 					return nil, err
 				}
+				llm.GetHTTPClient().Transport = client.Transport
 				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
@@ -118,11 +122,12 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 			validFrame:        `{"choices":[{"delta":{"content":"partial"}}]}`,
 			caseMismatchFrame: `{"CHOICES":[{"delta":{"content":"wrong"}}]}`,
 			frame:             sseFrame,
-			newStream: func(baseURL string) (*core.StreamResponse, error) {
+			newStream: func(baseURL string, client *http.Client) (*core.StreamResponse, error) {
 				llm, err := NewOllamaLLM("llama3:8b", WithBaseURL(baseURL), WithOpenAIAPI())
 				if err != nil {
 					return nil, err
 				}
+				llm.GetHTTPClient().Transport = client.Transport
 				return llm.StreamGenerate(context.Background(), "hello")
 			},
 		},
@@ -176,13 +181,13 @@ func TestStreamsFollowJSONV2Contract(t *testing.T) {
 			contract.CheckUnknownMember = checkCompatible
 
 			jsonv2test.Check(t, func(payload []byte) (streamJSONContractResult, error) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write(payload)
 				}))
-				defer server.Close()
+				serverClient := server.Client()
 
-				stream, err := provider.newStream(server.URL)
+				stream, err := provider.newStream(server.URL, serverClient)
 				if err != nil {
 					return streamJSONContractResult{}, err
 				}
