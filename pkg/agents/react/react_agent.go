@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1413,8 +1414,8 @@ func (r *ReActAgent) LastExecutionTrace() *agents.ExecutionTrace {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for i := len(r.executionHistory) - 1; i >= 0; i-- {
-		if trace := r.executionHistory[i].Trace; trace != nil {
+	for _, entry := range slices.Backward(r.executionHistory) {
+		if trace := entry.Trace; trace != nil {
 			return trace.Clone()
 		}
 	}

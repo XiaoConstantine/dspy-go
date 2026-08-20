@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -287,8 +288,7 @@ func (m *nativeRunModel) Complete(ctx context.Context, request agents.ModelReque
 }
 
 func latestNoToolDiagnostic(messages []agents.Message) string {
-	for index := len(messages) - 1; index >= 0; index-- {
-		message := messages[index]
+	for _, message := range slices.Backward(messages) {
 		if message.Role != agents.RoleAssistant {
 			continue
 		}

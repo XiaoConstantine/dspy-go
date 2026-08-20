@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,7 +50,7 @@ type TokenUsage struct {
 
 type spanIDGenerator struct {
 	// counter ensures uniqueness even with identical timestamps
-	counter uint64
+	counter atomic.Uint64
 }
 
 // ExecutionContextKey is the type for context keys specific to dspy-go.
@@ -205,9 +206,9 @@ func EndSpan(ctx context.Context) {
 				return
 			}
 
-			for i := len(state.spans) - 1; i >= 0; i-- {
-				if state.spans[i].ID == endedSpan.ParentID {
-					state.activeSpan = state.spans[i]
+			for _, span := range slices.Backward(state.spans) {
+				if span.ID == endedSpan.ParentID {
+					state.activeSpan = span
 					return
 				}
 			}
@@ -290,7 +291,7 @@ func generateSpanID() string {
 	now := time.Now().Unix()
 
 	// Increment counter atomically
-	counter := atomic.AddUint64(&defaultGenerator.counter, 1)
+	counter := defaultGenerator.counter.Add(1)
 
 	// Create buffer for our ID components
 	id := make([]byte, 8)
@@ -318,7 +319,7 @@ func generateSpanID() string {
 
 // For testing and debugging.
 func resetSpanIDGenerator() {
-	atomic.StoreUint64(&defaultGenerator.counter, 0)
+	defaultGenerator.counter.Store(0)
 }
 
 func (s *ExecutionState) GetCurrentSpan() *Span {

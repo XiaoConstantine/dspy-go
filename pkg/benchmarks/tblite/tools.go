@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -475,8 +476,8 @@ func resolvePathThroughExistingSymlinks(target string) (string, error) {
 		current = parent
 	}
 
-	for i := len(missing) - 1; i >= 0; i-- {
-		current = filepath.Join(current, missing[i])
+	for _, m := range slices.Backward(missing) {
+		current = filepath.Join(current, m)
 	}
 	return filepath.Clean(current), nil
 }

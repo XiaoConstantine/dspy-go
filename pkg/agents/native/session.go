@@ -4,6 +4,7 @@ import (
 	"context"
 	goerrors "errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -363,8 +364,8 @@ func buildSessionEventRecall(branchID string, summaries []sessionevent.SessionSu
 		if currentLen+len([]rune(summaryHeader))+footerLen <= maxChars {
 			builder.WriteString(summaryHeader)
 			currentLen += len([]rune(summaryHeader))
-			for i := len(summaries) - 1; i >= 0; i-- {
-				summaryText := renderSessionEventSummary(summaries[i])
+			for _, summary := range slices.Backward(summaries) {
+				summaryText := renderSessionEventSummary(summary)
 				summaryLen := len([]rune(summaryText))
 				if currentLen+summaryLen+footerLen > maxChars {
 					break

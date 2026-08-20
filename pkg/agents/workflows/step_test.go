@@ -104,11 +104,11 @@ func TestStep(t *testing.T) {
 			MaxAttempts:       3,
 			BackoffMultiplier: 1.5,
 		}
-		var attempts int32
+		var attempts atomic.Int32
 
 		module.On("Process", mock.Anything, mock.Anything).
 			Run(func(args mock.Arguments) {
-				current := atomic.AddInt32(&attempts, 1)
+				current := attempts.Add(1)
 				t.Logf("Attempt #%d", current)
 			}).
 			Return(make(map[string]any), assert.AnError).
@@ -117,7 +117,7 @@ func TestStep(t *testing.T) {
 		// Third call will succeed
 		module.On("Process", mock.Anything, mock.Anything).
 			Run(func(args mock.Arguments) {
-				atomic.AddInt32(&attempts, 1)
+				attempts.Add(1)
 				t.Logf("Final successful attempt")
 			}).
 			Return(map[string]any{"output": "success"}, nil).
@@ -131,7 +131,7 @@ func TestStep(t *testing.T) {
 		// Verify results
 		require.NoError(t, err)
 		assert.Equal(t, "success", result.Outputs["output"])
-		assert.Equal(t, int32(3), atomic.LoadInt32(&attempts),
+		assert.Equal(t, int32(3), attempts.Load(),
 			"Should have attempted exactly 3 times")
 
 		module.AssertExpectations(t)

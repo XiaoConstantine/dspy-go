@@ -265,7 +265,7 @@ type AsyncBatchHandle struct {
 	handles    []*AsyncQueryHandle
 	allDone    chan struct{}
 	doneOnce   sync.Once
-	completed  int32
+	completed  atomic.Int32
 	totalCount int32
 }
 
@@ -288,7 +288,7 @@ func (bh *AsyncBatchHandle) trackCompletion() {
 	for _, h := range bh.handles {
 		go func(handle *AsyncQueryHandle) {
 			<-handle.done
-			if atomic.AddInt32(&bh.completed, 1) == bh.totalCount {
+			if bh.completed.Add(1) == bh.totalCount {
 				bh.doneOnce.Do(func() {
 					close(bh.allDone)
 				})
@@ -332,7 +332,7 @@ func (bh *AsyncBatchHandle) Handles() []*AsyncQueryHandle {
 
 // CompletedCount returns the number of completed queries.
 func (bh *AsyncBatchHandle) CompletedCount() int {
-	return int(atomic.LoadInt32(&bh.completed))
+	return int(bh.completed.Load())
 }
 
 // TotalCount returns the total number of queries in the batch.

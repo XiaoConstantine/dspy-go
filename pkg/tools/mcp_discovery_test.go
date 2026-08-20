@@ -281,9 +281,9 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 		service := NewDefaultMCPDiscoveryService(config)
 		defer service.Stop()
 
-		var callbackCalled int32
+		var callbackCalled atomic.Int32
 		callback := func(tools []core.Tool) {
-			atomic.StoreInt32(&callbackCalled, 1)
+			callbackCalled.Store(1)
 		}
 
 		err := service.Subscribe(callback)
@@ -291,7 +291,7 @@ func TestDefaultMCPDiscoveryService_Subscribe(t *testing.T) {
 
 		// Wait for polling to start and callback to be called
 		time.Sleep(200 * time.Millisecond)
-		assert.Equal(t, int32(1), atomic.LoadInt32(&callbackCalled))
+		assert.Equal(t, int32(1), callbackCalled.Load())
 		assert.True(t, service.IsRunning())
 	})
 
@@ -462,9 +462,9 @@ func TestDefaultMCPDiscoveryService_CallbackPanicRecovery(t *testing.T) {
 		panic("test panic")
 	}
 
-	var normalCallbackCalled int32
+	var normalCallbackCalled atomic.Int32
 	normalCallback := func(tools []core.Tool) {
-		atomic.StoreInt32(&normalCallbackCalled, 1)
+		normalCallbackCalled.Store(1)
 	}
 
 	// Subscribe both callbacks
@@ -478,7 +478,7 @@ func TestDefaultMCPDiscoveryService_CallbackPanicRecovery(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Normal callback should still be called despite panic in other callback
-	assert.Equal(t, int32(1), atomic.LoadInt32(&normalCallbackCalled))
+	assert.Equal(t, int32(1), normalCallbackCalled.Load())
 }
 
 func TestDefaultMCPDiscoveryService_ConcurrentAccess(t *testing.T) {
@@ -641,9 +641,9 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 		service := NewDefaultMCPDiscoveryService(config)
 		defer service.Stop()
 
-		var callbackCount int32
+		var callbackCount atomic.Int32
 		callback := func(tools []core.Tool) {
-			atomic.AddInt32(&callbackCount, 1)
+			callbackCount.Add(1)
 		}
 
 		err := service.Subscribe(callback)
@@ -653,7 +653,7 @@ func TestDefaultMCPDiscoveryService_EdgeCases(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		// Should have been called multiple times
-		assert.True(t, atomic.LoadInt32(&callbackCount) > 1)
+		assert.True(t, callbackCount.Load() > 1)
 	})
 
 	t.Run("server with disconnect error during stop", func(t *testing.T) {

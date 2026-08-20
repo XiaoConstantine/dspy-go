@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1042,7 +1043,7 @@ type GEPA struct {
 	rng *rand.Rand
 
 	// System monitoring
-	concurrentTaskCounter int64
+	concurrentTaskCounter atomic.Int64
 }
 
 // MultiObjectiveFitness represents fitness across multiple objectives for Pareto-based selection.
@@ -3850,17 +3851,17 @@ func (g *GEPA) getCurrentMemoryUsage() float64 {
 
 // getCurrentConcurrentTasks gets current number of concurrent tasks.
 func (g *GEPA) getCurrentConcurrentTasks() int {
-	return int(atomic.LoadInt64(&g.concurrentTaskCounter))
+	return int(g.concurrentTaskCounter.Load())
 }
 
 // incrementConcurrentTasks increments the concurrent task counter.
 func (g *GEPA) incrementConcurrentTasks() {
-	atomic.AddInt64(&g.concurrentTaskCounter, 1)
+	g.concurrentTaskCounter.Add(1)
 }
 
 // decrementConcurrentTasks decrements the concurrent task counter.
 func (g *GEPA) decrementConcurrentTasks() {
-	atomic.AddInt64(&g.concurrentTaskCounter, -1)
+	g.concurrentTaskCounter.Add(-1)
 }
 
 // getCurrentExecutionPhase determines the current phase of execution.
@@ -5411,8 +5412,7 @@ func (g *GEPA) latestReflectionForCandidate(candidateID string) *ReflectionResul
 	g.state.mu.RLock()
 	defer g.state.mu.RUnlock()
 
-	for i := len(g.state.ReflectionHistory) - 1; i >= 0; i-- {
-		reflection := g.state.ReflectionHistory[i]
+	for _, reflection := range slices.Backward(g.state.ReflectionHistory) {
 		if reflection == nil || reflection.CandidateID != candidateID {
 			continue
 		}

@@ -80,7 +80,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 			demo core.Example
 			ctx  context.Context
 		}
-		processed int32
+		processed atomic.Int32
 		errCh     = make(chan error, 1)
 	)
 	examplesNeeded := b.MaxBootstrapped
@@ -129,7 +129,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				resultsMu.Unlock()
 			}
 
-			atomic.AddInt32(&processed, 1)
+			processed.Add(1)
 		})
 	}
 
