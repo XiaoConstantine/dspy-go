@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fatih/color v1.13.0
 	github.com/spf13/cobra v1.9.1
-	github.com/stretchr/testify v1.12.0
+	github.com/stretchr/testify v1.12.1
 	golang.org/x/term v0.45.0
 )
 
@@ -66,6 +66,7 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20251009144603-d2f985daa21b // indirect
