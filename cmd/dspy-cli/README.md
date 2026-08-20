@@ -58,7 +58,7 @@ export GEMINI_API_KEY="your-api-key-here"
 
 ### Prerequisites
 
-- Go 1.21 or higher
+- Go 1.27 or higher
 - Gemini API key (set as `GEMINI_API_KEY` environment variable)
 
 ### Build from Source

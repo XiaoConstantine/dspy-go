@@ -13,7 +13,7 @@ This example demonstrates how to use Google's Gemini model for multimodal tasks 
 ## Prerequisites
 
 1. **Google Gemini API Key**: You need a valid API key from Google AI Studio
-2. **Go 1.21+**: Make sure you have Go installed
+2. **Go 1.27+**: Make sure you have Go installed
 3. **Sample Images**: Place sample images in this directory (optional - placeholder will be created)
 
 ## Setup

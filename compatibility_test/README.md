@@ -145,7 +145,7 @@ The compatibility testing framework consists of:
 - Gemini API key
 
 ### Go Environment
-- Go 1.19+
+- Go 1.27+
 - dspy-go dependencies
 
 ### Required Environment Variables

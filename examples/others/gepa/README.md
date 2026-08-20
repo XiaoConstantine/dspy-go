@@ -200,7 +200,7 @@ config := &optimizers.GEPAConfig{
 
 ## Requirements
 
-- Go 1.19 or later
+- Go 1.27 or later
 - Google Gemini API key
 - Internet connection for dataset loading and LLM calls
 - Sufficient computation time (GEPA is thorough but takes longer than simpler optimizers)

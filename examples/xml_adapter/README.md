@@ -151,7 +151,7 @@ chain := interceptors.CreateXMLInterceptorChain(config,
 
 ## Running the Examples
 
-1. Ensure you have Go 1.21+ installed
+1. Ensure you have Go 1.27+ installed
 2. From this directory, run any example:
    ```bash
    (cd basic_usage && go run basic_usage.go)

@@ -60,7 +60,7 @@ ResearchOrchestrator (Parent)
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.27 or later
 - Google Gemini API key ([Get one here](https://aistudio.google.com/app/apikey))
 
 ### Basic Usage
