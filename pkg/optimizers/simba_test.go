@@ -2274,9 +2274,6 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		assert.NotNil(t, simba.pipelineChannels.Results)
 		assert.NotNil(t, simba.pipelineChannels.Errors)
 		assert.NotNil(t, simba.pipelineChannels.Done)
-
-		// Test safe cleanup
-		simba.closePipelineChannels()
 	})
 
 	t.Run("Pipeline processing execution", func(t *testing.T) {
@@ -2390,6 +2387,102 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		// Should complete without errors despite edge conditions
 		assert.NoError(t, err)
 		assert.NotNil(t, optimizedProgram)
+	})
+
+	t.Run("Pipeline worker termination propagates before coordinator cancellation", func(t *testing.T) {
+		program := createSIMBATestProgram()
+		examples := []core.Example{{
+			Inputs:  map[string]any{"question": "one"},
+			Outputs: map[string]any{"answer": "one"},
+		}}
+		simba := NewSIMBA(
+			WithSIMBABatchSize(1),
+			WithSIMBAMaxSteps(1),
+			WithPipelineProcessing(true),
+			WithPipelineBufferSize(1),
+		)
+		simba.initializePipelineChannels()
+
+		// Force the batch worker's downstream send to fail. The worker must
+		// propagate its termination to the evaluator without waiting for the
+		// coordinator to cancel the pipeline after Wait returns.
+		simba.pipelineChannels.BatchSampling = make(chan *PipelineStage)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var workers sync.WaitGroup
+		batchDone := make(chan struct{})
+		workers.Go(func() {
+			defer close(batchDone)
+			simba.batchSamplingWorker(ctx, examples)
+		})
+		simba.pipelineChannels.CandidateGeneration <- &PipelineStage{
+			StepIndex:  0,
+			Candidates: []core.Program{program},
+			Timestamp:  time.Now(),
+		}
+
+		select {
+		case <-batchDone:
+		case <-time.After(time.Second):
+			t.Fatal("batch worker did not reach its terminal path")
+		}
+
+		workers.Go(func() {
+			simba.candidateEvaluationWorker(ctx, func(expected, actual map[string]any) float64 { return 0.5 })
+		})
+
+		type pipelineResult struct {
+			program core.Program
+			err     error
+		}
+		resultCh := make(chan pipelineResult, 1)
+		go func() {
+			result, err := simba.pipelineCoordinator(ctx, program, examples, func(expected, actual map[string]any) float64 { return 0.5 }, &workers, cancel)
+			resultCh <- pipelineResult{program: result, err: err}
+		}()
+
+		select {
+		case result := <-resultCh:
+			require.NoError(t, result.err)
+			require.NotNil(t, result.program)
+		case <-time.After(time.Second):
+			cancel()
+			select {
+			case <-resultCh:
+			case <-time.After(time.Second):
+			}
+			t.Fatal("pipeline termination deadlocked waiting for coordinator cancellation")
+		}
+	})
+
+	t.Run("Pipeline worker error wins over closed output", func(t *testing.T) {
+		program := createSIMBATestProgram()
+		wantErr := fmt.Errorf("candidate evaluation failed")
+
+		// A worker sends its error and then closes CandidateEvaluation. Both
+		// coordinator cases are ready at that point, so repeat the real
+		// coordinator path to prove that channel selection cannot lose the error.
+		for range 100 {
+			simba := NewSIMBA(WithSIMBAMaxSteps(1), WithPipelineProcessing(true))
+			simba.initializePipelineChannels()
+			simba.pipelineChannels.Errors <- wantErr
+			close(simba.pipelineChannels.CandidateEvaluation)
+
+			var workers sync.WaitGroup
+			result, err := simba.pipelineCoordinator(
+				context.Background(),
+				program,
+				nil,
+				func(expected, actual map[string]any) float64 { return 0 },
+				&workers,
+				func() {},
+			)
+
+			assert.ErrorIs(t, err, wantErr)
+			assert.NotNil(t, result)
+		}
 	})
 
 	t.Run("Pipeline stage data flow", func(t *testing.T) {

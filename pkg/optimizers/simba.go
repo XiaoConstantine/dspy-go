@@ -2090,8 +2090,8 @@ func (s *SIMBA) initializePipelineChannels() {
 		BatchSampling:       make(chan *PipelineStage, bufferSize),
 		CandidateEvaluation: make(chan *PipelineStage, bufferSize),
 		Results:             make(chan *PipelineStage, bufferSize),
-		Errors:              make(chan error, bufferSize*3), // Extra capacity for error handling
-		Done:                make(chan struct{}, 1),         // ✅ Buffered to prevent blocking
+		Errors:              make(chan error, bufferSize*3),
+		Done:                make(chan struct{}),
 	}
 }
 
@@ -2106,33 +2106,6 @@ func (s *SIMBA) safeSendStage(ctx context.Context, ch chan<- *PipelineStage, sta
 		return false
 	case <-time.After(100 * time.Millisecond): // Prevent indefinite blocking
 		return false
-	}
-}
-
-// closePipelineChannels safely closes all pipeline channels.
-func (s *SIMBA) closePipelineChannels() {
-	if s.pipelineChannels != nil {
-		// Only close channels that haven't been closed yet
-		// Done channel is managed by the coordinator
-		safeClose := func(ch chan *PipelineStage) {
-			select {
-			case <-ch:
-			default:
-				close(ch)
-			}
-		}
-
-		safeClose(s.pipelineChannels.CandidateGeneration)
-		safeClose(s.pipelineChannels.BatchSampling)
-		safeClose(s.pipelineChannels.CandidateEvaluation)
-		safeClose(s.pipelineChannels.Results)
-
-		// Close error channel safely
-		select {
-		case <-s.pipelineChannels.Errors:
-		default:
-			close(s.pipelineChannels.Errors)
-		}
 	}
 }
 
@@ -2164,6 +2137,8 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 // candidateGenerationWorker generates candidates in parallel for multiple steps.
 // Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
 func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.Program) {
+	defer close(s.pipelineChannels.CandidateGeneration)
+
 	currentProgram := baseProgram
 	stepIndex := 0
 
@@ -2223,14 +2198,16 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 // batchSamplingWorker samples mini-batches in parallel.
 // Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
 func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example) {
+	defer close(s.pipelineChannels.BatchSampling)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.pipelineChannels.Done:
 			return
-		case stage := <-s.pipelineChannels.CandidateGeneration:
-			if stage == nil {
+		case stage, ok := <-s.pipelineChannels.CandidateGeneration:
+			if !ok {
 				return
 			}
 
@@ -2295,14 +2272,16 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example
 // candidateEvaluationWorker evaluates candidates in parallel.
 // Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
 func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, metric core.Metric) {
+	defer close(s.pipelineChannels.CandidateEvaluation)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.pipelineChannels.Done:
 			return
-		case stage := <-s.pipelineChannels.BatchSampling:
-			if stage == nil {
+		case stage, ok := <-s.pipelineChannels.BatchSampling:
+			if !ok {
 				return
 			}
 
@@ -2364,31 +2343,13 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 	bestScore := s.state.BestScore
 	processedSteps := 0
 
-	// Wait for pipeline workers and collect results
-	var doneOnce sync.Once
-	go func() {
-		defer func() {
-			// Ensure goroutine cleanup on panic
-			if r := recover(); r != nil {
-				// Log panic but continue - recovery is intentionally handled silently
-				_ = r
-			}
-		}()
-
-		// Check if context is cancelled before waiting
-		select {
-		case <-ctx.Done():
-			doneOnce.Do(func() {
-				close(s.pipelineChannels.Done)
-			})
-			return
-		default:
-		}
-
+	// The coordinator owns pipeline cancellation. Stage producers own and close
+	// their output channels, so normal upstream completion propagates through
+	// the pipeline without depending on this shutdown signal.
+	defer func() {
+		pipelineCancel()
+		close(s.pipelineChannels.Done)
 		wg.Wait()
-		doneOnce.Do(func() {
-			close(s.pipelineChannels.Done)
-		})
 	}()
 
 	stageTimings := make(map[string]time.Duration)
@@ -2396,27 +2357,26 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 	for processedSteps < s.config.MaxSteps {
 		select {
 		case <-ctx.Done():
-			pipelineCancel() // Cancel workers first
-			doneOnce.Do(func() {
-				close(s.pipelineChannels.Done)
-			})
-			// Wait for workers to finish before closing channels
-			wg.Wait()
-			s.closePipelineChannels()
 			return bestProgram, ctx.Err()
 		case err := <-s.pipelineChannels.Errors:
 			s.logger.Error(ctx, "Pipeline error: %v", err)
-			pipelineCancel() // Cancel workers first
-			doneOnce.Do(func() {
-				close(s.pipelineChannels.Done)
-			})
-			// Wait for workers to finish before closing channels
-			wg.Wait()
-			s.closePipelineChannels()
 			return bestProgram, err
-		case stage := <-s.pipelineChannels.CandidateEvaluation:
-			if stage == nil {
-				continue
+		case stage, ok := <-s.pipelineChannels.CandidateEvaluation:
+			if !ok {
+				if err := ctx.Err(); err != nil {
+					return bestProgram, err
+				}
+				// Workers report an error before closing their output channel. Both
+				// receives can therefore become ready together, and select does not
+				// prioritize the error case. Preserve the worker error before treating
+				// the closed stage channel as successful completion.
+				select {
+				case err := <-s.pipelineChannels.Errors:
+					s.logger.Error(ctx, "Pipeline error: %v", err)
+					return bestProgram, err
+				default:
+				}
+				return bestProgram, nil
 			}
 
 			processingTime := time.Since(stage.Timestamp)
@@ -2429,12 +2389,6 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			// Candidate/incumbent step selection above remains batch-local.
 			selectedFullScore, err := s.evaluateProgramOnExamples(ctx, selectedProgram, examples, metric)
 			if err != nil {
-				pipelineCancel()
-				doneOnce.Do(func() {
-					close(s.pipelineChannels.Done)
-				})
-				wg.Wait()
-				s.closePipelineChannels()
 				return bestProgram, err
 			}
 			improvement := selectedFullScore - bestScore
@@ -2475,34 +2429,10 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			// Check for convergence
 			if s.hasConverged() {
 				s.logger.Info(ctx, "Pipeline: Optimization converged at step %d", stage.StepIndex)
-				pipelineCancel() // Cancel workers first
-				doneOnce.Do(func() {
-					close(s.pipelineChannels.Done)
-				})
-				// Wait for workers to finish before closing channels
-				wg.Wait()
-				s.closePipelineChannels()
 				return bestProgram, nil
 			}
-		case <-s.pipelineChannels.Done:
-			pipelineCancel() // Cancel workers first
-			// Wait for workers to finish before closing channels
-			wg.Wait()
-			s.closePipelineChannels()
-			if err := ctx.Err(); err != nil {
-				return bestProgram, err
-			}
-			return bestProgram, nil
 		}
 	}
 
-	// Close channels safely when optimization completes normally
-	pipelineCancel() // Cancel workers first
-	doneOnce.Do(func() {
-		close(s.pipelineChannels.Done)
-	})
-	// Wait for workers to finish before closing channels
-	wg.Wait()
-	s.closePipelineChannels()
 	return bestProgram, nil
 }
