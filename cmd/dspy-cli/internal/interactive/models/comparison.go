@@ -3,7 +3,6 @@ package models
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/interactive/styles"
@@ -28,7 +27,6 @@ type ComparisonModel struct {
 	nextScreen      string
 	spinnerFrame    int
 	sortBy          string // "name", "accuracy", "improvement", "duration"
-	mu              sync.RWMutex
 
 	// Enhanced features
 	selectedOptimizers map[string]bool    // Which optimizers to compare
@@ -169,7 +167,6 @@ func (m ComparisonModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case comparisonCompleteMsg:
-		m.mu.Lock()
 		m.results[msg.optimizer] = msg.result
 
 		// Update status
@@ -195,12 +192,10 @@ func (m ComparisonModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.completed >= m.total {
 			m.isRunning = false
 		}
-		m.mu.Unlock()
 
 		return m, nil
 
 	case comparisonStartMsg:
-		m.mu.Lock()
 		status := OptimizerStatus{
 			State:     "initializing",
 			Progress:  0.0,
@@ -208,18 +203,15 @@ func (m ComparisonModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			StartTime: time.Now(),
 		}
 		m.runningStatus[msg.optimizer] = status
-		m.mu.Unlock()
 		return m, nil
 
 	case comparisonProgressMsg:
-		m.mu.Lock()
 		status := m.runningStatus[msg.optimizer]
 		status.State = "running"
 		status.Progress = msg.progress
 		status.Message = msg.message
 		m.runningStatus[msg.optimizer] = status
 		m.liveProgress[msg.optimizer] = msg.progress
-		m.mu.Unlock()
 		return m, nil
 
 	case spinnerTickMsg:
