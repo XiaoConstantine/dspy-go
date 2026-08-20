@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"sync"
 	"testing"
@@ -747,6 +748,16 @@ func TestToolCallJSONUnmarshalAcceptsLegacyFields(t *testing.T) {
 	assert.NotContains(t, string(reEncoded), "tool_name")
 	assert.NotContains(t, string(reEncoded), "\"input\"")
 	assert.Contains(t, string(reEncoded), "\"name\":\"parser\"")
+}
+
+func TestToolCallUnmarshalJSONPreservesV2Strictness(t *testing.T) {
+	var duplicate ToolCall
+	err := jsonv2.Unmarshal([]byte(`{"name":"first","name":"second"}`), &duplicate)
+	require.Error(t, err)
+
+	var mismatchedCase ToolCall
+	require.NoError(t, jsonv2.Unmarshal([]byte(`{"NAME":"wrong"}`), &mismatchedCase))
+	assert.Empty(t, mismatchedCase.Name)
 }
 
 func TestParallelPipelineExecutor(t *testing.T) {

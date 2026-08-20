@@ -2,6 +2,7 @@ package datasets
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,6 +48,16 @@ func TestOolongTaskUnmarshalJSON_AcceptsNumericID(t *testing.T) {
 	err := json.Unmarshal([]byte(`{"id":110010000,"question":"q","answer":"a"}`), &task)
 	require.NoError(t, err)
 	assert.Equal(t, "110010000", task.ID)
+}
+
+func TestOolongTaskUnmarshalJSONPreservesV2Strictness(t *testing.T) {
+	var duplicate OolongTask
+	err := jsonv2.Unmarshal([]byte(`{"id":"first","id":"second"}`), &duplicate)
+	require.Error(t, err)
+
+	var mismatchedCase OolongTask
+	require.NoError(t, jsonv2.Unmarshal([]byte(`{"ID":"wrong"}`), &mismatchedCase))
+	assert.Empty(t, mismatchedCase.ID)
 }
 
 func TestSliceOolongTasks_UsesDeterministicOffset(t *testing.T) {

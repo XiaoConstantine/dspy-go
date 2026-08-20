@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,6 +122,19 @@ func TestErrorResponseUnmarshal(t *testing.T) {
 		assert.Equal(t, "flat_param", resp.Error.Param)
 		assert.Equal(t, "flat_code", resp.Error.Code)
 	})
+}
+
+func TestErrorResponseUnmarshalJSONPreservesV2Strictness(t *testing.T) {
+	var duplicate ErrorResponse
+	err := jsonv2.Unmarshal([]byte(`{
+		"error":{"message":"first"},
+		"error":{"message":"second"}
+	}`), &duplicate)
+	require.Error(t, err)
+
+	var mismatchedCase ErrorResponse
+	require.NoError(t, jsonv2.Unmarshal([]byte(`{"ERROR":{"MESSAGE":"wrong"}}`), &mismatchedCase))
+	assert.Empty(t, mismatchedCase.Error.Message)
 }
 
 func TestErrorResponseGetError(t *testing.T) {

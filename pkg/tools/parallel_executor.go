@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	stderrors "errors"
 	"fmt"
 	"runtime"
@@ -525,7 +526,7 @@ func (c ToolCall) MarshalJSON() ([]byte, error) {
 // are present, the embedded core.ToolCall fields take precedence.
 func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	var decoded toolCallJSON
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	if err := jsonv2.Unmarshal(data, &decoded, json.FormatDurationAsNano(true)); err != nil {
 		return err
 	}
 

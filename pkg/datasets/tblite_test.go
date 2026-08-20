@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +37,16 @@ func TestTBLiteTaskUnmarshalJSON_AcceptsHuggingFaceShapes(t *testing.T) {
 	assert.Equal(t, []string{"system", "acl"}, task.Tags)
 	assert.Equal(t, 900, task.AgentTimeoutSec)
 	assert.Equal(t, 180, task.TestTimeoutSec)
+}
+
+func TestTBLiteTaskUnmarshalJSONPreservesV2Strictness(t *testing.T) {
+	var duplicate TBLiteTask
+	err := jsonv2.Unmarshal([]byte(`{"task_name":"first","task_name":"second"}`), &duplicate)
+	require.Error(t, err)
+
+	var mismatchedCase TBLiteTask
+	require.NoError(t, jsonv2.Unmarshal([]byte(`{"TASK_NAME":"wrong"}`), &mismatchedCase))
+	assert.Empty(t, mismatchedCase.TaskName)
 }
 
 func TestLoadTBLiteTasksFromFile_NormalizesTasks(t *testing.T) {

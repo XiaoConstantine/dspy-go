@@ -1,7 +1,7 @@
 package openai
 
 import (
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"strings"
 )
 
@@ -145,7 +145,7 @@ type ErrorResponse struct {
 func (e *ErrorResponse) UnmarshalJSON(data []byte) error {
 	type Alias ErrorResponse
 	var alias Alias
-	if err := json.Unmarshal(data, &alias); err != nil {
+	if err := jsonv2.Unmarshal(data, &alias); err != nil {
 		return err
 	}
 
@@ -155,7 +155,7 @@ func (e *ErrorResponse) UnmarshalJSON(data []byte) error {
 	}
 
 	var apiError APIError
-	if err := json.Unmarshal(data, &apiError); err != nil {
+	if err := jsonv2.Unmarshal(data, &apiError); err != nil {
 		return err
 	}
 

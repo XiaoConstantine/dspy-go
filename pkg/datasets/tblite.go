@@ -58,7 +58,7 @@ func (t *TBLiteTask) UnmarshalJSON(data []byte) error {
 		AgentTimeoutSec any `json:"agent_timeout_sec"`
 		TestTimeoutSec  any `json:"test_timeout_sec"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := jsonv2.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 

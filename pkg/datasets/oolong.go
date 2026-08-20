@@ -43,7 +43,7 @@ func (t *OolongTask) UnmarshalJSON(data []byte) error {
 		taskAlias
 		ID any `json:"id"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := jsonv2.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 
