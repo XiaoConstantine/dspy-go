@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"testing"
@@ -523,6 +524,9 @@ func TestHandleSendMessageTaskUsesServerLifecycle(t *testing.T) {
 	}
 	if got := taskCtx.Value(taskContextKey{}); got != "request-value" {
 		t.Fatalf("task context value = %v, want request-value", got)
+	}
+	if got, ok := pprof.Label(taskCtx, "task_id"); !ok || got != taskID {
+		t.Fatalf("task pprof label = %q, %v; want %q, true", got, ok, taskID)
 	}
 
 	requestErr := errors.New("request ended")

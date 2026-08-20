@@ -245,39 +245,41 @@ func (pe *ParallelExecutor) ExecuteParallel(ctx context.Context, tasks []*Parall
 				}
 			}()
 
-			// Check if context is already cancelled before execution
-			select {
-			case <-ctx.Done():
-				result := ParallelResult{
-					TaskID: t.ID,
-					Error:  ctx.Err(),
+			core.DoWithExecutionLabels(ctx, core.ExecutionLabels{
+				TaskID: t.ID,
+				Tool:   t.ToolName,
+			}, func(taskCtx context.Context) {
+				// Check if context is already cancelled before execution.
+				select {
+				case <-taskCtx.Done():
+					result := ParallelResult{
+						TaskID: t.ID,
+						Error:  taskCtx.Err(),
+					}
+					mu.Lock()
+					if idx, exists := resultMap[result.TaskID]; exists {
+						results[idx] = result
+					}
+					mu.Unlock()
+					return
+				default:
 				}
+
+				// Execute with worker pool.
+				result := pe.executeWithWorkerPool(taskCtx, t)
+
+				// Store result.
 				mu.Lock()
 				if idx, exists := resultMap[result.TaskID]; exists {
 					results[idx] = result
 				}
 				mu.Unlock()
-				return
-			default:
-			}
 
-			// Execute with worker pool
-			result := pe.executeWithWorkerPool(ctx, t)
-
-			// Store result
-			mu.Lock()
-			if idx, exists := resultMap[result.TaskID]; exists {
-				results[idx] = result
-			}
-			mu.Unlock()
-
-			// Update metrics
-			pe.updateMetrics(result)
-
-			// Update scheduler metrics if applicable
-			if fairShare, ok := scheduler.(*FairShareScheduler); ok {
-				fairShare.recordExecution(t.ToolName)
-			}
+				pe.updateMetrics(result)
+				if fairShare, ok := scheduler.(*FairShareScheduler); ok {
+					fairShare.recordExecution(t.ToolName)
+				}
+			})
 		}(task)
 	}
 

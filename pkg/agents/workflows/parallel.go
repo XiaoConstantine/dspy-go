@@ -59,6 +59,54 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 		limit = len(w.steps)
 	}
 	sem := make(chan struct{}, limit)
+	executeStep := func(stepCtx context.Context, step *Step) {
+		// Check if context is already cancelled before execution.
+		select {
+		case <-stepCtx.Done():
+			errors <- stepCtx.Err()
+			return
+		default:
+		}
+
+		// Acquire semaphore with timeout to prevent deadlock.
+		release, err := acquireSemaphore(stepCtx, sem, 30*time.Second)
+		if err != nil {
+			if err == context.DeadlineExceeded {
+				errors <- fmt.Errorf("semaphore acquire timeout for step %s", step.ID)
+			} else {
+				errors <- stepCtx.Err() // Original context was cancelled
+			}
+			return
+		}
+		// Release only after a successful acquire; releasing on every
+		// exit path could steal a permit another goroutine holds.
+		defer release()
+
+		// Prepare inputs for this step.
+		stepInputs := make(map[string]any)
+		signature := step.Module.GetSignature()
+		for _, field := range signature.Inputs {
+			if val, ok := inputs[field.Name]; ok {
+				stepInputs[field.Name] = val
+			}
+		}
+
+		// Each concurrent step needs its own mutable execution state. Sharing
+		// the parent's active span lets sibling steps become accidental parents
+		// of one another even though access to the state is mutex-protected.
+		executionCtx := core.WithFreshExecutionState(stepCtx)
+		result, err := step.Execute(executionCtx, stepInputs)
+		if err != nil {
+			errors <- fmt.Errorf("step %s failed: %w", step.ID, err)
+			return
+		}
+
+		// Send result without blocking if context is cancelled.
+		select {
+		case results <- result:
+		case <-stepCtx.Done():
+		}
+	}
 
 	// Launch goroutine for each step
 	var wg sync.WaitGroup
@@ -75,56 +123,9 @@ func (w *ParallelWorkflow) Execute(ctx context.Context, inputs map[string]any) (
 				}
 			}()
 
-			// Check if context is already cancelled before execution
-			select {
-			case <-ctx.Done():
-				errors <- ctx.Err()
-				return
-			default:
-			}
-
-			// Acquire semaphore with timeout to prevent deadlock.
-			release, err := acquireSemaphore(ctx, sem, 30*time.Second)
-			if err != nil {
-				if err == context.DeadlineExceeded {
-					errors <- fmt.Errorf("semaphore acquire timeout for step %s", s.ID)
-				} else {
-					errors <- ctx.Err() // Original context was cancelled
-				}
-				return
-			}
-			// Release only after a successful acquire; releasing on every
-			// exit path could steal a permit another goroutine holds.
-			defer release()
-
-			// Prepare inputs for this step
-			stepInputs := make(map[string]any)
-			signature := s.Module.GetSignature()
-
-			for _, field := range signature.Inputs {
-				if val, ok := inputs[field.Name]; ok {
-					stepInputs[field.Name] = val
-				}
-			}
-
-			// Each concurrent step needs its own mutable execution state. Sharing
-			// the parent's active span lets sibling steps become accidental parents
-			// of one another even though access to the state is mutex-protected.
-			stepCtx := core.WithFreshExecutionState(ctx)
-
-			// Execute step
-			result, err := s.Execute(stepCtx, stepInputs)
-			if err != nil {
-				errors <- fmt.Errorf("step %s failed: %w", s.ID, err)
-				return
-			}
-
-			// Send result without blocking if context is cancelled
-			select {
-			case results <- result:
-			case <-ctx.Done():
-				return
-			}
+			core.DoWithExecutionLabels(ctx, core.ExecutionLabels{StepID: s.ID}, func(stepCtx context.Context) {
+				executeStep(stepCtx, s)
+			})
 		}(step)
 	}
 

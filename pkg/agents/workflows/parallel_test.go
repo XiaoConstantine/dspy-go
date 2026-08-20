@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"errors"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -235,6 +236,7 @@ func TestParallelWorkflowIsolatesExecutionState(t *testing.T) {
 	workflow := NewParallelWorkflow(new(MockMemory), stepCount)
 	states := make(chan *core.ExecutionState, stepCount)
 	spans := make(chan *core.Span, stepCount)
+	labels := make(chan map[string]string, stepCount)
 	started := make(chan struct{}, stepCount)
 	release := make(chan struct{})
 
@@ -247,6 +249,9 @@ func TestParallelWorkflowIsolatesExecutionState(t *testing.T) {
 		module.On("Process", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 			stepCtx := args.Get(0).(context.Context)
 			states <- core.GetExecutionState(stepCtx)
+			traceID, _ := pprof.Label(stepCtx, "trace_id")
+			stepID, _ := pprof.Label(stepCtx, "step_id")
+			labels <- map[string]string{"trace_id": traceID, "step_id": stepID}
 			spanCtx, span := core.StartSpan(stepCtx, id)
 			spans <- span
 			started <- struct{}{}
@@ -279,6 +284,13 @@ func TestParallelWorkflowIsolatesExecutionState(t *testing.T) {
 	assert.NotSame(t, firstState, secondState)
 	assert.Equal(t, parentState.GetTraceID(), firstState.GetTraceID())
 	assert.Equal(t, parentState.GetTraceID(), secondState.GetTraceID())
+	seenStepIDs := make(map[string]bool, stepCount)
+	for range stepCount {
+		got := <-labels
+		assert.Equal(t, parentState.GetTraceID(), got["trace_id"])
+		seenStepIDs[got["step_id"]] = true
+	}
+	assert.Equal(t, map[string]bool{"step1": true, "step2": true}, seenStepIDs)
 
 	for range stepCount {
 		assert.Empty(t, (<-spans).ParentID, "parallel steps must not become sibling span parents")

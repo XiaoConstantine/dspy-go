@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -402,6 +403,43 @@ func TestParallelExecutor_NilTaskContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.NoError(t, results[0].Error)
+}
+
+func TestParallelExecutor_ExecutionLabels(t *testing.T) {
+	type observedLabels struct {
+		traceID string
+		taskID  string
+		tool    string
+	}
+
+	observed := make(chan observedLabels, 1)
+	tool := &parallelExecutorFuncTool{
+		mockProcessingTool: &mockProcessingTool{name: "labeled_tool"},
+		execute: func(ctx context.Context, _ map[string]any) (core.ToolResult, error) {
+			traceID, _ := pprof.Label(ctx, "trace_id")
+			taskID, _ := pprof.Label(ctx, "task_id")
+			toolName, _ := pprof.Label(ctx, "tool")
+			observed <- observedLabels{traceID: traceID, taskID: taskID, tool: toolName}
+			return core.ToolResult{}, nil
+		},
+	}
+	registry := createTestRegistry()
+	require.NoError(t, registry.Register(tool))
+	executor := NewParallelExecutor(registry, 1)
+	ctx := core.WithExecutionState(context.Background())
+
+	results, err := executor.ExecuteParallel(ctx, []*ParallelTask{{
+		ID:       "task-1",
+		ToolName: tool.Name(),
+	}}, nil)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.NoError(t, results[0].Error)
+	got := <-observed
+	assert.Equal(t, core.GetExecutionState(ctx).GetTraceID(), got.traceID)
+	assert.Equal(t, "task-1", got.taskID)
+	assert.Equal(t, tool.Name(), got.tool)
 }
 
 func TestParallelExecutor_TaskContextCancellation(t *testing.T) {

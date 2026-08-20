@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 // ============================================================================
@@ -661,7 +662,9 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 	task.setExecutionCancel(cancelTask)
 	go func() {
 		defer cancelTask()
-		s.processTask(taskCtx, task, msg)
+		core.DoWithExecutionLabels(taskCtx, core.ExecutionLabels{TaskID: task.ID}, func(taskCtx context.Context) {
+			s.processTask(taskCtx, task, msg)
+		})
 	}()
 
 	// Return task info immediately
