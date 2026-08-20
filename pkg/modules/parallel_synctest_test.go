@@ -12,7 +12,26 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type cancelAwareParallelModule struct {
+	core.BaseModule
+	started chan struct{}
+}
+
+func (m *cancelAwareParallelModule) Process(ctx context.Context, _ map[string]any, _ ...core.Option) (map[string]any, error) {
+	close(m.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (m *cancelAwareParallelModule) Clone() core.Module {
+	return &cancelAwareParallelModule{
+		BaseModule: *m.BaseModule.Clone().(*core.BaseModule),
+		started:    m.started,
+	}
+}
 
 // TestParallelWithSynctest demonstrates synctest for deterministic concurrent tests.
 // The synctest.Test function creates an isolated "bubble" with virtualized time,
@@ -117,6 +136,37 @@ func TestParallelWithSynctest(t *testing.T) {
 			// The key is that the test completes deterministically
 			_ = result
 		})
+	})
+}
+
+func TestParallelProcessReturnsCallerCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		module := &cancelAwareParallelModule{
+			BaseModule: *core.NewModule(core.Signature{}),
+			started:    make(chan struct{}),
+		}
+		parallel := NewParallel(module, WithMaxWorkers(1))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		type outcome struct {
+			result map[string]any
+			err    error
+		}
+		done := make(chan outcome)
+		go func() {
+			result, err := parallel.Process(ctx, map[string]any{
+				"batch_inputs": []map[string]any{{"input": "blocked"}},
+			})
+			done <- outcome{result: result, err: err}
+		}()
+
+		<-module.started
+		cancel()
+		got := <-done
+
+		require.ErrorIs(t, got.err, context.Canceled)
+		assert.Nil(t, got.result)
 	})
 }
 

@@ -228,6 +228,11 @@ func (p *Parallel) Process(ctx context.Context, inputs map[string]any, opts ...c
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		span.WithError(err)
+		return nil, err
+	}
+
 	// If we stopped on first error, return it
 	if firstError != nil {
 		span.WithError(firstError)
