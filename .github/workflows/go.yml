@@ -9,13 +9,16 @@ on:
 permissions:
   contents: read
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   unit-tests:
-    name: Run Unit Tests
+    name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -25,15 +28,34 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: "go.mod"
+          go-version: "1.27.x"
+          cache-dependency-path: |
+            go.sum
+            cmd/dspy-cli/go.sum
 
-      - name: Download dependencies
+      - name: Download root dependencies
         run: go mod download
 
-      - name: Run unit tests
-        run: go test -tags skip -race -v ./pkg/... -coverprofile ./coverage.txt
+      - name: Download CLI dependencies
+        working-directory: cmd/dspy-cli
+        run: go mod download
+
+      - name: Vet root module
+        run: go vet ./...
+
+      - name: Test root packages
+        run: go test -tags skip -race -covermode atomic -v ./pkg/... -coverprofile ./coverage.txt
+
+      - name: Vet CLI module
+        working-directory: cmd/dspy-cli
+        run: go vet ./...
+
+      - name: Test CLI module
+        working-directory: cmd/dspy-cli
+        run: go test -race ./...
 
       - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
