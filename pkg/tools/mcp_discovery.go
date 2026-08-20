@@ -15,11 +15,16 @@ type DefaultMCPDiscoveryService struct {
 	servers      []MCPServer
 	callbacks    []func(tools []core.Tool)
 	pollInterval time.Duration
-	stopChan     chan struct{}
-	running      bool
+
+	lifecycleMu sync.Mutex
+	pollCancel  context.CancelFunc
+	pollDone    chan struct{}
+	running     bool
 }
 
-// MCPServer represents an MCP server connection.
+// MCPServer represents an MCP server connection. Implementations must return
+// promptly when an operation's context is canceled; discovery shutdown waits
+// for in-flight operations to release their resources.
 type MCPServer interface {
 	Name() string
 	IsConnected() bool
@@ -44,7 +49,6 @@ func NewDefaultMCPDiscoveryService(config *MCPDiscoveryConfig) *DefaultMCPDiscov
 		servers:      config.Servers,
 		callbacks:    make([]func(tools []core.Tool), 0),
 		pollInterval: config.PollInterval,
-		stopChan:     make(chan struct{}),
 	}
 }
 
@@ -97,14 +101,20 @@ func (d *DefaultMCPDiscoveryService) Subscribe(callback func(tools []core.Tool))
 		return errors.New(errors.InvalidInput, "callback cannot be nil")
 	}
 
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
+
 	d.mu.Lock()
 	d.callbacks = append(d.callbacks, callback)
-	shouldStartPolling := !d.running
 	d.mu.Unlock()
 
-	// Start polling if this is the first subscriber
-	if shouldStartPolling {
-		go d.startPolling()
+	if !d.running {
+		pollCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		d.pollCancel = cancel
+		d.pollDone = done
+		d.running = true
+		go d.startPolling(pollCtx, done)
 	}
 
 	return nil
@@ -157,21 +167,29 @@ func (d *DefaultMCPDiscoveryService) RemoveServer(serverName string) error {
 	)
 }
 
-// Stop stops the discovery service.
+// Stop stops the discovery service. It cancels and joins any in-flight
+// discovery before disconnecting servers, so MCPServer implementations must
+// cooperate with context cancellation.
 func (d *DefaultMCPDiscoveryService) Stop() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
 
 	if d.running {
-		close(d.stopChan)
+		d.pollCancel()
+		<-d.pollDone
+		d.pollCancel = nil
+		d.pollDone = nil
 		d.running = false
 	}
 
-	// Disconnect all servers
+	d.mu.RLock()
+	servers := append([]MCPServer(nil), d.servers...)
+	d.mu.RUnlock()
+
+	// Disconnect only after the polling goroutine can no longer use the servers.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	for _, server := range d.servers {
+	for _, server := range servers {
 		if server.IsConnected() {
 			_ = server.Disconnect(ctx)
 		}
@@ -195,44 +213,42 @@ func (d *DefaultMCPDiscoveryService) GetConnectedServers() []string {
 
 // IsRunning returns true if the discovery service is currently running.
 func (d *DefaultMCPDiscoveryService) IsRunning() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
 	return d.running
 }
 
 // Private methods
 
-func (d *DefaultMCPDiscoveryService) startPolling() {
-	d.mu.Lock()
-	if d.running {
-		d.mu.Unlock()
-		return
-	}
-	d.running = true
-	d.mu.Unlock()
+func (d *DefaultMCPDiscoveryService) startPolling(ctx context.Context, done chan struct{}) {
+	defer close(done)
 
 	ticker := time.NewTicker(d.pollInterval)
 	defer ticker.Stop()
 
-	// Initial discovery
-	d.performDiscovery()
+	select {
+	case <-ctx.Done():
+		return
+	default:
+		d.performDiscovery(ctx)
+	}
 
 	for {
 		select {
 		case <-ticker.C:
-			d.performDiscovery()
-		case <-d.stopChan:
+			d.performDiscovery(ctx)
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (d *DefaultMCPDiscoveryService) performDiscovery() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (d *DefaultMCPDiscoveryService) performDiscovery(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
 	tools, err := d.DiscoverTools(ctx)
-	if err != nil {
+	if err != nil || ctx.Err() != nil {
 		// Log error but continue
 		return
 	}

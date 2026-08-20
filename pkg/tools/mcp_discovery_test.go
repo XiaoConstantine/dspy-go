@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -93,6 +94,46 @@ func newMockMCPServer(name string) *mockMCPServer {
 	}
 }
 
+type blockingDiscoveryMCPServer struct {
+	listStarted               chan struct{}
+	listCanceled              chan struct{}
+	releaseList               chan struct{}
+	listExited                chan struct{}
+	disconnectStarted         chan struct{}
+	releaseDisconnect         chan struct{}
+	disconnectedBeforeListEnd atomic.Bool
+}
+
+func (s *blockingDiscoveryMCPServer) Name() string { return "blocking-server" }
+
+func (s *blockingDiscoveryMCPServer) IsConnected() bool { return true }
+
+func (s *blockingDiscoveryMCPServer) Connect(context.Context) error { return nil }
+
+func (s *blockingDiscoveryMCPServer) ListTools(ctx context.Context) ([]core.Tool, error) {
+	close(s.listStarted)
+	<-ctx.Done()
+	close(s.listCanceled)
+	<-s.releaseList
+	close(s.listExited)
+	return nil, ctx.Err()
+}
+
+func (s *blockingDiscoveryMCPServer) Disconnect(ctx context.Context) error {
+	select {
+	case <-s.listExited:
+	default:
+		s.disconnectedBeforeListEnd.Store(true)
+	}
+	close(s.disconnectStarted)
+	select {
+	case <-s.releaseDisconnect:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func TestNewDefaultMCPDiscoveryService(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -133,7 +174,8 @@ func TestNewDefaultMCPDiscoveryService(t *testing.T) {
 			assert.Equal(t, tt.expectedInterval, service.pollInterval)
 			assert.Equal(t, len(tt.config.Servers), len(service.servers))
 			assert.NotNil(t, service.callbacks)
-			assert.NotNil(t, service.stopChan)
+			assert.Nil(t, service.pollCancel)
+			assert.Nil(t, service.pollDone)
 			assert.False(t, service.running)
 		})
 	}
@@ -427,6 +469,119 @@ func TestDefaultMCPDiscoveryService_Stop(t *testing.T) {
 
 	// Multiple stops should be safe
 	service.Stop() // Should not panic
+}
+
+func TestDefaultMCPDiscoveryService_StopBeforePollStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const pollInterval = time.Hour
+		service := NewDefaultMCPDiscoveryService(&MCPDiscoveryConfig{PollInterval: pollInterval})
+		var callbackCount atomic.Int32
+
+		require.NoError(t, service.Subscribe(func([]core.Tool) {
+			callbackCount.Add(1)
+		}))
+		require.True(t, service.IsRunning())
+		service.Stop()
+		synctest.Wait()
+
+		countAfterStop := callbackCount.Load()
+		time.Sleep(pollInterval)
+		synctest.Wait()
+		assert.Equal(t, countAfterStop, callbackCount.Load())
+		assert.False(t, service.IsRunning())
+	})
+}
+
+func TestDefaultMCPDiscoveryService_RestartUsesFreshCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const pollInterval = time.Hour
+		service := NewDefaultMCPDiscoveryService(&MCPDiscoveryConfig{PollInterval: pollInterval})
+		defer service.Stop()
+
+		var firstCallback, secondCallback atomic.Int32
+		require.NoError(t, service.Subscribe(func([]core.Tool) {
+			firstCallback.Add(1)
+		}))
+		synctest.Wait()
+		require.Equal(t, int32(1), firstCallback.Load())
+
+		service.Stop()
+		require.NoError(t, service.Subscribe(func([]core.Tool) {
+			secondCallback.Add(1)
+		}))
+		synctest.Wait()
+		require.Equal(t, int32(2), firstCallback.Load())
+		require.Equal(t, int32(1), secondCallback.Load())
+
+		time.Sleep(pollInterval)
+		synctest.Wait()
+		assert.Equal(t, int32(3), firstCallback.Load())
+		assert.Equal(t, int32(2), secondCallback.Load())
+	})
+}
+
+func TestDefaultMCPDiscoveryService_StopCancelsAndJoinsDiscovery(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := &blockingDiscoveryMCPServer{
+			listStarted:       make(chan struct{}),
+			listCanceled:      make(chan struct{}),
+			releaseList:       make(chan struct{}),
+			listExited:        make(chan struct{}),
+			disconnectStarted: make(chan struct{}),
+			releaseDisconnect: make(chan struct{}),
+		}
+		var releaseListOnce, releaseDisconnectOnce sync.Once
+		releaseList := func() { releaseListOnce.Do(func() { close(server.releaseList) }) }
+		releaseDisconnect := func() { releaseDisconnectOnce.Do(func() { close(server.releaseDisconnect) }) }
+		defer releaseList()
+		defer releaseDisconnect()
+
+		service := NewDefaultMCPDiscoveryService(&MCPDiscoveryConfig{
+			PollInterval: time.Hour,
+			Servers:      []MCPServer{server},
+		})
+		require.NoError(t, service.Subscribe(func([]core.Tool) {}))
+		<-server.listStarted
+
+		stopDone := make(chan struct{})
+		go func() {
+			service.Stop()
+			close(stopDone)
+		}()
+
+		<-server.listCanceled
+		synctest.Wait()
+		select {
+		case <-stopDone:
+			t.Fatal("Stop returned before in-flight discovery exited")
+		default:
+		}
+		select {
+		case <-server.disconnectStarted:
+			t.Fatal("Stop disconnected a server before in-flight discovery exited")
+		default:
+		}
+
+		releaseList()
+		<-server.disconnectStarted
+		assert.False(t, server.disconnectedBeforeListEnd.Load())
+
+		addDone := make(chan error, 1)
+		go func() {
+			addDone <- service.AddServer(newMockMCPServer("added-during-disconnect"))
+		}()
+		synctest.Wait()
+		select {
+		case err := <-addDone:
+			require.NoError(t, err)
+		default:
+			t.Fatal("server disconnect held the discovery data mutex")
+		}
+
+		releaseDisconnect()
+		<-stopDone
+		assert.False(t, service.IsRunning())
+	})
 }
 
 func TestDefaultMCPDiscoveryService_GetConnectedServers(t *testing.T) {
