@@ -7,7 +7,8 @@ import (
 	"sync"
 )
 
-// TypedSignature provides compile-time type safety for module inputs and outputs.
+// TypedSignature binds module inputs and outputs to Go types and exposes
+// metadata and runtime validation derived from their struct tags.
 type TypedSignature[TInput, TOutput any] interface {
 	// GetInputType returns the reflect.Type for the input struct
 	GetInputType() reflect.Type
@@ -15,10 +16,10 @@ type TypedSignature[TInput, TOutput any] interface {
 	// GetOutputType returns the reflect.Type for the output struct
 	GetOutputType() reflect.Type
 
-	// ValidateInput performs compile-time and runtime validation of input
+	// ValidateInput performs runtime validation of the input value.
 	ValidateInput(input TInput) error
 
-	// ValidateOutput performs compile-time and runtime validation of output
+	// ValidateOutput performs runtime validation of the output value.
 	ValidateOutput(output TOutput) error
 
 	// GetFieldMetadata returns parsed struct tag metadata

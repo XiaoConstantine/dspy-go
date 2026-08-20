@@ -952,7 +952,9 @@ func parseJSONResponse(content string, signature core.Signature) string {
 	return strings.TrimSpace(result.String())
 }
 
-// ProcessTyped provides type-safe processing with compile-time type validation.
+// ProcessTyped converts typed inputs and outputs around the legacy map-based
+// module API. Type parameters constrain call-site types; conversion errors are
+// reported at runtime.
 func (p *Predict) ProcessTyped[TInput, TOutput any](ctx context.Context, inputs TInput, opts ...core.Option) (TOutput, error) {
 	var zero TOutput
 
@@ -988,7 +990,9 @@ func (p *Predict) ProcessTyped[TInput, TOutput any](ctx context.Context, inputs 
 	return typedOutputs, nil
 }
 
-// ProcessTyped provides type-safe processing with compile-time type validation.
+// ProcessTyped converts typed inputs and outputs around the legacy map-based
+// module API. Type parameters constrain call-site types; conversion errors are
+// reported at runtime.
 // It is retained for compatibility; new code may use predict.ProcessTyped.
 func ProcessTyped[TInput, TOutput any](ctx context.Context, predict *Predict, inputs TInput, opts ...core.Option) (TOutput, error) {
 	return predict.ProcessTyped[TInput, TOutput](ctx, inputs, opts...)
