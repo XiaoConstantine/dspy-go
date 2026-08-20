@@ -75,14 +75,13 @@ go build -o dspy-cli
 sudo mv dspy-cli /usr/local/bin/
 ```
 
-### Go Workspace Setup
+### Separate Module Setup
 
-If you're developing, the CLI uses Go workspaces for seamless integration:
+For development, the CLI remains a separate Go module. Its `go.mod` resolves the repository root through `replace github.com/XiaoConstantine/dspy-go => ../../`:
 
 ```bash
-# The workspace is already configured in go.work
-cd dspy-go
-go work sync
+cd dspy-go/cmd/dspy-cli
+go mod download
 ```
 
 ## 📝 Commands
@@ -614,16 +613,16 @@ The CLI uses a separate Go module to prevent dependency pollution:
 
 ```
 dspy-go/
+├── go.mod                  # Main library module
 ├── pkg/                    # Main library (clean dependencies)
-├── cmd/dspy-cli/
-│   ├── go.mod             # Separate module with CLI dependencies
-│   ├── main.go            # CLI entry point
-│   └── internal/
-│       ├── commands/       # Cobra commands
-│       ├── optimizers/     # Optimizer registry
-│       ├── runner/         # Execution engine
-│       └── samples/        # Sample datasets
-└── go.work                # Workspace configuration
+└── cmd/dspy-cli/
+    ├── go.mod              # Separate module with a local replace to ../..
+    ├── main.go             # CLI entry point
+    └── internal/
+        ├── commands/       # Cobra commands
+        ├── optimizers/     # Optimizer registry
+        ├── runner/         # Execution engine
+        └── samples/        # Sample datasets
 ```
 
 ### Key Components
@@ -632,7 +631,7 @@ dspy-go/
 2. **Registry**: Optimizer metadata and recommendations
 3. **Runner**: Execution engine that eliminates boilerplate
 4. **Samples**: Built-in datasets for quick testing
-5. **Workspace**: Go workspace for seamless development
+5. **Module Integration**: Local `replace` directive linking the CLI module to the main library
 
 ### Boilerplate Elimination
 
@@ -698,11 +697,9 @@ Error: optimizer 'typo' not found
 ```
 Solution: Use `dspy-cli list` to see available optimizers.
 
-**Import Cycle During Development**
-```bash
-Error: import cycle detected
-```
-Solution: Ensure you're using the Go workspace: `go work sync`
+**Local Module Resolution During Development**
+
+Solution: Run CLI development commands from `cmd/dspy-cli` and verify its `go.mod` retains `replace github.com/XiaoConstantine/dspy-go => ../../`.
 
 ### Performance Tips
 
@@ -713,7 +710,7 @@ Solution: Ensure you're using the Go workspace: `go work sync`
 
 ### Development Tips
 
-1. **Use Go Workspace**: Enables seamless library development
+1. **Use the Local Replacement**: The CLI module resolves the main library from the repository root
 2. **Separate Dependencies**: CLI deps don't affect main library
 3. **Test Locally**: Build and test before committing
 4. **Check Registry**: Update optimizer status in registry.go
