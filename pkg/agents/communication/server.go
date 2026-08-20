@@ -52,6 +52,30 @@ type serverRun struct {
 	err         error
 }
 
+type taskExecutionContext struct {
+	lifecycle context.Context
+	request   context.Context
+}
+
+func (c taskExecutionContext) Deadline() (time.Time, bool) {
+	return c.lifecycle.Deadline()
+}
+
+func (c taskExecutionContext) Done() <-chan struct{} {
+	return c.lifecycle.Done()
+}
+
+func (c taskExecutionContext) Err() error {
+	return c.lifecycle.Err()
+}
+
+func (c taskExecutionContext) Value(key any) any {
+	if value := c.request.Value(key); value != nil {
+		return value
+	}
+	return c.lifecycle.Value(key)
+}
+
 // ============================================================================
 // Task Management
 // ============================================================================
@@ -336,6 +360,21 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (s *Server) taskContext(requestCtx context.Context) context.Context {
+	s.mu.Lock()
+	run := s.run
+	s.mu.Unlock()
+
+	lifecycleCtx := context.Background()
+	if run != nil {
+		lifecycleCtx = run.ctx
+	}
+	return taskExecutionContext{
+		lifecycle: lifecycleCtx,
+		request:   context.WithoutCancel(requestCtx),
+	}
+}
+
 // cleanupLoop periodically removes old completed tasks.
 func (s *Server) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Minute)
@@ -598,8 +637,9 @@ func (s *Server) handleSendMessage(ctx context.Context, req *JSONRPCRequest) *JS
 	task := s.tasks.create()
 	task.ContextID = msg.ContextID
 
-	// Process asynchronously
-	go s.processTask(ctx, task, msg)
+	// Processing outlives the HTTP request, but remains bounded by the server
+	// lifecycle. Request-scoped values are retained for tracing and metadata.
+	go s.processTask(s.taskContext(ctx), task, msg)
 
 	// Return task info immediately
 	return NewJSONRPCResponse(req.ID, map[string]any{

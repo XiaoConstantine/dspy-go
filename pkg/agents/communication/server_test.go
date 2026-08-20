@@ -3,6 +3,7 @@ package communication
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -44,6 +45,26 @@ func (a *testAgent) GetCapabilities() []core.Tool {
 }
 
 func (a *testAgent) GetMemory() agents.Memory {
+	return nil
+}
+
+type taskContextKey struct{}
+
+type taskContextAgent struct {
+	contexts chan context.Context
+}
+
+func (a *taskContextAgent) Execute(ctx context.Context, _ map[string]any) (map[string]any, error) {
+	a.contexts <- ctx
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (a *taskContextAgent) GetCapabilities() []core.Tool {
+	return nil
+}
+
+func (a *taskContextAgent) GetMemory() agents.Memory {
 	return nil
 }
 
@@ -426,6 +447,81 @@ func TestHandleSendMessage(t *testing.T) {
 	taskID, ok := result["taskId"].(string)
 	if !ok || taskID == "" {
 		t.Error("expected non-empty task ID")
+	}
+}
+
+func TestHandleSendMessageTaskUsesServerLifecycle(t *testing.T) {
+	agent := &taskContextAgent{contexts: make(chan context.Context, 1)}
+	server := createTestServer(t, agent)
+	lifecycleCtx, cancelLifecycle := context.WithCancelCause(context.Background())
+	defer cancelLifecycle(context.Canceled)
+	server.run = &serverRun{ctx: lifecycleCtx}
+
+	requestCtx := context.WithValue(context.Background(), taskContextKey{}, "request-value")
+	requestCtx, cancelRequest := context.WithCancelCause(requestCtx)
+	resp := server.handleSendMessage(requestCtx, &JSONRPCRequest{
+		ID: "request-1",
+		Params: map[string]any{
+			"message": map[string]any{
+				"role":  string(RoleUser),
+				"parts": []any{map[string]any{"type": "text", "text": "work"}},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("handleSendMessage() error = %v", resp.Error)
+	}
+	taskID := resp.Result.(map[string]any)["taskId"].(string)
+	sub := server.subscribers.subscribe(taskID)
+	defer server.subscribers.unsubscribe(sub)
+
+	var taskCtx context.Context
+	select {
+	case taskCtx = <-agent.contexts:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent execution did not start")
+	}
+	if got := taskCtx.Value(taskContextKey{}); got != "request-value" {
+		t.Fatalf("task context value = %v, want request-value", got)
+	}
+
+	requestErr := errors.New("request ended")
+	cancelRequest(requestErr)
+	select {
+	case <-taskCtx.Done():
+		t.Fatal("HTTP request cancellation stopped the background task")
+	default:
+	}
+	if cause := context.Cause(taskCtx); cause != nil {
+		t.Fatalf("task cancellation cause = %v after request cancellation, want nil", cause)
+	}
+
+	lifecycleErr := errors.New("server stopped")
+	cancelLifecycle(lifecycleErr)
+	select {
+	case <-taskCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("server lifecycle cancellation did not stop the background task")
+	}
+	if cause := context.Cause(taskCtx); !errors.Is(cause, lifecycleErr) {
+		t.Fatalf("task cancellation cause = %v, want %v", cause, lifecycleErr)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-sub.channel:
+			statusEvent, ok := event.(*TaskStatusUpdateEvent)
+			if !ok || !statusEvent.Final {
+				continue
+			}
+			if statusEvent.Status.State != TaskStateFailed {
+				t.Fatalf("final status = %+v, want failed", statusEvent)
+			}
+			return
+		case <-deadline:
+			t.Fatal("task did not publish a final status after lifecycle cancellation")
+		}
 	}
 }
 
