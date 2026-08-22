@@ -128,7 +128,7 @@ func TestOllamaLLM_DualModeGeneration(t *testing.T) {
 				Model:   "llama3:8b",
 				Choices: []openai.ChatChoice{{
 					Index:   0,
-					Message: openai.ChatCompletionMessage{Role: "assistant", Content: "OpenAI response"},
+					Message: openai.ChatCompletionMessage{Role: "assistant", Content: openai.TextContent("OpenAI response")},
 				}},
 				Usage: openai.CompletionUsage{
 					PromptTokens:     10,
@@ -166,7 +166,7 @@ func TestOllamaLLM_DualModeGeneration(t *testing.T) {
 					assert.Equal(t, "llama3:8b", req.Model)
 					assert.Len(t, req.Messages, 1)
 					assert.Equal(t, "user", req.Messages[0].Role)
-					assert.Equal(t, "Test prompt", req.Messages[0].Content)
+					assert.Equal(t, "Test prompt", req.Messages[0].Content.Text())
 					assert.False(t, req.Stream)
 					assert.NotNil(t, req.MaxTokens)
 					assert.Equal(t, 100, *req.MaxTokens)
@@ -271,7 +271,7 @@ func TestOllamaLLM_DualModeStreaming(t *testing.T) {
 							Model:   "llama3:8b",
 							Choices: []openai.ChatChoiceStream{{
 								Index: 0,
-								Delta: openai.ChatCompletionMessage{Content: chunk},
+								Delta: openai.ChatCompletionMessage{Content: openai.TextContent(chunk)},
 							}},
 						}
 						jsonData, _ := json.Marshal(streamResp)
@@ -666,7 +666,7 @@ func TestOllamaLLM_JSON_Generation(t *testing.T) {
 				if tt.useOpenAI {
 					resp := &openai.ChatCompletionResponse{
 						Choices: []openai.ChatChoice{{
-							Message: openai.ChatCompletionMessage{Content: tt.response},
+							Message: openai.ChatCompletionMessage{Content: openai.TextContent(tt.response)},
 						}},
 						Usage: openai.CompletionUsage{},
 					}
@@ -713,7 +713,7 @@ func TestOllamaLLM_MultimodalContent(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		resp := &openai.ChatCompletionResponse{
 			Choices: []openai.ChatChoice{{
-				Message: openai.ChatCompletionMessage{Content: "Processed text content"},
+				Message: openai.ChatCompletionMessage{Content: openai.TextContent("Processed text content")},
 			}},
 			Usage: openai.CompletionUsage{},
 		}
@@ -760,7 +760,7 @@ func TestOllamaLLM_MultimodalContent(t *testing.T) {
 			flusher := w.(http.Flusher)
 			streamResp := openai.ChatCompletionStreamResponse{
 				Choices: []openai.ChatChoiceStream{{
-					Delta: openai.ChatCompletionMessage{Content: "Streamed response"},
+					Delta: openai.ChatCompletionMessage{Content: openai.TextContent("Streamed response")},
 				}},
 			}
 			jsonData, _ := json.Marshal(streamResp)
@@ -1061,7 +1061,7 @@ func TestOllamaLLM_ConcurrentStreaming(t *testing.T) {
 			for i := 0; i < 5; i++ {
 				streamResp := openai.ChatCompletionStreamResponse{
 					Choices: []openai.ChatChoiceStream{{
-						Delta: openai.ChatCompletionMessage{Content: fmt.Sprintf("chunk_%d ", i)},
+						Delta: openai.ChatCompletionMessage{Content: openai.TextContent(fmt.Sprintf("chunk_%d ", i))},
 					}},
 				}
 				jsonData, _ := json.Marshal(streamResp)

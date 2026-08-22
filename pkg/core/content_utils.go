@@ -224,6 +224,52 @@ func NewAudioFromURL(url string) (*ContentBlock, error) {
 	return &block, nil
 }
 
+// ResolveImageMIME resolves the MIME type for image bytes and an optional declared label.
+// Magic-byte detection runs first with no filename fallback. When detection succeeds,
+// an empty declared MIME is inferred and a conflicting declared MIME returns an error.
+// When detection fails, a declared MIME on the existing allowlist is trusted.
+func ResolveImageMIME(data []byte, declared string) (string, error) {
+	if len(data) == 0 {
+		return "", errors.New(errors.InvalidInput, "image data cannot be empty")
+	}
+
+	detected := detectImageMimeType(data, "")
+	declared = normalizeImageMIME(declared)
+
+	if detected != "" {
+		if declared == "" {
+			return detected, nil
+		}
+		if declared != detected {
+			return "", errors.New(errors.InvalidInput,
+				fmt.Sprintf("image MIME type %s does not match detected format %s", declared, detected))
+		}
+		return declared, nil
+	}
+
+	if declared == "" {
+		return "", errors.New(errors.InvalidInput, "missing or unsupported image MIME type")
+	}
+	if !isValidImageMimeType(declared) {
+		return "", errors.New(errors.InvalidInput, fmt.Sprintf("unsupported image MIME type: %s", declared))
+	}
+	return declared, nil
+}
+
+func normalizeImageMIME(mimeType string) string {
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "" {
+		return ""
+	}
+	if mediaType, _, err := mime.ParseMediaType(mimeType); err == nil {
+		mimeType = mediaType
+	}
+	if mimeType == "image/jpg" {
+		return "image/jpeg"
+	}
+	return mimeType
+}
+
 // Helper functions for MIME type detection and validation
 
 // detectImageMimeType detects the MIME type of image data.

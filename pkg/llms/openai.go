@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
@@ -33,12 +34,13 @@ type OpenAIOption func(*OpenAIConfig)
 
 // OpenAIConfig holds configuration for OpenAI provider.
 type OpenAIConfig struct {
-	baseURL    string
-	path       string
-	apiKey     string
-	headers    map[string]string
-	timeout    time.Duration
-	httpClient *http.Client
+	baseURL           string
+	path              string
+	apiKey            string
+	headers           map[string]string
+	timeout           time.Duration
+	httpClient        *http.Client
+	extraCapabilities []core.Capability
 }
 
 // NewOpenAILLM creates a new OpenAILLM instance with functional options.
@@ -81,14 +83,7 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 	}
 	endpointCfg.Headers["Content-Type"] = "application/json"
 
-	capabilities := []core.Capability{
-		core.CapabilityCompletion,
-		core.CapabilityChat,
-		core.CapabilityJSON,
-		core.CapabilityStreaming,
-		core.CapabilityEmbedding,
-		core.CapabilityToolCalling,
-	}
+	capabilities := mergeOpenAICapabilities(defaultOpenAICapabilities(), config.extraCapabilities)
 
 	baseLLM := core.NewBaseLLM("openai", modelID, capabilities, endpointCfg, core.WithHTTPClient(config.httpClient))
 
@@ -133,6 +128,79 @@ func WithHeader(key, value string) OpenAIOption {
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(client *http.Client) OpenAIOption {
 	return func(c *OpenAIConfig) { c.httpClient = client }
+}
+
+// WithCapabilities appends extra capabilities to the OpenAI client defaults.
+// Use this to declare deployment-specific features such as vision on OpenAI-compatible proxies.
+func WithCapabilities(caps ...core.Capability) OpenAIOption {
+	return func(c *OpenAIConfig) {
+		c.extraCapabilities = append(c.extraCapabilities, caps...)
+	}
+}
+
+// defaultOpenAICapabilities returns the historical OpenAI client capability slice.
+func defaultOpenAICapabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+		core.CapabilityStreaming,
+		core.CapabilityEmbedding,
+		core.CapabilityToolCalling,
+	}
+}
+
+// mergeOpenAICapabilities appends unique extra capabilities onto the default slice.
+func mergeOpenAICapabilities(base, extras []core.Capability) []core.Capability {
+	if len(extras) == 0 {
+		return base
+	}
+	merged := append([]core.Capability(nil), base...)
+	seen := make(map[core.Capability]struct{}, len(merged)+len(extras))
+	for _, existing := range merged {
+		seen[existing] = struct{}{}
+	}
+	for _, extra := range extras {
+		if extra == "" {
+			continue
+		}
+		if _, exists := seen[extra]; exists {
+			continue
+		}
+		seen[extra] = struct{}{}
+		merged = append(merged, extra)
+	}
+	return merged
+}
+
+var openAICapabilityByName = map[string]core.Capability{
+	string(core.CapabilityCompletion):  core.CapabilityCompletion,
+	string(core.CapabilityChat):        core.CapabilityChat,
+	string(core.CapabilityJSON):        core.CapabilityJSON,
+	string(core.CapabilityStreaming):   core.CapabilityStreaming,
+	string(core.CapabilityEmbedding):   core.CapabilityEmbedding,
+	string(core.CapabilityToolCalling): core.CapabilityToolCalling,
+	string(core.CapabilityMultimodal):  core.CapabilityMultimodal,
+	string(core.CapabilityVision):      core.CapabilityVision,
+	string(core.CapabilityAudio):       core.CapabilityAudio,
+}
+
+// parseOpenAICapabilityStrings converts config capability names into typed capabilities.
+func parseOpenAICapabilityStrings(names []string) ([]core.Capability, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	capabilities := make([]core.Capability, 0, len(names))
+	for _, name := range names {
+		capability, ok := openAICapabilityByName[strings.TrimSpace(name)]
+		if !ok {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "unsupported OpenAI capability"),
+				errors.Fields{"capability": name})
+		}
+		capabilities = append(capabilities, capability)
+	}
+	return capabilities, nil
 }
 
 // Convenience constructor for standard OpenAI.
@@ -187,6 +255,14 @@ func NewOpenAILLMFromConfig(ctx context.Context, config core.ProviderConfig, mod
 		for key, value := range config.Endpoint.Headers {
 			opts = append(opts, WithHeader(key, value))
 		}
+	}
+
+	if modelConfig, ok := config.Models[string(modelID)]; ok && len(modelConfig.Capabilities) > 0 {
+		extraCapabilities, err := parseOpenAICapabilityStrings(modelConfig.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, WithCapabilities(extraCapabilities...))
 	}
 
 	return NewOpenAILLM(modelID, opts...)
@@ -254,7 +330,7 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 	}
@@ -276,7 +352,7 @@ func (o *OpenAILLM) Generate(ctx context.Context, prompt string, options ...core
 	}
 
 	return &core.LLMResponse{
-		Content: response.Choices[0].Message.Content,
+		Content: response.Choices[0].Message.Content.Text(),
 		Usage:   usage,
 		Metadata: map[string]any{
 			"finish_reason": response.Choices[0].FinishReason,
@@ -298,7 +374,7 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 		ResponseFormat: &openai.ResponseFormat{
@@ -316,7 +392,7 @@ func (o *OpenAILLM) GenerateWithJSON(ctx context.Context, prompt string, options
 		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
 	}
 
-	return utils.ParseJSONResponse(response.Choices[0].Message.Content)
+	return utils.ParseJSONResponse(response.Choices[0].Message.Content.Text())
 }
 
 // GenerateWithFunctions implements the core.LLM interface.
@@ -340,7 +416,7 @@ func (o *OpenAILLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 		Tools:      tools,
@@ -484,14 +560,41 @@ func anyMapToInterfaceMap(in map[string]any) map[string]any {
 	return out
 }
 
+func normalizeOpenAIChatRole(role string) string {
+	role = strings.TrimSpace(role)
+	switch strings.ToLower(role) {
+	case "system", "user", "assistant", "tool":
+		return strings.ToLower(role)
+	default:
+		return role
+	}
+}
+
 func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.ChatCompletionMessage, error) {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
 	pendingToolCallIDs := make([]string, 0, 1)
 
 	for messageIndex, message := range messages {
+		role := normalizeOpenAIChatRole(message.Role)
+		// image_url parts are only valid on user messages for OpenAI-compatible APIs.
+		// Other roles stay text-only: flatten image blocks to a placeholder string so
+		// existing GenerateWithTools histories still succeed (same as pre-vision).
+		var content openai.MessageContent
+		var err error
+		switch {
+		case role == "user":
+			content, err = coreContentBlocksToMessageContent(message.Content)
+			if err != nil {
+				return nil, err
+			}
+		case role == "tool" && message.ToolResult != nil:
+			content = openai.TextContent(flattenCoreChatMessageContent(message.ToolResult.Content))
+		default:
+			content = openai.TextContent(flattenCoreChatMessageContent(message.Content))
+		}
 		openAIMessage := openai.ChatCompletionMessage{
-			Role:    strings.TrimSpace(message.Role),
-			Content: flattenCoreChatMessageContent(message.Content),
+			Role:    role,
+			Content: content,
 		}
 
 		switch openAIMessage.Role {
@@ -528,7 +631,6 @@ func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.Chat
 			}
 		case "tool":
 			if message.ToolResult != nil {
-				openAIMessage.Content = flattenCoreChatMessageContent(message.ToolResult.Content)
 				openAIMessage.ToolCallID = strings.TrimSpace(message.ToolResult.ToolCallID)
 				if openAIMessage.ToolCallID == "" {
 					switch len(pendingToolCallIDs) {
@@ -567,6 +669,95 @@ func removePendingToolCallID(ids []string, target string) []string {
 	return ids
 }
 
+func contentBlocksHaveNonText(blocks []core.ContentBlock) bool {
+	for _, block := range blocks {
+		if block.Type != core.FieldTypeText {
+			return true
+		}
+	}
+	return false
+}
+
+// openAIImageOnlyFallbackText is prepended only when the multimodal payload has
+// image parts and no text parts at all (including whitespace-only text).
+const openAIImageOnlyFallbackText = "Describe the attached image(s)."
+
+func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatCompletionContentPart, error) {
+	parts := make([]openai.ChatCompletionContentPart, 0, len(blocks))
+	for _, block := range blocks {
+		switch block.Type {
+		case core.FieldTypeText:
+			// Keep caller-provided text as-is, including whitespace-only.
+			// Only drop truly empty strings so we do not invent or replace content.
+			if block.Text == "" {
+				continue
+			}
+			parts = append(parts, openai.ChatCompletionContentPart{
+				Type: "text",
+				Text: block.Text,
+			})
+		case core.FieldTypeImage:
+			mimeType, err := core.ResolveImageMIME(block.Data, block.MimeType)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, openai.ChatCompletionContentPart{
+				Type: "image_url",
+				ImageURL: &openai.ChatCompletionImageURLPart{
+					URL: fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(block.Data)),
+				},
+			})
+		case core.FieldTypeAudio:
+			return nil, errors.New(errors.UnsupportedOperation, "audio content blocks are not supported by OpenAILLM")
+		default:
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "unsupported content block type"),
+				errors.Fields{"type": string(block.Type)},
+			)
+		}
+	}
+	return ensureOpenAIMultimodalTextPart(parts), nil
+}
+
+// ensureOpenAIMultimodalTextPart prepends a short text part when the payload has
+// images but no text parts. Some OpenAI-compatible gateways reject image-only messages.
+// Whitespace-only text parts count as text so caller content is never replaced.
+func ensureOpenAIMultimodalTextPart(parts []openai.ChatCompletionContentPart) []openai.ChatCompletionContentPart {
+	hasText := false
+	hasImage := false
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			hasText = true
+		case "image_url":
+			hasImage = true
+		}
+	}
+	if !hasImage || hasText {
+		return parts
+	}
+	return append([]openai.ChatCompletionContentPart{{
+		Type: "text",
+		Text: openAIImageOnlyFallbackText,
+	}}, parts...)
+}
+
+// coreContentBlocksToMessageContent builds wire content that may include image_url
+// parts. Call only for user-role messages from convertCoreChatMessagesToOpenAI.
+func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.MessageContent, error) {
+	if !contentBlocksHaveNonText(blocks) {
+		return openai.TextContent(flattenCoreChatMessageContent(blocks)), nil
+	}
+	parts, err := contentBlocksToOpenAIParts(blocks)
+	if err != nil {
+		return openai.MessageContent{}, err
+	}
+	if len(parts) == 0 {
+		return openai.TextContent(""), nil
+	}
+	return openai.PartsContent(parts...), nil
+}
+
 func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
 	if len(blocks) == 0 {
 		return ""
@@ -586,7 +777,7 @@ func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
 func buildOpenAIToolResult(choice openai.ChatChoice, usage openai.CompletionUsage, mode string) (map[string]any, error) {
 	result := map[string]any{}
 
-	if content := strings.TrimSpace(choice.Message.Content); content != "" {
+	if content := strings.TrimSpace(choice.Message.Content.Text()); content != "" {
 		result["content"] = content
 	}
 
@@ -732,9 +923,62 @@ func (o *OpenAILLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 	}, nil
 }
 
+// GenerateWithContent implements multimodal content generation for OpenAI-compatible APIs.
+// This client can encode multimodal payloads regardless of advertised Capabilities(); callers
+// opt into CapabilityMultimodal/CapabilityVision at construction when their deployment supports them.
+// Individual model IDs behind OpenAI-compatible proxies may still reject vision at request time.
+func (o *OpenAILLM) GenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.LLMResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	messageContent, err := coreContentBlocksToMessageContent(content)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(messageContent.Text()) == "" && !messageContent.IsMultimodal() {
+		return nil, errors.New(errors.InvalidInput, "no content provided")
+	}
+
+	request := &openai.ChatCompletionRequest{
+		Model: o.ModelID(),
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    "user",
+				Content: messageContent,
+			},
+		},
+	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
+
+	response, err := o.makeRequest(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if len(response.Choices) == 0 {
+		return nil, errors.New(errors.InvalidResponse, "no choices returned from OpenAI API")
+	}
+
+	usage := &core.TokenInfo{
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+	}
+
+	return &core.LLMResponse{
+		Content: response.Choices[0].Message.Content.Text(),
+		Usage:   usage,
+		Metadata: map[string]any{
+			"finish_reason": response.Choices[0].FinishReason,
+			"id":            response.ID,
+			"model":         response.Model,
+		},
+	}, nil
+}
+
 // StreamGenerate implements the core.LLM interface.
 func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.StreamResponse, error) {
-	logger := logging.GetLogger()
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -745,20 +989,49 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: openai.TextContent(prompt),
 			},
 		},
 		Stream: true,
 	}
 	request.ApplyOptions(coreOptsToOpenAI(opts))
+	return o.streamChatCompletion(ctx, request)
+}
 
-	// Create a channel for the stream chunks
+// StreamGenerateWithContent implements multimodal streaming for OpenAI-compatible APIs.
+func (o *OpenAILLM) StreamGenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.StreamResponse, error) {
+	opts := core.NewGenerateOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	messageContent, err := coreContentBlocksToMessageContent(content)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(messageContent.Text()) == "" && !messageContent.IsMultimodal() {
+		return nil, errors.New(errors.InvalidInput, "no content provided")
+	}
+
+	request := &openai.ChatCompletionRequest{
+		Model: o.ModelID(),
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    "user",
+				Content: messageContent,
+			},
+		},
+		Stream: true,
+	}
+	request.ApplyOptions(coreOptsToOpenAI(opts))
+	return o.streamChatCompletion(ctx, request)
+}
+
+func (o *OpenAILLM) streamChatCompletion(ctx context.Context, request *openai.ChatCompletionRequest) (*core.StreamResponse, error) {
+	logger := logging.GetLogger()
 	chunkChan := make(chan core.StreamChunk)
-
-	// Create a cancellable context
 	streamCtx, cancelFunc := context.WithCancel(ctx)
 
-	// Start a goroutine to handle the streaming request
 	go func() {
 		defer close(chunkChan)
 		defer cancelFunc()
@@ -783,28 +1056,17 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 			default:
 			}
 
-			line := scanner.Text()
-			line = strings.TrimSpace(line)
-
-			if line == "" {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || !strings.HasPrefix(line, "data: ") {
 				continue
 			}
 
-			// Skip lines that don't start with "data: "
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-
-			// Remove "data: " prefix
 			data := strings.TrimPrefix(line, "data: ")
-
-			// Check for end marker
 			if data == "[DONE]" {
 				sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
 				return
 			}
 
-			// Parse the JSON response
 			var streamResponse openai.ChatCompletionStreamResponse
 			if err := jsonv2.Unmarshal([]byte(data), &streamResponse); err != nil {
 				logger.Debug(ctx, "Error parsing stream chunk: %v", err)
@@ -814,22 +1076,19 @@ func (o *OpenAILLM) StreamGenerate(ctx context.Context, prompt string, options .
 				return
 			}
 
-			// Process the response
-			if len(streamResponse.Choices) > 0 {
-				choice := streamResponse.Choices[0]
-				content := choice.Delta.Content
-
-				if content != "" {
-					if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: content}) {
-						return
-					}
-				}
-
-				// Check for finish reason
-				if choice.FinishReason != nil && *choice.FinishReason != "" {
-					sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
+			if len(streamResponse.Choices) == 0 {
+				continue
+			}
+			choice := streamResponse.Choices[0]
+			content := choice.Delta.Content.Text()
+			if content != "" {
+				if !sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Content: content}) {
 					return
 				}
+			}
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				sendStreamChunk(streamCtx, chunkChan, core.StreamChunk{Done: true})
+				return
 			}
 		}
 
@@ -906,7 +1165,7 @@ func summarizeOpenAIRequest(request *openai.ChatCompletionRequest, jsonData []by
 		for _, message := range request.Messages {
 			summary.Messages = append(summary.Messages, openAIMessageDebugSummary{
 				Role:            message.Role,
-				ContentBytes:    len(message.Content),
+				ContentBytes:    message.Content.ByteLen(),
 				ToolCalls:       len(message.ToolCalls),
 				HasFunctionCall: message.FunctionCall != nil,
 				HasToolCallID:   strings.TrimSpace(message.ToolCallID) != "",

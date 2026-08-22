@@ -161,8 +161,90 @@ func TestNewOpenAILLM(t *testing.T) {
 			if len(capabilities) != len(expectedCapabilities) {
 				t.Errorf("expected %d capabilities, got %d", len(expectedCapabilities), len(capabilities))
 			}
+			for _, expected := range expectedCapabilities {
+				found := false
+				for _, capability := range capabilities {
+					if capability == expected {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected capability %q not found in %v", expected, capabilities)
+				}
+			}
+			assert.NotContains(t, capabilities, core.CapabilityMultimodal)
+			assert.NotContains(t, capabilities, core.CapabilityVision)
 		})
 	}
+}
+
+func TestNewOpenAILLM_WithCapabilities(t *testing.T) {
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT4oMini,
+		WithAPIKey("test-api-key"),
+		WithCapabilities(core.CapabilityVision, core.CapabilityMultimodal, core.CapabilityVision),
+	)
+	require.NoError(t, err)
+
+	capabilities := llm.Capabilities()
+	assert.Contains(t, capabilities, core.CapabilityJSON)
+	assert.Contains(t, capabilities, core.CapabilityToolCalling)
+	assert.Contains(t, capabilities, core.CapabilityVision)
+	assert.Contains(t, capabilities, core.CapabilityMultimodal)
+
+	visionCount := 0
+	for _, capability := range capabilities {
+		if capability == core.CapabilityVision {
+			visionCount++
+		}
+	}
+	assert.Equal(t, 1, visionCount)
+}
+
+func TestNewOpenAILLMFromConfig_ModelCapabilities(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("model capabilities from config", func(t *testing.T) {
+		llm, err := NewOpenAILLMFromConfig(ctx, core.ProviderConfig{
+			Name:   "openai",
+			APIKey: "test-api-key",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelOpenAIGPT4oMini): {
+					Capabilities: []string{"vision", "multimodal"},
+				},
+			},
+		}, core.ModelOpenAIGPT4oMini)
+		require.NoError(t, err)
+		assert.Contains(t, llm.Capabilities(), core.CapabilityVision)
+		assert.Contains(t, llm.Capabilities(), core.CapabilityMultimodal)
+	})
+
+	t.Run("empty model capabilities keep defaults", func(t *testing.T) {
+		llm, err := NewOpenAILLMFromConfig(ctx, core.ProviderConfig{
+			Name:   "openai",
+			APIKey: "test-api-key",
+		}, core.ModelOpenAIGPT4oMini)
+		require.NoError(t, err)
+		assert.NotContains(t, llm.Capabilities(), core.CapabilityVision)
+		assert.NotContains(t, llm.Capabilities(), core.CapabilityMultimodal)
+	})
+
+	t.Run("unknown capability fails closed", func(t *testing.T) {
+		_, err := NewOpenAILLMFromConfig(ctx, core.ProviderConfig{
+			Name:   "openai",
+			APIKey: "test-api-key",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelOpenAIGPT4oMini): {
+					Capabilities: []string{"telepathy"},
+				},
+			},
+		}, core.ModelOpenAIGPT4oMini)
+		require.Error(t, err)
+		dsyErr, ok := err.(*errors.Error)
+		require.True(t, ok)
+		assert.Equal(t, errors.InvalidInput, dsyErr.Code())
+	})
 }
 
 func TestNewOpenAILLMFromConfig(t *testing.T) {
@@ -350,8 +432,8 @@ func TestOpenAILLM_Generate(t *testing.T) {
 		if req.Messages[0].Role != "user" {
 			t.Errorf("expected role user, got %s", req.Messages[0].Role)
 		}
-		if req.Messages[0].Content != "Hello, world!" {
-			t.Errorf("expected content 'Hello, world!', got %s", req.Messages[0].Content)
+		if req.Messages[0].Content.Text() != "Hello, world!" {
+			t.Errorf("expected content 'Hello, world!', got %s", req.Messages[0].Content.Text())
 		}
 
 		// Send mock response
@@ -365,7 +447,7 @@ func TestOpenAILLM_Generate(t *testing.T) {
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: "Hello! How can I help you today?",
+						Content: openai.TextContent("Hello! How can I help you today?"),
 					},
 					FinishReason: "stop",
 				},
@@ -459,7 +541,7 @@ func TestOpenAILLM_GenerateWithJSON(t *testing.T) {
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: `{"result": "success", "data": {"key": "value"}}`,
+						Content: openai.TextContent(`{"result": "success", "data": {"key": "value"}}`),
 					},
 					FinishReason: "stop",
 				},
@@ -915,7 +997,7 @@ func TestOpenAILLM_GenerateWithOptions(t *testing.T) {
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: "Test response",
+						Content: openai.TextContent("Test response"),
 					},
 					FinishReason: "stop",
 				},
@@ -1002,7 +1084,7 @@ func TestOpenAILLM_GenerateWithOptions_GPT5UsesMaxCompletionTokens(t *testing.T)
 					Index: 0,
 					Message: openai.ChatCompletionMessage{
 						Role:    "assistant",
-						Content: "Test response",
+						Content: openai.TextContent("Test response"),
 					},
 					FinishReason: "stop",
 				},
@@ -1273,14 +1355,14 @@ func TestOpenAILLM_GenerateWithTools(t *testing.T) {
 
 	require.Len(t, capturedRequest.Messages, 3)
 	assert.Equal(t, "user", capturedRequest.Messages[0].Role)
-	assert.Equal(t, "Solve task", capturedRequest.Messages[0].Content)
+	assert.Equal(t, "Solve task", capturedRequest.Messages[0].Content.Text())
 	assert.Equal(t, "assistant", capturedRequest.Messages[1].Role)
 	require.Len(t, capturedRequest.Messages[1].ToolCalls, 1)
 	assert.Equal(t, "call_write", capturedRequest.Messages[1].ToolCalls[0].ID)
 	assert.Equal(t, "write_file", capturedRequest.Messages[1].ToolCalls[0].Function.Name)
 	assert.Equal(t, "tool", capturedRequest.Messages[2].Role)
 	assert.Equal(t, "call_write", capturedRequest.Messages[2].ToolCallID)
-	assert.Equal(t, "ok", capturedRequest.Messages[2].Content)
+	assert.Equal(t, "ok", capturedRequest.Messages[2].Content.Text())
 	require.Len(t, capturedRequest.Tools, 1)
 	assert.Equal(t, "auto", capturedRequest.ToolChoice)
 

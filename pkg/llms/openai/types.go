@@ -26,10 +26,126 @@ type ChatCompletionRequest struct {
 // ChatCompletionMessage represents a message in the conversation.
 type ChatCompletionMessage struct {
 	Role         string                           `json:"role"` // "system", "user", "assistant"
-	Content      string                           `json:"content"`
+	Content      MessageContent                   `json:"content"`
 	ToolCallID   string                           `json:"tool_call_id,omitempty"`
 	ToolCalls    []ChatCompletionToolCall         `json:"tool_calls,omitempty"`
 	FunctionCall *ChatCompletionFunctionCallDelta `json:"function_call,omitempty"` // Legacy field for compatibility
+}
+
+// MessageContent is OpenAI message content: either a plain string or multimodal parts.
+// Text-only messages marshal as a JSON string for maximum proxy compatibility.
+type MessageContent struct {
+	text  string
+	parts []ChatCompletionContentPart
+}
+
+// ChatCompletionContentPart is one part of a multimodal user/assistant message.
+type ChatCompletionContentPart struct {
+	Type     string                      `json:"type"` // "text" or "image_url"
+	Text     string                      `json:"text,omitempty"`
+	ImageURL *ChatCompletionImageURLPart `json:"image_url,omitempty"`
+}
+
+// ChatCompletionImageURLPart holds an image URL (often a data: URL).
+type ChatCompletionImageURLPart struct {
+	URL string `json:"url"`
+}
+
+// TextContent builds a plain-text MessageContent (marshals as a JSON string).
+func TextContent(text string) MessageContent {
+	return MessageContent{text: text}
+}
+
+// PartsContent builds a multimodal MessageContent (marshals as a JSON array).
+func PartsContent(parts ...ChatCompletionContentPart) MessageContent {
+	copied := make([]ChatCompletionContentPart, len(parts))
+	copy(copied, parts)
+	return MessageContent{parts: copied}
+}
+
+// Text returns the plain-text content. For multimodal messages, text parts are joined.
+func (c MessageContent) Text() string {
+	if len(c.parts) == 0 {
+		return c.text
+	}
+	var b strings.Builder
+	for _, part := range c.parts {
+		if part.Type != "" && part.Type != "text" {
+			continue
+		}
+		if strings.TrimSpace(part.Text) == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(part.Text)
+	}
+	return b.String()
+}
+
+// String implements fmt.Stringer.
+func (c MessageContent) String() string {
+	return c.Text()
+}
+
+// IsMultimodal reports whether content uses parts instead of a plain string.
+func (c MessageContent) IsMultimodal() bool {
+	return len(c.parts) > 0
+}
+
+// Parts returns a copy of multimodal parts (nil if text-only).
+func (c MessageContent) Parts() []ChatCompletionContentPart {
+	if len(c.parts) == 0 {
+		return nil
+	}
+	out := make([]ChatCompletionContentPart, len(c.parts))
+	copy(out, c.parts)
+	return out
+}
+
+// ByteLen returns approximate UTF-8 byte length for debug summaries.
+func (c MessageContent) ByteLen() int {
+	if len(c.parts) == 0 {
+		return len(c.text)
+	}
+	n := 0
+	for _, part := range c.parts {
+		n += len(part.Text)
+		if part.ImageURL != nil {
+			n += len(part.ImageURL.URL)
+		}
+	}
+	return n
+}
+
+// MarshalJSON encodes as a string or as an array of content parts.
+func (c MessageContent) MarshalJSON() ([]byte, error) {
+	if len(c.parts) > 0 {
+		return jsonv2.Marshal(c.parts)
+	}
+	return jsonv2.Marshal(c.text)
+}
+
+// UnmarshalJSON accepts a JSON string or an array of content parts.
+func (c *MessageContent) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*c = MessageContent{}
+		return nil
+	}
+
+	var asString string
+	if err := jsonv2.Unmarshal(data, &asString); err == nil {
+		*c = TextContent(asString)
+		return nil
+	}
+
+	var parts []ChatCompletionContentPart
+	if err := jsonv2.Unmarshal(data, &parts); err != nil {
+		return err
+	}
+	*c = PartsContent(parts...)
+	return nil
 }
 
 // ChatCompletionTool represents a function/tool definition for tool calling.

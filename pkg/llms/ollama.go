@@ -223,7 +223,7 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 	// Create OpenAI-compatible request
 	req := &openai.ChatCompletionRequest{
 		Model:    string(o.ModelID()),
-		Messages: []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
+		Messages: []openai.ChatCompletionMessage{{Role: "user", Content: openai.TextContent(prompt)}},
 		Stream:   false,
 	}
 
@@ -294,7 +294,7 @@ func (o *OllamaLLM) generateOpenAI(ctx context.Context, prompt string, options .
 	}
 
 	return &core.LLMResponse{
-		Content: openaiResp.Choices[0].Message.Content,
+		Content: openaiResp.Choices[0].Message.Content.Text(),
 		Usage: &core.TokenInfo{
 			PromptTokens:     openaiResp.Usage.PromptTokens,
 			CompletionTokens: openaiResp.Usage.CompletionTokens,
@@ -403,7 +403,7 @@ func (o *OllamaLLM) streamGenerateOpenAI(ctx context.Context, prompt string, opt
 
 	req := &openai.ChatCompletionRequest{
 		Model:    string(o.ModelID()),
-		Messages: []openai.ChatCompletionMessage{{Role: "user", Content: prompt}},
+		Messages: []openai.ChatCompletionMessage{{Role: "user", Content: openai.TextContent(prompt)}},
 		Stream:   true,
 	}
 
@@ -756,7 +756,7 @@ func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	req := &openai.ChatCompletionRequest{
 		Model: string(o.ModelID()),
 		Messages: []openai.ChatCompletionMessage{
-			{Role: "user", Content: prompt},
+			{Role: "user", Content: openai.TextContent(prompt)},
 		},
 		Tools:      tools,
 		ToolChoice: "auto",
@@ -826,7 +826,7 @@ func (o *OllamaLLM) GenerateWithFunctions(ctx context.Context, prompt string, fu
 	choice := openAIResp.Choices[0]
 	result := map[string]any{}
 
-	if content := strings.TrimSpace(choice.Message.Content); content != "" {
+	if content := strings.TrimSpace(choice.Message.Content.Text()); content != "" {
 		result["content"] = content
 	}
 
@@ -1058,9 +1058,9 @@ func (o *OllamaLLM) parseOpenAIStreamResponse(ctx context.Context, body io.Reade
 				return
 			}
 
-			if len(streamResp.Choices) > 0 && streamResp.Choices[0].Delta.Content != "" {
+			if len(streamResp.Choices) > 0 && streamResp.Choices[0].Delta.Content.Text() != "" {
 				if !send(core.StreamChunk{
-					Content: streamResp.Choices[0].Delta.Content,
+					Content: streamResp.Choices[0].Delta.Content.Text(),
 				}) {
 					return
 				}

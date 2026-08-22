@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -600,4 +601,62 @@ func TestContentUtilsIntegration(t *testing.T) {
 		assert.Equal(t, "file", block1.Metadata["source"])
 		assert.Equal(t, "base64", block2.Metadata["source"])
 	})
+}
+
+func TestResolveImageMIME(t *testing.T) {
+	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46}
+	pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	gifData := []byte{'G', 'I', 'F', '8', '9', 'a', 0x00, 0x00}
+	webpData := []byte{'R', 'I', 'F', 'F', 0x00, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P'}
+	garbageData := []byte("not-an-image")
+
+	tests := []struct {
+		name      string
+		data      []byte
+		declared  string
+		wantMIME  string
+		wantError bool
+	}{
+		// Infer (magic wins)
+		{name: "jpeg empty declared", data: jpegData, declared: "", wantMIME: "image/jpeg"},
+		{name: "jpeg matching declared", data: jpegData, declared: "image/jpeg", wantMIME: "image/jpeg"},
+		{name: "jpeg jpg alias", data: jpegData, declared: "image/jpg", wantMIME: "image/jpeg"},
+		{name: "png empty declared", data: pngData, declared: "", wantMIME: "image/png"},
+		{name: "png matching declared", data: pngData, declared: "image/png", wantMIME: "image/png"},
+		{name: "gif empty declared", data: gifData, declared: "", wantMIME: "image/gif"},
+		{name: "webp empty declared", data: webpData, declared: "", wantMIME: "image/webp"},
+		{name: "jpeg whitespace declared", data: jpegData, declared: "  image/jpeg  ", wantMIME: "image/jpeg"},
+		{name: "jpeg charset parameter", data: jpegData, declared: "image/jpeg; charset=binary", wantMIME: "image/jpeg"},
+		{name: "jpeg mixed case", data: jpegData, declared: "IMAGE/JPEG", wantMIME: "image/jpeg"},
+
+		// Mismatch
+		{name: "jpeg declared png", data: jpegData, declared: "image/png", wantError: true},
+		{name: "png declared jpeg", data: pngData, declared: "image/jpeg", wantError: true},
+
+		// Trust when sniff fails
+		{name: "garbage svg", data: garbageData, declared: "image/svg+xml", wantMIME: "image/svg+xml"},
+		{name: "garbage svg with charset", data: garbageData, declared: "image/svg+xml; charset=utf-8", wantMIME: "image/svg+xml"},
+		{name: "garbage bmp", data: garbageData, declared: "image/bmp", wantMIME: "image/bmp"},
+		{name: "garbage png declared", data: garbageData, declared: "image/png", wantMIME: "image/png"},
+
+		// No signal / not allowlisted
+		{name: "garbage empty declared", data: garbageData, declared: "", wantError: true},
+		{name: "garbage text plain", data: garbageData, declared: "text/plain", wantError: true},
+		{name: "empty data", data: nil, declared: "image/png", wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveImageMIME(tt.data, tt.declared)
+			if tt.wantError {
+				require.Error(t, err)
+				dsyErr, ok := err.(*errors.Error)
+				require.True(t, ok)
+				assert.Equal(t, errors.InvalidInput, dsyErr.Code())
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantMIME, got)
+		})
+	}
 }
