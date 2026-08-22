@@ -489,26 +489,37 @@ func anyMapToInterfaceMap(in map[string]any) map[string]any {
 	return out
 }
 
+func normalizeOpenAIChatRole(role string) string {
+	role = strings.TrimSpace(role)
+	switch strings.ToLower(role) {
+	case "system", "user", "assistant", "tool":
+		return strings.ToLower(role)
+	default:
+		return role
+	}
+}
+
 func convertCoreChatMessagesToOpenAI(messages []core.ChatMessage) ([]openai.ChatCompletionMessage, error) {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
 	pendingToolCallIDs := make([]string, 0, 1)
 
 	for messageIndex, message := range messages {
-		role := strings.TrimSpace(message.Role)
-		// Tool-role content must stay a plain string for OpenAI-compatible APIs.
-		// Prefer ToolResult.Content when present; otherwise flatten message.Content once.
+		role := normalizeOpenAIChatRole(message.Role)
+		// image_url parts are only valid on user messages for OpenAI-compatible APIs.
+		// Other roles stay text-only: flatten image blocks to a placeholder string so
+		// existing GenerateWithTools histories still succeed (same as pre-vision).
 		var content openai.MessageContent
 		var err error
 		switch {
-		case role == "tool" && message.ToolResult != nil:
-			content = openai.TextContent(flattenCoreChatMessageContent(message.ToolResult.Content))
-		case role == "tool":
-			content = openai.TextContent(flattenCoreChatMessageContent(message.Content))
-		default:
+		case role == "user":
 			content, err = coreContentBlocksToMessageContent(message.Content)
 			if err != nil {
 				return nil, err
 			}
+		case role == "tool" && message.ToolResult != nil:
+			content = openai.TextContent(flattenCoreChatMessageContent(message.ToolResult.Content))
+		default:
+			content = openai.TextContent(flattenCoreChatMessageContent(message.Content))
 		}
 		openAIMessage := openai.ChatCompletionMessage{
 			Role:    role,
@@ -663,6 +674,8 @@ func ensureOpenAIMultimodalTextPart(parts []openai.ChatCompletionContentPart) []
 	}}, parts...)
 }
 
+// coreContentBlocksToMessageContent builds wire content that may include image_url
+// parts. Call only for user-role messages from convertCoreChatMessagesToOpenAI.
 func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.MessageContent, error) {
 	if !contentBlocksHaveNonText(blocks) {
 		return openai.TextContent(flattenCoreChatMessageContent(blocks)), nil

@@ -223,6 +223,19 @@ func TestOpenAILLM_StreamGenerateWithContent(t *testing.T) {
 	assert.Equal(t, []string{"seen", " image"}, parts)
 }
 
+func assertFlattenedImageWire(t *testing.T, content openai.MessageContent, wantTextFragments ...string) {
+	t.Helper()
+	assert.False(t, content.IsMultimodal())
+	for _, fragment := range wantTextFragments {
+		assert.Contains(t, content.Text(), fragment)
+	}
+	raw, err := json.Marshal(content)
+	require.NoError(t, err)
+	require.NotEmpty(t, raw)
+	assert.Equal(t, byte('"'), raw[0], "flattened content must marshal as a JSON string")
+	assert.NotContains(t, string(raw), "image_url")
+}
+
 func TestConvertCoreChatMessagesToOpenAI_PreservesUserImage(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
@@ -245,6 +258,55 @@ func TestConvertCoreChatMessagesToOpenAI_PreservesUserImage(t *testing.T) {
 	assert.True(t, strings.HasPrefix(parts[1].ImageURL.URL, "data:image/png;base64,"))
 }
 
+func TestConvertCoreChatMessagesToOpenAI_UserRoleCaseInsensitive(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+		{
+			Role: "User",
+			Content: []core.ContentBlock{
+				core.NewTextBlock("what is this?"),
+				core.NewImageBlock(pngBytes, "image/png"),
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "user", messages[0].Role)
+	require.True(t, messages[0].Content.IsMultimodal())
+	parts := messages[0].Content.Parts()
+	require.Len(t, parts, 2)
+	assert.Equal(t, "image_url", parts[1].Type)
+}
+
+func TestConvertCoreChatMessagesToOpenAI_NonUserRolesFlattenImages(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	tests := []struct {
+		name string
+		role string
+		text string
+	}{
+		{name: "system", role: "system", text: "use these brand refs"},
+		{name: "assistant", role: "assistant", text: "Looks like a tabby."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+				{
+					Role: tt.role,
+					Content: []core.ContentBlock{
+						core.NewTextBlock(tt.text),
+						core.NewImageBlock(pngBytes, "image/png"),
+					},
+				},
+			})
+			require.NoError(t, err)
+			require.Len(t, messages, 1)
+			assert.Equal(t, tt.role, messages[0].Role)
+			assertFlattenedImageWire(t, messages[0].Content, tt.text, "[Image: image/png, 4 bytes]")
+		})
+	}
+}
+
 func TestConvertCoreChatMessagesToOpenAI_ToolRoleFlattensImage(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
@@ -263,10 +325,26 @@ func TestConvertCoreChatMessagesToOpenAI_ToolRoleFlattensImage(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "tool", messages[0].Role)
-	assert.False(t, messages[0].Content.IsMultimodal())
-	assert.Contains(t, messages[0].Content.Text(), "tool says")
-	assert.Contains(t, messages[0].Content.Text(), "[Image:")
+	assertFlattenedImageWire(t, messages[0].Content, "tool says", "[Image: image/png, 4 bytes]")
 	assert.Equal(t, "call_1", messages[0].ToolCallID)
+}
+
+func TestConvertCoreChatMessagesToOpenAI_ToolRoleWithoutToolResultFlattensImage(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{
+		{
+			Role: "tool",
+			Content: []core.ContentBlock{
+				core.NewTextBlock("orphan tool payload"),
+				core.NewImageBlock(pngBytes, "image/png"),
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "tool", messages[0].Role)
+	assertFlattenedImageWire(t, messages[0].Content, "orphan tool payload", "[Image: image/png, 4 bytes]")
+	assert.Empty(t, messages[0].ToolCallID)
 }
 
 func TestConvertCoreChatMessagesToOpenAI_ToolRoleWithoutToolResultUsesMessageContent(t *testing.T) {
