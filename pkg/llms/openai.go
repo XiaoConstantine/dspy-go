@@ -697,12 +697,9 @@ func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatComple
 				Text: block.Text,
 			})
 		case core.FieldTypeImage:
-			if len(block.Data) == 0 {
-				return nil, errors.New(errors.InvalidInput, "image content block has empty data")
-			}
-			mimeType := strings.TrimSpace(block.MimeType)
-			if mimeType == "" {
-				mimeType = "image/png"
+			mimeType, err := core.ResolveImageMIME(block.Data, block.MimeType)
+			if err != nil {
+				return nil, err
 			}
 			parts = append(parts, openai.ChatCompletionContentPart{
 				Type: "image_url",

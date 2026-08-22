@@ -498,3 +498,41 @@ func mustMakeSolidPNG(t *testing.T, width, height int) []byte {
 	require.NoError(t, png.Encode(&buf, img))
 	return buf.Bytes()
 }
+
+func TestContentBlocksToOpenAIParts_ImageMIME(t *testing.T) {
+	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46}
+	garbageData := []byte("not-an-image")
+
+	t.Run("infer jpeg from empty mime", func(t *testing.T) {
+		parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
+			core.NewImageBlock(jpegData, ""),
+		})
+		require.NoError(t, err)
+		require.Len(t, parts, 2)
+		assert.Equal(t, "text", parts[0].Type)
+		assert.Equal(t, openAIImageOnlyFallbackText, parts[0].Text)
+		assert.Equal(t, "image_url", parts[1].Type)
+		require.NotNil(t, parts[1].ImageURL)
+		assert.True(t, strings.HasPrefix(parts[1].ImageURL.URL, "data:image/jpeg;base64,"))
+	})
+
+	t.Run("reject jpeg bytes with png mime", func(t *testing.T) {
+		_, err := contentBlocksToOpenAIParts([]core.ContentBlock{
+			core.NewImageBlock(jpegData, "image/png"),
+		})
+		require.Error(t, err)
+		dsyErr, ok := err.(*errors.Error)
+		require.True(t, ok)
+		assert.Equal(t, errors.InvalidInput, dsyErr.Code())
+	})
+
+	t.Run("reject garbage with empty mime", func(t *testing.T) {
+		_, err := contentBlocksToOpenAIParts([]core.ContentBlock{
+			core.NewImageBlock(garbageData, ""),
+		})
+		require.Error(t, err)
+		dsyErr, ok := err.(*errors.Error)
+		require.True(t, ok)
+		assert.Equal(t, errors.InvalidInput, dsyErr.Code())
+	})
+}
