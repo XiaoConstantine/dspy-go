@@ -122,9 +122,9 @@ func (c MessageContent) ByteLen() int {
 // MarshalJSON encodes as a string or as an array of content parts.
 func (c MessageContent) MarshalJSON() ([]byte, error) {
 	if len(c.parts) > 0 {
-		return json.Marshal(c.parts)
+		return jsonv2.Marshal(c.parts)
 	}
-	return json.Marshal(c.text)
+	return jsonv2.Marshal(c.text)
 }
 
 // UnmarshalJSON accepts a JSON string or an array of content parts.
@@ -135,13 +135,13 @@ func (c *MessageContent) UnmarshalJSON(data []byte) error {
 	}
 
 	var asString string
-	if err := json.Unmarshal(data, &asString); err == nil {
+	if err := jsonv2.Unmarshal(data, &asString); err == nil {
 		*c = TextContent(asString)
 		return nil
 	}
 
 	var parts []ChatCompletionContentPart
-	if err := json.Unmarshal(data, &parts); err != nil {
+	if err := jsonv2.Unmarshal(data, &parts); err != nil {
 		return err
 	}
 	*c = PartsContent(parts...)
