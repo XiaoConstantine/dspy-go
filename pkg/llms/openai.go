@@ -34,12 +34,13 @@ type OpenAIOption func(*OpenAIConfig)
 
 // OpenAIConfig holds configuration for OpenAI provider.
 type OpenAIConfig struct {
-	baseURL    string
-	path       string
-	apiKey     string
-	headers    map[string]string
-	timeout    time.Duration
-	httpClient *http.Client
+	baseURL           string
+	path              string
+	apiKey            string
+	headers           map[string]string
+	timeout           time.Duration
+	httpClient        *http.Client
+	extraCapabilities []core.Capability
 }
 
 // NewOpenAILLM creates a new OpenAILLM instance with functional options.
@@ -82,18 +83,7 @@ func NewOpenAILLM(modelID core.ModelID, opts ...OpenAIOption) (*OpenAILLM, error
 	}
 	endpointCfg.Headers["Content-Type"] = "application/json"
 
-	capabilities := []core.Capability{
-		core.CapabilityCompletion,
-		core.CapabilityChat,
-		core.CapabilityJSON,
-		core.CapabilityStreaming,
-		core.CapabilityEmbedding,
-		core.CapabilityToolCalling,
-		// Provider-level: client can send multimodal payloads (matches Gemini/Anthropic).
-		// Individual model IDs behind an OpenAI-compatible proxy may still reject vision.
-		core.CapabilityMultimodal,
-		core.CapabilityVision,
-	}
+	capabilities := mergeOpenAICapabilities(defaultOpenAICapabilities(), config.extraCapabilities)
 
 	baseLLM := core.NewBaseLLM("openai", modelID, capabilities, endpointCfg, core.WithHTTPClient(config.httpClient))
 
@@ -138,6 +128,79 @@ func WithHeader(key, value string) OpenAIOption {
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(client *http.Client) OpenAIOption {
 	return func(c *OpenAIConfig) { c.httpClient = client }
+}
+
+// WithCapabilities appends extra capabilities to the OpenAI client defaults.
+// Use this to declare deployment-specific features such as vision on OpenAI-compatible proxies.
+func WithCapabilities(caps ...core.Capability) OpenAIOption {
+	return func(c *OpenAIConfig) {
+		c.extraCapabilities = append(c.extraCapabilities, caps...)
+	}
+}
+
+// defaultOpenAICapabilities returns the historical OpenAI client capability slice.
+func defaultOpenAICapabilities() []core.Capability {
+	return []core.Capability{
+		core.CapabilityCompletion,
+		core.CapabilityChat,
+		core.CapabilityJSON,
+		core.CapabilityStreaming,
+		core.CapabilityEmbedding,
+		core.CapabilityToolCalling,
+	}
+}
+
+// mergeOpenAICapabilities appends unique extra capabilities onto the default slice.
+func mergeOpenAICapabilities(base, extras []core.Capability) []core.Capability {
+	if len(extras) == 0 {
+		return base
+	}
+	merged := append([]core.Capability(nil), base...)
+	seen := make(map[core.Capability]struct{}, len(merged)+len(extras))
+	for _, existing := range merged {
+		seen[existing] = struct{}{}
+	}
+	for _, extra := range extras {
+		if extra == "" {
+			continue
+		}
+		if _, exists := seen[extra]; exists {
+			continue
+		}
+		seen[extra] = struct{}{}
+		merged = append(merged, extra)
+	}
+	return merged
+}
+
+var openAICapabilityByName = map[string]core.Capability{
+	string(core.CapabilityCompletion):  core.CapabilityCompletion,
+	string(core.CapabilityChat):        core.CapabilityChat,
+	string(core.CapabilityJSON):        core.CapabilityJSON,
+	string(core.CapabilityStreaming):   core.CapabilityStreaming,
+	string(core.CapabilityEmbedding):   core.CapabilityEmbedding,
+	string(core.CapabilityToolCalling): core.CapabilityToolCalling,
+	string(core.CapabilityMultimodal):  core.CapabilityMultimodal,
+	string(core.CapabilityVision):      core.CapabilityVision,
+	string(core.CapabilityAudio):       core.CapabilityAudio,
+}
+
+// parseOpenAICapabilityStrings converts config capability names into typed capabilities.
+func parseOpenAICapabilityStrings(names []string) ([]core.Capability, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	capabilities := make([]core.Capability, 0, len(names))
+	for _, name := range names {
+		capability, ok := openAICapabilityByName[strings.TrimSpace(name)]
+		if !ok {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidInput, "unsupported OpenAI capability"),
+				errors.Fields{"capability": name})
+		}
+		capabilities = append(capabilities, capability)
+	}
+	return capabilities, nil
 }
 
 // Convenience constructor for standard OpenAI.
@@ -192,6 +255,14 @@ func NewOpenAILLMFromConfig(ctx context.Context, config core.ProviderConfig, mod
 		for key, value := range config.Endpoint.Headers {
 			opts = append(opts, WithHeader(key, value))
 		}
+	}
+
+	if modelConfig, ok := config.Models[string(modelID)]; ok && len(modelConfig.Capabilities) > 0 {
+		extraCapabilities, err := parseOpenAICapabilityStrings(modelConfig.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, WithCapabilities(extraCapabilities...))
 	}
 
 	return NewOpenAILLM(modelID, opts...)
@@ -856,8 +927,9 @@ func (o *OpenAILLM) CreateEmbeddings(ctx context.Context, inputs []string, optio
 }
 
 // GenerateWithContent implements multimodal content generation for OpenAI-compatible APIs.
-// CapabilityMultimodal/CapabilityVision on OpenAILLM mean this client can send multimodal
-// payloads (same provider-level pattern as Gemini/Anthropic); individual model IDs may still reject vision.
+// This client can encode multimodal payloads regardless of advertised Capabilities(); callers
+// opt into CapabilityMultimodal/CapabilityVision at construction when their deployment supports them.
+// Individual model IDs behind OpenAI-compatible proxies may still reject vision at request time.
 func (o *OpenAILLM) GenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.LLMResponse, error) {
 	opts := core.NewGenerateOptions()
 	for _, opt := range options {

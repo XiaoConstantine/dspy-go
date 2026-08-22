@@ -156,15 +156,95 @@ func TestNewOpenAILLM(t *testing.T) {
 				core.CapabilityStreaming,
 				core.CapabilityEmbedding,
 				core.CapabilityToolCalling,
-				core.CapabilityMultimodal,
-				core.CapabilityVision,
 			}
 
 			if len(capabilities) != len(expectedCapabilities) {
 				t.Errorf("expected %d capabilities, got %d", len(expectedCapabilities), len(capabilities))
 			}
+			for _, expected := range expectedCapabilities {
+				found := false
+				for _, capability := range capabilities {
+					if capability == expected {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected capability %q not found in %v", expected, capabilities)
+				}
+			}
+			assert.NotContains(t, capabilities, core.CapabilityMultimodal)
+			assert.NotContains(t, capabilities, core.CapabilityVision)
 		})
 	}
+}
+
+func TestNewOpenAILLM_WithCapabilities(t *testing.T) {
+	llm, err := NewOpenAILLM(
+		core.ModelOpenAIGPT4oMini,
+		WithAPIKey("test-api-key"),
+		WithCapabilities(core.CapabilityVision, core.CapabilityMultimodal, core.CapabilityVision),
+	)
+	require.NoError(t, err)
+
+	capabilities := llm.Capabilities()
+	assert.Contains(t, capabilities, core.CapabilityJSON)
+	assert.Contains(t, capabilities, core.CapabilityToolCalling)
+	assert.Contains(t, capabilities, core.CapabilityVision)
+	assert.Contains(t, capabilities, core.CapabilityMultimodal)
+
+	visionCount := 0
+	for _, capability := range capabilities {
+		if capability == core.CapabilityVision {
+			visionCount++
+		}
+	}
+	assert.Equal(t, 1, visionCount)
+}
+
+func TestNewOpenAILLMFromConfig_ModelCapabilities(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("model capabilities from config", func(t *testing.T) {
+		llm, err := NewOpenAILLMFromConfig(ctx, core.ProviderConfig{
+			Name:   "openai",
+			APIKey: "test-api-key",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelOpenAIGPT4oMini): {
+					Capabilities: []string{"vision", "multimodal"},
+				},
+			},
+		}, core.ModelOpenAIGPT4oMini)
+		require.NoError(t, err)
+		assert.Contains(t, llm.Capabilities(), core.CapabilityVision)
+		assert.Contains(t, llm.Capabilities(), core.CapabilityMultimodal)
+	})
+
+	t.Run("empty model capabilities keep defaults", func(t *testing.T) {
+		llm, err := NewOpenAILLMFromConfig(ctx, core.ProviderConfig{
+			Name:   "openai",
+			APIKey: "test-api-key",
+		}, core.ModelOpenAIGPT4oMini)
+		require.NoError(t, err)
+		assert.NotContains(t, llm.Capabilities(), core.CapabilityVision)
+		assert.NotContains(t, llm.Capabilities(), core.CapabilityMultimodal)
+	})
+
+	t.Run("unknown capability fails closed", func(t *testing.T) {
+		_, err := NewOpenAILLMFromConfig(ctx, core.ProviderConfig{
+			Name:   "openai",
+			APIKey: "test-api-key",
+			Models: map[string]core.ModelConfig{
+				string(core.ModelOpenAIGPT4oMini): {
+					Capabilities: []string{"telepathy"},
+				},
+			},
+		}, core.ModelOpenAIGPT4oMini)
+		require.Error(t, err)
+		dsyErr, ok := err.(*errors.Error)
+		require.True(t, ok)
+		assert.Equal(t, errors.InvalidInput, dsyErr.Code())
+	})
 }
 
 func TestNewOpenAILLMFromConfig(t *testing.T) {

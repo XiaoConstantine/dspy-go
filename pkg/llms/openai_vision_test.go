@@ -78,6 +78,8 @@ func TestOpenAILLM_GenerateWithContent(t *testing.T) {
 		},
 	}, core.ModelOpenAIGPT4oMini)
 	require.NoError(t, err)
+	assert.NotContains(t, llm.Capabilities(), core.CapabilityVision)
+	assert.NotContains(t, llm.Capabilities(), core.CapabilityMultimodal)
 
 	response, err := llm.GenerateWithContent(context.Background(), []core.ContentBlock{
 		core.NewTextBlock("describe"),
