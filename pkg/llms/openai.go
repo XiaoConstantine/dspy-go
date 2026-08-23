@@ -735,6 +735,12 @@ func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.Messa
 	return openai.TextContent(strings.Join(texts, "\n")), nil
 }
 
+// openaiUserContentIsEmpty reports whether user content has nothing to send.
+// Whitespace-only text is caller content and is not empty. TrimSpace is not used.
+func openaiUserContentIsEmpty(content openai.MessageContent) bool {
+	return !content.IsMultimodal() && content.Text() == ""
+}
+
 func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
 	if len(blocks) == 0 {
 		return ""
@@ -914,7 +920,7 @@ func (o *OpenAILLM) GenerateWithContent(ctx context.Context, content []core.Cont
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(messageContent.Text()) == "" && !messageContent.IsMultimodal() {
+	if openaiUserContentIsEmpty(messageContent) {
 		return nil, errors.New(errors.InvalidInput, "no content provided")
 	}
 
@@ -986,7 +992,7 @@ func (o *OpenAILLM) StreamGenerateWithContent(ctx context.Context, content []cor
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(messageContent.Text()) == "" && !messageContent.IsMultimodal() {
+	if openaiUserContentIsEmpty(messageContent) {
 		return nil, errors.New(errors.InvalidInput, "no content provided")
 	}
 

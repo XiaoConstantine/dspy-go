@@ -120,6 +120,80 @@ func TestOpenAILLM_GenerateWithContent_AudioUnsupported(t *testing.T) {
 	assert.Equal(t, errors.UnsupportedOperation, dsyErr.Code())
 }
 
+func TestOpenAILLM_GenerateWithContent_EmptyTextRejected(t *testing.T) {
+	llm, err := NewOpenAILLM(core.ModelOpenAIGPT4oMini, WithAPIKey("test-api-key"))
+	require.NoError(t, err)
+
+	_, err = llm.GenerateWithContent(context.Background(), []core.ContentBlock{
+		core.NewTextBlock(""),
+	})
+	require.Error(t, err)
+	dsyErr, ok := err.(*errors.Error)
+	require.True(t, ok)
+	assert.Equal(t, errors.InvalidInput, dsyErr.Code())
+	assert.Contains(t, err.Error(), "no content provided")
+}
+
+func TestOpenAILLM_GenerateWithContent_PreservesTextOnlyWhitespace(t *testing.T) {
+	assertGenerateWithContentSendsString(t, "  prompt  ", "  prompt  ")
+}
+
+func TestOpenAILLM_GenerateWithContent_KeepsWhitespaceOnlyText(t *testing.T) {
+	assertGenerateWithContentSendsString(t, "   \t", "   \t")
+}
+
+func assertGenerateWithContentSendsString(t *testing.T, blockText, wantContent string) {
+	t.Helper()
+	var gotContent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(body, &raw))
+		messages, ok := raw["messages"].([]any)
+		require.True(t, ok)
+		require.Len(t, messages, 1)
+		msg, ok := messages[0].(map[string]any)
+		require.True(t, ok)
+		content, isString := msg["content"].(string)
+		assert.True(t, isString, "text-only content must marshal as a JSON string")
+		gotContent = content
+
+		resp := openai.ChatCompletionResponse{
+			ID:    "whitespace",
+			Model: "gpt-4o-mini",
+			Choices: []openai.ChatChoice{{
+				Message: openai.ChatCompletionMessage{
+					Role:    "assistant",
+					Content: openai.TextContent("ok"),
+				},
+				FinishReason: "stop",
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	llm, err := NewOpenAILLMFromConfig(context.Background(), core.ProviderConfig{
+		Name:   "openai",
+		APIKey: "test-api-key",
+		Endpoint: &core.EndpointConfig{
+			BaseURL:    server.URL,
+			TimeoutSec: 30,
+		},
+	}, core.ModelOpenAIGPT4oMini)
+	require.NoError(t, err)
+
+	response, err := llm.GenerateWithContent(context.Background(), []core.ContentBlock{
+		core.NewTextBlock(blockText),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", response.Content)
+	assert.Equal(t, wantContent, gotContent)
+}
+
 func TestOpenAILLM_Generate_StillSendsStringContent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -223,6 +297,53 @@ func TestOpenAILLM_StreamGenerateWithContent(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"seen", " image"}, parts)
+}
+
+func TestOpenAILLM_StreamGenerateWithContent_KeepsWhitespaceOnlyText(t *testing.T) {
+	var gotContent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(body, &raw))
+		messages, ok := raw["messages"].([]any)
+		require.True(t, ok)
+		require.Len(t, messages, 1)
+		msg, ok := messages[0].(map[string]any)
+		require.True(t, ok)
+		content, isString := msg["content"].(string)
+		assert.True(t, isString, "text-only content must marshal as a JSON string")
+		gotContent = content
+
+		w.Header().Set("Content-Type", "text/plain")
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+		fmt.Fprintf(w, "%s\n\n", `data: {"id":"test","object":"chat.completion.chunk","created":1,"model":"gpt-4o-mini","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`)
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	llm, err := NewOpenAILLMFromConfig(context.Background(), core.ProviderConfig{
+		Name:   "openai",
+		APIKey: "test-api-key",
+		Endpoint: &core.EndpointConfig{
+			BaseURL:    server.URL,
+			TimeoutSec: 30,
+		},
+	}, core.ModelOpenAIGPT4oMini)
+	require.NoError(t, err)
+
+	stream, err := llm.StreamGenerateWithContent(context.Background(), []core.ContentBlock{
+		core.NewTextBlock("   \t"),
+	})
+	require.NoError(t, err)
+	for chunk := range stream.ChunkChannel {
+		require.NoError(t, chunk.Error)
+	}
+	assert.Equal(t, "   \t", gotContent)
 }
 
 func assertFlattenedImageWire(t *testing.T, content openai.MessageContent, wantTextFragments ...string) {
