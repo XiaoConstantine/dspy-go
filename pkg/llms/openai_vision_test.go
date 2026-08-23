@@ -238,6 +238,55 @@ func assertFlattenedImageWire(t *testing.T, content openai.MessageContent, wantT
 	assert.NotContains(t, string(raw), "image_url")
 }
 
+func TestCoreContentBlocksToMessageContent_PreservesTextOnlyWhitespace(t *testing.T) {
+	content, err := coreContentBlocksToMessageContent([]core.ContentBlock{
+		core.NewTextBlock("  prompt  "),
+	})
+	require.NoError(t, err)
+	assert.False(t, content.IsMultimodal())
+
+	raw, err := json.Marshal(content)
+	require.NoError(t, err)
+	require.NotEmpty(t, raw)
+	assert.Equal(t, byte('"'), raw[0], "text-only content must marshal as a JSON string")
+
+	var got string
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equal(t, "  prompt  ", got)
+}
+
+func TestCoreContentBlocksToMessageContent_PreservesWhitespaceWithImage(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	content, err := coreContentBlocksToMessageContent([]core.ContentBlock{
+		core.NewTextBlock("  prompt  "),
+		core.NewImageBlock(pngBytes, "image/png"),
+	})
+	require.NoError(t, err)
+	require.True(t, content.IsMultimodal())
+	parts := content.Parts()
+	require.GreaterOrEqual(t, len(parts), 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "  prompt  ", parts[0].Text)
+	assert.Equal(t, "image_url", parts[1].Type)
+}
+
+func TestCoreContentBlocksToMessageContent_KeepsWhitespaceOnlyText(t *testing.T) {
+	content, err := coreContentBlocksToMessageContent([]core.ContentBlock{
+		core.NewTextBlock("   \t"),
+	})
+	require.NoError(t, err)
+	assert.False(t, content.IsMultimodal())
+
+	raw, err := json.Marshal(content)
+	require.NoError(t, err)
+	require.NotEmpty(t, raw)
+	assert.Equal(t, byte('"'), raw[0], "text-only content must marshal as a JSON string")
+
+	var got string
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equal(t, "   \t", got)
+}
+
 func TestConvertCoreChatMessagesToOpenAI_PreservesUserImage(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	messages, err := convertCoreChatMessagesToOpenAI([]core.ChatMessage{

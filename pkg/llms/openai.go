@@ -715,12 +715,9 @@ func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatComple
 	return parts, nil
 }
 
-// coreContentBlocksToMessageContent builds wire content that may include image_url
-// parts. Call only for user-role messages from convertCoreChatMessagesToOpenAI.
+// coreContentBlocksToMessageContent converts user-role content. The preserve
+// rule lives in contentBlocksToOpenAIParts. Flatten is not used here.
 func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.MessageContent, error) {
-	if !contentBlocksHaveNonText(blocks) {
-		return openai.TextContent(flattenCoreChatMessageContent(blocks)), nil
-	}
 	parts, err := contentBlocksToOpenAIParts(blocks)
 	if err != nil {
 		return openai.MessageContent{}, err
@@ -728,7 +725,14 @@ func coreContentBlocksToMessageContent(blocks []core.ContentBlock) (openai.Messa
 	if len(parts) == 0 {
 		return openai.TextContent(""), nil
 	}
-	return openai.PartsContent(parts...), nil
+	if contentBlocksHaveNonText(blocks) {
+		return openai.PartsContent(parts...), nil
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		texts = append(texts, part.Text)
+	}
+	return openai.TextContent(strings.Join(texts, "\n")), nil
 }
 
 func flattenCoreChatMessageContent(blocks []core.ContentBlock) string {
