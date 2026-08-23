@@ -388,16 +388,16 @@ func TestConvertCoreChatMessagesToOpenAI_ToolResultWinsOverMessageContent(t *tes
 	assert.Equal(t, "call_2", messages[0].ToolCallID)
 }
 
-func TestContentBlocksToOpenAIParts_ImageOnlyAddsText(t *testing.T) {
+func TestContentBlocksToOpenAIParts_ImageOnlyKeepsImageURL(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
 		core.NewImageBlock(pngBytes, "image/png"),
 	})
 	require.NoError(t, err)
-	require.Len(t, parts, 2)
-	assert.Equal(t, "text", parts[0].Type)
-	assert.Equal(t, openAIImageOnlyFallbackText, parts[0].Text)
-	assert.Equal(t, "image_url", parts[1].Type)
+	require.Len(t, parts, 1)
+	assert.Equal(t, "image_url", parts[0].Type)
+	require.NotNil(t, parts[0].ImageURL)
+	assert.True(t, strings.HasPrefix(parts[0].ImageURL.URL, "data:image/png;base64,"))
 }
 
 func TestContentBlocksToOpenAIParts_WhitespaceTextWithImagePreserved(t *testing.T) {
@@ -410,21 +410,18 @@ func TestContentBlocksToOpenAIParts_WhitespaceTextWithImagePreserved(t *testing.
 	require.Len(t, parts, 2)
 	assert.Equal(t, "text", parts[0].Type)
 	assert.Equal(t, "   \t", parts[0].Text)
-	assert.NotEqual(t, openAIImageOnlyFallbackText, parts[0].Text)
 	assert.Equal(t, "image_url", parts[1].Type)
 }
 
-func TestContentBlocksToOpenAIParts_EmptyTextWithImageAddsFallback(t *testing.T) {
+func TestContentBlocksToOpenAIParts_EmptyTextWithImageDropsEmptyText(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	parts, err := contentBlocksToOpenAIParts([]core.ContentBlock{
 		core.NewTextBlock(""),
 		core.NewImageBlock(pngBytes, "image/png"),
 	})
 	require.NoError(t, err)
-	require.Len(t, parts, 2)
-	assert.Equal(t, "text", parts[0].Type)
-	assert.Equal(t, openAIImageOnlyFallbackText, parts[0].Text)
-	assert.Equal(t, "image_url", parts[1].Type)
+	require.Len(t, parts, 1)
+	assert.Equal(t, "image_url", parts[0].Type)
 }
 
 func TestOpenAIGenerateWithContentLive(t *testing.T) {
@@ -508,12 +505,10 @@ func TestContentBlocksToOpenAIParts_ImageMIME(t *testing.T) {
 			core.NewImageBlock(jpegData, ""),
 		})
 		require.NoError(t, err)
-		require.Len(t, parts, 2)
-		assert.Equal(t, "text", parts[0].Type)
-		assert.Equal(t, openAIImageOnlyFallbackText, parts[0].Text)
-		assert.Equal(t, "image_url", parts[1].Type)
-		require.NotNil(t, parts[1].ImageURL)
-		assert.True(t, strings.HasPrefix(parts[1].ImageURL.URL, "data:image/jpeg;base64,"))
+		require.Len(t, parts, 1)
+		assert.Equal(t, "image_url", parts[0].Type)
+		require.NotNil(t, parts[0].ImageURL)
+		assert.True(t, strings.HasPrefix(parts[0].ImageURL.URL, "data:image/jpeg;base64,"))
 	})
 
 	t.Run("reject jpeg bytes with png mime", func(t *testing.T) {

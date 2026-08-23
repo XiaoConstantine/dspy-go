@@ -678,10 +678,6 @@ func contentBlocksHaveNonText(blocks []core.ContentBlock) bool {
 	return false
 }
 
-// openAIImageOnlyFallbackText is prepended only when the multimodal payload has
-// image parts and no text parts at all (including whitespace-only text).
-const openAIImageOnlyFallbackText = "Describe the attached image(s)."
-
 func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatCompletionContentPart, error) {
 	parts := make([]openai.ChatCompletionContentPart, 0, len(blocks))
 	for _, block := range blocks {
@@ -716,30 +712,7 @@ func contentBlocksToOpenAIParts(blocks []core.ContentBlock) ([]openai.ChatComple
 			)
 		}
 	}
-	return ensureOpenAIMultimodalTextPart(parts), nil
-}
-
-// ensureOpenAIMultimodalTextPart prepends a short text part when the payload has
-// images but no text parts. Some OpenAI-compatible gateways reject image-only messages.
-// Whitespace-only text parts count as text so caller content is never replaced.
-func ensureOpenAIMultimodalTextPart(parts []openai.ChatCompletionContentPart) []openai.ChatCompletionContentPart {
-	hasText := false
-	hasImage := false
-	for _, part := range parts {
-		switch part.Type {
-		case "text":
-			hasText = true
-		case "image_url":
-			hasImage = true
-		}
-	}
-	if !hasImage || hasText {
-		return parts
-	}
-	return append([]openai.ChatCompletionContentPart{{
-		Type: "text",
-		Text: openAIImageOnlyFallbackText,
-	}}, parts...)
+	return parts, nil
 }
 
 // coreContentBlocksToMessageContent builds wire content that may include image_url
