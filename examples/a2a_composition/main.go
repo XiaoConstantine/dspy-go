@@ -353,7 +353,7 @@ func printResearchReport(ctx context.Context, result map[string]any) {
 func main() {
 	// Parse command-line flags
 	apiKey := flag.String("api-key", "", "LLM API Key (required)")
-	model := flag.String("model", "gemini-2.0-flash-exp", "Model to use")
+	model := flag.String("model", string(core.ModelGoogleGeminiFlash), "Model to use")
 	flag.Parse()
 
 	if *apiKey == "" {

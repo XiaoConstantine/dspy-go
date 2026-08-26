@@ -1,9 +1,9 @@
 ---
 title: "API Reference"
-description: "Complete API reference for dspy-go packages, modules, and configuration"
-summary: "Comprehensive technical reference for all dspy-go components"
+description: "Reference links and current integration patterns for dspy-go"
+summary: "Find package documentation and the current provider, configuration, and CLI references"
 date: 2025-10-13T00:00:00+00:00
-lastmod: 2025-10-13T00:00:00+00:00
+lastmod: 2026-08-26T00:00:00+00:00
 draft: false
 weight: 900
 toc: true
@@ -11,271 +11,118 @@ sidebar:
   collapsed: false
 seo:
   title: "API Reference - dspy-go"
-  description: "Complete API reference documentation for dspy-go framework"
+  description: "API reference and integration patterns for dspy-go"
   canonical: ""
   noindex: false
 ---
 
-Complete technical reference for all dspy-go packages, modules, and configuration options.
-
-## Quick Links
-
-### Core Packages
-- **[core](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/core)** - Signatures, fields, and base abstractions
-- **[modules](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/modules)** - Predict, ChainOfThought, ReAct, and more
-- **[llms](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/llms)** - LLM provider integrations
-- **[optimizers](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/optimizers)** - GEPA, MIPRO, SIMBA, Bootstrap, COPRO
-
-### Advanced Packages
-- **[tools](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/tools)** - Smart tool registry and management
-- **[agents](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/agents)** - Agent orchestration and memory
-- **[agents/memory](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/agents/memory)** - Conversation memory systems
-
----
-
-## Package Documentation
-
-### GoDoc Reference
-
-For complete API documentation with all types, interfaces, and functions, visit:
-
-**[pkg.go.dev/github.com/XiaoConstantine/dspy-go](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go)**
-
-The GoDoc provides:
-- ✅ Full type definitions
-- ✅ Function signatures
-- ✅ Method documentation
-- ✅ Code examples
-- ✅ Source code navigation
-
----
+The authoritative symbol-level API documentation is on
+[pkg.go.dev](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go). The guides
+in this section explain the configuration and integration boundaries around
+those APIs.
 
 ## Reference Guides
 
-### By Topic
-
 | Guide | Description |
-|-------|-------------|
-| **[Configuration Reference →](configuration/)** | Environment variables, LLM setup, provider options |
-| **[CLI Reference →](cli/)** | Command-line tool usage and flags |
-| **[LLM Providers →](providers/)** | Supported providers and model configurations |
+|---|---|
+| **[Configuration Reference →](configuration/)** | Credentials, model selection, generation options, runtimes, and YAML settings |
+| **[LLM Providers →](providers/)** | llm-go-backed provider constructors, streaming, embeddings, and Codex subscription access |
+| **[CLI Reference →](cli/)** | `dspy-cli` commands and flags |
 
----
+## Package Documentation
+
+### Core Framework
+
+- [`pkg/core`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/core):
+  signatures, modules, LLM capability interfaces, execution state, and runtime
+  model resolution
+- [`pkg/modules`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/modules):
+  Predict, ChainOfThought, ReAct, Refine, Parallel, and other DSPy modules
+- [`pkg/optimizers`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/optimizers):
+  GEPA, MIPRO, SIMBA, BootstrapFewShot, COPRO, and optimizer utilities
+- [`pkg/config`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/config):
+  typed file and environment configuration loading
+
+### Models and Agents
+
+- [`pkg/llms`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/llms):
+  adapters from llm-go generators to dspy-go's compatibility interfaces, plus
+  dspy-go-owned embedding clients
+- [`pkg/agents`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/agents):
+  provider-neutral execution loops, harnesses, typed events, and traces
+- [`pkg/agents/native`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/agents/native):
+  provider-native tool-calling agents and sessions
+- [`pkg/tools`](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go/pkg/tools):
+  tool contracts, registries, composition, and built-in toolsets
+
+## Current LLM Boundary
+
+Provider generation protocols and model metadata live in
+[`llm-go`](https://github.com/XiaoConstantine/llm-go). `pkg/llms` preserves the
+`core.LLM` integration used by existing dspy-go modules and agents. dspy-go
+continues to own Gemini and OpenAI-compatible embeddings because embedding is
+part of that compatibility contract.
+
+New consumers should depend on the smallest core capability interface they
+need, such as `core.TextGenerator`, `core.StreamGenerator`, `core.Embedder`, or
+`core.ToolCallingChatLLM`, rather than requiring the full `core.LLM` interface
+unnecessarily.
 
 ## Common Patterns
 
-### Initialization Patterns
+### Configure a Default Model
 
 ```go
-// Zero-config (recommended)
-llm, _ := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
-core.SetDefaultLLM(llm)
-
-// Explicit configuration
-llm, _ := llms.NewGeminiLLM("api-key", core.ModelGoogleGeminiPro)
-core.SetDefaultLLM(llm)
-
-// Per-module override
-module := modules.NewPredict(signature)
-module.SetLLM(customLLM)
-```
-
-### Error Handling
-
-```go
-import "github.com/XiaoConstantine/dspy-go/pkg/core"
-
-// Check for specific error types
+llm, err := llms.NewLLM(apiKey, core.ModelGoogleGeminiFlash)
 if err != nil {
-    switch {
-    case errors.Is(err, core.ErrNoLLMConfigured):
-        // Handle missing LLM configuration
-    case errors.Is(err, core.ErrInvalidSignature):
-        // Handle invalid signature
-    default:
-        // Handle other errors
-    }
+    return err
 }
+core.SetDefaultLLM(llm)
 ```
 
-### Context Management
+### Configure One Module
 
 ```go
-import "context"
-
-// Always pass context
-ctx := context.Background()
-
-// With timeout
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-defer cancel()
-
-// With cancellation
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
+predictor := modules.NewPredict(signature)
+predictor.SetLLM(llm)
 ```
 
----
+### Configure One Request
 
-## Type System
-
-### Core Types
-
-#### Signature
 ```go
-type Signature interface {
-    Inputs() []InputField
-    Outputs() []OutputField
-    Instruction() string
-}
+ctx := core.WithRuntime(context.Background(), &core.Runtime{
+    DefaultLLM: llm,
+})
+result, err := predictor.Process(ctx, inputs)
 ```
 
-#### Module
-```go
-type Module interface {
-    Process(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error)
-}
-```
-
-#### LLM
-```go
-type PromptModel interface {
-    Generate(ctx context.Context, prompt string, opts ...GenerateOption) (*LLMResponse, error)
-    ModelID() string
-}
-
-type LLM interface {
-    PromptModel
-    GenerateWithJSON(ctx context.Context, prompt string, opts ...GenerateOption) (map[string]interface{}, error)
-    GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]interface{}, opts ...GenerateOption) (map[string]interface{}, error)
-    CreateEmbedding(ctx context.Context, input string, opts ...EmbeddingOption) (*EmbeddingResult, error)
-    CreateEmbeddings(ctx context.Context, inputs []string, opts ...EmbeddingOption) (*BatchEmbeddingResult, error)
-    StreamGenerate(ctx context.Context, prompt string, opts ...GenerateOption) (*StreamResponse, error)
-    GenerateWithContent(ctx context.Context, content []ContentBlock, opts ...GenerateOption) (*LLMResponse, error)
-    StreamGenerateWithContent(ctx context.Context, content []ContentBlock, opts ...GenerateOption) (*StreamResponse, error)
-    ProviderName() string
-    Capabilities() []Capability
-}
-```
-
-`LLM` is the full compatibility interface. New code should prefer the smallest capability interface it needs, such as `PromptModel`, `TextGenerator`, or `CapabilityProvider`.
-
----
-
-## Constants
-
-### Model Identifiers
+### Configure One Generation Call
 
 ```go
-// OpenAI Models
-core.ModelOpenAIGPT4 = "gpt-4"
-core.ModelOpenAIGPT4Turbo = "gpt-4-turbo-preview"
-core.ModelOpenAIGPT35Turbo = "gpt-3.5-turbo"
-
-// Anthropic Models
-core.ModelAnthropicOpus = "claude-opus-5"
-core.ModelAnthropicSonnet = "claude-sonnet-5"
-core.ModelAnthropicHaiku = "claude-haiku-4-5"
-core.ModelAnthropicClaude5Fable = "claude-fable-5"
-core.ModelAnthropicClaude5Mythos = "claude-mythos-5"
-core.ModelAnthropicClaude48Opus = "claude-opus-4-8"
-```
-
-### Error Constants
-
-```go
-var (
-    ErrNoLLMConfigured = errors.New("no LLM configured")
-    ErrInvalidSignature = errors.New("invalid signature")
-    ErrEmptyInput = errors.New("empty input")
-    ErrMaxRetriesExceeded = errors.New("max retries exceeded")
+response, err := llm.Generate(ctx, prompt,
+    core.WithMaxTokens(1024),
+    core.WithTemperature(0.2),
 )
 ```
 
----
+Use `context.WithTimeout` or `context.WithCancel` to control an operation's
+lifetime. Streaming calls return a `core.StreamResponse`; consume
+`ChunkChannel` and call `Cancel` if you stop before the stream completes.
 
-## Environment Variables
+## Model IDs and Capabilities
 
-### LLM Provider Keys
+Use the exported `core.ModelID` constants instead of copying model strings when
+possible. Model catalogs change more frequently than this documentation, so
+consult the current `pkg/core` GoDoc and provider documentation for available
+models and limits.
 
-```bash
-# Google Gemini
-GEMINI_API_KEY="your-api-key"
-
-# OpenAI
-OPENAI_API_KEY="your-api-key"
-OPENAI_BASE_URL="https://api.openai.com/v1"  # optional
-
-# Anthropic Claude
-ANTHROPIC_API_KEY="your-api-key"
-
-# Ollama (local)
-OLLAMA_BASE_URL="http://localhost:11434"
-```
-
-### Optimization Settings
-
-```bash
-# Enable debug logging
-DSPY_DEBUG=true
-
-# Set default timeout (seconds)
-DSPY_TIMEOUT=30
-
-# Enable caching
-DSPY_CACHE_ENABLED=true
-```
-
----
-
-## Best Practices
-
-### Memory Management
-
-```go
-// Use context with timeout for long-running operations
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-defer cancel()
-
-// Clean up resources
-defer module.Close()
-```
-
-### Concurrent Usage
-
-```go
-// Modules are NOT goroutine-safe by default
-// Create separate instances for concurrent use
-module1 := modules.NewPredict(signature)
-module2 := modules.NewPredict(signature)
-
-go func() {
-    module1.Process(ctx, input1)
-}()
-
-go func() {
-    module2.Process(ctx, input2)
-}()
-```
-
-### Rate Limiting
-
-```go
-// Use built-in retry logic
-llm, _ := llms.NewGeminiLLM(apiKey, model)
-llm.SetMaxRetries(3)
-llm.SetRetryDelay(time.Second)
-
-// Or implement custom rate limiting
-limiter := rate.NewLimiter(rate.Every(time.Second), 10)
-limiter.Wait(ctx)
-```
-
----
+Capability support is model-specific. Check `llm.Capabilities()` at runtime
+when your application requires streaming, JSON, tool calling, vision, audio,
+or embeddings.
 
 ## Next Steps
 
-- **[Browse Full API on pkg.go.dev →](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go)**
+- **[Browse all packages on pkg.go.dev →](https://pkg.go.dev/github.com/XiaoConstantine/dspy-go)**
 - **[Configuration Reference →](configuration/)**
-- **[CLI Reference →](cli/)**
 - **[LLM Providers →](providers/)**
+- **[Getting Started →](../guides/getting-started/)**

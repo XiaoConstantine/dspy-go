@@ -78,7 +78,7 @@
 //
 //	func main() {
 //	    // Configure the default LLM
-//	    llm, err := llms.NewAnthropicLLM("your-api-key", core.ModelAnthropicSonnet)
+//	    llm, err := llms.NewLLM("your-api-key", core.ModelAnthropicSonnet)
 //	    if err != nil {
 //	        log.Fatalf("Failed to configure LLM: %v", err)
 //	    }
@@ -243,7 +243,7 @@
 //
 //	func main() {
 //	    // Configure LLM
-//	    llm, err := llms.NewAnthropicLLM("your-api-key", core.ModelAnthropicSonnet)
+//	    llm, err := llms.NewLLM("your-api-key", core.ModelAnthropicSonnet)
 //	    if err != nil {
 //	        log.Fatalf("Failed to create LLM: %v", err)
 //	    }

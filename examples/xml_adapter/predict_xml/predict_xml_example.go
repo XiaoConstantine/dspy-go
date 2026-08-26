@@ -37,7 +37,7 @@ func main() {
 
 	// Initialize LLM factory and create Gemini LLM
 	llms.EnsureFactory()
-	llm, err := llms.NewGeminiLLM(apiKey, core.ModelID("gemini-2.0-flash"))
+	llm, err := llms.NewGeminiLLM(apiKey, core.ModelGoogleGeminiFlash)
 	if err != nil {
 		logger.Error(ctx, "Failed to create Gemini LLM: %v", err)
 		return

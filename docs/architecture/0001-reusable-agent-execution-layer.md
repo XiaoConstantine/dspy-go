@@ -21,6 +21,11 @@ structs, and legacy provider result-map parsing referenced below have since
 been removed. Native `Execute` still returns compatibility output fields for
 existing callers.
 
+Provider generation has also since moved to `llm-go`. `pkg/llms` now adapts
+llm-go generators to `core.LLM` and retains dspy-go's embedding clients; later
+statements that provider implementations live in `pkg/llms` describe the
+historical state when this decision was made.
+
 ## Context
 
 >The remainder of this ADR preserves the pre-implementation decision record.

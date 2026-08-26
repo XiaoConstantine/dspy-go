@@ -1,742 +1,157 @@
-# DSPy-CLI: Interactive Command-Line Tool for DSPy-Go Optimizers
+# dspy-cli
 
-A powerful command-line interface for exploring, testing, and optimizing DSPy-Go programs with zero boilerplate code.
+`dspy-cli` explores and runs dspy-go optimizers, analyzes prompt structure,
+views JSONL traces, manages persisted agent sessions, and runs TBLite agent
+benchmarks.
 
-## 🚀 Quick Start
+The CLI is a separate Go module. During repository development its `go.mod`
+uses a local replacement for the dspy-go module at `../..`.
+
+## Build
+
+Requirements:
+
+- Go 1.27 or newer
+- A provider credential for commands that call a hosted model
 
 ```bash
-# Install the CLI
 cd cmd/dspy-cli
 go build -o dspy-cli
+./dspy-cli --help
+```
 
-# Set your API key
-export GEMINI_API_KEY="your-api-key-here"
+Running `./dspy-cli` without a subcommand starts the interactive TUI.
 
-# Try an optimizer with sample data
-./dspy-cli try bootstrap --dataset gsm8k --max-examples 5
+## Quick Start
 
-# List all available optimizers
+```bash
+export GEMINI_API_KEY="your-api-key"
+
 ./dspy-cli list
-
-# Get detailed optimizer information
 ./dspy-cli describe mipro
-
-# Get optimizer recommendations
-./dspy-cli recommend advanced
+./dspy-cli recommend --use-case balanced
+./dspy-cli try bootstrap --dataset qa --max-examples 3
+./dspy-cli try mipro --dataset gsm8k --max-examples 5 --verbose
 ```
 
-## 📋 Table of Contents
+## Commands
 
-- [Features](#-features)
-- [Installation](#-installation)
-- [Commands](#-commands)
-- [Log Viewer](#-log-viewer)
-- [Prompt Analyzer](#-prompt-analyzer)
-- [Optimizers](#-optimizers)
-- [Datasets](#-datasets)
-- [Examples](#-examples)
-- [Configuration](#-configuration)
-- [Architecture](#-architecture)
-- [Troubleshooting](#-troubleshooting)
+| Command | Purpose |
+|---|---|
+| `list` | List registered optimizers |
+| `describe <optimizer>` | Show one optimizer's details |
+| `recommend` | Recommend optimizers by use case or an interactive questionnaire |
+| `try <optimizer>` | Run an optimizer on `qa`, `gsm8k`, or `hotpotqa` samples |
+| `analyze [prompt]` | Analyze and optionally export prompt structure |
+| `view <file.jsonl>` | View RLM or native dspy-go logs |
+| `interactive` | Start the guided TUI |
+| `agent run-terminal-task` | Read one TBLite-style task from JSON stdin |
+| `benchmark tblite` | Run a TBLite evaluation, optionally with GEPA optimization |
+| `session show/switch/fork` | Inspect and branch persisted native-agent sessions |
+| `completion` | Generate shell completion scripts |
 
-## ✨ Features
+Run `./dspy-cli <command> --help` for current flags.
 
-- **Zero Boilerplate**: Eliminates 60+ lines of setup code per optimizer
-- **All Optimizers Supported**: Bootstrap, MIPRO, SIMBA, GEPA, COPRO
-- **Sample Datasets**: Built-in GSM8K, HotPotQA, and Simple Q&A datasets
-- **Intelligent Recommendations**: Get optimizer suggestions based on your use case
-- **Local LLM Support**: Run optimizations using local models (Ollama, LM Studio) or OpenAI-compatible APIs
-- **Prompt Structure Analyzer**: Advanced 10-component prompt analysis with color-coded visualization
-- **Interactive Mode**: Rich TUI experience for complex prompt analysis
-- **DSPy Signature Conversion**: Automatic conversion from prompts to optimizable DSPy signatures
-- **Beautiful Output**: Colored, formatted results with progress indicators
-- **Dependency Isolation**: CLI dependencies don't pollute the main library
-- **Quick Experimentation**: Test optimizers in seconds, not minutes
-- **Session Log Viewer**: Interactive viewer for dspy-go JSONL session logs with search, stats, and export
-
-## 🛠 Installation
-
-### Prerequisites
-
-- Go 1.27 or higher
-- Gemini API key (set as `GEMINI_API_KEY` environment variable)
-
-### Build from Source
+## Try an Optimizer
 
 ```bash
-# Clone the repository
-git clone https://github.com/XiaoConstantine/dspy-go.git
-cd dspy-go/cmd/dspy-cli
-
-# Build the CLI
-go build -o dspy-cli
-
-# Optional: Install globally
-sudo mv dspy-cli /usr/local/bin/
+./dspy-cli try <optimizer> [flags]
 ```
 
-### Separate Module Setup
+The default provider/model is Google `gemini-2.5-flash`. Useful flags are:
 
-For development, the CLI remains a separate Go module. Its `go.mod` resolves the repository root through `replace github.com/XiaoConstantine/dspy-go => ../../`:
+- `--dataset`: `qa`, `gsm8k`, or `hotpotqa` (default `qa`)
+- `--max-examples`: zero uses all examples
+- `--provider`: `google`, `openai`, or `local`
+- `--model`: model ID
+- `--base-url`: local or custom OpenAI-compatible endpoint
+- `--api-key`: explicit API key
+- `--verbose`: detailed logs
+
+The command reads `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `DSPY_API_KEY` when
+`--api-key` is empty. Pass the key explicitly for another hosted provider:
 
 ```bash
-cd dspy-go/cmd/dspy-cli
-go mod download
+./dspy-cli try simba \
+  --provider openai \
+  --model gpt-4o-mini \
+  --api-key "$OPENAI_API_KEY"
 ```
 
-## 📝 Commands
-
-### `list` - Show All Optimizers
+Use a local OpenAI-compatible server with:
 
 ```bash
-dspy-cli list
+./dspy-cli try bootstrap \
+  --provider local \
+  --model local-model \
+  --base-url http://localhost:1234/v1
 ```
 
-Displays all available optimizers with their status, complexity, and use cases.
-
-### `describe` - Detailed Optimizer Information
+## Prompt Analysis and Log Viewing
 
 ```bash
-dspy-cli describe <optimizer>
+./dspy-cli analyze "Answer the user's question clearly."
+./dspy-cli analyze --interactive
+./dspy-cli analyze --export signature.yaml "Explain this code."
+
+./dspy-cli view session.jsonl
+./dspy-cli view --interactive session.jsonl
+./dspy-cli view --watch session.jsonl
+./dspy-cli view --stats session.jsonl
+./dspy-cli view --export report.md session.jsonl
 ```
 
-Shows comprehensive information about a specific optimizer including:
-- Description and use cases
-- Complexity and computational cost
-- Best-for scenarios
-- Example applications
+## Persisted Sessions
 
 ```bash
-# Examples
-dspy-cli describe mipro
-dspy-cli describe bootstrap
-dspy-cli describe gepa
+./dspy-cli session --db sessions.db show <session-id>
+./dspy-cli session --db sessions.db switch <session-id> <branch-id>
+./dspy-cli session --db sessions.db fork <session-id> --name experiment
+./dspy-cli session --db sessions.db fork <session-id> --activate
 ```
 
-### `recommend` - Get Optimizer Suggestions
+## Agent and Benchmark Commands
+
+Run one terminal task from JSON stdin:
 
 ```bash
-dspy-cli recommend <use-case>
+./dspy-cli agent run-terminal-task \
+  --provider google \
+  --model gemini-2.5-flash \
+  < request.json > result.json
 ```
 
-Get intelligent optimizer recommendations based on your needs:
+Run a fixed TBLite slice:
 
 ```bash
-dspy-cli recommend beginner      # Simple, quick optimizers
-dspy-cli recommend balanced      # Good performance/cost balance
-dspy-cli recommend advanced      # Cutting-edge optimizers
-dspy-cli recommend multi-module  # Collaborative optimization
+./dspy-cli benchmark tblite --limit 5 --output report.json
 ```
 
-### `try` - Run Optimizer with Sample Data
+Enable GEPA optimization before held-out evaluation:
 
 ```bash
-dspy-cli try <optimizer> [flags]
+./dspy-cli benchmark tblite \
+  --gepa \
+  --population 4 \
+  --generations 2 \
+  --validation-split 0.2 \
+  --test-split 0.2 \
+  --output tuned-report.json
 ```
 
-**Flags:**
-- `--dataset`: Dataset to use (gsm8k, hotpotqa, simple)
-- `--max-examples`: Limit number of examples (default: all)
-- `--provider`: LLM provider: `google`, `openai`, or `local` (default: `google`)
-- `--model`: Model ID to use (default: `gemini-2.0-flash`)
-- `--base-url`: Custom endpoint for local or OpenAI-compatible providers
-- `--api-key`: API key (overrides environment variable)
-- `--verbose`: Enable detailed logging
+Use the subcommand help for task-source, artifact, concurrency, and search
+controls.
 
-**Examples:**
+## Development
 
 ```bash
-# Basic usage
-dspy-cli try bootstrap --dataset gsm8k
-
-# Use a local LLM (LM Studio / Ollama)
-dspy-cli try mipro --provider local --base-url http://localhost:1234/v1 --model local-model
-
-# Use OpenAI
-dspy-cli try simba --provider openai --api-key sk-... --model gpt-4o
-
-# Limit examples for faster testing
-dspy-cli try mipro --dataset gsm8k --max-examples 5
-
-# Verbose output for debugging
-dspy-cli try simba --dataset hotpotqa --verbose
-
-# All optimizers
-dspy-cli try bootstrap --dataset simple
-dspy-cli try mipro --dataset gsm8k --max-examples 3
-dspy-cli try simba --dataset hotpotqa --max-examples 5
-dspy-cli try gepa --dataset gsm8k --max-examples 3
-dspy-cli try copro --dataset simple --max-examples 10
+cd cmd/dspy-cli
+go test ./...
+go vet ./...
 ```
 
-### `analyze` - Prompt Structure Analysis
-
-```bash
-dspy-cli analyze [prompt] [flags]
-```
-
-Analyze any prompt to identify its structural components and get optimization recommendations:
-
-**Flags:**
-- `--interactive`, `-i`: Interactive mode for multi-line prompts
-- `--optimize`, `-o`: Optimize to full 10-component structure
-- `--export`, `-e`: Export signature to file (yaml/json)
-
-**Examples:**
-
-```bash
-# Analyze a simple prompt
-dspy-cli analyze "You are a helpful assistant. Answer questions clearly."
-
-# Interactive mode for complex prompts
-dspy-cli analyze --interactive
-
-# Analyze and optimize to full structure
-dspy-cli analyze --optimize "Answer questions about math problems step by step."
-
-# Export optimized structure
-dspy-cli analyze --export signature.yaml "Your prompt here"
-
-# Use interactive TUI (recommended for best experience)
-dspy-cli  # Select "🔍 Analyze prompt structure"
-```
-
-### `view` - Session Log Viewer
-
-```bash
-dspy-cli view <file.jsonl> [flags]
-```
-
-Enhanced CLI viewer for dspy-go JSONL session logs with colored output, search, statistics, and export. Supports both RLM format (iterations) and native DSPy format (events).
-
-**Flags:**
-- `-c, --compact`: Compact output (hide full responses)
-- `-i, --interactive`: Interactive navigation mode
-- `-w, --watch`: Watch file for changes (live tail)
-- `--iter N`: Show only iteration N (1-indexed)
-- `--errors`: Show only iterations with errors
-- `--final`: Show only the final answer
-- `-s, --search TEXT`: Search for text in responses/code
-- `--stats`: Show detailed statistics only
-- `--export FILE`: Export to markdown file (.md)
-- `--no-color`: Disable colored output
-
-**Examples:**
-
-```bash
-# View a log file
-dspy-cli view session.jsonl
-
-# Interactive navigation mode
-dspy-cli view -i session.jsonl
-
-# Watch live as log is being written
-dspy-cli view -w session.jsonl
-
-# Show only statistics
-dspy-cli view --stats session.jsonl
-
-# Show specific iteration
-dspy-cli view --iter 3 session.jsonl
-
-# Search for errors
-dspy-cli view -s "error" session.jsonl
-
-# Export to markdown
-dspy-cli view --export report.md session.jsonl
-
-# Show only final answer
-dspy-cli view --final session.jsonl
-```
-
-#### Interactive Mode Features
-
-The interactive analyzer provides a rich TUI experience with:
-
-- **🎨 Color-Coded Components**: Each of the 10 prompt components has a unique color
-- **📊 Real-time Analysis**: Live feedback on prompt structure completeness
-- **✨ Visual Feedback**: Beautiful terminal UI with proper navigation
-- **📝 Multi-line Input**: Support for complex, multi-paragraph prompts
-- **⚡ Instant Results**: Immediate analysis with optimization suggestions
-
-#### Component Color Guide
-
-- **Task Context** (Blue): Role and identity definition
-- **Tone Context** (Purple): Communication style guidelines
-- **Background Data** (Sky Blue): Supporting documents/information
-- **Task Rules** (Pink): Specific constraints and requirements
-- **Examples** (Green): Demonstration interactions
-- **Conversation History** (Yellow): Previous context
-- **User Request** (Plum): Immediate query/task
-- **Thinking Steps** (Gray): Reasoning guidance
-- **Output Format** (Light Blue): Response structure requirements
-- **Prefilled Response** (Light Green): Template starters
-
-#### 10-Component Framework
-
-The analyzer evaluates prompts against a professional 10-component structure:
-
-1. **Task Context**: Define AI role and identity
-2. **Tone Context**: Set communication style
-3. **Background Data**: Provide supporting information
-4. **Task Rules**: Specify constraints and requirements
-5. **Examples**: Show desired interactions
-6. **Conversation History**: Include relevant context
-7. **User Request**: Present the immediate task
-8. **Thinking Steps**: Guide reasoning process
-9. **Output Format**: Structure response requirements
-10. **Prefilled Response**: Provide response starters
-
-```
-
-## 📺 Log Viewer
-
-The DSPy-CLI includes a powerful session log viewer for analyzing JSONL logs from dspy-go. It automatically detects and handles both RLM format (iteration-based) and native DSPy format (event-based) logs.
-
-### Key Features
-
-- **Colored Output**: Easy-to-read display with syntax highlighting
-- **Interactive Navigation**: Browse through entries with keyboard controls
-- **Live Watching**: Monitor logs in real-time as they're being written
-- **Search**: Find specific text in responses and code blocks
-- **Statistics**: View detailed session metrics (tokens, timing, LLM calls)
-- **Export**: Generate markdown reports from session logs
-- **Dual Format Support**: Automatically detects RLM (iterations) and DSPy (events) formats
-
-### Interactive Mode Keys
-
-When using `-i` or `--interactive`:
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Next entry |
-| `k` / `↑` | Previous entry |
-| `g` | Go to first entry |
-| `G` | Go to last entry |
-| `/` | Enter search query (RLM format) |
-| `n` | Next search result |
-| `N` | Previous search result |
-| `e` | Toggle expand/compact mode |
-| `s` | Show detailed statistics |
-| `?` | Show help |
-| `q` | Quit |
-
-### Statistics View
-
-The `--stats` flag displays:
-
-- **Overview**: Entry count (iterations/events), code blocks, LLM calls, total time
-- **Token Usage**: Prompt tokens, completion tokens, averages per call
-- **Timing Analysis**: Min/max/median/avg timing metrics
-- **Per-Entry Breakdown**: Detailed table of each entry
-- **Timeline**: Visual bar chart of entry durations
-
-### Export Format
-
-The `--export` flag generates a markdown file containing:
-
-**For RLM format:**
-- Session metadata (model, backend, query)
-- Each iteration with code blocks and outputs
-- Final answer highlighted
-- Summary statistics
-
-**For DSPy format:**
-- Session information (trace ID, start time)
-- LLM calls with prompts and responses
-- Module executions with inputs/outputs
-- Code executions with stdout/stderr
-- Tool calls and errors
-- Summary statistics
-
-## 🔍 Prompt Analyzer
-
-The DSPy-CLI includes a sophisticated prompt structure analyzer that evaluates prompts against a professional 10-component framework and provides actionable optimization recommendations.
-
-### Key Features
-
-- **🎨 Color-Coded Visualization**: Each component type has a unique color for easy identification
-- **📊 Structure Completeness**: Real-time percentage showing prompt optimization level
-- **⚡ Intelligent Detection**: Advanced pattern matching and keyword analysis
-- **🔄 DSPy Integration**: Automatic conversion to optimizable DSPy signatures
-- **📱 Interactive TUI**: Rich terminal interface with scrolling and navigation
-- **📁 Export Support**: Save optimized structures as YAML or JSON
-
-### Analysis Output
-
-When you analyze a prompt, you'll see:
-
-```
-📊 Analysis Results
-
-🎨 Component Colors:
-  Task Context • Tone Context
-  Background Data • Task Rules
-  [... complete color guide ...]
-
-Structure Completeness: 90% (9/10 components) • 15 total instances found
-
-✅ Components Found:
-  • Task Context: You will be acting as an AI career coach...
-  • Tone Context: maintain a friendly customer service tone
-  • Background Data: Here is the career guidance document...
-  [... detailed breakdown ...]
-
-⚠️ Missing Components:
-  • Prefilled Response
-
-💡 Tip: Adding 1 more components could improve performance by +8%
-```
-
-### Professional Benefits
-
-- **Performance Gains**: Properly structured prompts show 40-60% better performance
-- **Consistency**: Standardized structure reduces output variance
-- **Maintainability**: Clear component separation makes prompts easier to update
-- **Team Collaboration**: Shared framework improves prompt engineering workflows
-- **LLM Optimization**: Structure guides LLM reasoning more effectively
-
-### Integration with DSPy
-
-The analyzer automatically converts analyzed prompts into DSPy signatures:
-
-```go
-// Generated DSPy signature from prompt analysis
-signature := core.Signature{
-    Inputs: []core.InputField{
-        {Field: core.Field{Name: "task_context", Type: "text"}},
-        {Field: core.Field{Name: "user_request", Type: "text"}},
-        // ... other detected components
-    },
-    Outputs: []core.OutputField{
-        {Field: core.Field{Name: "response", Type: "text", Prefix: "Response:"}},
-    },
-    Instruction: "Using the provided context, generate a response...",
-}
-
-// Use in your DSPy program
-module := modules.NewPredict(signature)
-optimizedProgram := optimizer.Compile(ctx, program, dataset, metric)
-```
-
-## 🔧 Optimizers
-
-All optimizers are fully functional and tested:
-
-### ✅ Bootstrap FewShot
-- **Complexity**: Low
-- **Cost**: Low (fast convergence)
-- **Best For**: Getting started, simple tasks, limited budget
-- **Use Case**: Quick improvements with minimal computational cost
-
-### ✅ MIPRO
-- **Complexity**: Medium
-- **Cost**: Medium (systematic search)
-- **Best For**: Complex reasoning, systematic optimization, multi-step problems
-- **Use Case**: Balanced cost/performance requirements
-
-### ✅ SIMBA
-- **Complexity**: High
-- **Cost**: Medium-High (introspective analysis)
-- **Best For**: Self-reflection tasks, adaptive learning, advanced reasoning
-- **Use Case**: Advanced optimization with introspective learning
-
-### ✅ GEPA
-- **Complexity**: Very High
-- **Cost**: High (evolutionary + Pareto optimization)
-- **Best For**: Cutting-edge performance, multi-objective optimization, research
-- **Use Case**: State-of-the-art optimization for demanding tasks
-
-### ✅ COPRO
-- **Complexity**: Medium-High
-- **Cost**: Medium (collaborative approach)
-- **Best For**: Multi-module systems, collaborative optimization, complex pipelines
-- **Use Case**: Optimizing multiple modules working together
-
-## 📊 Datasets
-
-### GSM8K (Grade School Math 8K)
-- **Type**: Math word problems
-- **Examples**: Sample math problems with step-by-step solutions
-- **Best For**: Reasoning, mathematical problem solving
-- **Format**: Question → Answer
-
-### HotPotQA
-- **Type**: Multi-hop question answering
-- **Examples**: Questions requiring multiple reasoning steps
-- **Best For**: Complex reasoning, information synthesis
-- **Format**: Question → Answer
-
-### Simple Q&A
-- **Type**: Basic question-answer pairs
-- **Examples**: Simple factual questions
-- **Best For**: Testing, basic optimization, getting started
-- **Format**: Question → Answer
-
-## 💡 Examples
-
-### Complete Workflow Example
-
-```bash
-# 1. Explore available optimizers
-dspy-cli list
-
-# 2. Get recommendations for your use case
-dspy-cli recommend balanced
-
-# 3. Learn about a specific optimizer
-dspy-cli describe mipro
-
-# 4. Test the optimizer with sample data
-dspy-cli try mipro --dataset gsm8k --max-examples 5 --verbose
-
-# 5. Compare with other optimizers
-dspy-cli try bootstrap --dataset gsm8k --max-examples 5
-dspy-cli try simba --dataset gsm8k --max-examples 5
-```
-
-### Performance Comparison
-
-```bash
-# Test all optimizers on the same dataset for comparison
-for optimizer in bootstrap mipro simba gepa copro; do
-  echo "Testing $optimizer..."
-  dspy-cli try $optimizer --dataset gsm8k --max-examples 3
-  echo "---"
-done
-```
-
-### Quick Validation
-
-```bash
-# Quickly validate that all optimizers are working
-dspy-cli try bootstrap --dataset simple --max-examples 2
-```
-
-### Prompt Analysis Examples
-
-```bash
-# Analyze a career coach prompt (from command line)
-dspy-cli analyze "You are an AI career coach named Joe. Help users with career advice in a friendly tone."
-
-# Complex prompt analysis with optimization
-dspy-cli analyze --optimize "You will be acting as an AI career coach named Joe created by AdAstra Careers. Your goal is to give career advice to users. You should maintain a friendly customer service tone."
-
-# Interactive analysis (recommended for long prompts)
-dspy-cli analyze --interactive
-# Then paste your multi-line prompt and press Tab to analyze
-
-# Export optimized prompt structure
-dspy-cli analyze --export career_coach.yaml "Your career coach prompt here"
-
-# Use the rich TUI interface
-dspy-cli
-# Navigate to "🔍 Analyze prompt structure"
-# Paste your prompt and see real-time color-coded analysis
-```
-
-### Prompt Analysis Workflow
-
-```bash
-# 1. Start with the interactive TUI for best experience
-dspy-cli
-
-# 2. Select "🔍 Analyze prompt structure"
-
-# 3. Paste or type your prompt in the input area
-
-# 4. Press Tab to analyze and see:
-#    - Color-coded component identification
-#    - Structure completeness percentage
-#    - Missing components highlighted
-#    - Optimization recommendations
-
-# 5. Use the color guide to understand each component
-
-# 6. For production use, export the optimized structure:
-dspy-cli analyze --export optimized_prompt.yaml "Your final prompt"
-```
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-```bash
-# For Google Gemini (Default)
-export GEMINI_API_KEY="your-api-key-here"
-
-# For OpenAI
-export OPENAI_API_KEY="sk-..."
-```
-
-### LLM Providers
-
-The CLI supports multiple LLM providers to give you flexibility in where you run your optimizations.
-
-#### Google Gemini (Default)
-Fast and cost-effective, ideal for quick experiments.
-```bash
-dspy-cli try bootstrap --dataset gsm8k
-```
-
-#### Local LLMs (Ollama, LM Studio, vLLM)
-Run optimizations entirely on your local machine using OpenAI-compatible servers.
-```bash
-# Example for LM Studio
-dspy-cli try bootstrap --provider local --base-url http://localhost:1234/v1 --model local-model
-
-# Example for Ollama (using its OpenAI-compatible endpoint)
-dspy-cli try bootstrap --provider local --base-url http://localhost:11434/v1 --model llama3
-```
-
-#### OpenAI
-Use standard OpenAI models.
-```bash
-dspy-cli try bootstrap --provider openai --model gpt-4o
-```
-
-### Logging Levels
-
-```bash
-# Normal output
-dspy-cli try bootstrap --dataset gsm8k
-
-# Verbose debugging
-dspy-cli try bootstrap --dataset gsm8k --verbose
-```
-
-## 🏗 Architecture
-
-### Dependency Isolation
-
-The CLI uses a separate Go module to prevent dependency pollution:
-
-```
-dspy-go/
-├── go.mod                  # Main library module
-├── pkg/                    # Main library (clean dependencies)
-└── cmd/dspy-cli/
-    ├── go.mod              # Separate module with a local replace to ../..
-    ├── main.go             # CLI entry point
-    └── internal/
-        ├── commands/       # Cobra commands
-        ├── optimizers/     # Optimizer registry
-        ├── runner/         # Execution engine
-        └── samples/        # Sample datasets
-```
-
-### Key Components
-
-1. **Command Layer**: Cobra-based CLI commands
-2. **Registry**: Optimizer metadata and recommendations
-3. **Runner**: Execution engine that eliminates boilerplate
-4. **Samples**: Built-in datasets for quick testing
-5. **Module Integration**: Local `replace` directive linking the CLI module to the main library
-
-### Boilerplate Elimination
-
-The CLI eliminates this typical setup code:
-
-```go
-// 60+ lines of boilerplate that the CLI handles automatically
-func setupOptimizer() {
-    // Context creation
-    ctx := core.WithExecutionState(context.Background())
-
-    // LLM configuration
-    llms.EnsureFactory()
-    core.ConfigureDefaultLLM(apiKey, core.ModelGoogleGeminiFlash)
-
-    // Dataset loading and conversion
-    examples, _ := datasets.LoadGSM8K()
-    dataset := createDataset(examples)
-
-    // Signature and module creation
-    signature := core.NewSignature(/* ... */)
-    module := modules.NewChainOfThought(signature)
-
-    // Program creation with forward function
-    program := core.NewProgram(/* ... */)
-
-    // Optimizer creation and configuration
-    optimizer := optimizers.NewMIPRO(/* complex config */)
-
-    // Training/validation split
-    trainExamples, valExamples := splitDataset(examples)
-
-    // Metric function definition
-    metricFunc := func(/* ... */) float64 { /* ... */ }
-
-    // Compilation and evaluation
-    optimizedProgram, _ := optimizer.Compile(ctx, program, dataset, metricFunc)
-
-    // Results calculation and display
-    // ...
-}
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**API Key Not Found**
-```bash
-Error: API key required. Set GEMINI_API_KEY environment variable
-```
-Solution: Set your Gemini API key in environment variables.
-
-**No Examples in Dataset**
-```bash
-Error: No examples found in dataset
-```
-Solution: Check dataset name spelling and network connectivity.
-
-**Optimizer Not Found**
-```bash
-Error: optimizer 'typo' not found
-```
-Solution: Use `dspy-cli list` to see available optimizers.
-
-**Local Module Resolution During Development**
-
-Solution: Run CLI development commands from `cmd/dspy-cli` and verify its `go.mod` retains `replace github.com/XiaoConstantine/dspy-go => ../../`.
-
-### Performance Tips
-
-1. **Start Small**: Use `--max-examples` flag for initial testing
-2. **Use Verbose Mode**: Add `--verbose` for debugging
-3. **Try Bootstrap First**: Fastest optimizer for initial validation
-4. **Compare Results**: Test multiple optimizers on same dataset
-
-### Development Tips
-
-1. **Use the Local Replacement**: The CLI module resolves the main library from the repository root
-2. **Separate Dependencies**: CLI deps don't affect main library
-3. **Test Locally**: Build and test before committing
-4. **Check Registry**: Update optimizer status in registry.go
-
-## 🔗 Related Documentation
-
-- [Main DSPy-Go Documentation](../../README.md)
-- [DSPy-Go Core Library](../../pkg/)
-- [Optimizer Examples](../../examples/)
-- [DSPy Framework](https://github.com/stanfordnlp/dspy)
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Test the CLI: `go run main.go try bootstrap --dataset simple`
-4. Commit your changes: `git commit -m 'Add amazing feature'`
-5. Push to the branch: `git push origin feature/amazing-feature`
-6. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](../../LICENSE) file for details.
-
----
-
-**Happy Optimizing! 🚀**
-
-*The DSPy-CLI makes exploring and optimizing DSPy-Go programs effortless. Start with `dspy-cli list` and discover the power of automated prompt optimization.*
+## Documentation
+
+- [CLI reference](../../docs/content/docs/reference/cli.md)
+- [Main dspy-go README](../../README.md)
+- [Examples](../../examples/)

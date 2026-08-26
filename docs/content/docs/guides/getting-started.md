@@ -1,292 +1,213 @@
 ---
 title: "Getting Started"
-description: "Get started with dspy-go in minutes"
-summary: "Install dspy-go and build your first LLM application"
+description: "Install dspy-go and run your first module"
+summary: "Build a first llm-go-backed dspy-go application or explore optimizers with the CLI"
 date: 2025-10-13T00:00:00+00:00
-lastmod: 2025-10-13T00:00:00+00:00
+lastmod: 2026-08-26T00:00:00+00:00
 draft: false
 weight: 100
 toc: true
 seo:
   title: "Getting Started with dspy-go"
-  description: "Quick start guide to building LLM applications with dspy-go - zero configuration required"
+  description: "Build your first dspy-go LLM application"
   canonical: ""
   noindex: false
 ---
 
 # Getting Started with dspy-go
 
-This guide will walk you through the basics of setting up `dspy-go` and running your first prediction. You can get started in two ways: with our CLI tool (no code required) or by writing Go code.
-
-## Choose Your Path
-
-### 🚀 Option A: CLI Tool (Recommended for Beginners)
-
-Perfect for exploring dspy-go without writing code. Try optimizers, test with sample datasets, and see results instantly.
-
-**[Jump to CLI Quick Start →](#cli-quick-start)**
-
-### 💻 Option B: Programming with Go
-
-Build custom applications with full control. Perfect for production applications and custom workflows.
-
-**[Jump to Programming Quick Start →](#programming-quick-start)**
-
----
-
-## CLI Quick Start
-
-The dspy-go CLI eliminates 60+ lines of boilerplate and lets you test all optimizers instantly.
-
-### 1. Build the CLI
-
-```bash
-cd cmd/dspy-cli
-go build -o dspy-cli
-```
-
-### 2. Set Your API Key
-
-```bash
-export GEMINI_API_KEY="your-api-key-here"
-# or
-export OPENAI_API_KEY="your-api-key-here"
-# or
-export ANTHROPIC_API_KEY="your-api-key-here"
-```
-
-### 3. Explore Optimizers
-
-```bash
-# See all available optimizers
-./dspy-cli list
-
-# Get optimizer recommendations
-./dspy-cli recommend balanced
-
-# Try Bootstrap optimizer with GSM8K math problems
-./dspy-cli try bootstrap --dataset gsm8k --max-examples 5
-
-# Test advanced MIPRO optimizer
-./dspy-cli try mipro --dataset gsm8k --verbose
-
-# Experiment with evolutionary GEPA
-./dspy-cli try gepa --dataset gsm8k --max-examples 10
-```
-
-### What You Can Do with the CLI
-
-- **List Optimizers**: See all available optimization algorithms
-- **Try Optimizers**: Test any optimizer with built-in datasets
-- **Get Recommendations**: Get suggestions based on your needs (speed/quality trade-off)
-- **Compare Results**: Run multiple optimizers and compare performance
-- **No Code Required**: Everything works out of the box
-
-[Full CLI Documentation →](https://github.com/XiaoConstantine/dspy-go/tree/main/cmd/dspy-cli/README.md)
-
----
+dspy-go provides composable modules, agents, and optimizers. Provider
+generation is supplied by llm-go through the compatibility adapters in
+`pkg/llms`.
 
 ## Programming Quick Start
 
-Build custom LLM applications with full programmatic control.
-
-### 1. Installation
-
-Add `dspy-go` to your project using `go get`:
+### 1. Install dspy-go
 
 ```bash
 go get github.com/XiaoConstantine/dspy-go
 ```
 
-### 2. Set Up Your API Key
+### 2. Set a Provider Credential
 
-`dspy-go` supports multiple LLM providers. Set the appropriate environment variable:
+This example uses Gemini:
 
 ```bash
-# Google Gemini (multimodal support)
-export GEMINI_API_KEY="your-api-key-here"
-
-# OpenAI
-export OPENAI_API_KEY="your-api-key-here"
-
-# Anthropic Claude
-export ANTHROPIC_API_KEY="your-api-key-here"
-
-# Ollama (local)
-export OLLAMA_BASE_URL="http://localhost:11434"
+export GEMINI_API_KEY="your-api-key"
 ```
 
-### 3. Your First Program
+Other supported credential variables include `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, and `ANTHROPIC_OAUTH_TOKEN`. Selecting a model is still
+explicit; dspy-go does not choose a provider based on whichever key happens to
+be present.
 
-Here's a simple sentiment analysis application using **zero-configuration setup**:
+### 3. Run a Prediction
 
 ```go
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
+    "context"
+    "fmt"
+    "log"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
-	"github.com/XiaoConstantine/dspy-go/pkg/modules"
+    "github.com/XiaoConstantine/dspy-go/pkg/core"
+    "github.com/XiaoConstantine/dspy-go/pkg/llms"
+    "github.com/XiaoConstantine/dspy-go/pkg/modules"
 )
 
 func main() {
-	// 1. Zero-Config Setup
-	// Pass empty string - automatically uses API key from environment variable
-	llm, err := llms.NewGeminiLLM("", core.ModelGoogleGeminiPro)
-	if err != nil {
-		log.Fatalf("Failed to create LLM: %v", err)
-	}
-	core.SetDefaultLLM(llm)
+    llm, err := llms.NewGeminiLLM("", core.ModelGoogleGeminiFlash)
+    if err != nil {
+        log.Fatal(err)
+    }
+    core.SetDefaultLLM(llm)
 
-	// 2. Define a Signature
-	// A signature describes the task inputs, outputs, and instructions
-	signature := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("sentence", core.WithDescription("The sentence to classify."))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("sentiment", core.WithDescription("The sentiment (Positive, Negative, Neutral)."))},
-		},
-	).WithInstruction("You are a helpful sentiment analysis expert. Classify the sentiment of the given sentence.")
+    signature := core.NewSignature(
+        []core.InputField{
+            {Field: core.NewTextField("sentence",
+                core.WithDescription("Sentence to classify"))},
+        },
+        []core.OutputField{
+            {Field: core.NewTextField("sentiment",
+                core.WithDescription("Positive, Negative, or Neutral"))},
+        },
+    ).WithInstruction("Classify the sentiment of the sentence.")
 
-	// 3. Create a Predict Module
-	predictor := modules.NewPredict(signature)
+    predictor := modules.NewPredict(signature).WithStructuredOutput()
+    result, err := predictor.Process(context.Background(), map[string]any{
+        "sentence": "dspy-go makes LLM workflows composable.",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	// 4. Execute the Predictor
-	ctx := context.Background()
-	input := map[string]interface{}{
-		"sentence": "dspy-go makes building AI applications easy and fun!",
-	}
-
-	result, err := predictor.Process(ctx, input)
-	if err != nil {
-		log.Fatalf("Prediction failed: %v", err)
-	}
-
-	// 5. Print the Result
-	fmt.Printf("Sentence: %s\n", input["sentence"])
-	fmt.Printf("Sentiment: %s\n", result["sentiment"])
+    fmt.Println(result["sentiment"])
 }
 ```
 
-### Running the Code
-
-Save the code above as `main.go`, and run it:
+Save the program as `main.go`, then run:
 
 ```bash
 go run main.go
 ```
 
-**Output:**
-```
-Sentence: dspy-go makes building AI applications easy and fun!
-Sentiment: Positive
-```
+## Choosing Another Provider
 
-Congratulations! You've just built your first LLM application with dspy-go. 🎉
-
-For package-level defaults, prefer helper functions such as `core.SetDefaultLLM`, `core.SetTeacherLLM`, and `core.GetConcurrencyLevel` instead of mutating `core.GlobalConfig` directly.
-
----
-
-## What's Next?
-
-Now that you have dspy-go running, explore these next steps:
-
-### Core Concepts
-Learn about the building blocks of dspy-go:
-- **[Signatures →](core-concepts/#signatures)** - Define task inputs and outputs
-- **[Modules →](core-concepts/#modules)** - Chain-of-Thought, ReAct, and more
-- **[Programs →](core-concepts/#programs)** - Compose modules into workflows
-
-### Advanced Features
-- **[Optimizers →](optimizers/)** - Automatically improve prompts with GEPA, MIPRO, SIMBA
-- **[Tool Management →](tools/)** - Smart tool selection, chaining, and MCP integration
-- **[Multimodal →](multimodal/)** - Work with images, vision Q&A, and streaming
-
-### Examples
-Check out real-world implementations:
-- [Question Answering](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/hotpotqa)
-- [Math Problem Solving](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/gsm8k)
-- [Smart Tool Registry](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/smart_tool_registry)
-- [Tool Chaining](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/tool_chaining)
-- [Multimodal Processing](https://github.com/XiaoConstantine/dspy-go/tree/main/examples/multimodal)
-
-### Example Application
-See dspy-go in production:
-- **[Maestro](https://github.com/XiaoConstantine/maestro)** - A code review and Q&A agent built with dspy-go
-
----
-
-## Alternative Configuration Methods
-
-While using empty string "" for zero-config is the easiest way to get started, you can also pass API keys explicitly:
-
-### Explicit Configuration
+`llms.NewLLM` infers the registered provider from a known model ID:
 
 ```go
-import (
-	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/llms"
+// Anthropic
+llm, err := llms.NewLLM(apiKey, core.ModelAnthropicSonnet)
+
+// OpenAI (the registry path uses llm-go's Responses API)
+llm, err := llms.NewLLM(apiKey, core.ModelOpenAIGPT4o)
+
+// Ollama through its OpenAI-compatible API
+llm, err := llms.NewLLM("", core.ModelOllamaLlama3_1_8B)
+```
+
+Use `llms.NewOpenAICompatible` for LiteLLM, LocalAI, LM Studio, or another
+compatible endpoint:
+
+```go
+llm, err := llms.NewOpenAICompatible(
+    "local",
+    core.ModelID("local-model"),
+    "http://localhost:1234/v1",
 )
+```
 
-// Anthropic Claude
-llm, err := llms.NewAnthropicLLM("api-key", core.ModelAnthropicSonnet)
-core.SetDefaultLLM(llm)
+See the [provider reference](../../reference/providers/) for dedicated
+constructors, streaming, embeddings, and OpenAI Codex subscription access.
 
-// Google Gemini
-llm, err := llms.NewGeminiLLM("api-key", core.ModelGoogleGeminiPro)
-core.SetDefaultLLM(llm)
+## Model Scope
 
-// OpenAI
-llm, err := llms.NewOpenAI(core.ModelOpenAIGPT4, "api-key")
-core.SetDefaultLLM(llm)
+The package default is a compatibility convenience:
 
-// Ollama (local)
-llm, err := llms.NewOllamaLLM(core.ModelOllamaLlama3_8B)
+```go
 core.SetDefaultLLM(llm)
 ```
 
-### Per-Module Configuration
+You can instead pin a model to one module:
 
 ```go
-// Use a specific LLM for a specific module
-llm, _ := llms.NewAnthropicLLM("api-key", core.ModelAnthropicSonnet)
-predictor := modules.NewPredict(signature)
 predictor.SetLLM(llm)
 ```
 
-If you do not call `SetLLM`, the module uses the current default LLM when it executes.
+Or select defaults for one request:
 
----
+```go
+ctx := core.WithRuntime(context.Background(), &core.Runtime{
+    DefaultLLM: llm,
+})
+result, err := predictor.Process(ctx, inputs)
+```
+
+Resolution order is module-local, request-local runtime, then package default.
+Prefer the helper functions over mutating `core.GlobalConfig` directly.
+
+## Per-Call Generation Settings
+
+```go
+result, err := predictor.Process(ctx, inputs,
+    core.WithGenerateOptions(
+        core.WithMaxTokens(512),
+        core.WithTemperature(0.2),
+    ),
+)
+```
+
+These options apply to the call. They are not arguments to Gemini or Anthropic
+constructors.
+
+## CLI Quick Start
+
+The CLI can list and run optimizers with built-in sample datasets:
+
+```bash
+cd cmd/dspy-cli
+go build -o dspy-cli
+
+export GEMINI_API_KEY="your-api-key"
+
+./dspy-cli list
+./dspy-cli recommend --use-case balanced
+./dspy-cli try bootstrap --dataset gsm8k --max-examples 5
+./dspy-cli try mipro --dataset gsm8k --max-examples 5 --verbose
+```
+
+Run `./dspy-cli --help` for the full current command list, or see the
+[CLI reference](../../reference/cli/).
 
 ## Troubleshooting
 
-### "Failed to configure LLM" Error
+### Provider creation reports a missing API key
 
-**Problem**: LLM creation fails with "API key required" error.
+Pass a key explicitly or set the variable used by the selected constructor:
 
-**Solution**: Make sure you've set the appropriate environment variable or pass the API key explicitly:
-- `GEMINI_API_KEY`
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `OLLAMA_BASE_URL`
+- Gemini: `GEMINI_API_KEY`
+- OpenAI: `OPENAI_API_KEY`
+- Anthropic: `ANTHROPIC_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`
 
-### API Rate Limits
+Ollama and llama.cpp require a running OpenAI-compatible server rather than a
+hosted-provider API key.
 
-**Problem**: Getting rate limit errors from your LLM provider.
+### A generation call times out
 
-**Solution**: dspy-go includes built-in retry logic with exponential backoff. For heavy workloads, consider:
-- Using local models with Ollama
-- Implementing request throttling
-- Caching results with custom middleware
+Use a context deadline appropriate for the operation:
 
-### Getting Help
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+defer cancel()
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/XiaoConstantine/dspy-go/issues)
-- **Discussions**: [Ask questions and share ideas](https://github.com/XiaoConstantine/dspy-go/discussions)
-- **Examples**: [Browse working examples](https://github.com/XiaoConstantine/dspy-go/tree/main/examples)
+result, err := predictor.Process(ctx, inputs)
+```
+
+### Next steps
+
+- **[Core Concepts →](../core-concepts/)**
+- **[Optimizers →](../optimizers/)**
+- **[Agents →](../agents/)**
+- **[Multimodal →](../multimodal/)**
+- **[Examples →](https://github.com/XiaoConstantine/dspy-go/tree/main/examples)**

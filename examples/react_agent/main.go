@@ -252,9 +252,9 @@ func main() {
 	var modelName string
 	switch *model {
 	case "gemini-flash":
-		modelName = "gemini-2.0-flash"
+		modelName = string(core.ModelGoogleGeminiFlash)
 	case "gemini-pro":
-		modelName = "gemini-2.0-pro"
+		modelName = string(core.ModelGoogleGeminiPro)
 	default:
 		fmt.Printf("Unsupported model: %s\n", *model)
 		os.Exit(1)

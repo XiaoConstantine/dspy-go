@@ -2,7 +2,7 @@
 llm:
   default:
     provider: "google"
-    model_id: "gemini-2.0-flash"
+    model_id: "gemini-2.5-flash"
 
 logging:
   level: "INFO"

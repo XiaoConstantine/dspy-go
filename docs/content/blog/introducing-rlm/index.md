@@ -3,7 +3,7 @@ title: "Introducing RLM: Recursive Language Models in DSPy-Go"
 description: "Process near-infinite context with 40% token savings using Recursive Language Models"
 summary: "Learn how RLM enables LLMs to programmatically explore large contexts through iterative REPL-based execution, achieving significant token efficiency gains."
 date: 2025-01-07T10:00:00+00:00
-lastmod: 2025-01-07T10:00:00+00:00
+lastmod: 2026-08-26T00:00:00+00:00
 draft: false
 weight: 50
 categories: ["Features", "Advanced"]
@@ -74,6 +74,7 @@ import (
     "fmt"
     "time"
 
+    "github.com/XiaoConstantine/dspy-go/pkg/core"
     "github.com/XiaoConstantine/dspy-go/pkg/llms"
     "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 )
@@ -82,8 +83,7 @@ func main() {
     ctx := context.Background()
 
     // Initialize your LLM
-    llm, _ := llms.NewAnthropicLLM(ctx, "claude-sonnet-4-20250514",
-        llms.WithAnthropicAPIKey("your-api-key"))
+    llm, _ := llms.NewLLM("your-api-key", core.ModelAnthropicSonnet)
 
     // Create RLM module with configuration
     rlmModule := rlm.NewFromLLM(llm,

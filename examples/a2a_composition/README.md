@@ -66,31 +66,28 @@ ResearchOrchestrator (Parent)
 ### Basic Usage
 
 ```bash
-# With default model (Gemini 2.0 Flash)
+# With default model (Gemini 2.5 Flash)
 go run main.go --api-key YOUR_GEMINI_API_KEY
 
 # With Gemini Pro
-go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-pro
+go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-2.5-pro
 
-# With Gemini Flash
-go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-flash
+# With Gemini Flash Lite
+go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-2.5-flash-lite
 ```
 
 ### Command-Line Flags
 
 - `--api-key` (required): Your Google Gemini API key
-- `--model` (optional): Gemini model to use (default: `gemini-2.0-flash-exp`)
+- `--model` (optional): Gemini model to use (default: `gemini-2.5-flash`)
 
 ### Supported Gemini Models
 
 ```go
 // Recommended models
-"gemini-2.0-flash-exp"  // Default - Fast and cost-effective
-"gemini-pro"            // More capable, higher quality
-"gemini-flash"          // Fast responses
-
-// Experimental models
-"gemini-exp-1206"       // Latest experimental features
+"gemini-2.5-flash"       // Default - Fast and cost-effective
+"gemini-2.5-pro"         // More capable, higher quality
+"gemini-2.5-flash-lite"  // Lowest-latency option
 ```
 
 > **Note**: This example is optimized for Google Gemini models. While dspy-go supports other providers (Claude, OpenAI), the example uses Gemini-specific model IDs.
@@ -102,7 +99,7 @@ go run main.go --api-key YOUR_GEMINI_API_KEY --model gemini-flash
 ║       A2A Deep Research Agent - Multi-Agent Composition        ║
 ╚════════════════════════════════════════════════════════════════╝
 
-⚙️  Configuring LLM: gemini-2.0-flash-exp
+⚙️  Configuring LLM: gemini-2.5-flash
 🔧 Initializing research agents...
 ✓ Research system ready with 3 specialized agents
 
@@ -364,11 +361,11 @@ func (s *SearchAgent) GetCapabilities() []core.Tool {
 
 ## Performance Considerations
 
-- **API Costs**: Each agent makes Gemini API calls; consider using `gemini-flash` for cost optimization
+- **API Costs**: Each agent makes Gemini API calls; consider using `gemini-2.5-flash-lite` for cost optimization
 - **Model Selection**:
-  - `gemini-2.0-flash-exp`: Best balance of speed and quality (recommended)
-  - `gemini-pro`: Higher quality for complex analysis
-  - `gemini-flash`: Fastest responses, lower cost
+  - `gemini-2.5-flash`: Best balance of speed and quality (recommended)
+  - `gemini-2.5-pro`: Higher quality for complex analysis
+  - `gemini-2.5-flash-lite`: Fastest responses, lower cost
 - **Caching**: Enable with `ctx = core.WithExecutionState(ctx)` to cache LLM responses
 - **In-Process**: Sub-agent calls have zero serialization overhead
 - **Parallelization**: Independent agents can be called concurrently (future enhancement)
@@ -411,7 +408,7 @@ orchestratorExec.WithSubAgent("search", searchExec).
 
 ## Next Steps
 
-1. **Experiment with Gemini models** (`gemini-flash` vs `gemini-pro`) to find the best performance/cost tradeoff
+1. **Experiment with Gemini models** (`gemini-2.5-flash` vs `gemini-2.5-pro`) to find the best performance/cost tradeoff
 2. **Add your own specialized agents** for domain-specific research
 3. **Integrate real tools** like WebSearch, databases, APIs
 4. **Implement multi-round refinement** for deeper research

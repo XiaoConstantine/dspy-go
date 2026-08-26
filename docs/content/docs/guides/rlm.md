@@ -3,7 +3,7 @@ title: "RLM Module"
 description: "Recursive Language Model workflows for large-context exploration"
 summary: "Use RLM for iterative long-context reasoning, structured replay policies, and budgeted sub-RLM delegation"
 date: 2026-04-16T00:00:00+00:00
-lastmod: 2026-04-16T00:00:00+00:00
+lastmod: 2026-08-26T00:00:00+00:00
 draft: false
 weight: 450
 toc: true
@@ -34,12 +34,13 @@ import (
     "context"
     "time"
 
+    "github.com/XiaoConstantine/dspy-go/pkg/core"
     "github.com/XiaoConstantine/dspy-go/pkg/llms"
     "github.com/XiaoConstantine/dspy-go/pkg/modules/rlm"
 )
 
 func main() {
-    llm, _ := llms.NewGeminiLLM("", "gemini-2.0-flash")
+    llm, _ := llms.NewGeminiLLM("", core.ModelGoogleGeminiFlash)
 
     module := rlm.NewFromLLM(
         llm,

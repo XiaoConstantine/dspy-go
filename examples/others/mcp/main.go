@@ -223,7 +223,7 @@ func main() {
 	// For now, use the existing configuration method until we implement NewFromConfig
 	var modelName core.ModelID
 	switch cfg.LLM.Default.ModelID {
-	case "gemini-2.0-flash":
+	case string(core.ModelGoogleGeminiFlash):
 		modelName = core.ModelGoogleGeminiFlash
 	default:
 		modelName = core.ModelGoogleGeminiFlash // fallback to gemini

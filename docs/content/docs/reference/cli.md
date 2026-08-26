@@ -1,622 +1,207 @@
 ---
 title: "CLI Reference"
-description: "Complete command-line interface reference for dspy-cli"
-summary: "All commands, flags, and usage examples for the dspy-go CLI tool"
+description: "Current command-line interface reference for dspy-cli"
+summary: "Optimizer exploration, prompt analysis, log viewing, sessions, agents, and TBLite benchmarks"
 date: 2025-10-13T00:00:00+00:00
-lastmod: 2025-10-13T00:00:00+00:00
+lastmod: 2026-08-26T00:00:00+00:00
 draft: false
 weight: 920
 toc: true
 seo:
   title: "CLI Reference - dspy-go"
-  description: "Complete CLI reference for dspy-go command-line tool"
+  description: "Current dspy-cli commands and usage"
   canonical: ""
   noindex: false
 ---
 
-Complete reference for the **dspy-cli** command-line tool. Test optimizers, run experiments, and explore dspy-go without writing code.
+`dspy-cli` is a separate Go module for exploring optimizers, analyzing prompts,
+viewing traces, managing persisted sessions, and running agent benchmarks.
 
----
-
-## Installation
-
-### Build from Source
+## Build and Run
 
 ```bash
 cd cmd/dspy-cli
 go build -o dspy-cli
+./dspy-cli --help
 ```
 
-### Install Globally
+Running `dspy-cli` without a command starts the interactive TUI and therefore
+requires a terminal.
+
+## Command Overview
+
+| Command | Purpose |
+|---|---|
+| `list` | List registered optimizers |
+| `describe <optimizer>` | Show details for one optimizer |
+| `recommend` | Recommend optimizers by use case or interactive questions |
+| `try <optimizer>` | Run an optimizer against a built-in sample dataset |
+| `analyze [prompt]` | Analyze and optionally export prompt structure |
+| `view <file.jsonl>` | Inspect RLM or native dspy-go JSONL logs |
+| `interactive` | Start the guided terminal UI |
+| `agent run-terminal-task` | Run one TBLite-style task from JSON stdin |
+| `benchmark tblite` | Evaluate or GEPA-optimize the native benchmark agent |
+| `session show` | Inspect a persisted native-agent session |
+| `session switch` | Change a session's active branch |
+| `session fork` | Fork the active branch from its current head |
+| `completion` | Generate shell completion scripts |
+
+Use `dspy-cli <command> --help` as the authoritative flag reference.
+
+## Optimizer Discovery
 
 ```bash
-cd cmd/dspy-cli
-go install
-```
-
-After installing, `dspy-cli` will be available in your `$GOPATH/bin` directory.
-
----
-
-## Configuration
-
-### API Keys
-
-Set your LLM provider API key:
-
-```bash
-# Google Gemini (recommended for multimodal)
-export GEMINI_API_KEY="your-api-key"
-
-# OpenAI
-export OPENAI_API_KEY="your-api-key"
-
-# Anthropic Claude
-export ANTHROPIC_API_KEY="your-api-key"
-
-# Ollama (local)
-export OLLAMA_BASE_URL="http://localhost:11434"
-```
-
----
-
-## Commands
-
-### `list` - List Available Optimizers
-
-Display all available optimization algorithms with descriptions.
-
-**Usage:**
-```bash
-dspy-cli list [flags]
-```
-
-**Flags:**
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--detailed` | `-d` | Show detailed information | `false` |
-| `--json` | | Output as JSON | `false` |
-
-**Examples:**
-
-```bash
-# List all optimizers
 dspy-cli list
-
-# Show detailed information
-dspy-cli list --detailed
-
-# Output as JSON
-dspy-cli list --json
+dspy-cli describe mipro
+dspy-cli recommend --use-case balanced
+dspy-cli recommend --interactive
 ```
 
-**Output:**
-```
-Available Optimizers:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`--use-case` accepts `simple`, `balanced`, `advanced`, or `multi-module`.
 
-1. bootstrap
-   Automated few-shot learning with example selection
-   Best for: Quick optimization with limited data
+## Run an Optimizer
 
-2. gepa
-   Multi-objective evolutionary optimization with Pareto selection
-   Best for: Highest quality results, complex tasks
-
-3. mipro
-   Systematic TPE-based prompt and demonstration optimization
-   Best for: Balanced performance and quality
-
-4. simba
-   Introspective mini-batch learning
-   Best for: Fast iteration with moderate quality
-
-5. copro
-   Collaborative multi-module prompt optimization
-   Best for: Complex programs with multiple modules
-```
-
----
-
-### `try` - Test an Optimizer
-
-Run an optimizer with a built-in dataset.
-
-**Usage:**
 ```bash
 dspy-cli try <optimizer> [flags]
 ```
 
-**Arguments:**
-| Argument | Description | Required |
-|----------|-------------|----------|
-| `<optimizer>` | Optimizer name (bootstrap, gepa, mipro, simba, copro) | Yes |
+Supported optimizer names are shown by `list`. The current flags are:
 
-**Flags:**
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--dataset` | `-d` | Dataset to use (gsm8k, hotpotqa) | `gsm8k` |
-| `--max-examples` | `-n` | Number of examples to use | `10` |
-| `--verbose` | `-v` | Verbose output | `false` |
-| `--timeout` | `-t` | Timeout in seconds | `300` |
-| `--output` | `-o` | Output file for results | stdout |
-| `--json` | | Output as JSON | `false` |
+| Flag | Default | Description |
+|---|---|---|
+| `--dataset` | `qa` | `qa`, `gsm8k`, or `hotpotqa` |
+| `--max-examples` | `0` | Limit examples; zero uses all examples |
+| `--provider` | `google` | `google`, `openai`, or `local` |
+| `--model` | `gemini-2.5-flash` | Model ID |
+| `--base-url` | empty | OpenAI-compatible endpoint for local/custom use |
+| `--api-key` | empty | Explicit API key |
+| `--verbose` | false | Enable verbose logging |
 
-**Examples:**
+Examples:
 
 ```bash
-# Try Bootstrap with default settings
-dspy-cli try bootstrap
+export GEMINI_API_KEY="your-api-key"
 
-# Try GEPA with GSM8K dataset
-dspy-cli try gepa --dataset gsm8k --max-examples 20
+dspy-cli try bootstrap --dataset qa --max-examples 3
+dspy-cli try mipro --dataset gsm8k --max-examples 5 --verbose
 
-# Try MIPRO with verbose output
-dspy-cli try mipro --verbose
+# OpenAI: specify an OpenAI model and key explicitly.
+dspy-cli try simba \
+  --provider openai \
+  --model gpt-4o-mini \
+  --api-key "$OPENAI_API_KEY"
 
-# Try SIMBA and save results
-dspy-cli try simba --output results.json --json
-
-# Try with custom timeout
-dspy-cli try copro --timeout 600
+# Local OpenAI-compatible endpoint, such as LM Studio.
+dspy-cli try bootstrap \
+  --provider local \
+  --model local-model \
+  --base-url http://localhost:1234/v1
 ```
 
-**Sample Output:**
-```
-🚀 Starting Bootstrap Optimizer
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The `try` command reads `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `DSPY_API_KEY`
+when `--api-key` is omitted. For other hosted providers, pass `--api-key`
+explicitly.
 
-Dataset: GSM8K (Math Problems)
-Examples: 10
-LLM: gemini-pro
-
-⏳ Optimizing prompts...
-
-[1/10] Processing example: "Janet's ducks lay 16 eggs..."
-  ✓ Generated demonstration
-  ✓ Score: 1.0
-
-[2/10] Processing example: "A robe takes 2 bolts..."
-  ✓ Generated demonstration
-  ✓ Score: 1.0
-
-...
-
-✨ Optimization Complete!
-
-Results:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Accuracy: 90.0%
-  Examples: 10
-  Duration: 45.2s
-  Avg Time: 4.5s per example
-
-Best Examples Selected: 5
-Prompt Optimized: Yes
-```
-
----
-
-### `recommend` - Get Optimizer Recommendations
-
-Get optimizer recommendations based on your requirements.
-
-**Usage:**
-```bash
-dspy-cli recommend <profile> [flags]
-```
-
-**Arguments:**
-| Argument | Description | Values |
-|----------|-------------|--------|
-| `<profile>` | Use case profile | `speed`, `balanced`, `quality`, `custom` |
-
-**Flags (for custom profile):**
-| Flag | Description | Range |
-|------|-------------|-------|
-| `--time-budget` | Time budget in seconds | `1-3600` |
-| `--quality-target` | Target quality score | `0.0-1.0` |
-| `--complexity` | Task complexity | `low`, `medium`, `high` |
-| `--data-size` | Dataset size | `small`, `medium`, `large` |
-
-**Examples:**
+## Analyze a Prompt
 
 ```bash
-# Quick recommendation for speed
-dspy-cli recommend speed
-
-# Balanced recommendation
-dspy-cli recommend balanced
-
-# High-quality results
-dspy-cli recommend quality
-
-# Custom recommendation
-dspy-cli recommend custom \
-  --time-budget 300 \
-  --quality-target 0.9 \
-  --complexity high \
-  --data-size medium
+dspy-cli analyze "Answer the user's question clearly."
+dspy-cli analyze --interactive
+dspy-cli analyze --optimize "Explain this code."
+dspy-cli analyze --export signature.yaml "Explain this code."
 ```
 
-**Sample Output:**
-```
-🎯 Optimizer Recommendation
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Flags:
 
-Profile: Balanced
-Time Budget: ~5 minutes
-Quality Target: High
+- `--interactive`, `-i`: enter a multi-line prompt
+- `--optimize`, `-o`: expand toward the analyzer's full prompt structure
+- `--export`, `-e`: export YAML or JSON
 
-Recommended: MIPRO
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## View Session Logs
 
-✅ Systematic prompt optimization
-✅ Good balance of speed and quality
-✅ Works well with moderate datasets
-✅ TPE-based search is efficient
-
-Command to try:
-  dspy-cli try mipro --dataset gsm8k --max-examples 20
-
-Alternative: Bootstrap (faster, slightly lower quality)
-Alternative: GEPA (slower, higher quality)
-```
-
----
-
-### `compare` - Compare Optimizers
-
-Compare multiple optimizers on the same dataset.
-
-**Usage:**
-```bash
-dspy-cli compare [optimizers...] [flags]
-```
-
-**Flags:**
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--dataset` | `-d` | Dataset to use | `gsm8k` |
-| `--max-examples` | `-n` | Examples per optimizer | `10` |
-| `--parallel` | `-p` | Run in parallel | `false` |
-| `--output` | `-o` | Output file | stdout |
-| `--format` | | Output format (table, json, csv) | `table` |
-
-**Examples:**
+The viewer auto-detects RLM iteration logs and native dspy-go event logs:
 
 ```bash
-# Compare all optimizers
-dspy-cli compare bootstrap mipro gepa
-
-# Compare with specific dataset
-dspy-cli compare bootstrap mipro --dataset hotpotqa
-
-# Run comparisons in parallel
-dspy-cli compare bootstrap mipro simba --parallel
-
-# Output as CSV
-dspy-cli compare bootstrap gepa --format csv --output comparison.csv
+dspy-cli view session.jsonl
+dspy-cli view --interactive session.jsonl
+dspy-cli view --watch session.jsonl
+dspy-cli view --stats session.jsonl
+dspy-cli view --iter 3 session.jsonl
+dspy-cli view --search error session.jsonl
+dspy-cli view --export report.md session.jsonl
 ```
 
-**Sample Output:**
-```
-⚖️  Optimizer Comparison
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Additional filters include `--compact`, `--errors`, `--final`, and
+`--no-color`.
 
-Dataset: GSM8K
-Examples: 10
+## Persisted Sessions
 
-┏━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┓
-┃ Optimizer ┃ Accuracy ┃ Time (s) ┃ Quality ┃
-┣━━━━━━━━━━━╋━━━━━━━━━━╋━━━━━━━━━━╋━━━━━━━━━┫
-┃ Bootstrap ┃ 85.0%    ┃ 32.1     ┃ ⭐⭐⭐   ┃
-┃ MIPRO     ┃ 90.0%    ┃ 58.4     ┃ ⭐⭐⭐⭐ ┃
-┃ GEPA      ┃ 95.0%    ┃ 124.7    ┃ ⭐⭐⭐⭐⭐┃
-┗━━━━━━━━━━━┻━━━━━━━━━━┻━━━━━━━━━━┻━━━━━━━━━┛
-
-🏆 Winner: GEPA (95.0% accuracy)
-⚡ Fastest: Bootstrap (32.1s)
-💎 Best Value: MIPRO (good balance)
-```
-
----
-
-### `benchmark` - Run Comprehensive Benchmarks
-
-Run comprehensive benchmarks across datasets and optimizers.
-
-**Usage:**
-```bash
-dspy-cli benchmark [flags]
-```
-
-**Flags:**
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--optimizers` | | Comma-separated optimizer list | all |
-| `--datasets` | | Comma-separated dataset list | all |
-| `--samples` | `-n` | Samples per benchmark | `20` |
-| `--iterations` | `-i` | Benchmark iterations | `3` |
-| `--parallel` | `-p` | Parallel execution | `false` |
-| `--output` | `-o` | Output directory | `./benchmarks` |
-
-**Examples:**
+Session commands require the SQLite event-store path:
 
 ```bash
-# Run full benchmark suite
-dspy-cli benchmark
-
-# Benchmark specific optimizers
-dspy-cli benchmark --optimizers bootstrap,mipro
-
-# Benchmark with more samples
-dspy-cli benchmark --samples 50 --iterations 5
-
-# Parallel benchmarking
-dspy-cli benchmark --parallel --output ./results
+dspy-cli session --db sessions.db show <session-id>
+dspy-cli session --db sessions.db switch <session-id> <branch-id>
+dspy-cli session --db sessions.db fork <session-id> --name experiment
+dspy-cli session --db sessions.db fork <session-id> --activate
 ```
 
----
+## Run One Terminal Task
 
-### `config` - Manage Configuration
-
-View and manage CLI configuration.
-
-**Usage:**
-```bash
-dspy-cli config <subcommand> [flags]
-```
-
-**Subcommands:**
-| Subcommand | Description |
-|------------|-------------|
-| `show` | Show current configuration |
-| `set` | Set configuration value |
-| `get` | Get configuration value |
-| `reset` | Reset to defaults |
-
-**Examples:**
+`agent run-terminal-task` reads a `tblite.TerminalTaskRequest` JSON object from
+stdin and writes a `tblite.TerminalTaskResult` JSON object to stdout:
 
 ```bash
-# Show configuration
-dspy-cli config show
-
-# Set default LLM
-dspy-cli config set default_llm gemini-1.5-pro
-
-# Get default dataset
-dspy-cli config get default_dataset
-
-# Reset configuration
-dspy-cli config reset
+dspy-cli agent run-terminal-task \
+  --provider google \
+  --model gemini-2.5-flash \
+  --max-turns 20 \
+  < request.json > result.json
 ```
 
----
+It supports `--api-key`, `--max-tokens`, `--temperature`,
+`--tool-output-limit`, and provider/model overrides. This command resolves
+provider-specific credentials from `GEMINI_API_KEY`/`GOOGLE_API_KEY`,
+`OPENAI_API_KEY`, or `ANTHROPIC_OAUTH_TOKEN`/`ANTHROPIC_API_KEY`; `DSPY_API_KEY`
+is the shared fallback.
+
+## TBLite Benchmark
+
+```bash
+dspy-cli benchmark tblite --limit 5 --output report.json
+```
+
+Use `--tasks-file` for a curated task slice, `--root-dir` for materialized task
+workspaces, and `--keep-artifacts` to retain those workspaces. Provider controls
+include `--provider`, `--model`, `--api-key`, `--max-turns`, `--max-tokens`,
+`--temperature`, and `--tool-output-limit`.
+
+Enable GEPA prompt optimization with:
+
+```bash
+dspy-cli benchmark tblite \
+  --gepa \
+  --population 4 \
+  --generations 2 \
+  --validation-split 0.2 \
+  --test-split 0.2 \
+  --output tuned-report.json
+```
+
+Run `dspy-cli benchmark tblite --help` for the complete split, shuffle,
+concurrency, and stagnation controls.
 
 ## Global Flags
 
-These flags work with all commands:
+The root command exposes only:
 
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--help` | `-h` | Show help | |
-| `--version` | | Show version | |
-| `--quiet` | `-q` | Quiet mode (minimal output) | `false` |
-| `--debug` | | Enable debug logging | `false` |
-| `--no-color` | | Disable colored output | `false` |
+- `--help`, `-h`
+- `--version`, `-v`
 
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | General error |
-| `2` | Invalid arguments |
-| `3` | Configuration error |
-| `4` | LLM error |
-| `5` | Timeout |
-
----
-
-## Environment Variables
-
-The CLI respects these environment variables:
-
-```bash
-# LLM Configuration
-GEMINI_API_KEY="..."
-OPENAI_API_KEY="..."
-ANTHROPIC_API_KEY="..."
-OLLAMA_BASE_URL="..."
-
-# CLI Defaults
-DSPY_CLI_DEFAULT_DATASET="gsm8k"
-DSPY_CLI_DEFAULT_OPTIMIZER="mipro"
-DSPY_CLI_MAX_EXAMPLES="10"
-
-# Output Options
-DSPY_CLI_NO_COLOR="false"
-DSPY_CLI_QUIET="false"
-DSPY_CLI_OUTPUT_FORMAT="table"
-
-# Performance
-DSPY_CLI_TIMEOUT="300"
-DSPY_CLI_PARALLEL="false"
-```
-
----
-
-## Configuration File
-
-Create `~/.dspy-cli.yaml` for persistent settings:
-
-```yaml
-# Default LLM provider
-default_llm: gemini-1.5-pro
-
-# Default dataset
-default_dataset: gsm8k
-
-# Default optimizer
-default_optimizer: mipro
-
-# Example limits
-max_examples: 20
-
-# Output preferences
-output_format: table
-colored_output: true
-verbose: false
-
-# Performance
-timeout: 300
-parallel: false
-```
-
----
-
-## Advanced Usage
-
-### Scripting with JSON Output
-
-```bash
-# Get optimizer recommendations as JSON
-recommendations=$(dspy-cli recommend balanced --json)
-echo "$recommendations" | jq '.recommended_optimizer'
-
-# Run optimizer and parse results
-results=$(dspy-cli try mipro --json --output -)
-accuracy=$(echo "$results" | jq '.accuracy')
-echo "Accuracy: $accuracy"
-```
-
-### Batch Processing
-
-```bash
-#!/bin/bash
-# test_all_optimizers.sh
-
-optimizers=("bootstrap" "mipro" "gepa" "simba")
-dataset="gsm8k"
-
-for opt in "${optimizers[@]}"; do
-    echo "Testing $opt..."
-    dspy-cli try "$opt" \
-        --dataset "$dataset" \
-        --max-examples 20 \
-        --output "${opt}_results.json" \
-        --json
-done
-```
-
-### CI/CD Integration
-
-```yaml
-# .github/workflows/test.yml
-name: Test Optimizers
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Build CLI
-        run: |
-          cd cmd/dspy-cli
-          go build -o dspy-cli
-
-      - name: Run optimizer tests
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          ./cmd/dspy-cli/dspy-cli try bootstrap --max-examples 5
-          ./cmd/dspy-cli/dspy-cli try mipro --max-examples 5
-```
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-#### "No API key found"
-
-```bash
-# Make sure you've set an API key
-export GEMINI_API_KEY="your-key"
-
-# Verify it's set
-echo $GEMINI_API_KEY
-```
-
-#### "Command not found: dspy-cli"
-
-```bash
-# Add $GOPATH/bin to your PATH
-export PATH=$PATH:$(go env GOPATH)/bin
-
-# Or run from the build directory
-cd cmd/dspy-cli
-./dspy-cli list
-```
-
-#### Timeout Errors
-
-```bash
-# Increase timeout for long-running optimizations
-dspy-cli try gepa --timeout 600  # 10 minutes
-```
-
----
-
-## Examples
-
-### Quick Start
-
-```bash
-# 1. List available optimizers
-dspy-cli list
-
-# 2. Get a recommendation
-dspy-cli recommend balanced
-
-# 3. Try the recommended optimizer
-dspy-cli try mipro --dataset gsm8k --max-examples 10
-
-# 4. Compare with others
-dspy-cli compare bootstrap mipro --max-examples 10
-```
-
-### Production Testing
-
-```bash
-# Full evaluation with 50 examples
-dspy-cli try gepa \
-  --dataset gsm8k \
-  --max-examples 50 \
-  --verbose \
-  --output production_results.json \
-  --json
-
-# Parallel comparison of top optimizers
-dspy-cli compare mipro gepa simba \
-  --dataset hotpotqa \
-  --max-examples 30 \
-  --parallel \
-  --output comparison.csv \
-  --format csv
-```
-
----
+There is no persistent `config` command or CLI configuration file. Configure
+each invocation with its flags and documented environment variables.
 
 ## Next Steps
 
-- **[Configuration Reference →](configuration/)** - Configure the CLI
-- **[Getting Started →](../../guides/getting-started/)** - Learn the basics
-- **[Optimizers Guide →](../../guides/optimizers/)** - Understand each optimizer
+- **[Getting Started →](../../guides/getting-started/)**
+- **[Configuration Reference →](../configuration/)**
+- **[Optimizers Guide →](../../guides/optimizers/)**

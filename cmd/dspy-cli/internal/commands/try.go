@@ -8,6 +8,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/optimizers"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/runner"
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/spf13/cobra"
 )
 
@@ -124,7 +125,7 @@ Perfect for:
 	cmd.Flags().StringVar(&dataset, "dataset", "qa", "Dataset to use (qa, gsm8k, hotpotqa)")
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key (or set GEMINI_API_KEY env var)")
 	cmd.Flags().StringVar(&provider, "provider", "google", "LLM provider (google, openai, local)")
-	cmd.Flags().StringVar(&model, "model", "gemini-2.0-flash", "Model ID to use")
+	cmd.Flags().StringVar(&model, "model", string(core.ModelGoogleGeminiFlash), "Model ID to use")
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for the LLM provider (optional)")
 	cmd.Flags().IntVar(&maxExamples, "max-examples", 0, "Limit number of examples (0 = use all)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable verbose logging")

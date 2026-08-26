@@ -162,30 +162,39 @@ interceptors.ApplyXMLInterceptors(predict, interceptors.DefaultXMLConfig())
 
 ```go
 // Anthropic Claude
-llm, _ := llms.NewAnthropicLLM("api-key", core.ModelAnthropicSonnet)
+llm, _ := llms.NewLLM("api-key", core.ModelAnthropicSonnet)
 
 // Google Gemini
-llm, _ := llms.NewGeminiLLM("api-key", core.ModelGoogleGeminiPro)
+llm, _ := llms.NewLLM("api-key", core.ModelGoogleGeminiFlash)
 
 // OpenAI
-llm, _ := llms.NewOpenAI(core.ModelOpenAIGPT4, "api-key")
+llm, _ := llms.NewLLM("api-key", core.ModelOpenAIGPT4o)
 
 // Ollama (local)
-llm, _ := llms.NewOllamaLLM(core.ModelOllamaLlama3_8B)
+llm, _ := llms.NewLLM("", core.ModelOllamaLlama3_8B)
 
 // OpenAI-compatible (LiteLLM, LocalAI, etc.)
-llm, _ := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
+llm, _ := llms.NewOpenAICompatible("litellm", core.ModelOpenAIGPT4,
+    "http://localhost:4000",
     llms.WithAPIKey("api-key"),
-    llms.WithOpenAIBaseURL("http://localhost:4000"))
+)
 ```
 
-Provider wire protocols and model metadata are supplied by
-[`llm-go`](https://github.com/XiaoConstantine/llm-go); `pkg/llms` is a
-compatibility adapter for dspy-go's `core.LLM` interface. llm-go owns
-generation, streaming, structured output, and tool calls. Because embeddings
-remain part of `core.LLM`, dspy-go retains the Gemini and OpenAI-compatible
-embedding clients. Ollama and llama.cpp must expose an OpenAI-compatible
-endpoint.
+`pkg/llms` originally implemented provider protocols because OpenAI,
+Anthropic, and Google did not yet offer mature Go SDKs. Maintaining those
+rapidly changing protocols is not DSPy's core responsibility now that the Go
+ecosystem has caught up, so provider wire protocols and model metadata are
+supplied by [`llm-go`](https://github.com/XiaoConstantine/llm-go).
+
+`pkg/llms` remains as the compatibility adapter for dspy-go's `core.LLM`
+interface. llm-go owns generation, streaming, structured output, and tool
+calls. Because embeddings remain part of `core.LLM`, dspy-go retains its
+Gemini and OpenAI-compatible embedding clients. Ollama and llama.cpp must
+expose an OpenAI-compatible endpoint.
+
+OpenAI Codex subscription generation is also available through llm-go via
+`llms.NewOpenAICodexLLM`. The application owns OAuth login, token refresh, and
+credential storage; dspy-go does not provide an interactive auth subsystem.
 
 **[Providers Reference](https://xiaocui.me/dspy-go/docs/reference/providers/)**
 
