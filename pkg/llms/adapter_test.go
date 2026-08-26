@@ -340,6 +340,27 @@ func TestAdaptGenerateWithToolsPreservesConversationState(t *testing.T) {
 	}, result["provider_data"])
 }
 
+func TestLegacyProviderDataRejectsDuplicateJSONNames(t *testing.T) {
+	providerData, err := legacyProviderData(json.RawMessage(`{"provider":"first","provider":"second"}`))
+	require.Error(t, err)
+	assert.Nil(t, providerData)
+}
+
+func TestCanonicalMessagesPreserveLegacyJSONWireSemantics(t *testing.T) {
+	messages, err := canonicalMessages([]core.ChatMessage{{
+		Role: "assistant",
+		ToolCalls: []core.ToolCall{{
+			ID: "call-1", Name: "lookup", Arguments: nil,
+		}},
+		ProviderData: map[string]any{"z": 1, "a": 2},
+	}})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].ToolCalls, 1)
+	assert.Equal(t, "null", string(messages[0].ToolCalls[0].Arguments))
+	assert.Equal(t, `{"a":2,"z":1}`, string(messages[0].ProviderData))
+}
+
 func TestAdaptStreamsTextAndFinalUsage(t *testing.T) {
 	stream := &sliceStream{chunks: []llm.Chunk{
 		{Content: []llm.Part{{Text: "hel"}}},

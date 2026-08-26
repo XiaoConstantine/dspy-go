@@ -2,7 +2,8 @@ package llms
 
 import (
 	"context"
-	"encoding/json"
+	jsonv2 "encoding/json/v2"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +23,7 @@ func TestOpenAICompatibleEmbeddingsRemainInDspy(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+		if err := jsonv2.UnmarshalRead(request.Body, &body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -31,7 +33,7 @@ func TestOpenAICompatibleEmbeddingsRemainInDspy(t *testing.T) {
 		}{request.Header.Get("Authorization"), body})
 		w.Header().Set("Content-Type", "application/json")
 		if _, ok := body["input"].([]any); ok {
-			fmt.Fprint(w, `{"data":[{"embedding":[1,2],"index":0},{"embedding":[3,4],"index":1}],"model":"custom-embedding","usage":{"total_tokens":6}}`)
+			fmt.Fprint(w, `{"data":[{"embedding":[3,4],"index":1},{"embedding":[1,2],"index":0}],"model":"custom-embedding","usage":{"total_tokens":6}}`)
 			return
 		}
 		fmt.Fprint(w, `{"data":[{"embedding":[0.1,0.2],"index":0}],"model":"text-embedding-3-small","usage":{"total_tokens":2}}`)
@@ -55,7 +57,10 @@ func TestOpenAICompatibleEmbeddingsRemainInDspy(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, batch.Error)
 	require.Len(t, batch.Embeddings, 2)
+	assert.Equal(t, []float32{1, 2}, batch.Embeddings[0].Vector)
+	assert.Equal(t, 0, batch.Embeddings[0].Metadata["index"])
 	assert.Equal(t, []float32{3, 4}, batch.Embeddings[1].Vector)
+	assert.Equal(t, 1, batch.Embeddings[1].Metadata["index"])
 	assert.Equal(t, 3, batch.Embeddings[1].TokenCount)
 
 	require.Len(t, requests, 2)
@@ -66,6 +71,58 @@ func TestOpenAICompatibleEmbeddingsRemainInDspy(t *testing.T) {
 	assert.Equal(t, "custom-embedding", requests[1].Body["model"])
 }
 
+func TestOpenAICompatibleBatchEmbeddingsRejectMalformedIndexes(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{
+			name:     "count mismatch",
+			response: `{"data":[{"embedding":[1,2],"index":0}]}`,
+		},
+		{
+			name:     "out of range index",
+			response: `{"data":[{"embedding":[1,2],"index":0},{"embedding":[3,4],"index":2}]}`,
+		},
+		{
+			name:     "duplicate index",
+			response: `{"data":[{"embedding":[1,2],"index":0},{"embedding":[3,4],"index":0}]}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, test.response)
+			}))
+			t.Cleanup(server.Close)
+
+			model, err := NewOpenAICompatible("localai", core.ModelLocalAICodeLlama, server.URL)
+			require.NoError(t, err)
+			batch, err := model.CreateEmbeddings(context.Background(), []string{"one", "two"})
+			require.Error(t, err)
+			assert.Nil(t, batch)
+			requireDSPyErrorCode(t, err, dspyerrors.InvalidResponse)
+		})
+	}
+}
+
+func TestOpenAICompatibleEmbeddingsRejectDuplicateJSONNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"embedding":[1,2],"index":0,"index":0}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	model, err := NewOpenAICompatible("localai", core.ModelLocalAICodeLlama, server.URL)
+	require.NoError(t, err)
+	batch, err := model.CreateEmbeddings(context.Background(), []string{"one"})
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	requireDSPyErrorCode(t, batch.Error, dspyerrors.InvalidResponse)
+}
+
 func TestOllamaEmbeddingUsesConfiguredModelAndOpenAIEndpoint(t *testing.T) {
 	var model string
 	var path string
@@ -74,7 +131,7 @@ func TestOllamaEmbeddingUsesConfiguredModelAndOpenAIEndpoint(t *testing.T) {
 		var body struct {
 			Model string `json:"model"`
 		}
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+		if err := jsonv2.UnmarshalRead(request.Body, &body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -108,7 +165,7 @@ func TestGeminiEmbeddingsRemainInDspy(t *testing.T) {
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		var body map[string]any
-		err := json.NewDecoder(request.Body).Decode(&body)
+		err := jsonv2.UnmarshalRead(request.Body, &body)
 		mu.Lock()
 		requests = append(requests, capturedRequest{
 			Path: request.URL.Path, Key: request.Header.Get("x-goog-api-key"), Body: body, Error: err,
@@ -161,4 +218,11 @@ func TestGeminiEmbeddingsRemainInDspy(t *testing.T) {
 		assert.Equal(t, "document", entry["title"])
 		assert.Equal(t, float64(128), entry["outputDimensionality"])
 	}
+}
+
+func requireDSPyErrorCode(t *testing.T, err error, expected dspyerrors.ErrorCode) {
+	t.Helper()
+	actual, ok := stderrors.AsType[*dspyerrors.Error](err)
+	require.True(t, ok, "error %v does not contain a dspy error", err)
+	assert.Equal(t, expected, actual.Code())
 }

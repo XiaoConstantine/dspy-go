@@ -2,7 +2,8 @@ package llms
 
 import (
 	"context"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -315,7 +316,7 @@ func canonicalMessages(messages []core.ChatMessage) ([]llm.Message, error) {
 		if len(message.ToolCalls) != 0 {
 			canonical.ToolCalls = make([]llm.ToolCall, 0, len(message.ToolCalls))
 			for _, call := range message.ToolCalls {
-				arguments, err := json.Marshal(call.Arguments)
+				arguments, err := jsonv2.Marshal(call.Arguments, jsonv1.DefaultOptionsV1())
 				if err != nil {
 					return nil, fmt.Errorf("messages[%d] tool %q arguments: %w", index, call.Name, err)
 				}
@@ -338,7 +339,7 @@ func canonicalMessages(messages []core.ChatMessage) ([]llm.Message, error) {
 			}}
 		}
 		if len(message.ProviderData) != 0 {
-			providerData, err := json.Marshal(message.ProviderData)
+			providerData, err := jsonv2.Marshal(message.ProviderData, jsonv1.DefaultOptionsV1())
 			if err != nil {
 				return nil, fmt.Errorf("messages[%d] provider data: %w", index, err)
 			}
@@ -417,7 +418,7 @@ func canonicalTools(schemas []map[string]any) ([]llm.Tool, error) {
 		if parameters == nil {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
-		inputSchema, err := json.Marshal(parameters)
+		inputSchema, err := jsonv2.Marshal(parameters, jsonv1.DefaultOptionsV1())
 		if err != nil {
 			return nil, fmt.Errorf("tool %q input schema: %w", name, err)
 		}
@@ -463,7 +464,7 @@ func legacyToolResponse(response *llm.Response) (map[string]any, error) {
 		for _, call := range response.Message.ToolCalls {
 			arguments := map[string]any{}
 			if len(call.Arguments) != 0 {
-				if err := json.Unmarshal(call.Arguments, &arguments); err != nil {
+				if err := jsonv2.Unmarshal(call.Arguments, &arguments); err != nil {
 					return nil, dspyerrors.WithFields(
 						dspyerrors.Wrap(err, dspyerrors.InvalidResponse, "tool arguments must be a JSON object"),
 						dspyerrors.Fields{"tool_name": call.Name},
@@ -514,12 +515,12 @@ func responseMetadata(response *llm.Response) map[string]any {
 	return metadata
 }
 
-func legacyProviderData(data json.RawMessage) (map[string]any, error) {
+func legacyProviderData(data []byte) (map[string]any, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
 	var providerData map[string]any
-	if err := json.Unmarshal(data, &providerData); err != nil {
+	if err := jsonv2.Unmarshal(data, &providerData); err != nil {
 		return nil, dspyerrors.Wrap(err, dspyerrors.InvalidResponse, "provider data must be a JSON object")
 	}
 	return providerData, nil

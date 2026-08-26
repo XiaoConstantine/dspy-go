@@ -31,7 +31,7 @@ func TestOfficialOpenAIEndpointWithTrailingSlashesUsesResponses(t *testing.T) {
 	}, core.ModelOpenAIGPT4o)
 	require.NoError(t, err)
 
-	adapted, ok := model.(*GeneratorLLM)
+	adapted, ok := model.(*OpenAILLM)
 	require.True(t, ok)
 	assert.Contains(t, adapted.Capabilities(), core.CapabilityEmbedding)
 	compatibility := adapted.Generator().Info().Compatibility

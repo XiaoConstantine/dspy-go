@@ -16,15 +16,16 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-// Provider-specific names remain aliases for source compatibility. All of them
-// now use the same provider-neutral llm-go adapter.
+// Provider-specific wrappers preserve the public constructor return types while
+// keeping their runtime identities distinct. Protocol behavior remains owned by
+// the embedded provider-neutral llm-go adapter.
 type (
-	AnthropicLLM   = GeneratorLLM
-	GeminiLLM      = GeneratorLLM
-	OpenAILLM      = GeneratorLLM
-	OpenAICodexLLM = GeneratorLLM
-	OllamaLLM      = GeneratorLLM
-	LlamacppLLM    = GeneratorLLM
+	AnthropicLLM   struct{ *GeneratorLLM }
+	GeminiLLM      struct{ *GeneratorLLM }
+	OpenAILLM      struct{ *GeneratorLLM }
+	OpenAICodexLLM struct{ *GeneratorLLM }
+	OllamaLLM      struct{ *GeneratorLLM }
+	LlamacppLLM    struct{ *GeneratorLLM }
 )
 
 func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error) {
@@ -49,7 +50,11 @@ func NewAnthropicLLMFromConfig(ctx context.Context, config core.ProviderConfig, 
 	}
 	config.Name = "anthropic"
 	config.APIKey = apiKey
-	return newProviderLLM(ctx, config, modelID, llmmodels.AnthropicMessages)
+	adapted, err := newProviderLLM(ctx, config, modelID, llmmodels.AnthropicMessages)
+	if err != nil {
+		return nil, err
+	}
+	return &AnthropicLLM{GeneratorLLM: adapted}, nil
 }
 
 func AnthropicProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
@@ -75,7 +80,11 @@ func NewGeminiLLMFromConfig(ctx context.Context, config core.ProviderConfig, mod
 	}
 	config.Name = "google"
 	config.APIKey = apiKey
-	return newProviderLLM(ctx, config, modelID, llmmodels.GeminiGenerateContent)
+	adapted, err := newProviderLLM(ctx, config, modelID, llmmodels.GeminiGenerateContent)
+	if err != nil {
+		return nil, err
+	}
+	return &GeminiLLM{GeneratorLLM: adapted}, nil
 }
 
 func GeminiProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
@@ -137,7 +146,7 @@ func NewOpenAILLM(modelID core.ModelID, options ...OpenAIOption) (*OpenAILLM, er
 	if config.apiKey == "" {
 		config.apiKey = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	}
-	return newOpenAICompatible("openai", modelID, config)
+	return wrapOpenAILLM(newOpenAICompatible("openai", modelID, config))
 }
 
 func NewOpenAI(modelID core.ModelID, apiKey string) (*OpenAILLM, error) {
@@ -156,7 +165,7 @@ func NewOpenAILLMFromConfig(_ context.Context, providerConfig core.ProviderConfi
 	if provider == "" {
 		provider = "openai"
 	}
-	return newOpenAICompatible(provider, modelID, config)
+	return wrapOpenAILLM(newOpenAICompatible(provider, modelID, config))
 }
 
 // OpenAIProviderFactory uses the current OpenAI Responses API selected by the
@@ -180,7 +189,7 @@ func OpenAIProviderFactory(ctx context.Context, config core.ProviderConfig, mode
 	}
 	config.Name = "openai"
 	config.APIKey = apiKey
-	return newProviderLLM(ctx, config, modelID, llmmodels.OpenAIResponses)
+	return wrapOpenAILLM(newProviderLLM(ctx, config, modelID, llmmodels.OpenAIResponses))
 }
 
 func NewOpenAICompatible(
@@ -189,15 +198,7 @@ func NewOpenAICompatible(
 	baseURL string,
 	options ...OpenAIOption,
 ) (*OpenAILLM, error) {
-	defaults := []OpenAIOption{
-		WithOpenAIBaseURL(baseURL),
-		WithOpenAIPath("/v1/chat/completions"),
-	}
-	config := OpenAIConfig{timeout: 60 * time.Second, headers: make(map[string]string)}
-	for _, option := range append(defaults, options...) {
-		option(&config)
-	}
-	return newOpenAICompatible(provider, modelID, config)
+	return wrapOpenAILLM(newOpenAICompatible(provider, modelID, openAICompatibleConfig(baseURL, options...)))
 }
 
 func NewLiteLLM(modelID core.ModelID, apiKey string, options ...OpenAIOption) (*OpenAILLM, error) {
@@ -277,13 +278,19 @@ func NewOllamaLLM(modelID core.ModelID, options ...OllamaOption) (*OllamaLLM, er
 	if strings.TrimSpace(string(modelID)) == "" {
 		return nil, dspyerrors.New(dspyerrors.InvalidInput, "Ollama model name is required")
 	}
-	return NewOpenAICompatible(
+	adapted, err := newOpenAICompatible(
 		"ollama",
 		modelID,
-		config.BaseURL,
-		WithAPIKey(config.APIKey),
-		WithOpenAITimeout(time.Duration(config.Timeout)*time.Second),
+		openAICompatibleConfig(
+			config.BaseURL,
+			WithAPIKey(config.APIKey),
+			WithOpenAITimeout(time.Duration(config.Timeout)*time.Second),
+		),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &OllamaLLM{GeneratorLLM: adapted}, nil
 }
 
 func NewOllamaLLMFromConfig(_ context.Context, config core.ProviderConfig, modelID core.ModelID) (*OllamaLLM, error) {
@@ -308,12 +315,18 @@ func OllamaProviderFactory(ctx context.Context, config core.ProviderConfig, mode
 }
 
 func NewLlamacppLLM(endpoint string) (*LlamacppLLM, error) {
-	return NewOpenAICompatible(
+	adapted, err := newOpenAICompatible(
 		"llamacpp",
 		"default",
-		firstNonempty(endpoint, "http://localhost:8080"),
-		WithOpenAITimeout(10*time.Minute),
+		openAICompatibleConfig(
+			firstNonempty(endpoint, "http://localhost:8080"),
+			WithOpenAITimeout(10*time.Minute),
+		),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &LlamacppLLM{GeneratorLLM: adapted}, nil
 }
 
 func NewLlamacppLLMFromConfig(_ context.Context, config core.ProviderConfig, modelID core.ModelID) (*LlamacppLLM, error) {
@@ -321,12 +334,18 @@ func NewLlamacppLLMFromConfig(_ context.Context, config core.ProviderConfig, mod
 	if modelID == "" {
 		modelID = "default"
 	}
-	return NewOpenAICompatible(
+	adapted, err := newOpenAICompatible(
 		"llamacpp",
 		modelID,
-		firstNonempty(configuredBaseURL(config), "http://localhost:8080"),
-		append([]OpenAIOption{WithOpenAITimeout(10 * time.Minute)}, providerOpenAIOptions(config)...)...,
+		openAICompatibleConfig(
+			firstNonempty(configuredBaseURL(config), "http://localhost:8080"),
+			append([]OpenAIOption{WithOpenAITimeout(10 * time.Minute)}, providerOpenAIOptions(config)...)...,
+		),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &LlamacppLLM{GeneratorLLM: adapted}, nil
 }
 
 func LlamacppProviderFactory(ctx context.Context, config core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
@@ -419,7 +438,11 @@ func NewOpenAICodexLLM(modelID core.ModelID, options ...OpenAICodexOption) (*Ope
 		BaseURL: config.baseURL, Path: "/codex/responses",
 		Headers: cloneStringMap(config.headers), TimeoutSec: int(config.timeout.Seconds()),
 	}
-	return adapt(generator, endpoint, client, nil)
+	adapted, err := adapt(generator, endpoint, client, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &OpenAICodexLLM{GeneratorLLM: adapted}, nil
 }
 
 func NewOpenAICodexLLMFromConfig(_ context.Context, config core.ProviderConfig, modelID core.ModelID) (*OpenAICodexLLM, error) {
@@ -546,7 +569,7 @@ func newProviderLLM(ctx context.Context, config core.ProviderConfig, modelID cor
 	return adapt(generator, endpoint, client, embedder)
 }
 
-func newOpenAICompatible(provider string, modelID core.ModelID, config OpenAIConfig) (*OpenAILLM, error) {
+func newOpenAICompatible(provider string, modelID core.ModelID, config OpenAIConfig) (*GeneratorLLM, error) {
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return nil, dspyerrors.New(dspyerrors.InvalidInput, "provider is required")
@@ -586,6 +609,26 @@ func newOpenAICompatible(provider string, modelID core.ModelID, config OpenAICon
 	}
 	embedder := newOpenAIEmbeddingClient(config.baseURL, endpointHeaders, client, defaultEmbeddingModel)
 	return adapt(generator, endpoint, client, embedder)
+}
+
+func openAICompatibleConfig(baseURL string, options ...OpenAIOption) OpenAIConfig {
+	config := OpenAIConfig{
+		baseURL: baseURL,
+		path:    "/v1/chat/completions",
+		timeout: 60 * time.Second,
+		headers: make(map[string]string),
+	}
+	for _, option := range options {
+		option(&config)
+	}
+	return config
+}
+
+func wrapOpenAILLM(adapted *GeneratorLLM, err error) (*OpenAILLM, error) {
+	if err != nil {
+		return nil, err
+	}
+	return &OpenAILLM{GeneratorLLM: adapted}, nil
 }
 
 func openAIConfigFromProvider(config core.ProviderConfig, baseURL, path string, timeout time.Duration) OpenAIConfig {

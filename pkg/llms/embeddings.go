@@ -3,7 +3,8 @@ package llms
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,13 +114,30 @@ func (c *openAIEmbeddingClient) CreateEmbeddings(
 	if err != nil {
 		return &core.BatchEmbeddingResult{Error: err, ErrorIndex: 0}, nil
 	}
-	if len(response.Data) == 0 {
-		return nil, errors.New(errors.InvalidResponse, "embedding values missing in OpenAI-compatible response")
+	if len(response.Data) != len(inputs) {
+		return nil, errors.WithFields(
+			errors.New(errors.InvalidResponse, "OpenAI-compatible embedding count does not match input count"),
+			errors.Fields{"expected": len(inputs), "actual": len(response.Data)},
+		)
 	}
-	results := make([]core.EmbeddingResult, len(response.Data))
-	perInputTokens := response.Usage.TotalTokens / len(response.Data)
-	for i, embedding := range response.Data {
-		results[i] = core.EmbeddingResult{
+	results := make([]core.EmbeddingResult, len(inputs))
+	seen := make([]bool, len(inputs))
+	perInputTokens := response.Usage.TotalTokens / len(inputs)
+	for _, embedding := range response.Data {
+		if embedding.Index < 0 || embedding.Index >= len(inputs) {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidResponse, "OpenAI-compatible embedding index is out of range"),
+				errors.Fields{"index": embedding.Index, "input_count": len(inputs)},
+			)
+		}
+		if seen[embedding.Index] {
+			return nil, errors.WithFields(
+				errors.New(errors.InvalidResponse, "OpenAI-compatible embedding index is duplicated"),
+				errors.Fields{"index": embedding.Index},
+			)
+		}
+		seen[embedding.Index] = true
+		results[embedding.Index] = core.EmbeddingResult{
 			Vector:     embedding.Embedding,
 			TokenCount: perInputTokens,
 			Metadata: map[string]any{
@@ -132,11 +150,11 @@ func (c *openAIEmbeddingClient) CreateEmbeddings(
 }
 
 func (c *openAIEmbeddingClient) request(ctx context.Context, input any, model string) (*openAIEmbeddingResponse, error) {
-	payload, err := json.Marshal(openAIEmbeddingRequest{
+	payload, err := jsonv2.Marshal(openAIEmbeddingRequest{
 		Input:          input,
 		Model:          model,
 		EncodingFormat: "float",
-	})
+	}, jsonv1.DefaultOptionsV1())
 	if err != nil {
 		return nil, errors.Wrap(err, errors.InvalidInput, "failed to marshal embedding request")
 	}
@@ -177,7 +195,7 @@ func (c *openAIEmbeddingClient) request(ctx context.Context, input any, model st
 	}
 
 	var response openAIEmbeddingResponse
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := jsonv2.Unmarshal(body, &response); err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.InvalidResponse, "failed to decode embedding response"),
 			errors.Fields{"model": model},
