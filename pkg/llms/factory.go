@@ -3,7 +3,6 @@ package llms
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/registry"
 )
 
+// DefaultLLMFactory creates the compatibility adapter backed by llm-go.
 type DefaultLLMFactory struct{}
 
 var (
@@ -22,14 +22,76 @@ var (
 	registryInitErr    error
 )
 
+var defaultProviderFactories = []struct {
+	name    string
+	factory core.ProviderFactory
+}{
+	{"anthropic", AnthropicProviderFactory},
+	{"google", GeminiProviderFactory},
+	{"openai", OpenAIProviderFactory},
+	{"openai-codex", OpenAICodexProviderFactory},
+	{"ollama", OllamaProviderFactory},
+	{"llamacpp", LlamacppProviderFactory},
+	{"litellm", LiteLLMProviderFactory},
+	{"localai", LocalAIProviderFactory},
+	{"fastchat", FastChatProviderFactory},
+}
+
 func init() {
 	core.SetRegistryConstructor(func() core.LLMRegistry {
 		return registry.NewLLMRegistry()
 	})
+	_ = ensureFactory()
 }
 
-// resetFactoryForTesting resets the factory for testing purposes
-// This should only be called from tests.
+func ensureFactory() error {
+	defaultFactoryOnce.Do(func() {
+		defaultFactory = &DefaultLLMFactory{}
+		core.SetDefaultFactory(defaultFactory)
+		factoryInitErr = ensureRegistryInitialized()
+	})
+	return factoryInitErr
+}
+
+func ensureRegistryInitialized() error {
+	registryInitOnce.Do(func() {
+		llmRegistry := core.GetRegistry()
+		for _, provider := range defaultProviderFactories {
+			if err := llmRegistry.RegisterProvider(provider.name, provider.factory); err != nil {
+				registryInitErr = fmt.Errorf("register %s provider: %w", provider.name, err)
+				return
+			}
+		}
+	})
+	return registryInitErr
+}
+
+// NewLLM creates a cached dspy-go LLM backed by an llm-go generator.
+func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
+	if err := ensureFactory(); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	model, err := core.GetRegistry().CreateLLM(ctx, apiKey, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("create LLM: %w", err)
+	}
+	return cache.WrapWithCache(model, nil), nil
+}
+
+// CreateLLM implements core.LLMFactory.
+func (*DefaultLLMFactory) CreateLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
+	return NewLLM(apiKey, modelID)
+}
+
+// EnsureFactory initializes dspy-go's default llm-go-backed provider registry.
+func EnsureFactory() {
+	_ = ensureFactory()
+}
+
+// resetFactoryForTesting resets package-global factory state.
 func resetFactoryForTesting() {
 	defaultFactory = nil
 	defaultFactoryOnce = sync.Once{}
@@ -37,389 +99,5 @@ func resetFactoryForTesting() {
 	factoryInitErr = nil
 	registryInitErr = nil
 	core.SetDefaultFactory(nil)
-	// Reset the global registry as well
 	core.SetRegistry(core.NewLLMRegistry())
-}
-
-func ensureFactory() error {
-	defaultFactoryOnce.Do(func() {
-		defaultFactory = &DefaultLLMFactory{}
-		core.SetDefaultFactory(defaultFactory)
-		// Initialize registry on first factory creation
-		factoryInitErr = ensureRegistryInitialized()
-	})
-	return factoryInitErr
-}
-
-// ensureRegistryInitialized initializes the global registry with default providers.
-func ensureRegistryInitialized() error {
-	registryInitOnce.Do(func() {
-		// Register default providers
-		registry := core.GetRegistry()
-
-		// Register Anthropic provider
-		if err := registry.RegisterProvider("anthropic", AnthropicProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register anthropic provider: %w", err)
-			return
-		}
-
-		// Register Google/Gemini provider
-		if err := registry.RegisterProvider("google", GeminiProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register google provider: %w", err)
-			return
-		}
-
-		// Register Ollama provider
-		if err := registry.RegisterProvider("ollama", OllamaProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register ollama provider: %w", err)
-			return
-		}
-
-		// Register LlamaCpp provider if it exists
-		if err := registry.RegisterProvider("llamacpp", LlamacppProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register llamacpp provider: %w", err)
-			return
-		}
-
-		// Register OpenAI and compatible providers
-		if err := registry.RegisterProvider("openai", OpenAIProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register openai provider: %w", err)
-			return
-		}
-		if err := registry.RegisterProvider("openai-codex", OpenAICodexProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register openai-codex provider: %w", err)
-			return
-		}
-		if err := registry.RegisterProvider("litellm", LiteLLMProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register litellm provider: %w", err)
-			return
-		}
-		if err := registry.RegisterProvider("localai", LocalAIProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register localai provider: %w", err)
-			return
-		}
-		if err := registry.RegisterProvider("fastchat", FastChatProviderFactory); err != nil {
-			registryInitErr = fmt.Errorf("failed to register fastchat provider: %w", err)
-			return
-		}
-
-		// Load default model configurations
-		registryInitErr = loadDefaultModelConfigurations(registry)
-	})
-	return registryInitErr
-}
-
-// loadDefaultModelConfigurations loads the default model configurations into the registry.
-func loadDefaultModelConfigurations(registry core.LLMRegistry) error {
-	anthropicCapabilities := []string{"completion", "chat", "json", "streaming", "tool-calling", "multimodal", "vision"}
-	anthropicModels := make(map[string]core.ModelConfig, len(core.ProviderModels["anthropic"]))
-	for modelID, name := range map[core.ModelID]string{
-		core.ModelAnthropicClaude5Sonnet:          "Claude Sonnet 5",
-		core.ModelAnthropicClaude5Fable:           "Claude Fable 5",
-		core.ModelAnthropicClaude5Mythos:          "Claude Mythos 5",
-		core.ModelAnthropicClaude5Opus:            "Claude Opus 5",
-		core.ModelAnthropicClaude48Opus:           "Claude Opus 4.8",
-		core.ModelAnthropicClaude47Opus:           "Claude Opus 4.7",
-		core.ModelAnthropicClaude46Opus:           "Claude Opus 4.6",
-		core.ModelAnthropicClaude46Sonnet:         "Claude Sonnet 4.6",
-		core.ModelAnthropicClaude45Haiku:          "Claude Haiku 4.5",
-		core.ModelAnthropicClaude45Haiku20251001:  "Claude Haiku 4.5 (2025-10-01)",
-		core.ModelAnthropicClaude45Opus:           "Claude Opus 4.5",
-		core.ModelAnthropicClaude45Opus20251101:   "Claude Opus 4.5 (2025-11-01)",
-		core.ModelAnthropicClaude45Sonnet:         "Claude Sonnet 4.5",
-		core.ModelAnthropicClaude45Sonnet20250929: "Claude Sonnet 4.5 (2025-09-29)",
-	} {
-		anthropicModels[string(modelID)] = core.ModelConfig{
-			ID:           string(modelID),
-			Name:         name,
-			Capabilities: anthropicCapabilities,
-		}
-	}
-
-	defaultConfigs := map[string]core.ProviderConfig{
-		"anthropic": {
-			Name:   "anthropic",
-			Models: anthropicModels,
-		},
-		"google": {
-			Name: "google",
-			Models: map[string]core.ModelConfig{
-				string(core.ModelGoogleGeminiFlash): {
-					ID:           string(core.ModelGoogleGeminiFlash),
-					Name:         "Gemini 2.5 Flash",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-				string(core.ModelGoogleGeminiPro): {
-					ID:           string(core.ModelGoogleGeminiPro),
-					Name:         "Gemini 2.5 Pro",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-				string(core.ModelGoogleGeminiFlashLite): {
-					ID:           string(core.ModelGoogleGeminiFlashLite),
-					Name:         "Gemini 2.5 Flash-Lite",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-				string(core.ModelGoogleGemini31ProPreview): {
-					ID:           string(core.ModelGoogleGemini31ProPreview),
-					Name:         "Gemini 3.1 Pro Preview",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-				string(core.ModelGoogleGemini31ProPreviewTools): {
-					ID:           string(core.ModelGoogleGemini31ProPreviewTools),
-					Name:         "Gemini 3.1 Pro Preview Custom Tools",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-				string(core.ModelGoogleGemini3FlashPreview): {
-					ID:           string(core.ModelGoogleGemini3FlashPreview),
-					Name:         "Gemini 3 Flash Preview",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-				string(core.ModelGoogleGemini31FlashLitePreview): {
-					ID:           string(core.ModelGoogleGemini31FlashLitePreview),
-					Name:         "Gemini 3.1 Flash-Lite Preview",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "streaming", "tool-calling"},
-				},
-			},
-		},
-		"openai": {
-			Name: "openai",
-			Models: map[string]core.ModelConfig{
-				string(core.ModelOpenAIGPT4): {
-					ID:           string(core.ModelOpenAIGPT4),
-					Name:         "GPT-4",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT4Turbo): {
-					ID:           string(core.ModelOpenAIGPT4Turbo),
-					Name:         "GPT-4 Turbo",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT35Turbo): {
-					ID:           string(core.ModelOpenAIGPT35Turbo),
-					Name:         "GPT-3.5 Turbo",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT4o): {
-					ID:           string(core.ModelOpenAIGPT4o),
-					Name:         "GPT-4o",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT4oMini): {
-					ID:           string(core.ModelOpenAIGPT4oMini),
-					Name:         "GPT-4o Mini",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT54): {
-					ID:           string(core.ModelOpenAIGPT54),
-					Name:         "GPT-5.4",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT54Mini): {
-					ID:           string(core.ModelOpenAIGPT54Mini),
-					Name:         "GPT-5.4 Mini",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT54Nano): {
-					ID:           string(core.ModelOpenAIGPT54Nano),
-					Name:         "GPT-5.4 Nano",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT54Pro): {
-					ID:           string(core.ModelOpenAIGPT54Pro),
-					Name:         "GPT-5.4 Pro",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT55): {
-					ID:           string(core.ModelOpenAIGPT55),
-					Name:         "GPT-5.5",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelOpenAIGPT55Pro): {
-					ID:           string(core.ModelOpenAIGPT55Pro),
-					Name:         "GPT-5.5 Pro",
-					Capabilities: []string{"completion", "chat", "json", "embedding", "tool-calling"},
-				},
-			},
-		},
-		"litellm": {
-			Name: "litellm",
-			Models: map[string]core.ModelConfig{
-				string(core.ModelLiteLLMGPT4): {
-					ID:           string(core.ModelLiteLLMGPT4),
-					Name:         "GPT-4 via LiteLLM",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelLiteLLMClaude3): {
-					ID:           string(core.ModelLiteLLMClaude3),
-					Name:         "Claude 3 Sonnet via LiteLLM",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelLiteLLMLlama2): {
-					ID:           string(core.ModelLiteLLMLlama2),
-					Name:         "Llama 2 70B via LiteLLM",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelLiteLLMGemini): {
-					ID:           string(core.ModelLiteLLMGemini),
-					Name:         "Gemini Pro via LiteLLM",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-			},
-		},
-		"localai": {
-			Name: "localai",
-			Models: map[string]core.ModelConfig{
-				string(core.ModelLocalAILlama2): {
-					ID:           string(core.ModelLocalAILlama2),
-					Name:         "Llama 2 7B Chat",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelLocalAICodeLlama): {
-					ID:           string(core.ModelLocalAICodeLlama),
-					Name:         "CodeLlama 13B Instruct",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelLocalAIAlpaca): {
-					ID:           string(core.ModelLocalAIAlpaca),
-					Name:         "Alpaca 7B",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelLocalAIVicuna): {
-					ID:           string(core.ModelLocalAIVicuna),
-					Name:         "Vicuna 7B",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-			},
-		},
-		"fastchat": {
-			Name: "fastchat",
-			Models: map[string]core.ModelConfig{
-				string(core.ModelFastChatVicuna): {
-					ID:           string(core.ModelFastChatVicuna),
-					Name:         "Vicuna 7B v1.5",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelFastChatAlpaca): {
-					ID:           string(core.ModelFastChatAlpaca),
-					Name:         "Alpaca 13B",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelFastChatCodeLlama): {
-					ID:           string(core.ModelFastChatCodeLlama),
-					Name:         "CodeLlama 7B Instruct",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-				string(core.ModelFastChatLlama2): {
-					ID:           string(core.ModelFastChatLlama2),
-					Name:         "Llama 2 7B Chat",
-					Capabilities: []string{"completion", "chat", "json", "streaming", "embedding", "tool-calling"},
-				},
-			},
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := registry.LoadFromConfig(ctx, defaultConfigs); err != nil {
-		return fmt.Errorf("failed to load default model configurations: %w", err)
-	}
-	return nil
-}
-
-// NewLLM creates a new LLM instance based on the provided model ID.
-// This function now uses the registry system for dynamic model creation.
-func NewLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
-	if err := ensureFactory(); err != nil {
-		return nil, err
-	}
-
-	// Try to use the registry first
-	registry := core.GetRegistry()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	llm, err := registry.CreateLLM(ctx, apiKey, modelID)
-	if err != nil {
-		// If registry fails, fall back to the old hardcoded approach for backward compatibility
-		llm, err = createLLMFallback(apiKey, modelID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create LLM with registry and fallback: %w", err)
-		}
-	}
-
-	// Apply caching if enabled (this happens before other decorators)
-	llm = cache.WrapWithCache(llm, nil) // nil means use environment/default config
-
-	return llm, nil
-}
-
-// createLLMFallback provides backward compatibility with the old factory approach.
-func createLLMFallback(apiKey string, modelID core.ModelID) (core.LLM, error) {
-	var llm core.LLM
-	var err error
-
-	if normalizedModelID, ok := core.ResolveAnthropicModelID(modelID); ok {
-		return NewAnthropicLLM(apiKey, string(normalizedModelID))
-	}
-
-	modelStr := string(modelID)
-	switch {
-	case modelID == core.ModelGoogleGeminiFlash || modelID == core.ModelGoogleGeminiPro ||
-		modelID == core.ModelGoogleGeminiFlashLite || modelID == core.ModelGoogleGemini31ProPreview ||
-		modelID == core.ModelGoogleGemini31ProPreviewTools || modelID == core.ModelGoogleGemini31FlashLitePreview ||
-		modelID == core.ModelGoogleGemini3FlashPreview:
-		llm, err = NewGeminiLLM(apiKey, modelID)
-	case modelID == core.ModelOpenAIGPT4 || modelID == core.ModelOpenAIGPT4Turbo || modelID == core.ModelOpenAIGPT35Turbo ||
-		modelID == core.ModelOpenAIGPT4o || modelID == core.ModelOpenAIGPT4oMini ||
-		modelID == core.ModelOpenAIGPT41 || modelID == core.ModelOpenAIGPT41Mini || modelID == core.ModelOpenAIGPT41Nano ||
-		modelID == core.ModelOpenAIO1 || modelID == core.ModelOpenAIO1Pro || modelID == core.ModelOpenAIO1Mini ||
-		modelID == core.ModelOpenAIO3 || modelID == core.ModelOpenAIO3Mini ||
-		modelID == core.ModelOpenAIGPT5 || modelID == core.ModelOpenAIGPT5Mini || modelID == core.ModelOpenAIGPT5Nano ||
-		modelID == core.ModelOpenAIGPT52 || modelID == core.ModelOpenAIGPT52Instant || modelID == core.ModelOpenAIGPT52Thinking ||
-		modelID == core.ModelOpenAIGPT52ThinkHigh || modelID == core.ModelOpenAIGPT52Pro || modelID == core.ModelOpenAIGPT52Codex ||
-		modelID == core.ModelOpenAIGPT54 || modelID == core.ModelOpenAIGPT54Mini || modelID == core.ModelOpenAIGPT54Nano ||
-		modelID == core.ModelOpenAIGPT54Pro || modelID == core.ModelOpenAIGPT55 || modelID == core.ModelOpenAIGPT55Pro ||
-		strings.HasPrefix(modelStr, "gpt-") || strings.HasPrefix(modelStr, "o1") || strings.HasPrefix(modelStr, "o3"):
-		llm, err = NewOpenAI(modelID, apiKey)
-	case strings.HasPrefix(string(modelID), "ollama:"):
-		parts := strings.SplitN(string(modelID), ":", 2)
-		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-			return nil, fmt.Errorf("invalid Ollama model ID format. Use 'ollama:<model_name>'")
-		}
-		llm, err = NewOllamaLLM(core.ModelID(parts[1]))
-	case strings.HasPrefix(string(modelID), "llamacpp:"):
-		return NewLlamacppLLM("http://localhost:8080")
-	default:
-		return nil, fmt.Errorf("unsupported model ID: %s", modelID)
-	}
-
-	return llm, err
-}
-
-// Implement the LLMFactory interface.
-func (f *DefaultLLMFactory) CreateLLM(apiKey string, modelID core.ModelID) (core.LLM, error) {
-	return NewLLM(apiKey, modelID)
-}
-
-func init() {
-	_ = ensureFactory()
-}
-
-func EnsureFactory() {
-	_ = ensureFactory()
-}
-
-// Provider factories are defined in their respective LLM files
-// (anthrophic.go, gemini.go, ollama.go, llamacpp.go)
-
-// isValidModelInList checks if a model ID is in the provided list of valid models.
-// This provides O(n) lookup which is acceptable for small lists of valid models.
-func isValidModelInList(modelID core.ModelID, validModels []core.ModelID) bool {
-	for _, validModel := range validModels {
-		if modelID == validModel {
-			return true
-		}
-	}
-	return false
 }

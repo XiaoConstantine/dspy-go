@@ -20,26 +20,28 @@ constructed.
 
 ## Decision
 
-DSPy-Go registers a distinct `openai-codex` provider implemented in
-`pkg/llms/openai_codex.go`.
+DSPy-Go registers a distinct `openai-codex` provider. The subscription wire
+protocol is implemented by `llm-go/openai/codex`; `pkg/llms/providers.go`
+constructs it and the shared `pkg/llms/adapter.go` maps it to `core.LLM`.
 
 The provider:
 
 - resolves credentials immediately before each operation;
 - reports the rejected access token once after an HTTP 401 so refresh rotation can be correlated safely;
 - sends Responses requests with the required account and originator headers;
-- translates canonical chat history, function calls, and function outputs;
+- accepts llm-go's canonical chat history, function calls, and function outputs;
 - preserves ordered opaque Responses output items on the canonical message so
   encrypted reasoning and calls can be replayed exactly on the next turn;
 - parses SSE text, function calls, errors, completion status, and token usage;
-- implements `core.ToolCallingChatLLM`, preserving `pkg/agents.RunLoop` as the
-  sole execution loop;
+- is adapted to `core.ToolCallingChatLLM`, preserving `pkg/agents.RunLoop` as
+  the sole execution loop;
 - does not offer embeddings, which are not part of subscription Codex access.
 
-The application owns OAuth interaction, permission-restricted persistence, and
-cross-process serialization of rotating refresh tokens. DSPy-Go supplies PKCE,
-independent state generation, context-aware token exchange/refresh helpers, JWT
-account-ID extraction, and the operation-time credential resolver contract.
+The consuming application owns OAuth login, token exchange and refresh,
+permission-restricted persistence, and cross-process serialization of rotating
+refresh tokens. DSPy-Go accepts current access-token credentials and exposes
+the operation-time resolver contract backed by llm-go; it does not implement
+OAuth authorization or credential storage.
 
 The ordinary `openai` provider accepts API keys only. Explicit configuration
 wins over `OPENAI_API_KEY`; `OPENAI_OAUTH_TOKEN` is reserved for
@@ -55,10 +57,10 @@ of the reusable provider layer.
 
 ## Verification
 
-Recorded-request tests assert the endpoint, headers, Responses payload,
-canonical tool round trip, ordered continuation, SSE usage parsing,
-operation-time resolution, forced refresh retry, and execution through the
-shared `agents.RunLoop`. OAuth tests assert independent state and context
-cancellation. A live ChatGPT subscription smoke test completed a two-turn tool
-call during development; releases should repeat it because it requires
+llm-go's recorded-request tests assert the endpoint, headers, Responses
+payload, canonical tool round trip, ordered continuation, SSE usage parsing,
+operation-time resolution, and forced refresh retry. dspy-go's adapter and
+agent tests cover the `core.LLM` boundary and execution through the shared
+`agents.RunLoop`. A live ChatGPT subscription smoke test completed a two-turn
+tool call during development; releases should repeat it because it requires
 interactive credentials and validates an external protocol.

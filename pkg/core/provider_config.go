@@ -114,6 +114,9 @@ func InferProviderFromModelID(modelID ModelID) string {
 	if strings.HasPrefix(modelStr, "llamacpp:") {
 		return "llamacpp"
 	}
+	if strings.HasPrefix(modelStr, "openai-codex:") {
+		return "openai-codex"
+	}
 
 	return ""
 }
