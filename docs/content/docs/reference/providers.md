@@ -277,11 +277,10 @@ llm, err := llms.NewOpenAICodexLLM(
 ```
 
 Credentials are resolved before every request. A `401` causes one retry with the rejected access token so concurrent refresh
-rotation can be correlated safely. The application owns secure persistence and cross-process
-serialization of rotating refresh tokens. Use
-`oauth.GetOpenAIAuthorizationURLWithState`, independent `oauth.GenerateState`,
-and the context-aware exchange/refresh helpers. The provider continues to use
-the shared `pkg/agents` execution loop.
+rotation can be correlated safely. The application owns OAuth login, token refresh, secure
+persistence, and cross-process serialization of rotating refresh tokens. DSPy-Go does not
+implement interactive OAuth or credential storage. The provider continues to use the shared
+`pkg/agents` execution loop.
 
 For static command-line use, select `openai-codex` and pass the OAuth access
 token in `ProviderConfig.APIKey` or `OPENAI_OAUTH_TOKEN`. Supply `account_id` or

@@ -33,7 +33,6 @@ This directory contains runnable examples for the main module, agent, optimizati
 - **[tool_chaining](tool_chaining/)** - Sequential tool pipelines
 - **[tool_composition](tool_composition/)** - Composite tools and orchestration
 - **[mcp_optimizer](mcp_optimizer/)** - MCP-backed optimization workflow
-- **[oauth_login](oauth_login/)** - OAuth integration example
 
 ### Research And Miscellaneous
 

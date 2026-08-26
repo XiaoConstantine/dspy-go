@@ -410,9 +410,18 @@ func main() {
 	err = core.ConfigureTeacherLLM(*apiKey, core.ModelGoogleGeminiPro)
 	if err != nil {
 		logger.Error(ctx, "Failed to configure LLM: %v", err)
+	} else {
+		embedding, embeddingErr := core.GetTeacherLLM().CreateEmbedding(
+			ctx,
+			"this is a test",
+			core.WithModel(string(core.ModelGoogleGeminiEmbedding2)),
+		)
+		if embeddingErr != nil {
+			logger.Error(ctx, "Failed to create embedding: %v", embeddingErr)
+		} else {
+			logger.Info(ctx, "Embedding dimensions: %d", len(embedding.Vector))
+		}
 	}
-	resp, _ := core.GetTeacherLLM().CreateEmbedding(ctx, "this is a test", core.WithModel("gemini-embedding-exp-03-07"))
-	logger.Info(ctx, "get resp: %v", resp)
 
 	RunChainExample(ctx, logger)
 	RunParallelExample(ctx, logger)

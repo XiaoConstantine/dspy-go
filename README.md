@@ -179,6 +179,14 @@ llm, _ := llms.NewOpenAILLM(core.ModelOpenAIGPT4,
     llms.WithOpenAIBaseURL("http://localhost:4000"))
 ```
 
+Provider wire protocols and model metadata are supplied by
+[`llm-go`](https://github.com/XiaoConstantine/llm-go); `pkg/llms` is a
+compatibility adapter for dspy-go's `core.LLM` interface. llm-go owns
+generation, streaming, structured output, and tool calls. Because embeddings
+remain part of `core.LLM`, dspy-go retains the Gemini and OpenAI-compatible
+embedding clients. Ollama and llama.cpp must expose an OpenAI-compatible
+endpoint.
+
 **[Providers Reference](https://xiaocui.me/dspy-go/docs/reference/providers/)**
 
 ## Community
