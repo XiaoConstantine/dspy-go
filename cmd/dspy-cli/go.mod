@@ -18,7 +18,7 @@ require (
 	cloud.google.com/go/auth v0.9.3 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
-	github.com/XiaoConstantine/llm-go v0.1.0 // indirect
+	github.com/XiaoConstantine/llm-go v0.2.0 // indirect
 	github.com/XiaoConstantine/mcp-go v0.3.1 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.66.0 // indirect
