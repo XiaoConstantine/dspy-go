@@ -62,7 +62,7 @@ credential behavior:
 
 | Provider | Constructor | Notes |
 |---|---|---|
-| Anthropic | `NewAnthropicLLM(apiKey, anthropic.Model)` | Uses `ANTHROPIC_OAUTH_TOKEN` first, then `apiKey`, then `ANTHROPIC_API_KEY` |
+| Anthropic | `NewAnthropicLLM(apiKey, modelID)` | Uses `ANTHROPIC_OAUTH_TOKEN` first, then `apiKey`, then `ANTHROPIC_API_KEY` |
 | Google Gemini | `NewGeminiLLM(apiKey, modelID)` | Reads `GEMINI_API_KEY` when `apiKey` is empty |
 | OpenAI-compatible chat | `NewOpenAILLM(modelID, options...)` | Chat Completions constructor; reads `OPENAI_API_KEY` if `WithAPIKey` is omitted |
 | OpenAI API key | `NewOpenAI(modelID, apiKey)` | Chat Completions convenience wrapper; requires an explicit key |

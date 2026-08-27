@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
-	"github.com/anthropics/anthropic-sdk-go"
 )
 
 type TokenInfo struct {
@@ -677,26 +676,26 @@ type ModelID string
 
 const (
 	// Anthropic models. The short names track the current model in each family.
-	ModelAnthropicHaiku  ModelID = ModelID(anthropic.ModelClaudeHaiku4_5)
-	ModelAnthropicSonnet ModelID = ModelID(anthropic.ModelClaudeSonnet5)
-	ModelAnthropicOpus   ModelID = ModelID(anthropic.ModelClaudeOpus5)
+	ModelAnthropicHaiku  ModelID = "claude-haiku-4-5"
+	ModelAnthropicSonnet ModelID = "claude-sonnet-5"
+	ModelAnthropicOpus   ModelID = "claude-opus-5"
 	// Claude 4.5 series.
-	ModelAnthropicClaude45Haiku          ModelID = ModelID(anthropic.ModelClaudeHaiku4_5)
-	ModelAnthropicClaude45Haiku20251001  ModelID = ModelID(anthropic.ModelClaudeHaiku4_5_20251001)
-	ModelAnthropicClaude45Sonnet         ModelID = ModelID(anthropic.ModelClaudeSonnet4_5)
-	ModelAnthropicClaude45Sonnet20250929 ModelID = ModelID(anthropic.ModelClaudeSonnet4_5_20250929)
-	ModelAnthropicClaude45Opus           ModelID = ModelID(anthropic.ModelClaudeOpus4_5)
-	ModelAnthropicClaude45Opus20251101   ModelID = ModelID(anthropic.ModelClaudeOpus4_5_20251101)
+	ModelAnthropicClaude45Haiku          ModelID = "claude-haiku-4-5"
+	ModelAnthropicClaude45Haiku20251001  ModelID = "claude-haiku-4-5-20251001"
+	ModelAnthropicClaude45Sonnet         ModelID = "claude-sonnet-4-5"
+	ModelAnthropicClaude45Sonnet20250929 ModelID = "claude-sonnet-4-5-20250929"
+	ModelAnthropicClaude45Opus           ModelID = "claude-opus-4-5"
+	ModelAnthropicClaude45Opus20251101   ModelID = "claude-opus-4-5-20251101"
 	// Claude 4.6 series.
-	ModelAnthropicClaude46Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet4_6)
-	ModelAnthropicClaude46Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_6)
-	ModelAnthropicClaude47Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_7)
-	ModelAnthropicClaude48Opus   ModelID = ModelID(anthropic.ModelClaudeOpus4_8)
+	ModelAnthropicClaude46Sonnet ModelID = "claude-sonnet-4-6"
+	ModelAnthropicClaude46Opus   ModelID = "claude-opus-4-6"
+	ModelAnthropicClaude47Opus   ModelID = "claude-opus-4-7"
+	ModelAnthropicClaude48Opus   ModelID = "claude-opus-4-8"
 	// Claude 5 series.
-	ModelAnthropicClaude5Sonnet ModelID = ModelID(anthropic.ModelClaudeSonnet5)
-	ModelAnthropicClaude5Fable  ModelID = ModelID(anthropic.ModelClaudeFable5)
-	ModelAnthropicClaude5Mythos ModelID = ModelID(anthropic.ModelClaudeMythos5)
-	ModelAnthropicClaude5Opus   ModelID = ModelID(anthropic.ModelClaudeOpus5)
+	ModelAnthropicClaude5Sonnet ModelID = "claude-sonnet-5"
+	ModelAnthropicClaude5Fable  ModelID = "claude-fable-5"
+	ModelAnthropicClaude5Mythos ModelID = "claude-mythos-5"
+	ModelAnthropicClaude5Opus   ModelID = "claude-opus-5"
 
 	// Google Gemini models (existing).
 	ModelGoogleGeminiFlash     ModelID = "gemini-2.5-flash"

@@ -13,7 +13,6 @@ import (
 	llmmodels "github.com/XiaoConstantine/llm-go/models"
 	llmopenai "github.com/XiaoConstantine/llm-go/openai"
 	llmcodex "github.com/XiaoConstantine/llm-go/openai/codex"
-	"github.com/anthropics/anthropic-sdk-go"
 )
 
 // Provider-specific wrappers preserve the public constructor return types while
@@ -28,7 +27,7 @@ type (
 	LlamacppLLM    struct{ *GeneratorLLM }
 )
 
-func NewAnthropicLLM(apiKey string, model anthropic.Model) (*AnthropicLLM, error) {
+func NewAnthropicLLM(apiKey string, model string) (*AnthropicLLM, error) {
 	return NewAnthropicLLMFromConfig(context.Background(), core.ProviderConfig{
 		Name: "anthropic", APIKey: apiKey,
 	}, core.ModelID(model))

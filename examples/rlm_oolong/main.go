@@ -28,8 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
-
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
@@ -305,7 +303,7 @@ func main() {
 		if modelName == "" {
 			modelName = "claude-haiku-4-5"
 		}
-		llm, err = llms.NewAnthropicLLM(apiKey, anthropic.Model(modelName))
+		llm, err = llms.NewAnthropicLLM(apiKey, modelName)
 		if err != nil {
 			logger.Fatalf(ctx, "Failed to create Anthropic LLM: %v", err)
 		}

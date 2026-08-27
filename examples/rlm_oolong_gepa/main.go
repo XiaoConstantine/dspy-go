@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
-
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/optimize"
 	agentrlm "github.com/XiaoConstantine/dspy-go/pkg/agents/rlm"
@@ -255,9 +253,9 @@ func buildLLM(ctx context.Context, logger *logging.Logger, provider, model, apiK
 		}
 		modelName := model
 		if modelName == "" {
-			modelName = string(anthropic.ModelClaudeHaiku4_5)
+			modelName = string(core.ModelAnthropicClaude45Haiku)
 		}
-		llm, err := llms.NewAnthropicLLM(apiKey, anthropic.Model(modelName))
+		llm, err := llms.NewAnthropicLLM(apiKey, modelName)
 		if err != nil {
 			return nil, "", err
 		}
