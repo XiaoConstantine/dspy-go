@@ -8,8 +8,8 @@ cloud.google.com/go/compute/metadata v0.9.0/go.mod h1:E0bWwX5wTnLPedCKqk3pJmVgCB
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c h1:RGWPOewvKIROun94nF7v2cua9qP+thov/7M50KEoeSU=
 github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c/go.mod h1:X0CRv0ky0k6m906ixxpzmDRLvX58TFUKS2eePweuyxk=
-github.com/XiaoConstantine/llm-go v0.1.0 h1:+vHQk1tP8qjtcxIbLvK9xltBHg6ekbTtTNtLp6DUTLI=
-github.com/XiaoConstantine/llm-go v0.1.0/go.mod h1:QHUXDw1zlW4qnAWrjmwKHYWgHXYpEsJk+SJTDdFzlGA=
+github.com/XiaoConstantine/llm-go v0.2.0 h1:iYA+nbq2IwGyPkchv6pdAnnFYdUGOGPk20LMwsTs2vU=
+github.com/XiaoConstantine/llm-go v0.2.0/go.mod h1:QHUXDw1zlW4qnAWrjmwKHYWgHXYpEsJk+SJTDdFzlGA=
 github.com/XiaoConstantine/mcp-go v0.3.1 h1:5aSrqvvulbKI1hxN7Aj3iSotX0VRSpDShXIDls4ZC+U=
 github.com/XiaoConstantine/mcp-go v0.3.1/go.mod h1:qsY3Gm4CYMREmoLXEMwtf0Hdb5F957kgcpF6huoNHcY=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
