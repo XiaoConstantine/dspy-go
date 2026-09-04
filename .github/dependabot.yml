@@ -1,13 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directory: "/"
+    directories:
+      - "/"
+      - "/cmd/dspy-cli"
     schedule:
       interval: daily
-  - package-ecosystem: gomod
-    directory: "/cmd/dspy-cli"
-    schedule:
-      interval: daily
+    groups:
+      shared-go-dependencies:
+        group-by: dependency-name
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
