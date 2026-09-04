@@ -7,7 +7,7 @@ require (
 	github.com/XiaoConstantine/mcp-go v0.3.1
 	github.com/apache/arrow/go/v13 v13.0.0
 	github.com/go-playground/validator/v10 v10.30.3
-	github.com/mattn/go-sqlite3 v1.14.49
+	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.12.1
 	github.com/traefik/yaegi v0.16.1
