@@ -144,6 +144,7 @@ interceptors.ApplyXMLInterceptors(predict, interceptors.DefaultXMLConfig())
 - **[xml_adapter](examples/xml_adapter/)** - XML structured output
 - **[parallel](examples/parallel/)** - Batch processing
 - **[refine](examples/refine/)** - Quality improvement
+- **[typesafe_decide](examples/typesafe_decide/)** - Experimental closed-set decisions with TypeSafe System One
 
 ### Optimization
 - **[rlm_oolong_gepa](examples/rlm_oolong_gepa/)** - Optimize an adaptive RLM agent, save the optimized program, restore it, and replay it

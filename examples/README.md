@@ -29,6 +29,7 @@ This directory contains runnable examples for the main module, agent, optimizati
 
 ### Tools And Integrations
 
+- **[typesafe_decide](typesafe_decide/)** - Experimental closed-set decisions with TypeSafe System One
 - **[smart_tool_registry](smart_tool_registry/)** - Intelligent tool selection
 - **[tool_chaining](tool_chaining/)** - Sequential tool pipelines
 - **[tool_composition](tool_composition/)** - Composite tools and orchestration
@@ -48,6 +49,7 @@ From the repo root:
 ```bash
 go run ./examples/rlm_subrlm_budgets
 go run ./examples/parallel
+TYPESAFE_API_KEY=... go run ./examples/typesafe_decide
 GEMINI_API_KEY=... go run ./examples/rlm_context_policy -provider gemini
 GOOGLE_API_KEY=... go run ./examples/rlm_oolong_gepa -provider gemini -artifact /tmp/oolong-program.json
 ```
@@ -56,7 +58,7 @@ Many example directories also include their own `README.md` with task-specific n
 
 ## Notes
 
-- Examples under `rlm`, `rlm_context_policy`, `rlm_oolong`, and `rlm_oolong_gepa` can make live provider calls unless explicitly scripted.
+- Examples under `rlm`, `rlm_context_policy`, `rlm_oolong`, `rlm_oolong_gepa`, and `typesafe_decide` can make live provider calls unless explicitly scripted.
 - `rlm_subrlm_budgets` is deterministic and does not require an API key.
 - The `others/` subtree is intentionally more experimental and lower-level than the curated examples above.
 
