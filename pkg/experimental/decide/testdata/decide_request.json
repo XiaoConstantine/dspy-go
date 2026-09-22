@@ -1,0 +1,56 @@
+{
+  "state": {
+    "ticket": "Payment failed and checkout is unavailable."
+  },
+  "model": "jev-test-pinned",
+  "questions": {
+    "category": {
+      "type": "choice",
+      "instructions": {
+        "question": "Classify the issue.",
+        "task": "Assess the support ticket.",
+        "inputs": [
+          {
+            "name": "ticket",
+            "description": "Support ticket text"
+          }
+        ]
+      },
+      "criteria": {
+        "billing": "Payment issue",
+        "technical": "Product malfunction"
+      }
+    },
+    "severity": {
+      "type": "score",
+      "instructions": {
+        "question": "Rate the impact.",
+        "task": "Assess the support ticket.",
+        "inputs": [
+          {
+            "name": "ticket",
+            "description": "Support ticket text"
+          }
+        ]
+      },
+      "criteria": [
+        "Minor",
+        "Disruptive",
+        "Blocking"
+      ]
+    },
+    "urgent": {
+      "type": "noul",
+      "instructions": {
+        "question": "Does this require immediate attention?",
+        "task": "Assess the support ticket.",
+        "inputs": [
+          {
+            "name": "ticket",
+            "description": "Support ticket text"
+          }
+        ]
+      }
+    }
+  }
+}

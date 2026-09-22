@@ -1,0 +1,29 @@
+{
+  "state": {
+    "ticket": "Payment failed and checkout is unavailable."
+  },
+  "model": "jev-test-pinned",
+  "questions": {
+    "category": {
+      "type": "choice",
+      "instructions": "What is this ticket about?",
+      "criteria": {
+        "billing": "Payment issue",
+        "technical": "Product malfunction"
+      }
+    },
+    "severity": {
+      "type": "score",
+      "instructions": "How severe is the issue?",
+      "criteria": [
+        "Minor",
+        "Disruptive",
+        "Blocking"
+      ]
+    },
+    "urgent": {
+      "type": "noul",
+      "instructions": "Does this require immediate attention?"
+    }
+  }
+}
