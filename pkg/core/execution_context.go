@@ -20,8 +20,9 @@ type ExecutionState struct {
 	activeSpan *Span
 
 	// LLM-specific state
-	modelID    string
-	tokenUsage *TokenUsage
+	modelID          string
+	tokenUsage       *TokenUsage
+	tokenUsageEvents uint64
 
 	// Custom annotations
 	annotations map[string]any
@@ -64,10 +65,11 @@ type spanContextFrame struct {
 	span   *Span
 	parent *spanContextFrame
 
-	modelID        string
-	tokenUsage     TokenUsage
-	lastTokenUsage TokenUsage
-	hasTokenUsage  bool
+	modelID          string
+	tokenUsage       TokenUsage
+	lastTokenUsage   TokenUsage
+	tokenUsageEvents uint64
+	hasTokenUsage    bool
 }
 
 var (
@@ -178,6 +180,7 @@ func RecordTokenUsage(ctx context.Context, usage *TokenUsage) {
 		current.tokenUsage.TotalTokens += usage.TotalTokens
 		current.tokenUsage.Cost += usage.Cost
 		current.lastTokenUsage = *usage
+		current.tokenUsageEvents++
 		current.hasTokenUsage = true
 		current.mu.Unlock()
 	}
@@ -237,6 +240,23 @@ func LatestTokenUsageFromContext(ctx context.Context) *TokenUsage {
 	}
 	usage := frame.lastTokenUsage
 	return &usage
+}
+
+// TokenUsageEventCount returns the number of usage events recorded on this
+// context branch. Contexts without a span frame use the legacy state counter.
+func TokenUsageEventCount(ctx context.Context) uint64 {
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return 0
+	}
+	if frame, ok := ctx.Value(spanKey).(*spanContextFrame); ok && frame.state == state {
+		frame.mu.Lock()
+		defer frame.mu.Unlock()
+		return frame.tokenUsageEvents
+	}
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.tokenUsageEvents
 }
 
 // StartSpan begins a new operation span. Callers must propagate the returned
@@ -366,6 +386,7 @@ func (s *ExecutionState) WithTokenUsage(usage *TokenUsage) {
 	}
 	copy := *usage
 	s.tokenUsage = &copy
+	s.tokenUsageEvents++
 }
 
 // State access methods.

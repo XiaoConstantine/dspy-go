@@ -566,6 +566,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		}
 
 		// Call the iteration module
+		usageCheckpoint := captureTokenUsage(ctx)
 		outputs, err := r.iterationModule.Process(ctx, iterInputs)
 		if err != nil {
 			processErr := fmt.Errorf("iteration %d: module process failed: %w", i, err)
@@ -583,7 +584,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		// Strip language markers from code (handles LLM outputting "go\n" at start)
 		code = stripCodeLanguageMarker(code)
 
-		rootPromptTokens := r.trackTokenUsage(ctx, tokenTracker, i+1)
+		rootPromptTokens := r.trackTokenUsage(ctx, tokenTracker, i+1, usageCheckpoint)
 		if err := r.enforceTokenBudget(tokenTracker); err != nil {
 			finalizeRLMTrace(trace, nil, "token_budget_exceeded", err)
 			return nil, trace, err
@@ -733,6 +734,11 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
 				tokenTracker.AddSubCall(call)
+				core.RecordTokenUsage(ctx, &core.TokenUsage{
+					PromptTokens:     call.PromptTokens,
+					CompletionTokens: call.CompletionTokens,
+					TotalTokens:      call.PromptTokens + call.CompletionTokens,
+				})
 				rlmCalls = append(rlmCalls, logging.RLMCallEntry{
 					Prompt:           call.Prompt,
 					Response:         call.Response,
@@ -1066,6 +1072,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 		}
 
 		// Call the iteration module
+		usageCheckpoint := captureTokenUsage(ctx)
 		outputs, err := subRLM.iterationModule.Process(ctx, iterInputs)
 		if err != nil {
 			return nil, fmt.Errorf("sub-RLM iteration %d: module process failed: %w", i, err)
@@ -1079,7 +1086,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 		subquery := extractStringOutput(outputs, "subquery")
 
 		code = stripCodeLanguageMarker(code)
-		subRLM.trackTokenUsage(ctx, tokenTracker, i+1)
+		subRLM.trackTokenUsage(ctx, tokenTracker, i+1, usageCheckpoint)
 		if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
 			return nil, err
 		}
@@ -1166,6 +1173,11 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
 				tokenTracker.AddSubCall(call)
+				core.RecordTokenUsage(ctx, &core.TokenUsage{
+					PromptTokens:     call.PromptTokens,
+					CompletionTokens: call.CompletionTokens,
+					TotalTokens:      call.PromptTokens + call.CompletionTokens,
+				})
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
 			if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
@@ -1249,12 +1261,13 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 		"repl_state":   r.formatREPLStateInput(replEnv),
 	}
 
+	usageCheckpoint := captureTokenUsage(ctx)
 	outputs, err := r.iterationModule.Process(ctx, iterInputs)
 	if err != nil {
 		return nil, fmt.Errorf("default answer: module process failed: %w", err)
 	}
 
-	r.trackTokenUsage(ctx, tokenTracker, 0)
+	r.trackTokenUsage(ctx, tokenTracker, 0, usageCheckpoint)
 	if err := r.enforceTokenBudget(tokenTracker); err != nil {
 		return nil, err
 	}
@@ -1679,31 +1692,61 @@ func finalizeRLMTrace(trace *RLMTrace, result *CompletionResult, terminationCaus
 	}
 }
 
-// trackTokenUsage extracts token usage from the execution state and records it.
-// When iteration > 0, a per-iteration snapshot is recorded for context fill ratio analysis.
-// Returns the per-call prompt tokens reported by the provider (0 if unavailable).
-func (r *RLM) trackTokenUsage(ctx context.Context, tokenTracker *TokenTracker, iteration int) int {
+type tokenUsageCheckpoint struct {
+	events    uint64
+	aggregate *core.TokenUsage
+	branch    bool
+}
+
+func captureTokenUsage(ctx context.Context) tokenUsageCheckpoint {
+	return tokenUsageCheckpoint{
+		events:    core.TokenUsageEventCount(ctx),
+		aggregate: core.TokenUsageFromContext(ctx),
+		branch:    core.SpanFromContext(ctx) != nil,
+	}
+}
+
+// trackTokenUsage records only usage events produced after checkpoint. When
+// iteration > 0, a per-iteration snapshot is recorded for context fill ratio
+// analysis. It returns per-call prompt tokens, or zero when the call supplied
+// no usage metadata.
+func (r *RLM) trackTokenUsage(ctx context.Context, tokenTracker *TokenTracker, iteration int, checkpoint tokenUsageCheckpoint) int {
 	if tokenTracker == nil {
 		tokenTracker = r.GetTokenTracker()
 	}
-	if tokenTracker == nil {
+	if tokenTracker == nil || core.TokenUsageEventCount(ctx) == checkpoint.events {
 		return 0
 	}
-	usage := core.LatestTokenUsageFromContext(ctx)
-	if usage == nil && core.SpanFromContext(ctx) == nil {
-		if state := core.GetExecutionState(ctx); state != nil {
-			usage = state.GetTokenUsage()
-		}
+
+	var usage *core.TokenUsage
+	if checkpoint.branch {
+		usage = tokenUsageDifference(checkpoint.aggregate, core.TokenUsageFromContext(ctx))
+	} else if state := core.GetExecutionState(ctx); state != nil {
+		usage = state.GetTokenUsage()
 	}
-	if usage != nil {
-		if iteration > 0 {
-			tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
-		} else {
-			tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
-		}
-		return usage.PromptTokens
+	if usage == nil {
+		return 0
 	}
-	return 0
+	if iteration > 0 {
+		tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
+	} else {
+		tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+	}
+	return usage.PromptTokens
+}
+
+func tokenUsageDifference(before, after *core.TokenUsage) *core.TokenUsage {
+	if after == nil {
+		return nil
+	}
+	difference := *after
+	if before != nil {
+		difference.PromptTokens -= before.PromptTokens
+		difference.CompletionTokens -= before.CompletionTokens
+		difference.TotalTokens -= before.TotalTokens
+		difference.Cost -= before.Cost
+	}
+	return &difference
 }
 
 func (r *RLM) setTokenTracker(tokenTracker *TokenTracker) {

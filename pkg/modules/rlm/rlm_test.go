@@ -22,6 +22,7 @@ type mockLLM struct {
 	callCount int
 	prompts   []string
 	usages    []core.TokenInfo
+	omitUsage map[int]bool
 }
 
 func (m *mockLLM) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
@@ -29,20 +30,22 @@ func (m *mockLLM) Generate(ctx context.Context, prompt string, opts ...core.Gene
 		return nil, fmt.Errorf("no more mock responses")
 	}
 	m.prompts = append(m.prompts, prompt)
-	resp := m.responses[m.callCount]
+	callIndex := m.callCount
+	resp := m.responses[callIndex]
 	usage := core.TokenInfo{
 		PromptTokens:     100,
 		CompletionTokens: 50,
 		TotalTokens:      150,
 	}
-	if m.callCount < len(m.usages) {
-		usage = m.usages[m.callCount]
+	if callIndex < len(m.usages) {
+		usage = m.usages[callIndex]
 	}
 	m.callCount++
-	return &core.LLMResponse{
-		Content: resp,
-		Usage:   &usage,
-	}, nil
+	response := &core.LLMResponse{Content: resp}
+	if !m.omitUsage[callIndex] {
+		response.Usage = &usage
+	}
+	return response, nil
 }
 
 func (m *mockLLM) GenerateWithJSON(ctx context.Context, prompt string, opts ...core.GenerateOption) (map[string]any, error) {
@@ -525,6 +528,48 @@ func TestRLMWithCodeExecution(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", result.Response)
 	assert.Equal(t, 2, result.Iterations)
+}
+
+func TestRLMProcessRecordsRootAndSubUsageOnContextBranch(t *testing.T) {
+	mockRoot := &mockLLM{responses: []string{
+		"Reasoning:\nUse a sub-query and finish.\n\nAction:\nquery\n\nCode:\nanswer := QueryRaw(\"what is the answer?\")\nFINAL(answer)\n\nAnswer:\n",
+	}}
+	mockSub := &mockSubLLMClient{
+		queryResponse:         "sub answer",
+		queryPromptTokens:     20,
+		queryCompletionTokens: 5,
+	}
+	r := New(mockRoot, mockSub, WithMaxIterations(1))
+
+	ctx := core.WithExecutionState(context.Background())
+	outerCtx, _ := core.StartSpan(ctx, "outer")
+	outputs, err := r.Process(outerCtx, map[string]any{"context": "ctx", "query": "q"})
+	require.NoError(t, err)
+	assert.Equal(t, "sub answer", outputs["answer"])
+
+	usage := core.TokenUsageFromContext(outerCtx)
+	require.NotNil(t, usage)
+	assert.Equal(t, 120, usage.PromptTokens)
+	assert.Equal(t, 55, usage.CompletionTokens)
+	assert.Equal(t, 175, usage.TotalTokens)
+	core.EndSpan(outerCtx)
+}
+
+func TestRLMDoesNotReusePriorUsageWhenResponseOmitsIt(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nExplore once.\n\nAction:\nexplore\n\nCode:\nfmt.Println(\"first\")\n\nAnswer:\n",
+			"Reasoning:\nFinish.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ndone",
+		},
+		omitUsage: map[int]bool{1: true},
+	}
+	r := New(mockRoot, &mockSubLLMClient{}, WithMaxIterations(2), WithMaxTokens(200))
+
+	result, err := r.Complete(context.Background(), "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, "done", result.Response)
+	assert.Equal(t, 150, result.Usage.TotalTokens)
+	assert.Len(t, r.GetTokenTracker().GetRootSnapshots(), 1)
 }
 
 func TestRLMDefaultBlocksLargeFullContextQuery(t *testing.T) {
