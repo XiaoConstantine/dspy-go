@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,8 +57,15 @@ type ExecutionContextKey struct {
 	name string
 }
 
+type spanContextFrame struct {
+	state  *ExecutionState
+	span   *Span
+	parent *Span
+}
+
 var (
 	stateKey         = &ExecutionContextKey{"dspy-state"}
+	spanKey          = &ExecutionContextKey{"dspy-span"}
 	defaultGenerator = &spanIDGenerator{}
 )
 
@@ -175,44 +181,65 @@ func StartSpanWithContext(ctx context.Context, operation string, moduleName stri
 	}
 
 	span := &Span{
-		ID:          generateSpanID(), // Implementation needed
+		ID:          generateSpanID(),
 		Operation:   displayName,
 		StartTime:   time.Now(),
 		Annotations: annotations,
 	}
 
-	if state.activeSpan != nil {
-		span.ParentID = state.activeSpan.ID
+	// Parentage belongs to the context branch, not to the most recently started
+	// span in the shared execution state. This keeps sibling goroutines from
+	// becoming accidental parent/child spans.
+	var parent *Span
+	if frame, ok := ctx.Value(spanKey).(*spanContextFrame); ok && frame.state == state {
+		parent = frame.span
+		span.ParentID = parent.ID
 	}
 
 	state.spans = append(state.spans, span)
 	state.activeSpan = span
+	ctx = context.WithValue(ctx, spanKey, &spanContextFrame{
+		state:  state,
+		span:   span,
+		parent: parent,
+	})
 
 	return ctx, span
 }
 
-// EndSpan completes the current span.
+// EndSpan completes the span associated with ctx. When multiple context
+// branches share one ExecutionState, ending one branch never closes another
+// branch's span.
 func EndSpan(ctx context.Context) {
-	if state := GetExecutionState(ctx); state != nil {
-		state.mu.Lock()
-		defer state.mu.Unlock()
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return
+	}
 
-		if state.activeSpan != nil {
-			endedSpan := state.activeSpan
-			endedSpan.EndTime = time.Now()
-			state.activeSpan = nil
+	state.mu.Lock()
+	defer state.mu.Unlock()
 
-			if endedSpan.ParentID == "" {
-				return
-			}
+	var target, parent *Span
+	if frame, ok := ctx.Value(spanKey).(*spanContextFrame); ok && frame.state == state {
+		target = frame.span
+		parent = frame.parent
+	} else {
+		// Preserve the legacy best-effort behavior for callers that discard the
+		// context returned by StartSpan.
+		target = state.activeSpan
+	}
+	if target == nil {
+		return
+	}
 
-			for _, span := range slices.Backward(state.spans) {
-				if span.ID == endedSpan.ParentID {
-					state.activeSpan = span
-					return
-				}
-			}
-		}
+	target.mu.Lock()
+	if target.EndTime.IsZero() {
+		target.EndTime = time.Now()
+	}
+	target.mu.Unlock()
+
+	if state.activeSpan == target {
+		state.activeSpan = parent
 	}
 }
 

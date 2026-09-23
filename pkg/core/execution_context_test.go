@@ -121,8 +121,30 @@ func TestEndSpan_RestoresParentSpan(t *testing.T) {
 	require.False(t, parent.EndTime.IsZero())
 }
 
+func TestEndSpan_IsolatesConcurrentContextBranches(t *testing.T) {
+	ctx := WithExecutionState(context.Background())
+	rootCtx, root := StartSpan(ctx, "root")
+	leftCtx, left := StartSpan(rootCtx, "left")
+	rightCtx, right := StartSpan(rootCtx, "right")
+
+	require.Equal(t, root.ID, left.ParentID)
+	require.Equal(t, root.ID, right.ParentID)
+
+	EndSpan(leftCtx)
+	require.False(t, left.EndTime.IsZero())
+	require.True(t, right.EndTime.IsZero(), "ending one branch must not close its sibling")
+
+	EndSpan(rightCtx)
+	require.False(t, right.EndTime.IsZero())
+	require.Same(t, root, GetExecutionState(rootCtx).GetCurrentSpan())
+
+	EndSpan(rootCtx)
+	require.False(t, root.EndTime.IsZero())
+}
+
 func TestWithFreshExecutionStatePreservesTraceID(t *testing.T) {
 	parentCtx := WithExecutionState(context.Background())
+	parentCtx, _ = StartSpan(parentCtx, "parent")
 	parentState := GetExecutionState(parentCtx)
 	require.NotNil(t, parentState)
 
@@ -134,6 +156,10 @@ func TestWithFreshExecutionStatePreservesTraceID(t *testing.T) {
 	require.Equal(t, parentState.GetTraceID(), childState.GetTraceID())
 	require.Nil(t, childState.GetCurrentSpan())
 	require.Empty(t, CollectSpans(childCtx))
+
+	childCtx, childSpan := StartSpan(childCtx, "fresh child")
+	require.Empty(t, childSpan.ParentID, "a fresh state must not inherit the parent state's active span")
+	EndSpan(childCtx)
 }
 
 func TestSpanConcurrentAnnotations(t *testing.T) {
