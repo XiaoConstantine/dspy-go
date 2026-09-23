@@ -177,6 +177,16 @@ func (c *cancelAwareSubLLMClient) QueryBatched(ctx context.Context, _ []string) 
 	return nil, err
 }
 
+type partialBatchSubLLMClient struct{}
+
+func (*partialBatchSubLLMClient) Query(context.Context, string) (QueryResponse, error) {
+	return QueryResponse{}, errors.New("single query is not supported")
+}
+
+func (*partialBatchSubLLMClient) QueryBatched(context.Context, []string) ([]QueryResponse, error) {
+	return []QueryResponse{{Response: "partial", PromptTokens: 20, CompletionTokens: 10}}, errors.New("second query failed")
+}
+
 // TestFindCodeBlocks tests the code block extraction.
 func TestFindCodeBlocks(t *testing.T) {
 	tests := []struct {
@@ -828,7 +838,6 @@ func TestRLMMaxTokens_CountsSubLLMUsage(t *testing.T) {
 	assert.Greater(t, rlm.GetTokenTracker().GetTotalUsage().TotalTokens, 180)
 }
 
-// TestRLMContextCancellation tests that context cancellation works.
 func TestRLMMaxTokensStopsBetweenREPLQueries(t *testing.T) {
 	mockRoot := &mockLLM{
 		responses: []string{
@@ -838,7 +847,7 @@ func TestRLMMaxTokensStopsBetweenREPLQueries(t *testing.T) {
 	}
 	mockSub := &mockSubLLMClient{
 		queryResponse:         "sub",
-		queryPromptTokens:     31,
+		queryPromptTokens:     30,
 		queryCompletionTokens: 20,
 	}
 	r := New(mockRoot, mockSub, WithMaxIterations(1), WithMaxTokens(150))
@@ -848,6 +857,63 @@ func TestRLMMaxTokensStopsBetweenREPLQueries(t *testing.T) {
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
 	assert.EqualValues(t, 1, mockSub.queryCalls.Load(), "calls at the exact budget must be rejected before reaching the provider")
+}
+
+func TestRLMExactTokenLimitRejectsBatchedAndAsyncQueries(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+	}{
+		{
+			name: "batch",
+			code: "results := QueryBatchedRaw([]string{\"one\", \"two\"})\nFINAL(results[0])",
+		},
+		{
+			name: "async",
+			code: "first := QueryAsync(\"one\")\n_ = WaitAsync(first)\nsecond := QueryAsync(\"two\")\n_ = WaitAsync(second)\nFINAL(\"done\")",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mockRoot := &mockLLM{
+				responses: []string{fmt.Sprintf("Reasoning:\nExercise the %s path.\n\nAction:\nquery\n\nCode:\n%s\n\nAnswer:\n", test.name, test.code)},
+				usages:    []core.TokenInfo{{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100}},
+			}
+			mockSub := &mockSubLLMClient{
+				queryResponse:         "sub",
+				queryPromptTokens:     30,
+				queryCompletionTokens: 20,
+			}
+			r := New(mockRoot, mockSub, WithMaxIterations(1), WithMaxTokens(150))
+
+			result, err := r.Complete(context.Background(), "ctx", "q")
+			require.Error(t, err)
+			assert.Nil(t, result)
+			assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
+			assert.EqualValues(t, 1, mockSub.queryCalls.Load())
+		})
+	}
+}
+
+func TestRLMBatchProviderErrorPreservesPartialUsage(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nUse the available partial batch result.\n\nAction:\nquery\n\nCode:\nresults := QueryBatchedRaw([]string{\"one\", \"two\"})\nFINAL(results[0])\n\nAnswer:\n",
+		},
+		usages: []core.TokenInfo{{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100}},
+	}
+	r := New(mockRoot, &partialBatchSubLLMClient{}, WithMaxIterations(1))
+	ctx := core.WithExecutionState(context.Background())
+	outerCtx, _ := core.StartSpan(ctx, "outer")
+
+	outputs, err := r.Process(outerCtx, map[string]any{"context": "ctx", "query": "q"})
+	require.NoError(t, err)
+	assert.Equal(t, "partial", outputs["answer"])
+	assert.Equal(t, 130, r.GetTokenTracker().GetTotalUsage().TotalTokens)
+	usage := core.TokenUsageFromContext(outerCtx)
+	require.NotNil(t, usage)
+	assert.Equal(t, 130, usage.TotalTokens)
+	core.EndSpan(outerCtx)
 }
 
 func TestRLMMaxTokensIncludesFailedChildUsage(t *testing.T) {
@@ -877,6 +943,39 @@ func TestRLMMaxTokensIncludesFailedChildUsage(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
 	assert.Equal(t, 3, mockRoot.callCount, "the parent must not continue after the child exhausts the tree budget")
 	assert.Equal(t, 400, r.GetTokenTracker().GetTotalUsage().TotalTokens)
+}
+
+func TestRLMPropagatesCancellationDuringREPLQuery(t *testing.T) {
+	mockRoot := &mockLLM{responses: []string{
+		"Reasoning:\nTry a query.\n\nAction:\nquery\n\nCode:\n_ = QueryRaw(\"wait\")\nFINAL(\"must not succeed\")\n\nAnswer:\n",
+	}}
+	mockSub := newCancelAwareSubLLMClient()
+	r := New(mockRoot, mockSub, WithMaxIterations(1))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	type completion struct {
+		result *CompletionResult
+		err    error
+	}
+	done := make(chan completion, 1)
+	go func() {
+		result, err := r.Complete(ctx, "ctx", "q")
+		done <- completion{result: result, err: err}
+	}()
+	select {
+	case <-mockSub.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("REPL query never reached the provider")
+	}
+	cancel()
+
+	select {
+	case completed := <-done:
+		assert.Nil(t, completed.result)
+		assert.ErrorIs(t, completed.err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("RLM did not return after context cancellation")
+	}
 }
 
 func TestRLMContextCancellation(t *testing.T) {

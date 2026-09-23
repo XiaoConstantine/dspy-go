@@ -1021,23 +1021,7 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 	results, err := r.llmClient.QueryBatched(r.executionContext(), fullPrompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
-
-	if err != nil {
-		responses := make([]string, len(prompts))
-		errMsg := fmt.Sprintf("Error: %v", err)
-		for i, prompt := range prompts {
-			responses[i] = errMsg
-			r.recordLLMCall(prompt, errMsg, avgDuration, 0, 0)
-		}
-		return responses
-	}
-
-	responses := make([]string, len(results))
-	for i, res := range results {
-		responses[i] = res.Response
-		r.recordLLMCall(prompts[i], res.Response, avgDuration, res.PromptTokens, res.CompletionTokens)
-	}
-	return responses
+	return r.recordBatchedCalls(prompts, results, err, avgDuration)
 }
 
 // llmQueryBatchedRaw makes concurrent LLM queries WITHOUT prepending context.
@@ -1053,21 +1037,27 @@ func (r *YaegiREPL) llmQueryBatchedRaw(prompts []string) []string {
 	results, err := r.llmClient.QueryBatched(r.executionContext(), prompts)
 	duration := time.Since(start)
 	avgDuration := duration / time.Duration(len(prompts))
+	return r.recordBatchedCalls(prompts, results, err, avgDuration)
+}
 
-	if err != nil {
-		responses := make([]string, len(prompts))
-		errMsg := fmt.Sprintf("Error: %v", err)
-		for i, prompt := range prompts {
-			responses[i] = errMsg
-			r.recordLLMCall(prompt, errMsg, avgDuration, 0, 0)
+func (r *YaegiREPL) recordBatchedCalls(prompts []string, results []QueryResponse, batchErr error, duration time.Duration) []string {
+	responses := make([]string, len(prompts))
+	for index, prompt := range prompts {
+		var result QueryResponse
+		if index < len(results) {
+			result = results[index]
 		}
-		return responses
-	}
-
-	responses := make([]string, len(results))
-	for i, res := range results {
-		responses[i] = res.Response
-		r.recordLLMCall(prompts[i], res.Response, avgDuration, res.PromptTokens, res.CompletionTokens)
+		response := result.Response
+		if response == "" {
+			switch {
+			case batchErr != nil:
+				response = fmt.Sprintf("Error: %v", batchErr)
+			case index >= len(results):
+				response = "Error: batch response is missing"
+			}
+		}
+		responses[index] = response
+		r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
 	}
 	return responses
 }
