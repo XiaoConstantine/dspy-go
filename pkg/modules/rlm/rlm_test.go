@@ -82,6 +82,26 @@ func (m *mockLLM) Capabilities() []core.Capability {
 	return []core.Capability{core.CapabilityCompletion}
 }
 
+type gatedMockLLM struct {
+	*mockLLM
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (m *gatedMockLLM) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
+	select {
+	case m.entered <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-m.release:
+		return m.mockLLM.Generate(ctx, prompt, opts...)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // mockSubLLMClient implements SubLLMClient for testing.
 type mockSubLLMClient struct {
 	queryResponse         string
@@ -572,6 +592,57 @@ func TestRLMDoesNotReusePriorUsageWhenResponseOmitsIt(t *testing.T) {
 	assert.Len(t, r.GetTokenTracker().GetRootSnapshots(), 1)
 }
 
+func TestConcurrentCompletionsSharingContextKeepUsageLocal(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	withUsageRelease := make(chan struct{})
+	withoutUsageRelease := make(chan struct{})
+	finalResponse := "Reasoning:\nFinish.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ndone"
+
+	withUsage := New(&gatedMockLLM{
+		mockLLM: &mockLLM{responses: []string{finalResponse}},
+		entered: entered,
+		release: withUsageRelease,
+	}, &mockSubLLMClient{}, WithMaxIterations(1))
+	withoutUsage := New(&gatedMockLLM{
+		mockLLM: &mockLLM{
+			responses: []string{finalResponse},
+			omitUsage: map[int]bool{0: true},
+		},
+		entered: entered,
+		release: withoutUsageRelease,
+	}, &mockSubLLMClient{}, WithMaxIterations(1))
+
+	type completion struct {
+		result *CompletionResult
+		err    error
+	}
+	sharedCtx := core.WithExecutionState(context.Background())
+	withUsageDone := make(chan completion, 1)
+	withoutUsageDone := make(chan completion, 1)
+	go func() {
+		result, err := withUsage.Complete(sharedCtx, "ctx", "with usage")
+		withUsageDone <- completion{result: result, err: err}
+	}()
+	go func() {
+		result, err := withoutUsage.Complete(sharedCtx, "ctx", "without usage")
+		withoutUsageDone <- completion{result: result, err: err}
+	}()
+
+	<-entered
+	<-entered
+	close(withUsageRelease)
+	withResult := <-withUsageDone
+	require.NoError(t, withResult.err)
+	require.NotNil(t, withResult.result)
+	assert.Equal(t, 150, withResult.result.Usage.TotalTokens)
+
+	close(withoutUsageRelease)
+	withoutResult := <-withoutUsageDone
+	require.NoError(t, withoutResult.err)
+	require.NotNil(t, withoutResult.result)
+	assert.Zero(t, withoutResult.result.Usage.TotalTokens)
+}
+
 func TestRLMDefaultBlocksLargeFullContextQuery(t *testing.T) {
 	mockRoot := &mockLLM{
 		responses: []string{
@@ -672,6 +743,35 @@ func TestRLMMaxTokens_CountsSubLLMUsage(t *testing.T) {
 }
 
 // TestRLMContextCancellation tests that context cancellation works.
+func TestRLMMaxTokensIncludesFailedChildUsage(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDelegate.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nchild work\n\nAnswer:\n",
+			"Reasoning:\nChild step one.\n\nAction:\nexplore\n\nCode:\nfmt.Println(\"one\")\n\nAnswer:\n",
+			"Reasoning:\nChild step two.\n\nAction:\nexplore\n\nCode:\nfmt.Println(\"two\")\n\nAnswer:\n",
+			"Reasoning:\nParent would otherwise finish.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\nincorrect success",
+		},
+		usages: []core.TokenInfo{
+			{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100},
+			{PromptTokens: 90, CompletionTokens: 60, TotalTokens: 150},
+			{PromptTokens: 90, CompletionTokens: 60, TotalTokens: 150},
+			{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100},
+		},
+	}
+	r := New(mockRoot, &mockSubLLMClient{},
+		WithMaxIterations(2),
+		WithMaxTokens(250),
+		WithSubRLMConfig(SubRLMConfig{MaxDepth: 3, MaxIterationsPerSubRLM: 3}),
+	)
+
+	result, err := r.Complete(context.Background(), "ctx", "q")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
+	assert.Equal(t, 3, mockRoot.callCount, "the parent must not continue after the child exhausts the tree budget")
+	assert.Equal(t, 400, r.GetTokenTracker().GetTotalUsage().TotalTokens)
+}
+
 func TestRLMContextCancellation(t *testing.T) {
 	mockRoot := &mockLLM{
 		responses: []string{

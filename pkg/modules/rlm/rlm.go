@@ -461,6 +461,8 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 	defer r.setTokenTracker(tokenTracker)
 
 	ctx = core.WithExecutionState(ctx)
+	ctx, _ = core.StartSpan(ctx, "RLM.Complete")
+	defer core.EndSpan(ctx)
 
 	// Apply timeout if configured
 	if r.config.Timeout > 0 {
@@ -545,7 +547,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			return nil, trace, ctx.Err()
 		default:
 		}
-		if err := r.enforceTokenBudget(tokenTracker); err != nil {
+		if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
 			trace.CompletedAt = time.Now()
 			trace.ProcessingTime = time.Since(start)
 			trace.TerminationCause = "token_budget_exceeded"
@@ -585,7 +587,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		code = stripCodeLanguageMarker(code)
 
 		rootPromptTokens := r.trackTokenUsage(ctx, tokenTracker, i+1, usageCheckpoint)
-		if err := r.enforceTokenBudget(tokenTracker); err != nil {
+		if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
 			finalizeRLMTrace(trace, nil, "token_budget_exceeded", err)
 			return nil, trace, err
 		}
@@ -628,6 +630,10 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					},
 				})
 				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, "", fmt.Sprintf("Sub-RLM error: %v", err), time.Since(iterStart), false, err))
+				if errors.Is(err, ErrTokenBudgetExceeded) {
+					finalizeRLMTrace(trace, nil, "token_budget_exceeded", err)
+					return nil, trace, err
+				}
 			} else {
 				// Store result in REPL variable for access in subsequent iterations
 				_ = replEnv.SetVariable("subrlm_result", subRLMResult.Response)
@@ -748,7 +754,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 				})
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
-			if err := r.enforceTokenBudget(tokenTracker); err != nil {
+			if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
 				trace.CompletedAt = time.Now()
 				trace.ProcessingTime = time.Since(start)
 				trace.TerminationCause = "token_budget_exceeded"
@@ -986,25 +992,32 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 	}
 	subRLM.ModuleType = "SubRLM"
 
-	// Execute sub-RLM using the SHARED REPL environment
+	// Execute sub-RLM using the SHARED REPL environment.
 	subTracker := NewTokenTracker()
 	result, err := r.completeWithSharedREPL(ctx, subRLM, replEnv, subquery, subTracker, subRLMBudget)
-	if err != nil {
-		return nil, fmt.Errorf("sub-RLM execution failed: %w", err)
-	}
 	subRLM.setTokenTracker(subTracker)
 
-	// Track sub-RLM token usage
+	// Merge child usage even when the child fails so the parent cannot continue
+	// with an artificially replenished token budget.
 	subUsage := subTracker.GetTotalUsage()
-	parentTracker.AddSubRLMCall(SubRLMCall{
+	subCall := SubRLMCall{
 		Query:            subquery,
-		Result:           result.Response,
-		Iterations:       result.Iterations,
 		Depth:            currentDepth + 1,
 		Duration:         time.Since(start),
 		PromptTokens:     subUsage.PromptTokens,
 		CompletionTokens: subUsage.CompletionTokens,
-	})
+	}
+	if result != nil {
+		subCall.Result = result.Response
+		subCall.Iterations = result.Iterations
+	}
+	if err != nil {
+		subCall.Result = "error: " + err.Error()
+	}
+	parentTracker.AddSubRLMCall(subCall)
+	if err != nil {
+		return nil, fmt.Errorf("sub-RLM execution failed: %w", err)
+	}
 
 	if r.config.Verbose {
 		logger.Debug(ctx, "[RLM] Sub-RLM completed in %d iterations, %v", result.Iterations, time.Since(start))
@@ -1055,7 +1068,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 			return nil, ctx.Err()
 		default:
 		}
-		if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
+		if err := subRLM.enforceTokenBudget(ctx, tokenTracker); err != nil {
 			return nil, err
 		}
 
@@ -1087,7 +1100,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		code = stripCodeLanguageMarker(code)
 		subRLM.trackTokenUsage(ctx, tokenTracker, i+1, usageCheckpoint)
-		if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
+		if err := subRLM.enforceTokenBudget(ctx, tokenTracker); err != nil {
 			return nil, err
 		}
 
@@ -1111,6 +1124,9 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 						Duration: time.Since(iterStart),
 					},
 				})
+				if errors.Is(err, ErrTokenBudgetExceeded) {
+					return nil, err
+				}
 			} else {
 				_ = replEnv.SetVariable("subrlm_result", nestedResult.Response)
 				subRLM.appendHistoryEntry(history, HistoryEntry{
@@ -1180,7 +1196,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 				})
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
-			if err := subRLM.enforceTokenBudget(tokenTracker); err != nil {
+			if err := subRLM.enforceTokenBudget(ctx, tokenTracker); err != nil {
 				return nil, err
 			}
 
@@ -1249,7 +1265,7 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
 func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time, maxIterations int, tokenTracker *TokenTracker) (*CompletionResult, error) {
-	if err := r.enforceTokenBudget(tokenTracker); err != nil {
+	if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
 		return nil, err
 	}
 
@@ -1268,7 +1284,7 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 	}
 
 	r.trackTokenUsage(ctx, tokenTracker, 0, usageCheckpoint)
-	if err := r.enforceTokenBudget(tokenTracker); err != nil {
+	if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
 		return nil, err
 	}
 
@@ -1394,18 +1410,25 @@ func (r *RLM) summarizeLLMCalls(calls []LLMCall) string {
 	return strings.TrimSuffix(summary.String(), "\n")
 }
 
-func (r *RLM) enforceTokenBudget(tokenTracker *TokenTracker) error {
+func (r *RLM) enforceTokenBudget(ctx context.Context, tokenTracker *TokenTracker) error {
 	if r.config.MaxTokens <= 0 {
 		return nil
 	}
 
-	if tokenTracker == nil {
-		tokenTracker = r.GetTokenTracker()
+	var usage core.TokenUsage
+	if branchUsage := core.TokenUsageFromContext(ctx); branchUsage != nil {
+		// CompleteWithTrace owns an invocation-local span, so this aggregate is
+		// tree-wide for the current completion, including nested and REPL calls.
+		usage = *branchUsage
+	} else {
+		if tokenTracker == nil {
+			tokenTracker = r.GetTokenTracker()
+		}
+		if tokenTracker == nil {
+			return nil
+		}
+		usage = tokenTracker.GetTotalUsage()
 	}
-	if tokenTracker == nil {
-		return nil
-	}
-	usage := tokenTracker.GetTotalUsage()
 	if usage.TotalTokens <= r.config.MaxTokens {
 		return nil
 	}
