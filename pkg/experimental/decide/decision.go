@@ -3,6 +3,8 @@ package decide
 import (
 	"maps"
 	"slices"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/experimental/typesafe"
 )
 
 // Decision is evidence for one closed-set output. Its concrete form is one of
@@ -11,6 +13,25 @@ type Decision interface {
 	// Native returns the value placed in Result.Outputs and Process output.
 	Native() any
 	decision()
+	providerAnswer() typesafe.Answer
+}
+
+// Get returns a named decision when it has the requested concrete evidence
+// type. It returns false for a nil result, a missing name, or a type mismatch.
+func Get[T Decision](result *Result, name string) (T, bool) {
+	var zero T
+	if result == nil {
+		return zero, false
+	}
+	decision, found := result.Decisions[name]
+	if !found {
+		return zero, false
+	}
+	typed, ok := decision.(T)
+	if !ok {
+		return zero, false
+	}
+	return typed, true
 }
 
 // NoulDecision is a thresholded Boolean and its provider probability.
@@ -25,6 +46,9 @@ type NoulDecision struct {
 
 func (d NoulDecision) Native() any { return d.Value }
 func (NoulDecision) decision()     {}
+func (d NoulDecision) providerAnswer() typesafe.Answer {
+	return typesafe.NoulAnswer{Probability: d.Probability}
+}
 
 // ScoreDecision is a locally weighted expected value over the provider's raw
 // index-keyed distribution. ProviderScore and ProviderConfidence are retained
@@ -39,6 +63,13 @@ type ScoreDecision struct {
 
 func (d ScoreDecision) Native() any { return d.Value }
 func (ScoreDecision) decision()     {}
+func (d ScoreDecision) providerAnswer() typesafe.Answer {
+	return typesafe.ScoreAnswer{
+		Score:         d.ProviderScore,
+		Confidence:    d.ProviderConfidence,
+		Probabilities: maps.Clone(d.probabilities),
+	}
+}
 
 // Probabilities returns a copy of the provider's raw index-keyed distribution.
 func (d ScoreDecision) Probabilities() map[int]float64 {
@@ -72,6 +103,13 @@ type ChoiceDecision[T any] struct {
 
 func (d ChoiceDecision[T]) Native() any { return d.Value }
 func (ChoiceDecision[T]) decision()     {}
+func (d ChoiceDecision[T]) providerAnswer() typesafe.Answer {
+	return typesafe.ChoiceAnswer{
+		Choice:        d.ProviderLabel,
+		Confidence:    d.ProviderConfidence,
+		Probabilities: maps.Clone(d.probabilities),
+	}
+}
 
 // Probabilities returns a copy of the provider's raw label distribution.
 func (d ChoiceDecision[T]) Probabilities() map[string]float64 {

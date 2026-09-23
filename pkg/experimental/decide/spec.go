@@ -28,6 +28,7 @@ type Output interface {
 	validate() error
 	clone() Output
 	question(instructions any) typesafe.Question
+	provenance() outputProvenance
 	decode(typesafe.Answer) (Decision, any, error)
 	parameter() any
 	setParameter(any) error
@@ -56,6 +57,10 @@ func (o *noulOutput) validate() error {
 
 func (o *noulOutput) question(instructions any) typesafe.Question {
 	return typesafe.NoulQuestion{Instructions: instructions}
+}
+
+func (o *noulOutput) provenance() outputProvenance {
+	return outputProvenance{Name: o.name, Kind: outputNoul}
 }
 
 func (o *noulOutput) decode(raw typesafe.Answer) (Decision, any, error) {
@@ -154,6 +159,14 @@ func (o *scoreOutput) question(instructions any) typesafe.Question {
 		criteria[i] = level.description
 	}
 	return typesafe.ScoreQuestion{Instructions: instructions, Criteria: criteria}
+}
+
+func (o *scoreOutput) provenance() outputProvenance {
+	levels := make([]scoreLevelProvenance, len(o.levels))
+	for i, level := range o.levels {
+		levels[i] = scoreLevelProvenance{Value: level.value, Description: level.description}
+	}
+	return outputProvenance{Name: o.name, Kind: outputScore, ScoreLevels: levels}
 }
 
 func (o *scoreOutput) decode(raw typesafe.Answer) (Decision, any, error) {
@@ -290,6 +303,23 @@ func (o *choiceOutput[T]) question(instructions any) typesafe.Question {
 		}
 	}
 	return typesafe.ChoiceQuestion{Instructions: instructions, Criteria: criteria}
+}
+
+func (o *choiceOutput[T]) provenance() outputProvenance {
+	options := make([]choiceOptionProvenance, len(o.options))
+	for i, option := range o.options {
+		valueType := reflect.TypeOf(option.value)
+		typeName := "<nil>"
+		if valueType != nil {
+			typeName = valueType.PkgPath() + ":" + valueType.String()
+		}
+		options[i] = choiceOptionProvenance{
+			Label:       option.label,
+			Description: option.description,
+			ValueType:   typeName,
+		}
+	}
+	return outputProvenance{Name: o.name, Kind: outputChoice, ChoiceOptions: options}
 }
 
 func (o *choiceOutput[T]) decode(raw typesafe.Answer) (Decision, any, error) {

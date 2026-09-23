@@ -27,6 +27,8 @@ type Result struct {
 	Model     string
 	Usage     typesafe.Usage
 	RequestID string
+
+	provenance string
 }
 
 // Decide is a closed-set core.Module backed by a System One client. It is a
@@ -94,16 +96,35 @@ func (d *Decide) Process(ctx context.Context, inputs map[string]any, _ ...core.O
 }
 
 // ProcessDecision returns native outputs plus typed evidence from one request.
-func (d *Decide) ProcessDecision(ctx context.Context, inputs map[string]any) (*Result, error) {
+func (d *Decide) ProcessDecision(ctx context.Context, inputs map[string]any) (result *Result, err error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("decide: context must not be nil")
 	}
+
 	signature, declared, client, signatureErr := d.snapshot()
+	metadata := map[string]any{
+		"module_type":   d.GetModuleType(),
+		"module_config": signature.String(),
+		"provider":      "typesafe",
+	}
+	ctx, span := core.StartSpanWithContext(ctx, "Decide", d.GetDisplayName(), metadata)
+	defer func() {
+		if err != nil {
+			span.WithError(err)
+		}
+		core.EndSpan(ctx)
+	}()
+	span.WithAnnotation("inputs", inputs)
+
 	if signatureErr != nil {
 		return nil, signatureErr
 	}
 	if err := validateInputs(signature, inputs); err != nil {
 		return nil, err
+	}
+	provenance, err := computeResultProvenance(signature, declared)
+	if err != nil {
+		return nil, fmt.Errorf("decide: %w", err)
 	}
 
 	state := make(map[string]any, len(signature.Inputs))
@@ -126,16 +147,28 @@ func (d *Decide) ProcessDecision(ctx context.Context, inputs map[string]any) (*R
 	if response == nil {
 		return nil, fmt.Errorf("decide: System One client returned a nil response")
 	}
+	span.WithAnnotation("model", response.Model)
+	span.WithAnnotation("request_id", response.RequestID)
+	span.WithAnnotation("token_usage", &core.TokenUsage{
+		PromptTokens:     int(response.Usage.InputTokens),
+		CompletionTokens: int(response.Usage.OutputTokens),
+		TotalTokens:      int(response.Usage.InputTokens + response.Usage.OutputTokens),
+	})
+	// Keep System One usage on the Result and Decide span rather than writing it
+	// to ExecutionState. That state is currently an overwrite-only LLM counter;
+	// updating it here could erase a generative module's usage in mixed programs.
+
 	if len(response.Answers) != len(declared) {
 		return nil, fmt.Errorf("decide: response answer names do not match declared outputs")
 	}
 
-	result := &Result{
-		Outputs:   make(map[string]any, len(declared)),
-		Decisions: make(map[string]Decision, len(declared)),
-		Model:     response.Model,
-		Usage:     response.Usage,
-		RequestID: response.RequestID,
+	result = &Result{
+		Outputs:    make(map[string]any, len(declared)),
+		Decisions:  make(map[string]Decision, len(declared)),
+		Model:      response.Model,
+		Usage:      response.Usage,
+		RequestID:  response.RequestID,
+		provenance: provenance,
 	}
 	for _, output := range declared {
 		name := output.outputName()
@@ -146,6 +179,58 @@ func (d *Decide) ProcessDecision(ctx context.Context, inputs map[string]any) (*R
 		decision, native, err := output.decode(answer)
 		if err != nil {
 			return nil, fmt.Errorf("decide: %w", err)
+		}
+		result.Decisions[name] = decision
+		result.Outputs[name] = native
+	}
+	span.WithAnnotation("outputs", maps.Clone(result.Outputs))
+	return result, nil
+}
+
+// Reinterpret applies the module's current local thresholds, Score anchors, and
+// Choice multipliers to an existing result without making a provider request.
+// Provider probabilities, selections, confidence, model, usage, and request ID
+// are copied unchanged into a new result. Results are rejected unless their
+// captured signature and answer-space provenance matches the current module.
+func (d *Decide) Reinterpret(source *Result) (*Result, error) {
+	if source == nil {
+		return nil, fmt.Errorf("decide: result must not be nil")
+	}
+	signature, declared, _, signatureErr := d.snapshot()
+	if signatureErr != nil {
+		return nil, signatureErr
+	}
+	if len(source.Decisions) != len(declared) {
+		return nil, fmt.Errorf("decide: result decision names do not match declared outputs")
+	}
+	provenance, err := computeResultProvenance(signature, declared)
+	if err != nil {
+		return nil, fmt.Errorf("decide: %w", err)
+	}
+	if source.provenance == "" {
+		return nil, fmt.Errorf("decide: result is missing answer-space provenance")
+	}
+	if source.provenance != provenance {
+		return nil, fmt.Errorf("decide: result is incompatible with the current signature or answer space")
+	}
+
+	result := &Result{
+		Outputs:    make(map[string]any, len(declared)),
+		Decisions:  make(map[string]Decision, len(declared)),
+		Model:      source.Model,
+		Usage:      source.Usage,
+		RequestID:  source.RequestID,
+		provenance: provenance,
+	}
+	for _, output := range declared {
+		name := output.outputName()
+		evidence, found := source.Decisions[name]
+		if !found || evidence == nil || isNilDecision(evidence) {
+			return nil, fmt.Errorf("decide: result is missing decision %q", name)
+		}
+		decision, native, err := output.decode(evidence.providerAnswer())
+		if err != nil {
+			return nil, fmt.Errorf("decide: reinterpret output %q: %w", name, err)
 		}
 		result.Decisions[name] = decision
 		result.Outputs[name] = native
@@ -299,10 +384,18 @@ func cloneSignature(signature core.Signature) core.Signature {
 }
 
 func isNilClient(client SystemOneClient) bool {
-	value := reflect.ValueOf(client)
-	switch value.Kind() {
+	return isNilValue(client)
+}
+
+func isNilDecision(decision Decision) bool {
+	return isNilValue(decision)
+}
+
+func isNilValue(value any) bool {
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
+		return reflected.IsNil()
 	default:
 		return false
 	}
