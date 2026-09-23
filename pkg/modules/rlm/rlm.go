@@ -283,7 +283,8 @@ func (c *accountingSubLLMClient) QueryBatched(ctx context.Context, prompts []str
 			continue
 		}
 		if !errors.Is(err, ErrTokenBudgetExceeded) {
-			return responses[:index], err
+			responses[index] = response
+			return responses[:index+1], err
 		}
 		response.Response = "Error: " + err.Error()
 		responses[index] = response
@@ -757,6 +758,10 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					},
 				})
 				trace.Steps = append(trace.Steps, newRLMTraceStep(i+1, reasoning, action, "", subquery, "", fmt.Sprintf("Sub-RLM error: %v", err), time.Since(iterStart), false, err))
+				if contextErr := ctx.Err(); contextErr != nil {
+					finalizeRLMTrace(trace, nil, "context_canceled", contextErr)
+					return nil, trace, contextErr
+				}
 				if errors.Is(err, ErrTokenBudgetExceeded) {
 					finalizeRLMTrace(trace, nil, "token_budget_exceeded", err)
 					return nil, trace, err
@@ -1260,6 +1265,9 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 						Duration: time.Since(iterStart),
 					},
 				})
+				if contextErr := ctx.Err(); contextErr != nil {
+					return nil, contextErr
+				}
 				if errors.Is(err, ErrTokenBudgetExceeded) {
 					return nil, err
 				}
@@ -1405,6 +1413,9 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 // forceDefaultAnswer forces the LLM to provide a final answer when max iterations reached.
 func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, query string, history string, start time.Time, maxIterations int, tokenTracker *TokenTracker) (*CompletionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
 		return nil, err
 	}
@@ -1425,6 +1436,9 @@ func (r *RLM) forceDefaultAnswer(ctx context.Context, replEnv REPLEnvironment, q
 
 	r.trackTokenUsage(ctx, tokenTracker, 0, usageCheckpoint)
 	if err := r.enforceTokenBudget(ctx, tokenTracker); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
