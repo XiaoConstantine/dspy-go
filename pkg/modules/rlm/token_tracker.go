@@ -14,6 +14,7 @@ type LLMCall struct {
 	Duration         time.Duration `json:"duration"`
 	PromptTokens     int           `json:"prompt_tokens"`
 	CompletionTokens int           `json:"completion_tokens"`
+	TotalTokens      int           `json:"total_tokens"`
 }
 
 // SubRLMCall represents a nested sub-RLM invocation.
@@ -135,7 +136,7 @@ func (t *TokenTracker) AddSubCall(call LLMCall) {
 	t.subCalls = append(t.subCalls, call)
 	t.subPromptTokens += call.PromptTokens
 	t.subCompletionTokens += call.CompletionTokens
-	t.subTotalTokens += call.PromptTokens + call.CompletionTokens
+	t.subTotalTokens += normalizedTokenTotal(call.PromptTokens, call.CompletionTokens, call.TotalTokens)
 }
 
 // AddSubCalls adds multiple sub-LLM calls.
@@ -146,7 +147,7 @@ func (t *TokenTracker) AddSubCalls(calls []LLMCall) {
 		t.subCalls = append(t.subCalls, call)
 		t.subPromptTokens += call.PromptTokens
 		t.subCompletionTokens += call.CompletionTokens
-		t.subTotalTokens += call.PromptTokens + call.CompletionTokens
+		t.subTotalTokens += normalizedTokenTotal(call.PromptTokens, call.CompletionTokens, call.TotalTokens)
 	}
 }
 

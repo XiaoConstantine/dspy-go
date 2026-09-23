@@ -109,6 +109,7 @@ type mockSubLLMClient struct {
 	batchedResponses      []string
 	queryPromptTokens     int
 	queryCompletionTokens int
+	queryTotalTokens      int
 	queryCalls            atomic.Int64
 }
 
@@ -118,6 +119,7 @@ func (m *mockSubLLMClient) Query(ctx context.Context, prompt string) (QueryRespo
 		Response:         m.queryResponse,
 		PromptTokens:     m.queryPromptTokens,
 		CompletionTokens: m.queryCompletionTokens,
+		TotalTokens:      m.queryTotalTokens,
 	}, nil
 }
 
@@ -132,6 +134,7 @@ func (m *mockSubLLMClient) QueryBatched(ctx context.Context, prompts []string) (
 			Response:         resp,
 			PromptTokens:     m.queryPromptTokens,
 			CompletionTokens: m.queryCompletionTokens,
+			TotalTokens:      m.queryTotalTokens,
 		}
 	}
 	return responses, nil
@@ -885,6 +888,93 @@ func TestRLMNestedUsagePreservesProviderTotal(t *testing.T) {
 	branchUsage := core.TokenUsageFromContext(outerCtx)
 	require.NotNil(t, branchUsage)
 	assert.Equal(t, 365, branchUsage.TotalTokens)
+	core.EndSpan(outerCtx)
+}
+
+func TestLLMSubClientPreservesProviderTotal(t *testing.T) {
+	model := &mockLLM{
+		responses: []string{"sub response"},
+		usages:    []core.TokenInfo{{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 50}},
+	}
+
+	response, err := NewLLMSubClient(model).Query(context.Background(), "prompt")
+	require.NoError(t, err)
+	assert.Equal(t, 20, response.PromptTokens)
+	assert.Equal(t, 10, response.CompletionTokens)
+	assert.Equal(t, 50, response.TotalTokens)
+}
+
+func TestRLMSubQueriesPreserveProviderTotal(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+	}{
+		{name: "direct", code: "answer := QueryRaw(\"one\")\nFINAL(answer)"},
+		{name: "batch", code: "answers := QueryBatchedRaw([]string{\"one\"})\nFINAL(answers[0])"},
+		{name: "async", code: "handle := QueryAsync(\"one\")\nFINAL(WaitAsync(handle))"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mockRoot := &mockLLM{
+				responses: []string{fmt.Sprintf("Reasoning:\nUse a %s sub-query.\n\nAction:\nquery\n\nCode:\n%s\n\nAnswer:\n", test.name, test.code)},
+				usages:    []core.TokenInfo{{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100}},
+			}
+			mockSub := &mockSubLLMClient{
+				queryResponse:         "sub answer",
+				queryPromptTokens:     20,
+				queryCompletionTokens: 10,
+				queryTotalTokens:      50,
+			}
+			r := New(mockRoot, mockSub, WithMaxIterations(1))
+			ctx := core.WithExecutionState(context.Background())
+			outerCtx, _ := core.StartSpan(ctx, "outer")
+
+			result, trace, err := r.CompleteWithTrace(outerCtx, "ctx", "q")
+			require.NoError(t, err)
+			assert.Equal(t, 150, result.Usage.TotalTokens)
+			assert.Equal(t, 50, trace.SubUsage.TotalTokens)
+			assert.Equal(t, 150, r.GetTokenTracker().GetTotalUsage().TotalTokens)
+			branchUsage := core.TokenUsageFromContext(outerCtx)
+			require.NotNil(t, branchUsage)
+			assert.Equal(t, 150, branchUsage.TotalTokens)
+			core.EndSpan(outerCtx)
+		})
+	}
+}
+
+func TestRLMNestedSubQueryPreservesProviderTotal(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDelegate.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nchild work\n\nAnswer:\n",
+			"Reasoning:\nAsk a sub-query.\n\nAction:\nquery\n\nCode:\nanswer := QueryRaw(\"one\")\nFINAL(answer)\n\nAnswer:\n",
+			"Reasoning:\nParent done.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\nparent answer",
+		},
+		usages: []core.TokenInfo{
+			{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100},
+			{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100},
+			{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100},
+		},
+	}
+	mockSub := &mockSubLLMClient{
+		queryResponse:         "child answer",
+		queryPromptTokens:     20,
+		queryCompletionTokens: 10,
+		queryTotalTokens:      50,
+	}
+	r := New(mockRoot, mockSub,
+		WithMaxIterations(2),
+		WithSubRLMConfig(SubRLMConfig{MaxDepth: 3, MaxIterationsPerSubRLM: 1}),
+	)
+	ctx := core.WithExecutionState(context.Background())
+	outerCtx, _ := core.StartSpan(ctx, "outer")
+
+	result, err := r.Complete(outerCtx, "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, 350, result.Usage.TotalTokens)
+	assert.Equal(t, 150, r.GetTokenTracker().GetSubRLMUsage().TotalTokens)
+	branchUsage := core.TokenUsageFromContext(outerCtx)
+	require.NotNil(t, branchUsage)
+	assert.Equal(t, 350, branchUsage.TotalTokens)
 	core.EndSpan(outerCtx)
 }
 

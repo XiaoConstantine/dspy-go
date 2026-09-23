@@ -105,6 +105,7 @@ type QueryResponse struct {
 	Response         string
 	PromptTokens     int
 	CompletionTokens int
+	TotalTokens      int
 }
 
 // SubLLMClient defines the interface for making LLM calls from within the REPL.
@@ -130,21 +131,17 @@ func NewLLMSubClient(llm core.PromptModel) *LLMSubClient {
 func (c *LLMSubClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
 	core.RecordModelCall(ctx, c.llm)
 	resp, err := c.llm.Generate(ctx, prompt)
-	if err != nil {
+	if resp == nil {
 		return QueryResponse{}, err
 	}
 
-	var promptTokens, completionTokens int
+	result := QueryResponse{Response: resp.Content}
 	if resp.Usage != nil {
-		promptTokens = resp.Usage.PromptTokens
-		completionTokens = resp.Usage.CompletionTokens
+		result.PromptTokens = resp.Usage.PromptTokens
+		result.CompletionTokens = resp.Usage.CompletionTokens
+		result.TotalTokens = resp.Usage.TotalTokens
 	}
-
-	return QueryResponse{
-		Response:         resp.Content,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-	}, nil
+	return result, err
 }
 
 // QueryBatched implements SubLLMClient with concurrent queries.
@@ -156,12 +153,11 @@ func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]Qu
 		i, prompt := i, prompt
 		p.Go(func(ctx context.Context) error {
 			result, err := c.Query(ctx, prompt)
-			if err != nil {
-				results[i] = QueryResponse{Response: fmt.Sprintf("Error: %v", err)}
-				return err
+			if err != nil && result.Response == "" {
+				result.Response = fmt.Sprintf("Error: %v", err)
 			}
 			results[i] = result
-			return nil
+			return err
 		})
 	}
 
@@ -928,7 +924,7 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 	start := time.Now()
 
 	if blockedMsg, blocked := r.fullContextQueryBlocked("Query"); blocked {
-		r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+		r.recordLLMCall(prompt, blockedMsg, 0, 0, 0, 0)
 		return blockedMsg
 	}
 
@@ -944,7 +940,7 @@ func (r *YaegiREPL) llmQuery(prompt string) string {
 	}
 
 	// Record the call (store original prompt for clarity)
-	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
+	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens, result.TotalTokens)
 	return response
 }
 
@@ -963,7 +959,7 @@ func (r *YaegiREPL) llmQueryRaw(prompt string) string {
 		response = fmt.Sprintf("Error: %v", err)
 	}
 
-	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
+	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens, result.TotalTokens)
 	return response
 }
 
@@ -990,7 +986,7 @@ func (r *YaegiREPL) llmQueryWith(contextSlice, prompt string) string {
 	}
 
 	// Record with the original prompt for clarity in logs
-	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
+	r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens, result.TotalTokens)
 	return response
 }
 
@@ -1005,7 +1001,7 @@ func (r *YaegiREPL) llmQueryBatched(prompts []string) []string {
 		responses := make([]string, len(prompts))
 		for i, prompt := range prompts {
 			responses[i] = blockedMsg
-			r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+			r.recordLLMCall(prompt, blockedMsg, 0, 0, 0, 0)
 		}
 		return responses
 	}
@@ -1057,7 +1053,7 @@ func (r *YaegiREPL) recordBatchedCalls(prompts []string, results []QueryResponse
 			}
 		}
 		responses[index] = response
-		r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens)
+		r.recordLLMCall(prompt, response, duration, result.PromptTokens, result.CompletionTokens, result.TotalTokens)
 	}
 	return responses
 }
@@ -1255,7 +1251,7 @@ func (r *YaegiREPL) Reset() error {
 
 // recordLLMCall appends an LLM call record using the dedicated LLM calls mutex.
 // This is called from llmQuery/llmQueryBatched during Execute().
-func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duration, promptTokens, completionTokens int) {
+func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duration, promptTokens, completionTokens, totalTokens int) {
 	r.llmCallsMu.Lock()
 	r.llmCalls = append(r.llmCalls, LLMCall{
 		Prompt:           prompt,
@@ -1263,6 +1259,7 @@ func (r *YaegiREPL) recordLLMCall(prompt, response string, duration time.Duratio
 		Duration:         duration,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
+		TotalTokens:      normalizedTokenTotal(promptTokens, completionTokens, totalTokens),
 	})
 	r.llmCallsMu.Unlock()
 }
@@ -1356,7 +1353,7 @@ func FormatExecutionResult(result *ExecutionResult) string {
 // It automatically includes the context variable (if loaded) in the prompt.
 func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 	if blockedMsg, blocked := r.fullContextQueryBlocked("QueryAsync"); blocked {
-		r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+		r.recordLLMCall(prompt, blockedMsg, 0, 0, 0, 0)
 		return r.completedAsyncHandle(blockedMsg)
 	}
 
@@ -1392,6 +1389,7 @@ func (r *YaegiREPL) llmQueryAsync(prompt string) string {
 			Duration:         duration,
 			PromptTokens:     result.PromptTokens,
 			CompletionTokens: result.CompletionTokens,
+			TotalTokens:      normalizedTokenTotal(result.PromptTokens, result.CompletionTokens, result.TotalTokens),
 		})
 		r.llmCallsMu.Unlock()
 
@@ -1408,7 +1406,7 @@ func (r *YaegiREPL) llmQueryBatchedAsync(prompts []string) []string {
 	if blockedMsg, blocked := r.fullContextQueryBlocked("QueryBatchedAsync"); blocked {
 		handleIDs := make([]string, len(prompts))
 		for i, prompt := range prompts {
-			r.recordLLMCall(prompt, blockedMsg, 0, 0, 0)
+			r.recordLLMCall(prompt, blockedMsg, 0, 0, 0, 0)
 			handleIDs[i] = r.completedAsyncHandle(blockedMsg)
 		}
 		return handleIDs
@@ -1516,6 +1514,7 @@ func (r *YaegiREPL) QueryAsync(prompt string) *AsyncQueryHandle {
 			Duration:         duration,
 			PromptTokens:     result.PromptTokens,
 			CompletionTokens: result.CompletionTokens,
+			TotalTokens:      normalizedTokenTotal(result.PromptTokens, result.CompletionTokens, result.TotalTokens),
 		})
 		r.llmCallsMu.Unlock()
 

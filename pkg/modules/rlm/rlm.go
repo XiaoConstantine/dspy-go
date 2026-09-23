@@ -311,13 +311,13 @@ func (c *accountingSubLLMClient) queryError() error {
 }
 
 func (c *accountingSubLLMClient) recordUsage(ctx context.Context, response QueryResponse) {
-	if response.PromptTokens == 0 && response.CompletionTokens == 0 {
+	if response.PromptTokens == 0 && response.CompletionTokens == 0 && response.TotalTokens == 0 {
 		return
 	}
 	core.RecordTokenUsage(ctx, &core.TokenUsage{
 		PromptTokens:     response.PromptTokens,
 		CompletionTokens: response.CompletionTokens,
-		TotalTokens:      response.PromptTokens + response.CompletionTokens,
+		TotalTokens:      response.TotalTokens,
 	})
 }
 
@@ -880,6 +880,7 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 					Response:         call.Response,
 					PromptTokens:     call.PromptTokens,
 					CompletionTokens: call.CompletionTokens,
+					TotalTokens:      call.TotalTokens,
 					ExecutionTime:    call.Duration.Seconds(),
 				})
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)

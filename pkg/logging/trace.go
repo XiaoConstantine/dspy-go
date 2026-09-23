@@ -550,6 +550,7 @@ type RLMCallEntry struct {
 	Response         string  `json:"response"`
 	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
+	TotalTokens      int     `json:"total_tokens"`
 	ExecutionTime    float64 `json:"execution_time"`
 }
 
