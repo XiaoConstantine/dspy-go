@@ -140,15 +140,32 @@ func (m *mockSubLLMClient) QueryBatched(ctx context.Context, prompts []string) (
 type cancelAwareSubLLMClient struct {
 	started      chan struct{}
 	canceled     chan struct{}
+	gateStarted  chan struct{}
+	gateRelease  chan struct{}
 	startedOnce  sync.Once
 	canceledOnce sync.Once
+	gateOnce     sync.Once
 }
 
 func newCancelAwareSubLLMClient() *cancelAwareSubLLMClient {
-	return &cancelAwareSubLLMClient{started: make(chan struct{}), canceled: make(chan struct{})}
+	return &cancelAwareSubLLMClient{
+		started:     make(chan struct{}),
+		canceled:    make(chan struct{}),
+		gateStarted: make(chan struct{}),
+		gateRelease: make(chan struct{}),
+	}
 }
 
-func (c *cancelAwareSubLLMClient) Query(ctx context.Context, _ string) (QueryResponse, error) {
+func (c *cancelAwareSubLLMClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
+	if prompt == "gate" {
+		c.gateOnce.Do(func() { close(c.gateStarted) })
+		select {
+		case <-c.gateRelease:
+			return QueryResponse{Response: "gate complete"}, nil
+		case <-ctx.Done():
+			return QueryResponse{}, ctx.Err()
+		}
+	}
 	c.startedOnce.Do(func() { close(c.started) })
 	<-ctx.Done()
 	c.canceledOnce.Do(func() { close(c.canceled) })
@@ -578,21 +595,39 @@ func TestRLMWithCodeExecution(t *testing.T) {
 
 func TestRLMJoinsAndCancelsUnwaitedAsyncQueries(t *testing.T) {
 	mockRoot := &mockLLM{responses: []string{
-		"Reasoning:\nStart an async query but do not wait for it.\n\nAction:\nquery\n\nCode:\nhandleID := QueryAsync(\"slow\")\n_ = handleID\nFINAL(\"done\")\n\nAnswer:\n",
+		"Reasoning:\nStart an async query but do not wait for it.\n\nAction:\nquery\n\nCode:\nhandleID := QueryAsync(\"slow\")\n_ = QueryRaw(\"gate\")\n_ = handleID\nFINAL(\"done\")\n\nAnswer:\n",
 	}}
 	mockSub := newCancelAwareSubLLMClient()
 	r := New(mockRoot, mockSub, WithMaxIterations(1))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	result, err := r.Complete(ctx, "ctx", "q")
-	require.NoError(t, err)
-	assert.Equal(t, "done", result.Response)
+	type completion struct {
+		result *CompletionResult
+		err    error
+	}
+	done := make(chan completion, 1)
+	go func() {
+		result, err := r.Complete(ctx, "ctx", "q")
+		done <- completion{result: result, err: err}
+	}()
+
 	select {
 	case <-mockSub.started:
-	default:
+	case <-ctx.Done():
 		t.Fatal("async query never reached the provider")
 	}
+	select {
+	case <-mockSub.gateStarted:
+	case <-ctx.Done():
+		t.Fatal("synchronous gate query never started")
+	}
+	close(mockSub.gateRelease)
+
+	completed := <-done
+	require.NoError(t, completed.err)
+	require.NotNil(t, completed.result)
+	assert.Equal(t, "done", completed.result.Response)
 	select {
 	case <-mockSub.canceled:
 	default:

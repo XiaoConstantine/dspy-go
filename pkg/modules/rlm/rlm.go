@@ -595,6 +595,12 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		finalizeRLMTrace(trace, nil, "repl_create_error", fmt.Errorf("failed to create REPL: %w", err))
 		return nil, trace, fmt.Errorf("failed to create REPL: %w", err)
 	}
+	ctx, cancelCompletion := context.WithCancel(ctx)
+	replEnv.SetContext(ctx)
+	defer func() {
+		cancelCompletion()
+		replEnv.WaitAllAsyncQueries()
+	}()
 	replEnv.SetContextInfoPreviewChars(r.config.ContextInfoPreviewChars)
 	replEnv.SetMaxFullContextQueryChars(r.config.MaxFullContextQueryChars)
 
