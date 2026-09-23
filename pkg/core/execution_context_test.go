@@ -121,6 +121,17 @@ func TestEndSpan_RestoresParentSpan(t *testing.T) {
 	require.False(t, parent.EndTime.IsZero())
 }
 
+func TestEndSpanRequiresReturnedContext(t *testing.T) {
+	ctx := WithExecutionState(context.Background())
+	spanCtx, span := StartSpan(ctx, "span")
+
+	EndSpan(ctx)
+	require.True(t, span.EndTime.IsZero(), "a context without the span frame must not close another branch")
+
+	EndSpan(spanCtx)
+	require.False(t, span.EndTime.IsZero())
+}
+
 func TestEndSpan_IsolatesConcurrentContextBranches(t *testing.T) {
 	ctx := WithExecutionState(context.Background())
 	rootCtx, root := StartSpan(ctx, "root")
@@ -129,6 +140,9 @@ func TestEndSpan_IsolatesConcurrentContextBranches(t *testing.T) {
 
 	require.Equal(t, root.ID, left.ParentID)
 	require.Equal(t, root.ID, right.ParentID)
+	require.Same(t, root, SpanFromContext(rootCtx))
+	require.Same(t, left, SpanFromContext(leftCtx))
+	require.Same(t, right, SpanFromContext(rightCtx))
 
 	EndSpan(leftCtx)
 	require.False(t, left.EndTime.IsZero())

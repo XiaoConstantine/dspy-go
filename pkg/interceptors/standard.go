@@ -203,8 +203,8 @@ func MetricsModuleInterceptor() core.ModuleInterceptor {
 				metrics["cost"] = tokenUsage.Cost
 			}
 
-			// Store metrics in current span
-			if span := state.GetCurrentSpan(); span != nil {
+			// Store metrics in this context branch's span.
+			if span := core.SpanFromContext(ctx); span != nil {
 				span.WithAnnotation("metrics", metrics)
 			}
 		}
@@ -243,8 +243,8 @@ func MetricsAgentInterceptor() core.AgentInterceptor {
 				metrics["cost"] = tokenUsage.Cost
 			}
 
-			// Store metrics in current span
-			if span := state.GetCurrentSpan(); span != nil {
+			// Store metrics in this context branch's span.
+			if span := core.SpanFromContext(ctx); span != nil {
 				span.WithAnnotation("metrics", metrics)
 			}
 		}
@@ -278,8 +278,8 @@ func MetricsToolInterceptor() core.ToolInterceptor {
 				metrics["has_data"] = true
 			}
 
-			// Store metrics in current span
-			if span := state.GetCurrentSpan(); span != nil {
+			// Store metrics in this context branch's span.
+			if span := core.SpanFromContext(ctx); span != nil {
 				span.WithAnnotation("metrics", metrics)
 			}
 		}

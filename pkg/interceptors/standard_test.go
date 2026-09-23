@@ -265,6 +265,33 @@ func TestMetricsModuleInterceptor(t *testing.T) {
 	// it just records metrics in the execution state
 }
 
+func TestMetricsModuleInterceptorUsesContextBranch(t *testing.T) {
+	interceptor := MetricsModuleInterceptor()
+	ctx := core.WithExecutionState(context.Background())
+	rootCtx, _ := core.StartSpan(ctx, "root")
+	leftCtx, left := core.StartSpan(rootCtx, "left")
+	rightCtx, right := core.StartSpan(rootCtx, "right")
+
+	info := core.NewModuleInfo("LeftModule", "TestType", core.Signature{})
+	_, err := interceptor(leftCtx, map[string]any{"side": "left"}, info,
+		func(context.Context, map[string]any, ...core.Option) (map[string]any, error) {
+			return map[string]any{"result": "success"}, nil
+		})
+	if err != nil {
+		t.Fatalf("MetricsModuleInterceptor returned an error: %v", err)
+	}
+	if left.Annotations["metrics"] == nil {
+		t.Fatal("expected metrics on the left branch span")
+	}
+	if right.Annotations["metrics"] != nil {
+		t.Fatal("metrics from the left branch were attached to its sibling")
+	}
+
+	core.EndSpan(leftCtx)
+	core.EndSpan(rightCtx)
+	core.EndSpan(rootCtx)
+}
+
 func TestMetricsAgentInterceptor(t *testing.T) {
 	interceptor := MetricsAgentInterceptor()
 

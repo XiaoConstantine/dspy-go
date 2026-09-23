@@ -138,12 +138,15 @@ func RecordLLMCall(ctx context.Context, llm LLM) {
 	RecordModelCall(ctx, llm)
 }
 
-// StartSpan begins a new operation span.
+// StartSpan begins a new operation span. Callers must propagate the returned
+// context to nested work and pass it to EndSpan.
 func StartSpan(ctx context.Context, operation string) (context.Context, *Span) {
 	return StartSpanWithContext(ctx, operation, "", nil)
 }
 
-// StartSpanWithContext begins a new operation span with additional context information.
+// StartSpanWithContext begins a new operation span with additional context
+// information. Parentage is derived only from the supplied context; callers
+// must propagate the returned context to nested work and pass it to EndSpan.
 func StartSpanWithContext(ctx context.Context, operation string, moduleName string, metadata map[string]any) (context.Context, *Span) {
 	state := GetExecutionState(ctx)
 	if state == nil {
@@ -207,9 +210,10 @@ func StartSpanWithContext(ctx context.Context, operation string, moduleName stri
 	return ctx, span
 }
 
-// EndSpan completes the span associated with ctx. When multiple context
-// branches share one ExecutionState, ending one branch never closes another
-// branch's span.
+// EndSpan completes the span associated with ctx. The context must be the one
+// returned by StartSpan or StartSpanWithContext. When multiple context branches
+// share one ExecutionState, ending one branch never closes another branch's
+// span.
 func EndSpan(ctx context.Context) {
 	state := GetExecutionState(ctx)
 	if state == nil {
@@ -219,15 +223,11 @@ func EndSpan(ctx context.Context) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	var target, parent *Span
-	if frame, ok := ctx.Value(spanKey).(*spanContextFrame); ok && frame.state == state {
-		target = frame.span
-		parent = frame.parent
-	} else {
-		// Preserve the legacy best-effort behavior for callers that discard the
-		// context returned by StartSpan.
-		target = state.activeSpan
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return
 	}
+	target, parent := frame.span, frame.parent
 	if target == nil {
 		return
 	}
@@ -349,6 +349,24 @@ func resetSpanIDGenerator() {
 	defaultGenerator.counter.Store(0)
 }
 
+// SpanFromContext returns the innermost span associated with this context
+// branch. Unlike ExecutionState.GetCurrentSpan, it cannot return a span from a
+// concurrent sibling branch.
+func SpanFromContext(ctx context.Context) *Span {
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return nil
+	}
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return nil
+	}
+	return frame.span
+}
+
+// GetCurrentSpan returns the shared legacy active span. It is retained for
+// compatibility with serial callers; branch-aware code should use
+// SpanFromContext.
 func (s *ExecutionState) GetCurrentSpan() *Span {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
