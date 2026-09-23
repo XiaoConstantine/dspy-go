@@ -153,7 +153,7 @@ func (c *LLMSubClient) QueryBatched(ctx context.Context, prompts []string) ([]Qu
 		i, prompt := i, prompt
 		p.Go(func(ctx context.Context) error {
 			result, err := c.Query(ctx, prompt)
-			if err != nil && result.Response == "" {
+			if err != nil {
 				result.Response = fmt.Sprintf("Error: %v", err)
 			}
 			results[i] = result

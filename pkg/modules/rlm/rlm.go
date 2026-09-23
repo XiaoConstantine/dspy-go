@@ -283,6 +283,7 @@ func (c *accountingSubLLMClient) QueryBatched(ctx context.Context, prompts []str
 			continue
 		}
 		if !errors.Is(err, ErrTokenBudgetExceeded) {
+			response.Response = "Error: " + err.Error()
 			responses[index] = response
 			return responses[:index+1], err
 		}

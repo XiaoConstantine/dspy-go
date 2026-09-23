@@ -89,6 +89,17 @@ type gatedMockLLM struct {
 	release <-chan struct{}
 }
 
+type responseErrorLLM struct {
+	*mockLLM
+}
+
+func (m *responseErrorLLM) Generate(context.Context, string, ...core.GenerateOption) (*core.LLMResponse, error) {
+	return &core.LLMResponse{
+		Content: "unsafe partial response",
+		Usage:   &core.TokenInfo{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 50},
+	}, errors.New("provider failed")
+}
+
 func (m *gatedMockLLM) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
 	select {
 	case m.entered <- struct{}{}:
@@ -198,7 +209,7 @@ func (c *sequentialErrorSubLLMClient) Query(context.Context, string) (QueryRespo
 	if c.calls.Add(1) == 1 {
 		return QueryResponse{Response: "first", PromptTokens: 20, CompletionTokens: 10}, nil
 	}
-	return QueryResponse{PromptTokens: 5, CompletionTokens: 5}, errors.New("second query failed after consuming tokens")
+	return QueryResponse{Response: "unsafe partial response", PromptTokens: 5, CompletionTokens: 5}, errors.New("second query failed after consuming tokens")
 }
 
 func (*sequentialErrorSubLLMClient) QueryBatched(context.Context, []string) ([]QueryResponse, error) {
@@ -904,6 +915,18 @@ func TestLLMSubClientPreservesProviderTotal(t *testing.T) {
 	assert.Equal(t, 50, response.TotalTokens)
 }
 
+func TestLLMSubClientBatchedErrorHidesPartialResponseButPreservesUsage(t *testing.T) {
+	model := &responseErrorLLM{mockLLM: &mockLLM{}}
+
+	responses, err := NewLLMSubClient(model).QueryBatched(context.Background(), []string{"prompt"})
+	require.Error(t, err)
+	require.Len(t, responses, 1)
+	assert.Equal(t, "Error: provider failed", responses[0].Response)
+	assert.Equal(t, 20, responses[0].PromptTokens)
+	assert.Equal(t, 10, responses[0].CompletionTokens)
+	assert.Equal(t, 50, responses[0].TotalTokens)
+}
+
 func TestRLMSubQueriesPreserveProviderTotal(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1095,6 +1118,9 @@ func TestRLMBudgetedBatchProviderErrorPreservesFailedUsage(t *testing.T) {
 	assert.Equal(t, "first", outputs["answer"])
 	assert.EqualValues(t, 2, mockSub.calls.Load())
 	assert.Equal(t, 140, r.GetTokenTracker().GetTotalUsage().TotalTokens)
+	calls := r.GetTokenTracker().GetSubCalls()
+	require.Len(t, calls, 2)
+	assert.Equal(t, "Error: second query failed after consuming tokens", calls[1].Response)
 	usage := core.TokenUsageFromContext(outerCtx)
 	require.NotNil(t, usage)
 	assert.Equal(t, 140, usage.TotalTokens)
