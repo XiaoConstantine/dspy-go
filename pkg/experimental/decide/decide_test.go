@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -463,6 +464,38 @@ func TestDecideRejectsMalformedEvidence(t *testing.T) {
 			assert.Contains(t, err.Error(), test.match)
 		})
 	}
+}
+
+func TestDecideScoreAvoidsFiniteWeightedOverflow(t *testing.T) {
+	maximum := math.MaxFloat64
+	client := &recordingClient{response: &typesafe.SystemOneResponse{
+		Model: "jev-extreme",
+		Answers: map[string]typesafe.Answer{
+			"score": typesafe.ScoreAnswer{
+				Score:         0.5,
+				Confidence:    0.8,
+				Probabilities: map[int]float64{0: 0.509, 1: 0.509},
+			},
+		},
+	}}
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("input")}},
+		[]core.OutputField{{Field: core.NewField("score")}},
+	)
+	module, err := decide.New(client, signature, decide.Score("score",
+		decide.Level(0.99*maximum, "very large"),
+		decide.Level(maximum, "maximum"),
+	))
+	require.NoError(t, err)
+
+	result, err := module.ProcessDecision(context.Background(), map[string]any{"input": "extreme"})
+	require.NoError(t, err)
+	score, ok := decide.Get[decide.ScoreDecision](result, "score")
+	require.True(t, ok)
+	require.False(t, math.IsInf(score.Value, 0))
+	require.False(t, math.IsNaN(score.Value))
+	require.GreaterOrEqual(t, score.Value, 0.99*maximum)
+	require.LessOrEqual(t, score.Value, maximum)
 }
 
 func TestDecidePropagatesCancellation(t *testing.T) {

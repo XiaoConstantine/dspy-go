@@ -184,13 +184,31 @@ func (o *scoreOutput) decode(raw typesafe.Answer) (Decision, any, error) {
 		return nil, nil, fmt.Errorf("output %q: %w", o.name, err)
 	}
 
-	var weighted, mass float64
+	var mass, scale float64
 	for i, anchor := range o.anchors {
-		probability := answer.Probabilities[i]
-		weighted += anchor * probability
-		mass += probability
+		mass += answer.Probabilities[i]
+		scale = math.Max(scale, math.Abs(anchor))
 	}
-	value := weighted / mass
+
+	// Compute the convex combination in a scaled domain. Multiplying very large
+	// finite anchors before normalizing can overflow even when the result is
+	// mathematically finite.
+	value := 0.0
+	if scale != 0 {
+		var scaled float64
+		for i, anchor := range o.anchors {
+			scaled += (anchor / scale) * (answer.Probabilities[i] / mass)
+		}
+		if !isFinite(scaled) {
+			return nil, nil, fmt.Errorf("output %q: computed score must be finite", o.name)
+		}
+		// Floating-point summation can stray just outside the convex hull.
+		scaled = math.Max(o.anchors[0]/scale, math.Min(o.anchors[len(o.anchors)-1]/scale, scaled))
+		value = scaled * scale
+	}
+	if !isFinite(value) {
+		return nil, nil, fmt.Errorf("output %q: computed score must be finite", o.name)
+	}
 	decision := ScoreDecision{
 		Value:              value,
 		ProviderScore:      answer.Score,
