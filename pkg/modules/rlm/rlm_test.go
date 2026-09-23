@@ -831,6 +831,63 @@ func TestRLMMaxTokens_StopsOnRootBudgetExceeded(t *testing.T) {
 	assert.Contains(t, err.Error(), "token budget")
 }
 
+func TestRLMTracksProviderTotalBeyondComponents(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ncomplete",
+		},
+		usages: []core.TokenInfo{{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 200}},
+	}
+	r := New(mockRoot, &mockSubLLMClient{}, WithMaxIterations(1))
+	ctx := core.WithExecutionState(context.Background())
+	outerCtx, _ := core.StartSpan(ctx, "outer")
+
+	result, trace, err := r.CompleteWithTrace(outerCtx, "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, 200, result.Usage.TotalTokens)
+	assert.Equal(t, 200, trace.Usage.TotalTokens)
+	assert.Equal(t, 200, trace.RootUsage.TotalTokens)
+	assert.Equal(t, 200, r.GetTokenTracker().GetTotalUsage().TotalTokens)
+	branchUsage := core.TokenUsageFromContext(outerCtx)
+	require.NotNil(t, branchUsage)
+	assert.Equal(t, 200, branchUsage.TotalTokens)
+	stateUsage := core.GetExecutionState(outerCtx).GetTokenUsage()
+	require.NotNil(t, stateUsage)
+	assert.Equal(t, 200, stateUsage.TotalTokens)
+	core.EndSpan(outerCtx)
+}
+
+func TestRLMNestedUsagePreservesProviderTotal(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nDelegate.\n\nAction:\nsubrlm\n\nCode:\n\nSubQuery:\nchild work\n\nAnswer:\n",
+			"Reasoning:\nChild done.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\nchild answer",
+			"Reasoning:\nParent done.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\nparent answer",
+		},
+		usages: []core.TokenInfo{
+			{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 125},
+			{PromptTokens: 90, CompletionTokens: 60, TotalTokens: 200},
+			{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 40},
+		},
+	}
+	r := New(mockRoot, &mockSubLLMClient{},
+		WithMaxIterations(2),
+		WithSubRLMConfig(SubRLMConfig{MaxDepth: 3, MaxIterationsPerSubRLM: 1}),
+	)
+	ctx := core.WithExecutionState(context.Background())
+	outerCtx, _ := core.StartSpan(ctx, "outer")
+
+	result, err := r.Complete(outerCtx, "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, "parent answer", result.Response)
+	assert.Equal(t, 365, result.Usage.TotalTokens)
+	assert.Equal(t, 200, r.GetTokenTracker().GetSubRLMUsage().TotalTokens)
+	branchUsage := core.TokenUsageFromContext(outerCtx)
+	require.NotNil(t, branchUsage)
+	assert.Equal(t, 365, branchUsage.TotalTokens)
+	core.EndSpan(outerCtx)
+}
+
 func TestRLMMaxTokens_CountsSubLLMUsage(t *testing.T) {
 	mockRoot := &mockLLM{
 		responses: []string{

@@ -1144,6 +1144,7 @@ func (r *RLM) executeSubRLM(ctx context.Context, replEnv *YaegiREPL, subquery, p
 		Duration:         time.Since(start),
 		PromptTokens:     subUsage.PromptTokens,
 		CompletionTokens: subUsage.CompletionTokens,
+		TotalTokens:      subUsage.TotalTokens,
 	}
 	if result != nil {
 		subCall.Result = result.Response
@@ -1905,9 +1906,9 @@ func (r *RLM) trackTokenUsage(ctx context.Context, tokenTracker *TokenTracker, i
 		return 0
 	}
 	if iteration > 0 {
-		tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
+		tokenTracker.AddRootTokenUsageForIteration(iteration, *usage)
 	} else {
-		tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+		tokenTracker.AddRootTokenUsage(*usage)
 	}
 	return usage.PromptTokens
 }

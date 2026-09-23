@@ -25,6 +25,7 @@ type SubRLMCall struct {
 	Duration         time.Duration `json:"duration"`
 	PromptTokens     int           `json:"prompt_tokens"`
 	CompletionTokens int           `json:"completion_tokens"`
+	TotalTokens      int           `json:"total_tokens"`
 }
 
 // RootIterationSnapshot captures per-iteration root LLM prompt token counts.
@@ -43,14 +44,17 @@ type TokenTracker struct {
 	// Root LLM usage (orchestration)
 	rootPromptTokens     int
 	rootCompletionTokens int
+	rootTotalTokens      int
 
 	// Sub-LLM usage (Query/QueryBatched calls from REPL)
 	subPromptTokens     int
 	subCompletionTokens int
+	subTotalTokens      int
 
 	// Sub-RLM usage (nested RLM loops)
 	subRLMPromptTokens     int
 	subRLMCompletionTokens int
+	subRLMTotalTokens      int
 
 	// Detailed call history
 	subCalls    []LLMCall
@@ -69,12 +73,29 @@ func NewTokenTracker() *TokenTracker {
 	}
 }
 
+func normalizedTokenTotal(promptTokens, completionTokens, totalTokens int) int {
+	componentTotal := promptTokens + completionTokens
+	if totalTokens < componentTotal {
+		return componentTotal
+	}
+	return totalTokens
+}
+
 // AddRootUsage adds token usage from a root LLM call.
 func (t *TokenTracker) AddRootUsage(promptTokens, completionTokens int) {
+	t.AddRootTokenUsage(core.TokenUsage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      promptTokens + completionTokens,
+	})
+}
+
+// AddRootTokenUsage adds a complete root LLM usage record, preserving provider
+// totals that include tokens outside the prompt/completion breakdown.
+func (t *TokenTracker) AddRootTokenUsage(usage core.TokenUsage) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.rootPromptTokens += promptTokens
-	t.rootCompletionTokens += completionTokens
+	t.addRootTokenUsage(usage)
 }
 
 // AddRootUsageForIteration adds token usage from a root LLM call and records
@@ -82,15 +103,29 @@ func (t *TokenTracker) AddRootUsage(promptTokens, completionTokens int) {
 // provider reported for this single root call — not a cumulative delta.
 // This is the data needed to compute context_fill_ratio per iteration.
 func (t *TokenTracker) AddRootUsageForIteration(iteration, promptTokens, completionTokens int) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.rootPromptTokens += promptTokens
-	t.rootCompletionTokens += completionTokens
-	t.rootSnapshots = append(t.rootSnapshots, RootIterationSnapshot{
-		Iteration:        iteration,
+	t.AddRootTokenUsageForIteration(iteration, core.TokenUsage{
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
+		TotalTokens:      promptTokens + completionTokens,
 	})
+}
+
+// AddRootTokenUsageForIteration records complete root usage and its iteration snapshot.
+func (t *TokenTracker) AddRootTokenUsageForIteration(iteration int, usage core.TokenUsage) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.addRootTokenUsage(usage)
+	t.rootSnapshots = append(t.rootSnapshots, RootIterationSnapshot{
+		Iteration:        iteration,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+	})
+}
+
+func (t *TokenTracker) addRootTokenUsage(usage core.TokenUsage) {
+	t.rootPromptTokens += usage.PromptTokens
+	t.rootCompletionTokens += usage.CompletionTokens
+	t.rootTotalTokens += normalizedTokenTotal(usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 }
 
 // AddSubCall adds a sub-LLM call with its token usage.
@@ -100,6 +135,7 @@ func (t *TokenTracker) AddSubCall(call LLMCall) {
 	t.subCalls = append(t.subCalls, call)
 	t.subPromptTokens += call.PromptTokens
 	t.subCompletionTokens += call.CompletionTokens
+	t.subTotalTokens += call.PromptTokens + call.CompletionTokens
 }
 
 // AddSubCalls adds multiple sub-LLM calls.
@@ -110,6 +146,7 @@ func (t *TokenTracker) AddSubCalls(calls []LLMCall) {
 		t.subCalls = append(t.subCalls, call)
 		t.subPromptTokens += call.PromptTokens
 		t.subCompletionTokens += call.CompletionTokens
+		t.subTotalTokens += call.PromptTokens + call.CompletionTokens
 	}
 }
 
@@ -120,6 +157,7 @@ func (t *TokenTracker) AddSubRLMCall(call SubRLMCall) {
 	t.subRLMCalls = append(t.subRLMCalls, call)
 	t.subRLMPromptTokens += call.PromptTokens
 	t.subRLMCompletionTokens += call.CompletionTokens
+	t.subRLMTotalTokens += normalizedTokenTotal(call.PromptTokens, call.CompletionTokens, call.TotalTokens)
 }
 
 // GetTotalUsage returns the total aggregated token usage.
@@ -133,7 +171,7 @@ func (t *TokenTracker) GetTotalUsage() core.TokenUsage {
 	return core.TokenUsage{
 		PromptTokens:     totalPrompt,
 		CompletionTokens: totalCompletion,
-		TotalTokens:      totalPrompt + totalCompletion,
+		TotalTokens:      t.rootTotalTokens + t.subTotalTokens + t.subRLMTotalTokens,
 	}
 }
 
@@ -145,7 +183,7 @@ func (t *TokenTracker) GetRootUsage() core.TokenUsage {
 	return core.TokenUsage{
 		PromptTokens:     t.rootPromptTokens,
 		CompletionTokens: t.rootCompletionTokens,
-		TotalTokens:      t.rootPromptTokens + t.rootCompletionTokens,
+		TotalTokens:      t.rootTotalTokens,
 	}
 }
 
@@ -157,7 +195,7 @@ func (t *TokenTracker) GetSubUsage() core.TokenUsage {
 	return core.TokenUsage{
 		PromptTokens:     t.subPromptTokens,
 		CompletionTokens: t.subCompletionTokens,
-		TotalTokens:      t.subPromptTokens + t.subCompletionTokens,
+		TotalTokens:      t.subTotalTokens,
 	}
 }
 
@@ -189,7 +227,7 @@ func (t *TokenTracker) GetSubRLMUsage() core.TokenUsage {
 	return core.TokenUsage{
 		PromptTokens:     t.subRLMPromptTokens,
 		CompletionTokens: t.subRLMCompletionTokens,
-		TotalTokens:      t.subRLMPromptTokens + t.subRLMCompletionTokens,
+		TotalTokens:      t.subRLMTotalTokens,
 	}
 }
 
@@ -248,10 +286,13 @@ func (t *TokenTracker) Reset() {
 
 	t.rootPromptTokens = 0
 	t.rootCompletionTokens = 0
+	t.rootTotalTokens = 0
 	t.subPromptTokens = 0
 	t.subCompletionTokens = 0
+	t.subTotalTokens = 0
 	t.subRLMPromptTokens = 0
 	t.subRLMCompletionTokens = 0
+	t.subRLMTotalTokens = 0
 	t.subCalls = make([]LLMCall, 0)
 	t.subRLMCalls = make([]SubRLMCall, 0)
 	t.rootSnapshots = make([]RootIterationSnapshot, 0)
