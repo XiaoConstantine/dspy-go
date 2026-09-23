@@ -97,8 +97,14 @@ func (l *Logger) logf(ctx context.Context, s Severity, format string, args ...an
 	}
 	// Add execution context information if available
 	if state := core.GetExecutionState(ctx); state != nil {
-		entry.Fields["model_id"] = state.GetModelID()
-		if usage := state.GetTokenUsage(); usage != nil {
+		modelID := core.ModelIDFromContext(ctx)
+		usage := core.TokenUsageFromContext(ctx)
+		if core.SpanFromContext(ctx) == nil {
+			modelID = state.GetModelID()
+			usage = state.GetTokenUsage()
+		}
+		entry.Fields["model_id"] = modelID
+		if usage != nil {
 			entry.Fields["token_usage"] = usage
 		}
 		entry.Fields["spans"] = core.CollectSpans(ctx)

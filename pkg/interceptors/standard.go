@@ -177,13 +177,14 @@ func TracingToolInterceptor() core.ToolInterceptor {
 func MetricsModuleInterceptor() core.ModuleInterceptor {
 	return func(ctx context.Context, inputs map[string]any, info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
 		start := time.Now()
+		usageBefore := core.TokenUsageFromContext(ctx)
 
 		result, err := handler(ctx, inputs, opts...)
 
 		duration := time.Since(start)
 
 		// Record metrics in execution state for later collection
-		if state := core.GetExecutionState(ctx); state != nil {
+		if core.GetExecutionState(ctx) != nil {
 			// Create metrics annotation for this module execution
 			metrics := map[string]any{
 				"module_name":  info.ModuleName,
@@ -195,13 +196,8 @@ func MetricsModuleInterceptor() core.ModuleInterceptor {
 				"output_count": len(result),
 			}
 
-			// Add token usage if available
-			if tokenUsage := state.GetTokenUsage(); tokenUsage != nil {
-				metrics["prompt_tokens"] = tokenUsage.PromptTokens
-				metrics["completion_tokens"] = tokenUsage.CompletionTokens
-				metrics["total_tokens"] = tokenUsage.TotalTokens
-				metrics["cost"] = tokenUsage.Cost
-			}
+			// Add only usage recorded by this operation on this context branch.
+			addTokenUsageMetrics(metrics, tokenUsageDelta(usageBefore, core.TokenUsageFromContext(ctx)))
 
 			// Store metrics in this context branch's span.
 			if span := core.SpanFromContext(ctx); span != nil {
@@ -217,13 +213,14 @@ func MetricsModuleInterceptor() core.ModuleInterceptor {
 func MetricsAgentInterceptor() core.AgentInterceptor {
 	return func(ctx context.Context, input map[string]any, info *core.AgentInfo, handler core.AgentHandler) (map[string]any, error) {
 		start := time.Now()
+		usageBefore := core.TokenUsageFromContext(ctx)
 
 		result, err := handler(ctx, input)
 
 		duration := time.Since(start)
 
 		// Record metrics in execution state for later collection
-		if state := core.GetExecutionState(ctx); state != nil {
+		if core.GetExecutionState(ctx) != nil {
 			metrics := map[string]any{
 				"agent_id":          info.AgentID,
 				"agent_type":        info.AgentType,
@@ -235,13 +232,8 @@ func MetricsAgentInterceptor() core.AgentInterceptor {
 				"capabilities_used": len(info.Capabilities),
 			}
 
-			// Add token usage if available
-			if tokenUsage := state.GetTokenUsage(); tokenUsage != nil {
-				metrics["prompt_tokens"] = tokenUsage.PromptTokens
-				metrics["completion_tokens"] = tokenUsage.CompletionTokens
-				metrics["total_tokens"] = tokenUsage.TotalTokens
-				metrics["cost"] = tokenUsage.Cost
-			}
+			// Add only usage recorded by this operation on this context branch.
+			addTokenUsageMetrics(metrics, tokenUsageDelta(usageBefore, core.TokenUsageFromContext(ctx)))
 
 			// Store metrics in this context branch's span.
 			if span := core.SpanFromContext(ctx); span != nil {
@@ -289,6 +281,33 @@ func MetricsToolInterceptor() core.ToolInterceptor {
 }
 
 // Helper functions
+
+func tokenUsageDelta(before, after *core.TokenUsage) *core.TokenUsage {
+	if after == nil {
+		return nil
+	}
+	delta := *after
+	if before != nil {
+		delta.PromptTokens -= before.PromptTokens
+		delta.CompletionTokens -= before.CompletionTokens
+		delta.TotalTokens -= before.TotalTokens
+		delta.Cost -= before.Cost
+	}
+	if delta.PromptTokens == 0 && delta.CompletionTokens == 0 && delta.TotalTokens == 0 && delta.Cost == 0 {
+		return nil
+	}
+	return &delta
+}
+
+func addTokenUsageMetrics(metrics map[string]any, usage *core.TokenUsage) {
+	if usage == nil {
+		return
+	}
+	metrics["prompt_tokens"] = usage.PromptTokens
+	metrics["completion_tokens"] = usage.CompletionTokens
+	metrics["total_tokens"] = usage.TotalTokens
+	metrics["cost"] = usage.Cost
+}
 
 // getInputFieldNames extracts field names from module inputs.
 func getInputFieldNames(inputs map[string]any) []string {

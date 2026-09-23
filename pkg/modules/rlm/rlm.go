@@ -418,7 +418,9 @@ func (r *RLM) Process(ctx context.Context, inputs map[string]any, opts ...core.O
 		return nil, err
 	}
 
-	// Update execution state with token usage
+	// Preserve the legacy total snapshot. Individual Predict calls have already
+	// contributed their usage to the context branch, so recording this aggregate
+	// there again would double count it.
 	if state := core.GetExecutionState(ctx); state != nil {
 		state.WithTokenUsage(&core.TokenUsage{
 			PromptTokens:     result.Usage.PromptTokens,
@@ -1687,15 +1689,19 @@ func (r *RLM) trackTokenUsage(ctx context.Context, tokenTracker *TokenTracker, i
 	if tokenTracker == nil {
 		return 0
 	}
-	if state := core.GetExecutionState(ctx); state != nil {
-		if usage := state.GetTokenUsage(); usage != nil {
-			if iteration > 0 {
-				tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
-			} else {
-				tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
-			}
-			return usage.PromptTokens
+	usage := core.LatestTokenUsageFromContext(ctx)
+	if usage == nil && core.SpanFromContext(ctx) == nil {
+		if state := core.GetExecutionState(ctx); state != nil {
+			usage = state.GetTokenUsage()
 		}
+	}
+	if usage != nil {
+		if iteration > 0 {
+			tokenTracker.AddRootUsageForIteration(iteration, usage.PromptTokens, usage.CompletionTokens)
+		} else {
+			tokenTracker.AddRootUsage(usage.PromptTokens, usage.CompletionTokens)
+		}
+		return usage.PromptTokens
 	}
 	return 0
 }

@@ -58,9 +58,16 @@ type ExecutionContextKey struct {
 }
 
 type spanContextFrame struct {
+	mu sync.Mutex
+
 	state  *ExecutionState
 	span   *Span
-	parent *Span
+	parent *spanContextFrame
+
+	modelID        string
+	tokenUsage     TokenUsage
+	lastTokenUsage TokenUsage
+	hasTokenUsage  bool
 }
 
 var (
@@ -127,8 +134,18 @@ func RecordModelCall(ctx context.Context, model ModelIdentifier) {
 		}()
 		modelID = model.ModelID()
 	}()
-	if modelID != "" {
-		state.WithModelID(modelID)
+	if modelID == "" {
+		return
+	}
+	state.WithModelID(modelID)
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return
+	}
+	for current := frame; current != nil; current = current.parent {
+		current.mu.Lock()
+		current.modelID = modelID
+		current.mu.Unlock()
 	}
 }
 
@@ -136,6 +153,90 @@ func RecordModelCall(ctx context.Context, model ModelIdentifier) {
 // logs and traces can attribute downstream events to the active model.
 func RecordLLMCall(ctx context.Context, llm LLM) {
 	RecordModelCall(ctx, llm)
+}
+
+// RecordTokenUsage records one LLM usage event on the shared legacy execution
+// state and aggregates it into this context branch and each of its ancestors.
+func RecordTokenUsage(ctx context.Context, usage *TokenUsage) {
+	if usage == nil {
+		return
+	}
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return
+	}
+	state.WithTokenUsage(usage)
+
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return
+	}
+	for current := frame; current != nil; current = current.parent {
+		current.mu.Lock()
+		current.tokenUsage.PromptTokens += usage.PromptTokens
+		current.tokenUsage.CompletionTokens += usage.CompletionTokens
+		current.tokenUsage.TotalTokens += usage.TotalTokens
+		current.tokenUsage.Cost += usage.Cost
+		current.lastTokenUsage = *usage
+		current.hasTokenUsage = true
+		current.mu.Unlock()
+	}
+}
+
+// ModelIDFromContext returns the most recently recorded model for this context
+// branch without consulting a concurrent sibling branch.
+func ModelIDFromContext(ctx context.Context) string {
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return ""
+	}
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return ""
+	}
+	frame.mu.Lock()
+	defer frame.mu.Unlock()
+	return frame.modelID
+}
+
+// TokenUsageFromContext returns aggregate token usage for this context branch.
+// The returned value is a copy and cannot be mutated to alter execution state.
+func TokenUsageFromContext(ctx context.Context) *TokenUsage {
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return nil
+	}
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return nil
+	}
+	frame.mu.Lock()
+	defer frame.mu.Unlock()
+	if !frame.hasTokenUsage {
+		return nil
+	}
+	usage := frame.tokenUsage
+	return &usage
+}
+
+// LatestTokenUsageFromContext returns the latest token-usage event recorded on
+// this context branch. The returned value is a copy.
+func LatestTokenUsageFromContext(ctx context.Context) *TokenUsage {
+	state := GetExecutionState(ctx)
+	if state == nil {
+		return nil
+	}
+	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
+	if !ok || frame.state != state {
+		return nil
+	}
+	frame.mu.Lock()
+	defer frame.mu.Unlock()
+	if !frame.hasTokenUsage {
+		return nil
+	}
+	usage := frame.lastTokenUsage
+	return &usage
 }
 
 // StartSpan begins a new operation span. Callers must propagate the returned
@@ -193,10 +294,10 @@ func StartSpanWithContext(ctx context.Context, operation string, moduleName stri
 	// Parentage belongs to the context branch, not to the most recently started
 	// span in the shared execution state. This keeps sibling goroutines from
 	// becoming accidental parent/child spans.
-	var parent *Span
+	var parent *spanContextFrame
 	if frame, ok := ctx.Value(spanKey).(*spanContextFrame); ok && frame.state == state {
-		parent = frame.span
-		span.ParentID = parent.ID
+		parent = frame
+		span.ParentID = parent.span.ID
 	}
 
 	state.spans = append(state.spans, span)
@@ -227,7 +328,11 @@ func EndSpan(ctx context.Context) {
 	if !ok || frame.state != state {
 		return
 	}
-	target, parent := frame.span, frame.parent
+	target := frame.span
+	var parent *Span
+	if frame.parent != nil {
+		parent = frame.parent.span
+	}
 	if target == nil {
 		return
 	}
@@ -250,10 +355,17 @@ func (s *ExecutionState) WithModelID(modelID string) {
 	s.modelID = modelID
 }
 
+// WithTokenUsage sets the shared legacy usage snapshot. Context-aware callers
+// should use RecordTokenUsage so concurrent branches remain distinguishable.
 func (s *ExecutionState) WithTokenUsage(usage *TokenUsage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokenUsage = usage
+	if usage == nil {
+		s.tokenUsage = nil
+		return
+	}
+	copy := *usage
+	s.tokenUsage = &copy
 }
 
 // State access methods.
@@ -263,10 +375,16 @@ func (s *ExecutionState) GetModelID() string {
 	return s.modelID
 }
 
+// GetTokenUsage returns a copy of the shared legacy usage snapshot. Use
+// TokenUsageFromContext for branch-aware aggregate accounting.
 func (s *ExecutionState) GetTokenUsage() *TokenUsage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.tokenUsage
+	if s.tokenUsage == nil {
+		return nil
+	}
+	copy := *s.tokenUsage
+	return &copy
 }
 
 // Span methods.

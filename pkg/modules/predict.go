@@ -386,9 +386,7 @@ func recordTokenUsage(ctx context.Context, usage *core.TokenUsage) {
 	}
 
 	logger := logging.GetLogger()
-	if state := core.GetExecutionState(ctx); state != nil {
-		state.WithTokenUsage(usage)
-	}
+	core.RecordTokenUsage(ctx, usage)
 	logger.Debug(ctx, "LLM Completion total token usage: %d, %d, %d",
 		usage.TotalTokens, usage.PromptTokens, usage.CompletionTokens)
 }

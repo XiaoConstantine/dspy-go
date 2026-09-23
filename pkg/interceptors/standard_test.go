@@ -274,14 +274,19 @@ func TestMetricsModuleInterceptorUsesContextBranch(t *testing.T) {
 
 	info := core.NewModuleInfo("LeftModule", "TestType", core.Signature{})
 	_, err := interceptor(leftCtx, map[string]any{"side": "left"}, info,
-		func(context.Context, map[string]any, ...core.Option) (map[string]any, error) {
+		func(ctx context.Context, _ map[string]any, _ ...core.Option) (map[string]any, error) {
+			core.RecordTokenUsage(ctx, &core.TokenUsage{PromptTokens: 11, CompletionTokens: 2, TotalTokens: 13})
 			return map[string]any{"result": "success"}, nil
 		})
 	if err != nil {
 		t.Fatalf("MetricsModuleInterceptor returned an error: %v", err)
 	}
-	if left.Annotations["metrics"] == nil {
+	metrics, ok := left.Annotations["metrics"].(map[string]any)
+	if !ok {
 		t.Fatal("expected metrics on the left branch span")
+	}
+	if metrics["prompt_tokens"] != 11 || metrics["completion_tokens"] != 2 || metrics["total_tokens"] != 13 {
+		t.Fatalf("unexpected left-branch token metrics: %v", metrics)
 	}
 	if right.Annotations["metrics"] != nil {
 		t.Fatal("metrics from the left branch were attached to its sibling")
@@ -427,24 +432,35 @@ func TestMetricsWithTokenUsage(t *testing.T) {
 	interceptor := MetricsModuleInterceptor()
 
 	ctx := core.WithExecutionState(context.Background())
-	state := core.GetExecutionState(ctx)
-	// Set token usage to test metrics collection
-	state.WithTokenUsage(&core.TokenUsage{
-		PromptTokens:     100,
-		CompletionTokens: 50,
-		TotalTokens:      150,
-		Cost:             0.01,
-	})
+	spanCtx, span := core.StartSpan(ctx, "module")
+	// Usage that predates the operation must not be included in its delta.
+	core.RecordTokenUsage(spanCtx, &core.TokenUsage{PromptTokens: 7, CompletionTokens: 3, TotalTokens: 10})
 
 	inputs := map[string]any{"test": "value", "other": "data"}
 	info := core.NewModuleInfo("TestModule", "TestType", core.Signature{})
-
-	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	handler := func(ctx context.Context, _ map[string]any, _ ...core.Option) (map[string]any, error) {
+		core.RecordTokenUsage(ctx, &core.TokenUsage{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+			Cost:             0.01,
+		})
 		return map[string]any{"result": "success", "data": "output"}, nil
 	}
 
-	_, err := interceptor(ctx, inputs, info, handler)
+	_, err := interceptor(spanCtx, inputs, info, handler)
 	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
+		t.Fatalf("MetricsModuleInterceptor returned an error: %v", err)
 	}
+	metrics, ok := span.Annotations["metrics"].(map[string]any)
+	if !ok {
+		t.Fatal("expected module metrics annotation")
+	}
+	if metrics["prompt_tokens"] != 100 || metrics["completion_tokens"] != 50 || metrics["total_tokens"] != 150 {
+		t.Fatalf("unexpected operation token delta: %v", metrics)
+	}
+	if metrics["cost"] != 0.01 {
+		t.Fatalf("unexpected operation cost: %v", metrics["cost"])
+	}
+	core.EndSpan(spanCtx)
 }

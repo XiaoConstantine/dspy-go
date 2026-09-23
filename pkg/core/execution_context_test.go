@@ -156,6 +156,37 @@ func TestEndSpan_IsolatesConcurrentContextBranches(t *testing.T) {
 	require.False(t, root.EndTime.IsZero())
 }
 
+func TestTokenUsageFromContextIsolatesBranchesAndAggregatesParents(t *testing.T) {
+	ctx := WithExecutionState(context.Background())
+	rootCtx, _ := StartSpan(ctx, "root")
+	leftCtx, _ := StartSpan(rootCtx, "left")
+	rightCtx, _ := StartSpan(rootCtx, "right")
+
+	RecordModelCall(leftCtx, &recordLLMCallStub{modelID: "left-model"})
+	RecordTokenUsage(leftCtx, &TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, Cost: 0.01})
+	RecordModelCall(rightCtx, &recordLLMCallStub{modelID: "right-model"})
+	RecordTokenUsage(rightCtx, &TokenUsage{PromptTokens: 20, CompletionTokens: 3, TotalTokens: 23, Cost: 0.02})
+
+	require.Equal(t, "left-model", ModelIDFromContext(leftCtx))
+	require.Equal(t, "right-model", ModelIDFromContext(rightCtx))
+	require.Equal(t, "right-model", ModelIDFromContext(rootCtx))
+	require.Equal(t, &TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, Cost: 0.01}, TokenUsageFromContext(leftCtx))
+	require.Equal(t, &TokenUsage{PromptTokens: 20, CompletionTokens: 3, TotalTokens: 23, Cost: 0.02}, TokenUsageFromContext(rightCtx))
+	require.Equal(t, &TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, Cost: 0.01}, LatestTokenUsageFromContext(leftCtx))
+	require.Equal(t, &TokenUsage{PromptTokens: 20, CompletionTokens: 3, TotalTokens: 23, Cost: 0.02}, LatestTokenUsageFromContext(rightCtx))
+	rootUsage := TokenUsageFromContext(rootCtx)
+	require.NotNil(t, rootUsage)
+	require.Equal(t, 30, rootUsage.PromptTokens)
+	require.Equal(t, 5, rootUsage.CompletionTokens)
+	require.Equal(t, 35, rootUsage.TotalTokens)
+	require.InDelta(t, 0.03, rootUsage.Cost, 1e-12)
+	require.Nil(t, TokenUsageFromContext(ctx))
+
+	EndSpan(leftCtx)
+	EndSpan(rightCtx)
+	EndSpan(rootCtx)
+}
+
 func TestWithFreshExecutionStatePreservesTraceID(t *testing.T) {
 	parentCtx := WithExecutionState(context.Background())
 	parentCtx, _ = StartSpan(parentCtx, "parent")
