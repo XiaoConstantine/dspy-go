@@ -118,6 +118,28 @@ func TestBootstrapFewShot(t *testing.T) {
 	assert.NotZero(t, compilationSpan.StartTime)
 	assert.Nil(t, compilationSpan.Error)
 
+	spansByID := make(map[string]*core.Span, len(spans))
+	for _, span := range spans {
+		spansByID[span.ID] = span
+	}
+	teacherPredictions := 0
+	addedDemonstrations := 0
+	for _, tracedSpan := range spans {
+		switch tracedSpan.Operation {
+		case "Example":
+			assert.Equal(t, compilationSpan.ID, tracedSpan.ParentID)
+		case "TeacherPrediction":
+			teacherPredictions++
+			parent := spansByID[tracedSpan.ParentID]
+			require.NotNil(t, parent, "TeacherPrediction should have a traced parent")
+			assert.Equal(t, "Example", parent.Operation)
+		case "AddDemonstrations":
+			addedDemonstrations++
+			assert.Equal(t, compilationSpan.ID, tracedSpan.ParentID)
+		}
+	}
+	assert.Equal(t, maxBootstrapped, teacherPredictions)
+	assert.Equal(t, maxBootstrapped, addedDemonstrations)
 }
 
 func TestBootstrapFewShotEdgeCases(t *testing.T) {

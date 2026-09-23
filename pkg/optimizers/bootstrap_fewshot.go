@@ -76,10 +76,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 
 	var (
 		resultsMu sync.Mutex
-		results   []struct {
-			demo core.Example
-			ctx  context.Context
-		}
+		results   []core.Example
 		processed atomic.Int32
 		errCh     = make(chan error, 1)
 	)
@@ -103,7 +100,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 			defer core.EndSpan(exampleCtx)
 
 			exampleSpan.WithAnnotation("Example", ex)
-			prediction, err := b.predictWithTeacher(ctx, teacher, teacherLLM, ex)
+			prediction, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
 			if err != nil {
 				exampleSpan.WithError(err)
 				select {
@@ -116,15 +113,9 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 
 			if b.Metric(ex, prediction, exampleCtx) {
 				resultsMu.Lock()
-				results = append(results, struct {
-					demo core.Example
-					ctx  context.Context
-				}{
-					demo: core.Example{
-						Inputs:  ex,
-						Outputs: prediction,
-					},
-					ctx: exampleCtx,
+				results = append(results, core.Example{
+					Inputs:  ex,
+					Outputs: prediction,
 				})
 				resultsMu.Unlock()
 			}
@@ -143,7 +134,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 	}
 
 	for _, result := range results {
-		if err := b.addDemonstrations(compiledStudent, result.demo, result.ctx); err != nil {
+		if err := b.addDemonstrations(compiledStudent, result, ctx); err != nil {
 			span.WithError(err)
 			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
 		}
