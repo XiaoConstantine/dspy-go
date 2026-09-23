@@ -1,0 +1,50 @@
+[
+  {
+    "ticket": "All production uploads are failing with data-loss errors.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.96}},
+      "usage": {"input_tokens": 189, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "An API secret was exposed in a public repository.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.84}},
+      "usage": {"input_tokens": 187, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "The monthly analytics report is taking longer than usual.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.76}},
+      "usage": {"input_tokens": 190, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "Can you refund the add-on I purchased yesterday?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.33}},
+      "usage": {"input_tokens": 186, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "There is a typo in the getting-started guide.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.07}},
+      "usage": {"input_tokens": 183, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "How do I replace my profile picture?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.14}},
+      "usage": {"input_tokens": 182, "output_tokens": 8}
+    }
+  }
+]

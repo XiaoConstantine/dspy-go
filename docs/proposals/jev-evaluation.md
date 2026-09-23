@@ -19,9 +19,9 @@ The proposal does not change `core.Metric` or pass provider data through hidden 
 An initial fixture-driven vertical slice now exists under `pkg/experimental`:
 
 - `typesafe` implements the verified `POST /v1/systemone` request/response shape, environment and explicit configuration, context cancellation, bounded retries, request IDs, typed errors, and Noul/Choice/Score decoding. Its compatibility references are TypeSafe's official Python SDK v0.7.1, official JavaScript SDK v0.6.0, and the OpenAPI-generated models committed in the official Python SDK; there is no official Go SDK at the time of implementation.
-- `decide` implements a sibling `core.Module` with native `Process` outputs, typed `ProcessDecision` evidence, local Noul thresholds, Score anchors, Choice multipliers, cloning, and versioned tuned-parameter persistence. `SetLLM` is explicitly a no-op and it implements no demonstration interfaces.
-- An import guard enforces that packages outside `pkg/experimental` do not depend on experimental packages.
-- Normal tests use recorded JSON fixtures and local transports only. No live API call or credential is required.
+- `decide` implements a sibling `core.Module` with native `Process` outputs, typed `ProcessDecision` evidence, `Get[T]` evidence lookup, local Noul thresholds, Score anchors, Choice multipliers, cloning, and versioned tuned-parameter persistence. `Reinterpret` reapplies current local parameters to compatible, provenance-bound evidence without a provider call, and `ProcessDecision` records provider provenance and one `token_usage` annotation in a context-bound tracing span. System One usage stays separate from the overwrite-only program LLM counter. `SetLLM` is explicitly a no-op and the module implements no demonstration interfaces.
+- An import guard enforces that stable packages elsewhere under `pkg` do not depend on experimental packages.
+- Normal tests use recorded JSON fixtures and local transports only. Four runnable replay modes exercise a `Decide` + `ChainOfThought` program, two-sided threshold calibration with a held-out split, a Jev-first `Predict` cascade, and a labeled `Decide`-versus-`Predict` harness without credentials or live calls.
 
 This is an M0/W7 implementation slice, not completion of either milestone. It intentionally omits response caching, request coalescing, model listing, judge integration, probability reports, and live quality/calibration evidence.
 
@@ -406,7 +406,7 @@ W7 defines an experimental program execution artifact that can produce these rec
 - **What:** add an experimental `Decide` module, typed Noul/Score/Choice evidence, and explicit native-value projection under `pkg/experimental/decide`.
 - **Depends on:** the verified M0 client boundary. Integration with W5 records depends on the W5 record review.
 - **Why:** Jev is useful not only as a judge but also as a fast closed-set program backend. Stanford DSPy's experiment gives dspy-go a concrete behavior matrix to test.
-- **Scope:** one request may answer several declared outputs; no demonstrations, generative fallback, prompt optimizer integration, cascade, or numeric optimizer is included initially.
+- **Scope:** one request may answer several declared outputs; no demonstrations, prompt optimizer integration, or numeric optimizer is built in. Generative fallback and cascades remain explicit program composition rather than `Decide` behavior.
 
 `Decide` is a predictor in the general sense, but it is not the concrete `*modules.Predict` type:
 
@@ -436,9 +436,13 @@ module, err := decide.New(
 // Process satisfies core.Module and returns native task values for composition.
 outputs, err := module.Process(ctx, inputs)
 
-// ProcessDecision returns the same values plus immutable provider evidence.
+// ProcessDecision returns the same values plus typed provider evidence.
 result, err := module.ProcessDecision(ctx, inputs)
-probability := result.Decisions["urgent"].(decide.NoulDecision).Probability
+urgent, found := decide.Get[decide.NoulDecision](result, "urgent")
+if !found {
+    return fmt.Errorf("urgent evidence is missing")
+}
+probability := urgent.Probability
 ```
 
 The exact generic constructors may change during the experiment. The behavioral contract is more important:
@@ -448,7 +452,7 @@ The exact generic constructors may change during the experiment. The behavioral 
 - Noul stores P(true), the local threshold, selected value, and threshold-relative decision confidence.
 - Score stores the raw index-keyed distribution, provider confidence, declared anchors, and expected local value.
 - Choice stores provider string labels, typed application values, raw probabilities, provider selection/confidence, and any distinct local selection. Labels that collide after string conversion are rejected.
-- Provider evidence is immutable. Changing a threshold, Score anchor, or Choice multiplier derives a new local result from the cached distribution.
+- Provider evidence is retained separately from local parameters. After changing a threshold, Score anchor, or Choice multiplier, `Reinterpret` preserves that evidence while deriving a new local result without a provider call. Each result carries private signature and answer-space provenance, and reinterpretation rejects incompatible evidence.
 - Output names and answer spaces are fixed at construction. Incompatible `SetSignature` changes are recorded as validation failures and cause `Process` to fail before a provider call; instruction and input-description edits may remain compatible.
 
 The module's `Clone` method deep-copies its local parameters, and the existing `core.ParameterProvider`/`core.ParameterConsumer` interfaces persist thresholds, Score anchors, and Choice multipliers. It deliberately does not implement `core.DemoProvider` or `core.DemoConsumer`. Existing prompt optimizers that discover `*modules.Predict` therefore leave it alone. A later numeric optimizer can target its tuned parameters through a dedicated capability interface.
@@ -460,10 +464,12 @@ The experiment remains under an `experimental` import path with no stable root a
 - Noul, non-uniform Score, and typed Choice request/response fixtures;
 - multi-output request batching and context cancellation;
 - native and rich projections from identical evidence;
-- cache reuse after local parameter changes;
+- local reinterpretation after parameter changes without another provider call;
 - cloning and program-state round trips without credentials;
 - exclusion from demo/prompt optimizers and discovery through its dedicated parameter capability;
 - an opt-in live comparison with ordinary `Predict` on a closed-set dataset, reporting quality, latency, calibration, and uncached variance.
+
+[`examples/typesafe_vs_predict`](../../examples/typesafe_vs_predict/) is the runnable W7 head-to-head harness for labeled accuracy, per-call latency, calls, and separate provider token counts. Its live measurement bypasses dspy-go's transparent LLM response cache, while replay fixtures match the complete recorded System One request. Replay validates mechanics only; a pre-registered live run on adequate held-out data is still required for W7 evidence, including calibration and uncached variance. [`examples/typesafe_cascade`](../../examples/typesafe_cascade/) separately demonstrates evidence-aware escalation to `modules.Predict` without making raw provider confidence a correctness probability.
 
 ## Cross-cutting requirements
 

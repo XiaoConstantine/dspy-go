@@ -1,58 +1,83 @@
-# TypeSafe Decide example
+# TypeSafe cheap-gate program
 
-This example uses the experimental TypeSafe System One client and `Decide`
-module to triage a support ticket. One provider request returns three closed-set
-outputs:
+This example composes experimental System One decisions and a generative
+DSPy-Go module in one `core.Program`:
 
-- `urgent`: a Noul (yes/no) probability, interpreted with a local threshold;
-- `severity`: an ordinal distribution converted to the expected value of the
-  declared anchors `0`, `2`, and `10`;
-- `category`: a typed Go choice (`billing`, `technical`, `account`, or `other`).
+```text
+support ticket
+    |
+    v
+Decide: answerable + needs_human + category
+    |-- human review ----------> stop before generation
+    |-- account tools required -> stop before generation
+    `-- answerable ------------> ChainOfThought drafts a bounded acknowledgment
+```
 
-`ProcessDecision` returns both ordinary values for program composition and the
-provider evidence used to derive them.
+The built-in batch contains two tickets eligible for a bounded acknowledgment,
+one production incident, and one account-specific refund request. The gate
+therefore invokes the reply-writing LLM for only two of four tickets. Because
+this example supplies no product documentation, generated replies must not
+invent navigation steps, product behavior, or policy.
 
 > **Experimental:** The packages and their persisted formats may change or be
 > removed in a dspy-go v0 minor release.
 
-## Run
+## Run entirely offline
 
-Set a TypeSafe API key and run from the repository root:
+Replay mode starts a local `httptest` System One server backed by recorded JSON
+responses. It also uses a deterministic stand-in for the generative LLM, so it
+requires no API keys or network access:
+
+```bash
+go run ./examples/typesafe_decide -replay
+```
+
+The summary should report four System One calls, two generative calls, and two
+generative calls avoided. Replay probabilities are fixtures for exercising the
+program; they are not evidence about live Jev quality or calibration.
+
+## Run live
+
+Set credentials for TypeSafe and the default Gemini generator:
 
 ```bash
 export TYPESAFE_API_KEY="..."
+export GEMINI_API_KEY="..."
 go run ./examples/typesafe_decide
 ```
 
-Classify another ticket or change the local urgency boundary:
+Select explicit models or provide the generative key directly:
 
 ```bash
 go run ./examples/typesafe_decide \
-  -ticket "I cannot sign in after enabling SSO." \
-  -urgent-threshold 0.7
+  -model YOUR_PINNED_JEV_MODEL \
+  -llm-model YOUR_GENERATIVE_MODEL \
+  -llm-api-key YOUR_GENERATIVE_KEY
 ```
 
-To choose a specific model rather than the default `jev-latest` alias:
+Process one custom ticket in live mode:
 
 ```bash
-go run ./examples/typesafe_decide -model YOUR_PINNED_MODEL
+go run ./examples/typesafe_decide \
+  -ticket "How do I rotate an API key?"
 ```
 
-`TYPESAFE_DEFAULT_MODEL` and `TYPESAFE_BASE_URL` are also supported. A pinned
-model is recommended for reproducible experiments.
+Replay mode only recognizes the exact recorded System One requests. A change to
+the ticket, model, question instructions, or Choice criteria fails rather than
+silently reusing stale evidence.
 
 ## What to notice
 
-- No generative `core.LLM` is configured. `Decide` uses its explicit System One
-  client, and its `SetLLM` method intentionally does not replace that client.
-- All three outputs are batched into one `/v1/systemone` request.
-- `result.Outputs` contains native `bool`, `float64`, and `ticketCategory`
-  values.
-- `result.Decisions` keeps provider probabilities and confidence provenance.
-  Noul confidence is threshold-relative boundary distance, not provider
-  confidence or a calibrated probability of correctness.
-- Local thresholds, Score anchors, and Choice multipliers are not sent to the
-  provider.
-
-This is a live example and incurs a TypeSafe API request. The package tests use
-recorded fixtures and never require credentials.
+- `Decide` and `ChainOfThought` are sibling `core.Module` values in one
+  `core.Program`.
+- Program-wide `SetLLM` is applied to every module. It configures
+  `ChainOfThought`, while `Decide.SetLLM` remains a no-op and its explicit
+  System One client continues receiving all decision calls.
+- `decide.Get[T]` reads typed evidence without unchecked assertions.
+- Human and tool routes avoid generative calls. A real application could replace
+  the tool-route short circuit with ReAct after defining safe tools and approval
+  policy; this example deliberately keeps that branch deterministic.
+- `ProcessDecision` creates a trace span containing model, request ID, and token
+  usage metadata.
+- Ordinary tests and replay runs need no provider credentials. Live mode incurs
+  TypeSafe and generative-provider requests.

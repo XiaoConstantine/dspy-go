@@ -33,4 +33,29 @@ response, err := client.SystemOne(ctx, typesafe.SystemOneRequest{
 
 `decide.New` accepts that client through its narrow `SystemOneClient` interface
 and batches all declared signature outputs into one request. Call `Process` for
-native values or `ProcessDecision` for values plus provider evidence.
+native values or `ProcessDecision` for values plus provider evidence. Use
+`decide.Get[T]` to retrieve named evidence without an unchecked assertion.
+
+After changing a Noul threshold, Score anchor, or Choice multiplier,
+`Decide.Reinterpret` derives a new local result from an existing result without
+calling the provider. It preserves the original model, request ID, token usage,
+probabilities, provider selection, and provider confidence, and rejects results
+whose captured signature or answer space differs from the current module. `ProcessDecision`
+also records a `Decide` span with provider provenance and one `token_usage`
+annotation. System One usage remains on the result and span; it does not update
+the program's overwrite-only `ExecutionState` LLM counter, where it could erase
+a generative module's usage in a mixed program.
+
+Runnable integrations are available in:
+
+- [`examples/typesafe_decide`](../../examples/typesafe_decide): a System One
+  gate and generative `ChainOfThought` in one `core.Program`;
+- [`examples/typesafe_threshold_tuning`](../../examples/typesafe_threshold_tuning):
+  a two-sided abstention band chosen on calibration data, persisted, and
+  reported once on a held-out split;
+- [`examples/typesafe_cascade`](../../examples/typesafe_cascade): a Jev-first
+  classifier that escalates uncertain items to `modules.Predict`;
+- [`examples/typesafe_vs_predict`](../../examples/typesafe_vs_predict): the W7
+  labeled head-to-head harness for quality, latency, calls, and token usage.
+
+All four examples support `-replay` and need no credentials in that mode.

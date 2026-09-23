@@ -1,0 +1,92 @@
+[
+  {
+    "ticket": "Where can I download a copy of last month's invoice?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 0.92,
+          "probabilities": {"billing": 0.91, "technical": 0.02, "account": 0.02, "product": 0.05}
+        }
+      },
+      "usage": {"input_tokens": 224, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "Checkout sometimes freezes after I confirm a card.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "technical",
+          "confidence": 0.58,
+          "probabilities": {"billing": 0.34, "technical": 0.55, "account": 0.03, "product": 0.08}
+        }
+      },
+      "usage": {"input_tokens": 226, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "I am locked out after replacing my phone.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "account",
+          "confidence": 0.88,
+          "probabilities": {"billing": 0.02, "technical": 0.04, "account": 0.89, "product": 0.05}
+        }
+      },
+      "usage": {"input_tokens": 221, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "The export option isn't doing what I expected.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "product",
+          "confidence": 0.64,
+          "probabilities": {"billing": 0.03, "technical": 0.36, "account": 0.02, "product": 0.59}
+        }
+      },
+      "usage": {"input_tokens": 223, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "I cannot access the workspace that appears on my latest charge.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "billing",
+          "confidence": 0.52,
+          "probabilities": {"billing": 0.42, "technical": 0.04, "account": 0.40, "product": 0.14}
+        }
+      },
+      "usage": {"input_tokens": 230, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "Every API request returns a 503 response.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "technical",
+          "confidence": 0.86,
+          "probabilities": {"billing": 0.01, "technical": 0.92, "account": 0.01, "product": 0.06}
+        }
+      },
+      "usage": {"input_tokens": 220, "output_tokens": 17}
+    }
+  }
+]

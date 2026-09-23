@@ -7,59 +7,49 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/experimental/decide"
-	"github.com/XiaoConstantine/dspy-go/pkg/experimental/typesafe"
-)
-
-type ticketCategory string
-
-const (
-	categoryBilling   ticketCategory = "billing"
-	categoryTechnical ticketCategory = "technical"
-	categoryAccount   ticketCategory = "account"
-	categoryOther     ticketCategory = "other"
 )
 
 func main() {
+	replay := flag.Bool("replay", false, "run entirely offline with recorded System One responses and a deterministic LLM")
+	ticket := flag.String("ticket", "", "process one ticket instead of the built-in batch (live mode, or an exact replay ticket)")
 	model := flag.String("model", "", "TypeSafe model override (otherwise TYPESAFE_DEFAULT_MODEL or jev-latest)")
-	ticket := flag.String("ticket", "Payment failed and checkout is unavailable for all users.", "support ticket to classify")
-	urgentThreshold := flag.Float64("urgent-threshold", 0.5, "local P(true) threshold for the urgent decision")
-	timeout := flag.Duration("timeout", 20*time.Second, "total example deadline")
+	llmModel := flag.String("llm-model", string(core.ModelGoogleGeminiFlash), "generative model used for drafted replies")
+	llmAPIKey := flag.String("llm-api-key", "", "generative provider key (defaults to DSPY_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY)")
+	timeout := flag.Duration("timeout", 45*time.Second, "total example deadline")
 	flag.Parse()
+	log.SetFlags(0)
 
-	clientOptions := make([]typesafe.ClientOption, 0, 1)
-	if *model != "" {
-		clientOptions = append(clientOptions, typesafe.WithDefaultModel(*model))
-	}
-	client, err := typesafe.NewClient(clientOptions...)
+	systemOne, closeReplay, err := newSystemOneClient(*replay, *model)
 	if err != nil {
-		log.Fatalf("create TypeSafe client: %v", err)
+		log.Fatalf("create System One client: %v", err)
+	}
+	defer closeReplay()
+	countedSystemOne := &countingSystemOneClient{inner: systemOne}
+
+	program, err := newCheapGateProgram(countedSystemOne)
+	if err != nil {
+		log.Fatalf("create cheap-gate program: %v", err)
 	}
 
-	module, err := decide.New(
-		client,
-		ticketSignature(),
-		decide.Noul("urgent"),
-		decide.Score("severity",
-			decide.Level(0, "Minor: little or no user impact"),
-			decide.Level(2, "Disruptive: an important workflow is degraded"),
-			decide.Level(10, "Blocking: users cannot complete a critical workflow"),
-		),
-		decide.Choice[ticketCategory]("category",
-			decide.Option(categoryBilling, "Payments, invoices, refunds, or charges"),
-			decide.Option(categoryTechnical, "Product malfunction or service outage"),
-			decide.Option(categoryAccount, "Login, identity, permissions, or account access"),
-			decide.Option(categoryOther, "Anything not covered by the other categories"),
-		),
-	)
-	if err != nil {
-		log.Fatalf("create Decide module: %v", err)
+	var generative core.LLM
+	if *replay {
+		generative = newReplayLLM()
+	} else {
+		generative, err = newLiveLLM(*llmAPIKey, *llmModel)
+		if err != nil {
+			log.Fatalf("create generative LLM: %v", err)
+		}
 	}
-	if err := module.SetThreshold("urgent", *urgentThreshold); err != nil {
-		log.Fatalf("configure urgent threshold: %v", err)
+	countedLLM := &countingLLM{LLM: generative}
+	configureProgramLLM(&program, countedLLM)
+
+	tickets := replayTickets
+	if strings.TrimSpace(*ticket) != "" {
+		tickets = []sampleTicket{{Name: "custom ticket", Text: strings.TrimSpace(*ticket)}}
 	}
 
 	interruptContext, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -67,55 +57,50 @@ func main() {
 	ctx, cancel := context.WithTimeout(interruptContext, *timeout)
 	defer cancel()
 
-	result, err := module.ProcessDecision(ctx, map[string]any{"ticket": *ticket})
-	if err != nil {
-		log.Fatalf("classify ticket: %v", err)
+	mode := "live"
+	if *replay {
+		mode = "offline replay"
+	}
+	fmt.Printf("TypeSafe cheap-gate program (%s)\n", mode)
+	fmt.Println("Decide triages every ticket; ChainOfThought runs only on the draft route.")
+
+	routeCounts := map[string]int{}
+	for index, item := range tickets {
+		outputs, err := program.Execute(ctx, map[string]any{"ticket": item.Text})
+		if err != nil {
+			log.Fatalf("process %q: %v", item.Name, err)
+		}
+		route, _ := outputs["route"].(string)
+		routeCounts[route]++
+
+		fmt.Printf("\n%d. %s\n", index+1, item.Name)
+		fmt.Printf("   Ticket: %s\n", item.Text)
+		fmt.Printf("   Decision: category=%v (confidence %.2f), answerable=%v (P %.2f), needs_human=%v (P %.2f)\n",
+			outputs["category"], floatOutput(outputs, "category_confidence"),
+			outputs["answerable"], floatOutput(outputs, "answerable_probability"),
+			outputs["needs_human"], floatOutput(outputs, "needs_human_probability"),
+		)
+		fmt.Printf("   Route: %s\n", route)
+		if reply, ok := outputs["reply"].(string); ok {
+			fmt.Printf("   Reply: %s\n", reply)
+		} else {
+			fmt.Printf("   Result: %v\n", outputs["message"])
+		}
+		fmt.Printf("   Evidence: model=%v request_id=%v\n", outputs["decision_model"], outputs["decision_request_id"])
 	}
 
-	urgent := result.Decisions["urgent"].(decide.NoulDecision)
-	severity := result.Decisions["severity"].(decide.ScoreDecision)
-	category := result.Decisions["category"].(decide.ChoiceDecision[ticketCategory])
-	severityProbabilities := severity.Probabilities()
-	categoryProbabilities := category.Probabilities()
-
-	fmt.Printf("Ticket: %s\n\n", *ticket)
-	fmt.Println("Native outputs")
-	fmt.Printf("  urgent:  %t\n", result.Outputs["urgent"])
-	fmt.Printf("  severity: %.2f\n", result.Outputs["severity"])
-	fmt.Printf("  category: %s\n", result.Outputs["category"])
-
-	fmt.Println("\nDecision evidence")
-	fmt.Printf("  urgent: P(true)=%.3f, threshold=%.2f, boundary confidence=%.3f\n",
-		urgent.Probability, urgent.Threshold, urgent.Confidence)
-	fmt.Printf("  severity: value=%.2f, provider score=%.2f, provider confidence=%.3f\n",
-		severity.Value, severity.ProviderScore, severity.ProviderConfidence)
-	fmt.Printf("    level probabilities: minor=%.3f disruptive=%.3f blocking=%.3f\n",
-		severityProbabilities[0], severityProbabilities[1], severityProbabilities[2])
-	fmt.Printf("  category: local=%s, provider=%s, provider confidence=%.3f\n",
-		category.Value, category.ProviderValue, category.ProviderConfidence)
-	fmt.Printf("    probabilities: billing=%.3f technical=%.3f account=%.3f other=%.3f\n",
-		categoryProbabilities[string(categoryBilling)],
-		categoryProbabilities[string(categoryTechnical)],
-		categoryProbabilities[string(categoryAccount)],
-		categoryProbabilities[string(categoryOther)],
-	)
-
-	fmt.Printf("\nProvider model: %s\n", result.Model)
-	fmt.Printf("Usage: %d input tokens, %d output tokens\n", result.Usage.InputTokens, result.Usage.OutputTokens)
-	if result.RequestID != "" {
-		fmt.Printf("Request ID: %s\n", result.RequestID)
-	}
+	llmCalls := int(countedLLM.Calls())
+	avoided := len(tickets) - routeCounts[routeDraft]
+	fmt.Println("\nBatch summary")
+	fmt.Printf("  tickets: %d\n", len(tickets))
+	fmt.Printf("  routes: draft=%d tools=%d human=%d\n", routeCounts[routeDraft], routeCounts[routeTools], routeCounts[routeHuman])
+	fmt.Printf("  System One calls: %d\n", countedSystemOne.Calls())
+	fmt.Printf("  generative LLM calls: %d\n", llmCalls)
+	fmt.Printf("  one-call-per-ticket generations avoided by the gate: %d of %d\n", avoided, len(tickets))
+	fmt.Println("  SetLLM was applied to every program module; Decide retained its explicit System One client.")
 }
 
-func ticketSignature() core.Signature {
-	return core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("ticket", core.WithDescription("Support ticket text"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("urgent", core.WithDescription("Does this ticket require immediate attention?"))},
-			{Field: core.NewField("severity", core.WithDescription("How severe is the user impact?"))},
-			{Field: core.NewField("category", core.WithDescription("What kind of support issue is this?"))},
-		},
-	).WithInstruction("Triage the support ticket using only the supplied ticket text.")
+func floatOutput(outputs map[string]any, name string) float64 {
+	value, _ := outputs[name].(float64)
+	return value
 }

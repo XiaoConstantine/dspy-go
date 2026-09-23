@@ -1,0 +1,66 @@
+[
+  {
+    "ticket": "Checkout is down for every customer; no payments can complete.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.97}},
+      "usage": {"input_tokens": 188, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "The production database is unavailable and all writes are failing.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.91}},
+      "usage": {"input_tokens": 190, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "I think my account was taken over and unfamiliar sessions are active.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.82}},
+      "usage": {"input_tokens": 193, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "I cannot sign in and I have a customer presentation in an hour.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.68}},
+      "usage": {"input_tokens": 192, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "The invoice total looks wrong and finance closes the books today.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.74}},
+      "usage": {"input_tokens": 191, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "Please refund a duplicate charge from last week.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.44}},
+      "usage": {"input_tokens": 185, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "How can I export my project data as CSV?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.26}},
+      "usage": {"input_tokens": 184, "output_tokens": 8}
+    }
+  },
+  {
+    "ticket": "Where do I change my profile avatar?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"urgent": {"type": "noul", "noul": 0.08}},
+      "usage": {"input_tokens": 182, "output_tokens": 8}
+    }
+  }
+]

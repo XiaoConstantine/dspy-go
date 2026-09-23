@@ -1,0 +1,20 @@
+{
+  "model": "jev-1.13.0-replay",
+  "answers": {
+    "answerable": {"type": "noul", "noul": 0.97},
+    "needs_human": {"type": "noul", "noul": 0.03},
+    "category": {
+      "type": "choice",
+      "choice": "account",
+      "confidence": 0.91,
+      "probabilities": {
+        "billing": 0.01,
+        "technical": 0.01,
+        "account": 0.94,
+        "product": 0.03,
+        "other": 0.01
+      }
+    }
+  },
+  "usage": {"input_tokens": 352, "output_tokens": 31}
+}

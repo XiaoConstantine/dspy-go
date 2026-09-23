@@ -144,7 +144,10 @@ interceptors.ApplyXMLInterceptors(predict, interceptors.DefaultXMLConfig())
 - **[xml_adapter](examples/xml_adapter/)** - XML structured output
 - **[parallel](examples/parallel/)** - Batch processing
 - **[refine](examples/refine/)** - Quality improvement
-- **[typesafe_decide](examples/typesafe_decide/)** - Experimental closed-set decisions with TypeSafe System One
+- **[typesafe_decide](examples/typesafe_decide/)** - Experimental TypeSafe decision gate composed with ChainOfThought; includes offline replay
+- **[typesafe_threshold_tuning](examples/typesafe_threshold_tuning/)** - Two-sided calibration policy with a held-out replay split
+- **[typesafe_cascade](examples/typesafe_cascade/)** - Jev-first decisions with selective Predict escalation
+- **[typesafe_vs_predict](examples/typesafe_vs_predict/)** - Head-to-head Decide and Predict comparison harness
 
 ### Optimization
 - **[rlm_oolong_gepa](examples/rlm_oolong_gepa/)** - Optimize an adaptive RLM agent, save the optimized program, restore it, and replay it

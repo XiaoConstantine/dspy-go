@@ -29,7 +29,10 @@ This directory contains runnable examples for the main module, agent, optimizati
 
 ### Tools And Integrations
 
-- **[typesafe_decide](typesafe_decide/)** - Experimental closed-set decisions with TypeSafe System One
+- **[typesafe_decide](typesafe_decide/)** - Confidence-gated `Decide` + `ChainOfThought` program with offline replay
+- **[typesafe_threshold_tuning](typesafe_threshold_tuning/)** - Calibrate a two-sided abstention band, then report a held-out split
+- **[typesafe_cascade](typesafe_cascade/)** - Jev-first classification with uncertainty-triggered `Predict` escalation
+- **[typesafe_vs_predict](typesafe_vs_predict/)** - W7 accuracy, latency, call, and token comparison harness
 - **[smart_tool_registry](smart_tool_registry/)** - Intelligent tool selection
 - **[tool_chaining](tool_chaining/)** - Sequential tool pipelines
 - **[tool_composition](tool_composition/)** - Composite tools and orchestration
@@ -49,7 +52,11 @@ From the repo root:
 ```bash
 go run ./examples/rlm_subrlm_budgets
 go run ./examples/parallel
-TYPESAFE_API_KEY=... go run ./examples/typesafe_decide
+go run ./examples/typesafe_decide -replay
+go run ./examples/typesafe_threshold_tuning -replay
+go run ./examples/typesafe_cascade -replay
+go run ./examples/typesafe_vs_predict -replay
+TYPESAFE_API_KEY=... GEMINI_API_KEY=... go run ./examples/typesafe_decide
 GEMINI_API_KEY=... go run ./examples/rlm_context_policy -provider gemini
 GOOGLE_API_KEY=... go run ./examples/rlm_oolong_gepa -provider gemini -artifact /tmp/oolong-program.json
 ```
@@ -58,8 +65,8 @@ Many example directories also include their own `README.md` with task-specific n
 
 ## Notes
 
-- Examples under `rlm`, `rlm_context_policy`, `rlm_oolong`, `rlm_oolong_gepa`, and `typesafe_decide` can make live provider calls unless explicitly scripted.
-- `rlm_subrlm_budgets` is deterministic and does not require an API key.
+- Examples under `rlm`, `rlm_context_policy`, `rlm_oolong`, `rlm_oolong_gepa`, and all four `typesafe_*` directories can make live provider calls unless replay or scripted mode is selected.
+- Every `typesafe_*` example supports deterministic `-replay` without API keys; `rlm_subrlm_budgets` is also deterministic.
 - The `others/` subtree is intentionally more experimental and lower-level than the curated examples above.
 
 ## 🤝 Contributing

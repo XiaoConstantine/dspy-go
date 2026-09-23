@@ -1,0 +1,66 @@
+[
+  {
+    "ticket": "I was charged twice for the same subscription renewal.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "billing", "confidence": 0.94, "probabilities": {"billing": 0.95, "technical": 0.01, "account": 0.02, "product": 0.02}}},
+      "usage": {"input_tokens": 218, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "Every API request returns a 503 response.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "technical", "confidence": 0.91, "probabilities": {"billing": 0.01, "technical": 0.94, "account": 0.01, "product": 0.04}}},
+      "usage": {"input_tokens": 216, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "How can I reset MFA after losing my phone?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "account", "confidence": 0.90, "probabilities": {"billing": 0.01, "technical": 0.03, "account": 0.92, "product": 0.04}}},
+      "usage": {"input_tokens": 217, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "Where can I export project data as CSV?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "product", "confidence": 0.89, "probabilities": {"billing": 0.01, "technical": 0.02, "account": 0.01, "product": 0.96}}},
+      "usage": {"input_tokens": 215, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "I need to change the company address shown on our invoices.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "billing", "confidence": 0.82, "probabilities": {"billing": 0.83, "technical": 0.01, "account": 0.13, "product": 0.03}}},
+      "usage": {"input_tokens": 222, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "The settings page crashes whenever I save a webhook.",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "product", "confidence": 0.56, "probabilities": {"billing": 0.01, "technical": 0.43, "account": 0.01, "product": 0.55}}},
+      "usage": {"input_tokens": 220, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "How do I let a teammate administer our workspace?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "account", "confidence": 0.78, "probabilities": {"billing": 0.01, "technical": 0.02, "account": 0.80, "product": 0.17}}},
+      "usage": {"input_tokens": 219, "output_tokens": 17}
+    }
+  },
+  {
+    "ticket": "Can the dashboard filter results by custom date ranges?",
+    "response": {
+      "model": "jev-1.13.0-replay",
+      "answers": {"category": {"type": "choice", "choice": "product", "confidence": 0.87, "probabilities": {"billing": 0.01, "technical": 0.03, "account": 0.02, "product": 0.94}}},
+      "usage": {"input_tokens": 221, "output_tokens": 17}
+    }
+  }
+]
