@@ -1,12 +1,15 @@
 package config
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
 )
 
 func TestNewInterceptorBuilder(t *testing.T) {
@@ -61,7 +64,38 @@ func TestInterceptorBuilder_BuildModuleInterceptors_StandardInterceptors(t *test
 	interceptors, err := builder.BuildModuleInterceptors()
 
 	require.NoError(t, err)
-	assert.Len(t, interceptors, 3) // logging, metrics, tracing
+	assert.Len(t, interceptors, 3) // logging, tracing, metrics
+}
+
+func TestInterceptorBuilder_TracingWrapsModuleMetrics(t *testing.T) {
+	config := &InterceptorsConfig{
+		Global: GlobalInterceptorConfig{Enabled: true},
+		Module: ModuleInterceptorsConfig{
+			Metrics: InterceptorToggle{Enabled: true},
+			Tracing: InterceptorToggle{Enabled: true},
+		},
+	}
+	built, err := NewInterceptorBuilder(config).BuildModuleInterceptors()
+	require.NoError(t, err)
+	require.Len(t, built, 2)
+
+	ctx := core.WithExecutionState(context.Background())
+	info := core.NewModuleInfo("ConfiguredModule", "test", core.Signature{})
+	chain := core.ChainModuleInterceptors(built...)
+	_, err = chain(ctx, map[string]any{"input": "value"}, info,
+		func(ctx context.Context, _ map[string]any, _ ...core.Option) (map[string]any, error) {
+			core.RecordTokenUsage(ctx, &core.TokenUsage{PromptTokens: 8, CompletionTokens: 2, TotalTokens: 10})
+			return map[string]any{"output": "value"}, nil
+		})
+	require.NoError(t, err)
+
+	spans := core.CollectSpans(ctx)
+	require.Len(t, spans, 1)
+	metrics, ok := spans[0].Annotations["metrics"].(map[string]any)
+	require.True(t, ok, "configured metrics should annotate the tracing span")
+	assert.Equal(t, 8, metrics["prompt_tokens"])
+	assert.Equal(t, 2, metrics["completion_tokens"])
+	assert.Equal(t, 10, metrics["total_tokens"])
 }
 
 func TestInterceptorBuilder_BuildModuleInterceptors_PerformanceInterceptors(t *testing.T) {

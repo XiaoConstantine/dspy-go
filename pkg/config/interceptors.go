@@ -122,12 +122,14 @@ func (b *InterceptorBuilder) BuildModuleInterceptors() ([]core.ModuleInterceptor
 		moduleInterceptors = append(moduleInterceptors, interceptors.LoggingModuleInterceptor())
 	}
 
-	if moduleConfig.Metrics.Enabled {
-		moduleInterceptors = append(moduleInterceptors, interceptors.MetricsModuleInterceptor())
-	}
-
+	// Tracing must wrap metrics so the metrics interceptor receives the
+	// branch-local span context it annotates.
 	if moduleConfig.Tracing.Enabled {
 		moduleInterceptors = append(moduleInterceptors, interceptors.TracingModuleInterceptor())
+	}
+
+	if moduleConfig.Metrics.Enabled {
+		moduleInterceptors = append(moduleInterceptors, interceptors.MetricsModuleInterceptor())
 	}
 
 	// Performance interceptors
@@ -232,12 +234,14 @@ func (b *InterceptorBuilder) BuildAgentInterceptors() ([]core.AgentInterceptor, 
 		agentInterceptors = append(agentInterceptors, interceptors.LoggingAgentInterceptor())
 	}
 
-	if agentConfig.Metrics.Enabled {
-		agentInterceptors = append(agentInterceptors, interceptors.MetricsAgentInterceptor())
-	}
-
+	// Tracing must wrap metrics so the metrics interceptor receives the
+	// branch-local span context it annotates.
 	if agentConfig.Tracing.Enabled {
 		agentInterceptors = append(agentInterceptors, interceptors.TracingAgentInterceptor())
+	}
+
+	if agentConfig.Metrics.Enabled {
+		agentInterceptors = append(agentInterceptors, interceptors.MetricsAgentInterceptor())
 	}
 
 	// Performance interceptors
@@ -306,12 +310,14 @@ func (b *InterceptorBuilder) BuildToolInterceptors() ([]core.ToolInterceptor, er
 		toolInterceptors = append(toolInterceptors, interceptors.LoggingToolInterceptor())
 	}
 
-	if toolConfig.Metrics.Enabled {
-		toolInterceptors = append(toolInterceptors, interceptors.MetricsToolInterceptor())
-	}
-
+	// Tracing must wrap metrics so the metrics interceptor receives the
+	// branch-local span context it annotates.
 	if toolConfig.Tracing.Enabled {
 		toolInterceptors = append(toolInterceptors, interceptors.TracingToolInterceptor())
+	}
+
+	if toolConfig.Metrics.Enabled {
+		toolInterceptors = append(toolInterceptors, interceptors.MetricsToolInterceptor())
 	}
 
 	// Performance interceptors
