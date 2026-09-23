@@ -163,7 +163,7 @@ func TestTokenUsageFromContextIsolatesBranchesAndAggregatesParents(t *testing.T)
 	rightCtx, _ := StartSpan(rootCtx, "right")
 
 	RecordModelCall(leftCtx, &recordLLMCallStub{modelID: "left-model"})
-	RecordTokenUsage(leftCtx, &TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, Cost: 0.01})
+	RecordTokenUsage(leftCtx, &TokenUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 0, Cost: 0.01})
 	RecordModelCall(rightCtx, &recordLLMCallStub{modelID: "right-model"})
 	RecordTokenUsage(rightCtx, &TokenUsage{PromptTokens: 20, CompletionTokens: 3, TotalTokens: 23, Cost: 0.02})
 

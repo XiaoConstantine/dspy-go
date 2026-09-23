@@ -159,6 +159,7 @@ func RecordLLMCall(ctx context.Context, llm LLM) {
 
 // RecordTokenUsage records one LLM usage event on the shared legacy execution
 // state and aggregates it into this context branch and each of its ancestors.
+// TotalTokens is normalized to at least PromptTokens + CompletionTokens.
 func RecordTokenUsage(ctx context.Context, usage *TokenUsage) {
 	if usage == nil {
 		return
@@ -167,7 +168,11 @@ func RecordTokenUsage(ctx context.Context, usage *TokenUsage) {
 	if state == nil {
 		return
 	}
-	state.WithTokenUsage(usage)
+	normalized := *usage
+	if componentTotal := normalized.PromptTokens + normalized.CompletionTokens; componentTotal > normalized.TotalTokens {
+		normalized.TotalTokens = componentTotal
+	}
+	state.WithTokenUsage(&normalized)
 
 	frame, ok := ctx.Value(spanKey).(*spanContextFrame)
 	if !ok || frame.state != state {
@@ -175,11 +180,11 @@ func RecordTokenUsage(ctx context.Context, usage *TokenUsage) {
 	}
 	for current := frame; current != nil; current = current.parent {
 		current.mu.Lock()
-		current.tokenUsage.PromptTokens += usage.PromptTokens
-		current.tokenUsage.CompletionTokens += usage.CompletionTokens
-		current.tokenUsage.TotalTokens += usage.TotalTokens
-		current.tokenUsage.Cost += usage.Cost
-		current.lastTokenUsage = *usage
+		current.tokenUsage.PromptTokens += normalized.PromptTokens
+		current.tokenUsage.CompletionTokens += normalized.CompletionTokens
+		current.tokenUsage.TotalTokens += normalized.TotalTokens
+		current.tokenUsage.Cost += normalized.Cost
+		current.lastTokenUsage = normalized
 		current.tokenUsageEvents++
 		current.hasTokenUsage = true
 		current.mu.Unlock()
