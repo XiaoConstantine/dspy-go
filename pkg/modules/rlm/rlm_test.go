@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,9 +109,11 @@ type mockSubLLMClient struct {
 	batchedResponses      []string
 	queryPromptTokens     int
 	queryCompletionTokens int
+	queryCalls            atomic.Int64
 }
 
 func (m *mockSubLLMClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
+	m.queryCalls.Add(1)
 	return QueryResponse{
 		Response:         m.queryResponse,
 		PromptTokens:     m.queryPromptTokens,
@@ -132,6 +135,29 @@ func (m *mockSubLLMClient) QueryBatched(ctx context.Context, prompts []string) (
 		}
 	}
 	return responses, nil
+}
+
+type cancelAwareSubLLMClient struct {
+	started      chan struct{}
+	canceled     chan struct{}
+	startedOnce  sync.Once
+	canceledOnce sync.Once
+}
+
+func newCancelAwareSubLLMClient() *cancelAwareSubLLMClient {
+	return &cancelAwareSubLLMClient{started: make(chan struct{}), canceled: make(chan struct{})}
+}
+
+func (c *cancelAwareSubLLMClient) Query(ctx context.Context, _ string) (QueryResponse, error) {
+	c.startedOnce.Do(func() { close(c.started) })
+	<-ctx.Done()
+	c.canceledOnce.Do(func() { close(c.canceled) })
+	return QueryResponse{}, ctx.Err()
+}
+
+func (c *cancelAwareSubLLMClient) QueryBatched(ctx context.Context, _ []string) ([]QueryResponse, error) {
+	_, err := c.Query(ctx, "")
+	return nil, err
 }
 
 // TestFindCodeBlocks tests the code block extraction.
@@ -550,6 +576,30 @@ func TestRLMWithCodeExecution(t *testing.T) {
 	assert.Equal(t, 2, result.Iterations)
 }
 
+func TestRLMJoinsAndCancelsUnwaitedAsyncQueries(t *testing.T) {
+	mockRoot := &mockLLM{responses: []string{
+		"Reasoning:\nStart an async query but do not wait for it.\n\nAction:\nquery\n\nCode:\nhandleID := QueryAsync(\"slow\")\n_ = handleID\nFINAL(\"done\")\n\nAnswer:\n",
+	}}
+	mockSub := newCancelAwareSubLLMClient()
+	r := New(mockRoot, mockSub, WithMaxIterations(1))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	result, err := r.Complete(ctx, "ctx", "q")
+	require.NoError(t, err)
+	assert.Equal(t, "done", result.Response)
+	select {
+	case <-mockSub.started:
+	default:
+		t.Fatal("async query never reached the provider")
+	}
+	select {
+	case <-mockSub.canceled:
+	default:
+		t.Fatal("unwaited async query outlived the RLM code block")
+	}
+}
+
 func TestRLMProcessRecordsRootAndSubUsageOnContextBranch(t *testing.T) {
 	mockRoot := &mockLLM{responses: []string{
 		"Reasoning:\nUse a sub-query and finish.\n\nAction:\nquery\n\nCode:\nanswer := QueryRaw(\"what is the answer?\")\nFINAL(answer)\n\nAnswer:\n",
@@ -709,6 +759,7 @@ func TestRLMMaxTokens_StopsOnRootBudgetExceeded(t *testing.T) {
 		responses: []string{
 			"Reasoning:\nDone.\n\nAction:\nfinal\n\nCode:\n\nAnswer:\ncomplete",
 		},
+		usages: []core.TokenInfo{{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 0}},
 	}
 
 	rlm := New(mockRoot, &mockSubLLMClient{}, WithMaxTokens(100))
@@ -743,6 +794,27 @@ func TestRLMMaxTokens_CountsSubLLMUsage(t *testing.T) {
 }
 
 // TestRLMContextCancellation tests that context cancellation works.
+func TestRLMMaxTokensStopsBetweenREPLQueries(t *testing.T) {
+	mockRoot := &mockLLM{
+		responses: []string{
+			"Reasoning:\nTry several queries.\n\nAction:\nquery\n\nCode:\na := QueryRaw(\"one\")\nb := QueryRaw(\"two\")\nc := QueryRaw(\"three\")\nFINAL(a + b + c)\n\nAnswer:\n",
+		},
+		usages: []core.TokenInfo{{PromptTokens: 60, CompletionTokens: 40, TotalTokens: 100}},
+	}
+	mockSub := &mockSubLLMClient{
+		queryResponse:         "sub",
+		queryPromptTokens:     31,
+		queryCompletionTokens: 20,
+	}
+	r := New(mockRoot, mockSub, WithMaxIterations(1), WithMaxTokens(150))
+
+	result, err := r.Complete(context.Background(), "ctx", "q")
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrTokenBudgetExceeded)
+	assert.EqualValues(t, 1, mockSub.queryCalls.Load(), "calls at the exact budget must be rejected before reaching the provider")
+}
+
 func TestRLMMaxTokensIncludesFailedChildUsage(t *testing.T) {
 	mockRoot := &mockLLM{
 		responses: []string{

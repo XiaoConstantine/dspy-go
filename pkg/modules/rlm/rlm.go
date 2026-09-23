@@ -233,6 +233,93 @@ type CompletionResult struct {
 	Usage      core.TokenUsage
 }
 
+type accountingSubLLMClient struct {
+	inner     SubLLMClient
+	maxTokens int
+	budgetMu  sync.Mutex
+}
+
+func (c *accountingSubLLMClient) Query(ctx context.Context, prompt string) (QueryResponse, error) {
+	if c.maxTokens > 0 {
+		// Serialize budgeted calls so concurrent QueryAsync requests cannot all
+		// be admitted against the same stale remaining balance.
+		c.budgetMu.Lock()
+		defer c.budgetMu.Unlock()
+	}
+	if err := ctx.Err(); err != nil {
+		return QueryResponse{}, err
+	}
+	if err := c.checkBudget(ctx, true); err != nil {
+		return QueryResponse{}, err
+	}
+	response, err := c.inner.Query(ctx, prompt)
+	c.recordUsage(ctx, response)
+	if budgetErr := c.checkBudget(ctx, false); budgetErr != nil {
+		return response, budgetErr
+	}
+	return response, err
+}
+
+func (c *accountingSubLLMClient) QueryBatched(ctx context.Context, prompts []string) ([]QueryResponse, error) {
+	if c.maxTokens <= 0 {
+		responses, err := c.inner.QueryBatched(ctx, prompts)
+		for _, response := range responses {
+			c.recordUsage(ctx, response)
+		}
+		return responses, err
+	}
+
+	// A budgeted batch is admitted one call at a time so one large batch cannot
+	// spend the entire remainder before accounting runs.
+	responses := make([]QueryResponse, len(prompts))
+	for index, prompt := range prompts {
+		response, err := c.Query(ctx, prompt)
+		if err == nil {
+			responses[index] = response
+			continue
+		}
+		if !errors.Is(err, ErrTokenBudgetExceeded) {
+			return responses[:index], err
+		}
+		response.Response = "Error: " + err.Error()
+		responses[index] = response
+		for remaining := index + 1; remaining < len(prompts); remaining++ {
+			responses[remaining].Response = "Error: " + err.Error()
+		}
+		return responses, nil
+	}
+	return responses, nil
+}
+
+func (c *accountingSubLLMClient) recordUsage(ctx context.Context, response QueryResponse) {
+	if response.PromptTokens == 0 && response.CompletionTokens == 0 {
+		return
+	}
+	core.RecordTokenUsage(ctx, &core.TokenUsage{
+		PromptTokens:     response.PromptTokens,
+		CompletionTokens: response.CompletionTokens,
+		TotalTokens:      response.PromptTokens + response.CompletionTokens,
+	})
+}
+
+func (c *accountingSubLLMClient) checkBudget(ctx context.Context, admission bool) error {
+	if c.maxTokens <= 0 {
+		return nil
+	}
+	usage := core.TokenUsageFromContext(ctx)
+	if usage == nil {
+		return nil
+	}
+	exhausted := usage.TotalTokens > c.maxTokens
+	if admission {
+		exhausted = usage.TotalTokens >= c.maxTokens
+	}
+	if !exhausted {
+		return nil
+	}
+	return fmt.Errorf("%w: used %d tokens (limit %d)", ErrTokenBudgetExceeded, usage.TotalTokens, c.maxTokens)
+}
+
 // RLM is the main Recursive Language Model module implementation.
 // It enables LLMs to explore large contexts programmatically through a Go REPL,
 // making iterative queries to sub-LLMs until a final answer is reached.
@@ -498,8 +585,12 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 		}
 	}
 
-	// Create REPL environment
-	replEnv, err := NewYaegiREPL(r.subLLMClient)
+	// Create a REPL environment whose sub-LLM calls are accounted immediately,
+	// including calls started asynchronously.
+	replEnv, err := NewYaegiREPL(&accountingSubLLMClient{
+		inner:     r.subLLMClient,
+		maxTokens: r.config.MaxTokens,
+	})
 	if err != nil {
 		finalizeRLMTrace(trace, nil, "repl_create_error", fmt.Errorf("failed to create REPL: %w", err))
 		return nil, trace, fmt.Errorf("failed to create REPL: %w", err)
@@ -722,7 +813,10 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			// Clear final state before execution (Nightjar Algorithm 1 Gap 1)
 			replEnv.ClearFinal()
 
-			result, execErr := replEnv.Execute(ctx, code)
+			executionCtx, cancelExecution := context.WithCancel(ctx)
+			result, execErr := replEnv.Execute(executionCtx, code)
+			cancelExecution()
+			replEnv.WaitAllAsyncQueries()
 			if execErr != nil {
 				logger.Warn(ctx, "[RLM] Code execution error: %v", execErr)
 			}
@@ -740,11 +834,6 @@ func (r *RLM) CompleteWithTrace(ctx context.Context, contextPayload any, query s
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
 				tokenTracker.AddSubCall(call)
-				core.RecordTokenUsage(ctx, &core.TokenUsage{
-					PromptTokens:     call.PromptTokens,
-					CompletionTokens: call.CompletionTokens,
-					TotalTokens:      call.PromptTokens + call.CompletionTokens,
-				})
 				rlmCalls = append(rlmCalls, logging.RLMCallEntry{
 					Prompt:           call.Prompt,
 					Response:         call.Response,
@@ -1182,18 +1271,16 @@ func (r *RLM) completeWithSharedREPL(ctx context.Context, subRLM *RLM, replEnv *
 
 		if code != "" {
 			replEnv.ClearFinal()
-			result, execErr := replEnv.Execute(ctx, code)
+			executionCtx, cancelExecution := context.WithCancel(ctx)
+			result, execErr := replEnv.Execute(executionCtx, code)
+			cancelExecution()
+			replEnv.WaitAllAsyncQueries()
 
 			// Collect sub-LLM calls
 			fullExecOutput := FormatExecutionResult(result)
 			llmCalls := replEnv.GetLLMCalls()
 			for _, call := range llmCalls {
 				tokenTracker.AddSubCall(call)
-				core.RecordTokenUsage(ctx, &core.TokenUsage{
-					PromptTokens:     call.PromptTokens,
-					CompletionTokens: call.CompletionTokens,
-					TotalTokens:      call.PromptTokens + call.CompletionTokens,
-				})
 				fullExecOutput += fmt.Sprintf("\n\n[LLM query]\n%s\n[LLM result]\n%s", call.Prompt, call.Response)
 			}
 			if err := subRLM.enforceTokenBudget(ctx, tokenTracker); err != nil {
