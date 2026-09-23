@@ -72,7 +72,7 @@ type persistedBandPolicy struct {
 
 func main() {
 	replay := flag.Bool("replay", false, "run offline against recorded System One responses")
-	model := flag.String("model", "", "TypeSafe model override (otherwise TYPESAFE_DEFAULT_MODEL or jev-latest)")
+	model := flag.String("model", "", "TypeSafe model override (replay fixtures require jev-replay; live defaults to TYPESAFE_DEFAULT_MODEL or jev-latest)")
 	targetPrecision := flag.Float64("target-precision", 0.95, "minimum precision required on each automatic side")
 	timeout := flag.Duration("timeout", 45*time.Second, "total example deadline")
 	flag.Parse()

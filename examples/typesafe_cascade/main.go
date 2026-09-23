@@ -66,7 +66,7 @@ type cascadeReport struct {
 
 func main() {
 	replay := flag.Bool("replay", false, "run offline with recorded System One and LLM responses")
-	model := flag.String("model", "", "TypeSafe model override (otherwise TYPESAFE_DEFAULT_MODEL or jev-latest)")
+	model := flag.String("model", "", "TypeSafe model override (replay fixtures require jev-replay; live defaults to TYPESAFE_DEFAULT_MODEL or jev-latest)")
 	llmModel := flag.String("llm-model", string(core.ModelGoogleGeminiFlash), "generative model used on escalated tickets")
 	llmAPIKey := flag.String("llm-api-key", "", "generative provider key (otherwise the provider's environment variable)")
 	confidenceThreshold := flag.Float64("confidence-threshold", 0.75, "escalate Choice provider confidence below this value")

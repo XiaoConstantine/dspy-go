@@ -69,7 +69,7 @@ func newSystemOneClient(replay bool, model string) (decide.SystemOneClient, func
 			requestID: fmt.Sprintf("req_support_replay_%d", index+1),
 		}
 	}
-	return startSystemOneReplay(fixtures)
+	return startSystemOneReplay(fixtures, model)
 }
 
 func expectedSystemOneReplayRequest(ticket string) typesafe.SystemOneRequest {
@@ -102,7 +102,7 @@ func expectedSystemOneReplayRequest(ticket string) typesafe.SystemOneRequest {
 	}
 }
 
-func startSystemOneReplay(fixtures []systemOneReplayFixture) (decide.SystemOneClient, func(), error) {
+func startSystemOneReplay(fixtures []systemOneReplayFixture, model string) (decide.SystemOneClient, func(), error) {
 	responses := make(map[string]systemOneReplayFixture, len(fixtures))
 	for index, fixture := range fixtures {
 		requestKey, err := canonicalReplayJSON(fixture.request)
@@ -147,10 +147,14 @@ func startSystemOneReplay(fixtures []systemOneReplayFixture) (decide.SystemOneCl
 
 	policy := typesafe.DefaultRetryPolicy()
 	policy.MaxRetries = 0
+	replayModel := strings.TrimSpace(model)
+	if replayModel == "" {
+		replayModel = "jev-replay"
+	}
 	client, err := typesafe.NewClient(
 		typesafe.WithAPIKey("local-replay-key"),
 		typesafe.WithBaseURL(server.URL),
-		typesafe.WithDefaultModel("jev-replay"),
+		typesafe.WithDefaultModel(replayModel),
 		typesafe.WithRetryPolicy(policy),
 	)
 	if err != nil {
@@ -215,12 +219,12 @@ func (l *replayLLM) GenerateWithJSON(ctx context.Context, prompt string, _ ...co
 	}
 	responses := map[string]map[string]any{
 		replayTickets[0].Text: {
-			"reasoning": "This general account-settings question can receive a bounded acknowledgment without private account data.",
-			"reply":     "I understand that you want to update the email address on your account. Please follow the official account documentation for exact steps, or contact support if that guidance is unavailable.",
+			"reasoning": "The only releasable text is the locally approved acknowledgment.",
+			"reply":     approvedAcknowledgment,
 		},
 		replayTickets[3].Text: {
-			"reasoning": "This product question can receive a bounded acknowledgment without inventing navigation steps.",
-			"reply":     "I understand that you want to export your project data as CSV. Please consult the official export documentation for exact steps, or contact support if the option is unavailable.",
+			"reasoning": "The only releasable text is the locally approved acknowledgment.",
+			"reply":     approvedAcknowledgment,
 		},
 	}
 	for ticket, response := range responses {

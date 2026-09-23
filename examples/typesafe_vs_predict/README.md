@@ -22,7 +22,8 @@ go run ./examples/typesafe_vs_predict -replay
 
 Replay mode serves recorded System One responses from a local `httptest` server
 and uses a deterministic completion-only LLM. Fixtures match the exact model,
-state, question instructions, and Choice criteria. Replay explicitly reports
+state, question instructions, and Choice criteria. The recorded model is
+`jev-replay`, so a different `-model` override fails exact matching. Replay explicitly reports
 that local fixture latency is not meaningful. The replay predictions exist to exercise the
 comparison harness; differences in their displayed accuracy are not evidence
 about either live system.

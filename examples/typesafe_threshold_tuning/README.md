@@ -32,7 +32,8 @@ go run ./examples/typesafe_threshold_tuning -replay
 ```
 
 Replay mode serves recorded responses from a local `httptest` server and
-matches the exact model, state, and question instructions. It should select
+matches the exact model, state, and question instructions. The recorded model
+is `jev-replay`, so a different `-model` override fails exact matching. It should select
 `(low=0.20, high=0.80)` for the default 95% target, report 50% calibration
 coverage and 66.7% held-out coverage, and make:
 

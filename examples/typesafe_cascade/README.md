@@ -27,7 +27,8 @@ go run ./examples/typesafe_cascade -replay
 
 Replay mode serves six recorded System One responses through a local
 `httptest` server and uses a deterministic completion-only LLM. Fixtures match
-the exact model, state, question instructions, and Choice criteria. With the default
+the exact model, state, question instructions, and Choice criteria. The recorded
+model is `jev-replay`, so a different `-model` override fails exact matching. With the default
 `0.75` threshold it escalates three of six tickets and the two systems agree on
 two of those three. Replay latency is intentionally reported as not meaningful.
 Fixtures exercise the harness; they make no claim about live model quality.

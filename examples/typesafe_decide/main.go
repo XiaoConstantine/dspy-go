@@ -16,7 +16,7 @@ import (
 func main() {
 	replay := flag.Bool("replay", false, "run entirely offline with recorded System One responses and a deterministic LLM")
 	ticket := flag.String("ticket", "", "process one ticket instead of the built-in batch (live mode, or an exact replay ticket)")
-	model := flag.String("model", "", "TypeSafe model override (otherwise TYPESAFE_DEFAULT_MODEL or jev-latest)")
+	model := flag.String("model", "", "TypeSafe model override (replay fixtures require jev-replay; live defaults to TYPESAFE_DEFAULT_MODEL or jev-latest)")
 	llmModel := flag.String("llm-model", string(core.ModelGoogleGeminiFlash), "generative model used for drafted replies")
 	llmAPIKey := flag.String("llm-api-key", "", "generative provider key (defaults to DSPY_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY)")
 	timeout := flag.Duration("timeout", 45*time.Second, "total example deadline")
@@ -62,7 +62,7 @@ func main() {
 		mode = "offline replay"
 	}
 	fmt.Printf("TypeSafe cheap-gate program (%s)\n", mode)
-	fmt.Println("Decide triages every ticket; ChainOfThought runs only on the draft route.")
+	fmt.Println("Decide triages every ticket; ChainOfThought runs only on the draft route, behind an exact local output guard.")
 
 	routeCounts := map[string]int{}
 	for index, item := range tickets {

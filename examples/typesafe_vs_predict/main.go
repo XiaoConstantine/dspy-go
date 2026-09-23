@@ -62,7 +62,7 @@ type comparisonReport struct {
 
 func main() {
 	replay := flag.Bool("replay", false, "run offline with recorded System One and LLM responses")
-	model := flag.String("model", "", "TypeSafe model override (otherwise TYPESAFE_DEFAULT_MODEL or jev-latest)")
+	model := flag.String("model", "", "TypeSafe model override (replay fixtures require jev-replay; live defaults to TYPESAFE_DEFAULT_MODEL or jev-latest)")
 	llmModel := flag.String("llm-model", string(core.ModelGoogleGeminiFlash), "generative model used by Predict")
 	llmAPIKey := flag.String("llm-api-key", "", "generative provider key (otherwise the provider's environment variable)")
 	timeout := flag.Duration("timeout", 60*time.Second, "total example deadline")

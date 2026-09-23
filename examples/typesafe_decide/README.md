@@ -10,14 +10,16 @@ support ticket
 Decide: answerable + needs_human + category
     |-- human review ----------> stop before generation
     |-- account tools required -> stop before generation
-    `-- answerable ------------> ChainOfThought drafts a bounded acknowledgment
+    `-- answerable ------------> ChainOfThought copies an approved acknowledgment
+                                  `-- exact local guard releases canonical text
 ```
 
 The built-in batch contains two tickets eligible for a bounded acknowledgment,
 one production incident, and one account-specific refund request. The gate
-therefore invokes the reply-writing LLM for only two of four tickets. Because
-this example supplies no product documentation, generated replies must not
-invent navigation steps, product behavior, or policy.
+therefore invokes the reply-writing LLM for only two of four tickets. Ticket
+text is untrusted: the model must copy a locally approved acknowledgment
+exactly, every other output fails closed, and only the local canonical string is
+released. Model-generated procedures are never presented to the user.
 
 > **Experimental:** The packages and their persisted formats may change or be
 > removed in a dspy-go v0 minor release.
@@ -64,7 +66,8 @@ go run ./examples/typesafe_decide \
 
 Replay mode only recognizes the exact recorded System One requests. A change to
 the ticket, model, question instructions, or Choice criteria fails rather than
-silently reusing stale evidence.
+silently reusing stale evidence. The recorded model is `jev-replay`; explicitly
+passing another value with `-replay -model ...` therefore fails.
 
 ## What to notice
 
@@ -74,9 +77,12 @@ silently reusing stale evidence.
   `ChainOfThought`, while `Decide.SetLLM` remains a no-op and its explicit
   System One client continues receiving all decision calls.
 - `decide.Get[T]` reads typed evidence without unchecked assertions.
-- Human and tool routes avoid generative calls. A real application could replace
-  the tool-route short circuit with ReAct after defining safe tools and approval
-  policy; this example deliberately keeps that branch deterministic.
+- Human and tool routes avoid generative calls. On the draft route, an exact
+  allowlist guard rejects any generated wording other than the locally approved
+  acknowledgment, including instructions injected through ticket text. A real
+  application could replace the tool-route short circuit with ReAct after
+  defining safe tools and approval policy; this example deliberately keeps that
+  branch deterministic.
 - `ProcessDecision` creates a trace span containing model, request ID, and token
   usage metadata.
 - Ordinary tests and replay runs need no provider credentials. Live mode incurs

@@ -60,7 +60,7 @@ func newTuningClient(replay bool, model string) (decide.SystemOneClient, func(),
 	if err != nil {
 		return nil, func() {}, err
 	}
-	return startSystemOneReplay(append(calibration, heldOut...))
+	return startSystemOneReplay(append(calibration, heldOut...), model)
 }
 
 func readUrgencyFixtures(path, split string, tickets []labeledTicket) ([]systemOneReplayFixture, error) {
@@ -105,7 +105,7 @@ func expectedSystemOneReplayRequest(ticket string) typesafe.SystemOneRequest {
 	}
 }
 
-func startSystemOneReplay(fixtures []systemOneReplayFixture) (decide.SystemOneClient, func(), error) {
+func startSystemOneReplay(fixtures []systemOneReplayFixture, model string) (decide.SystemOneClient, func(), error) {
 	responses := make(map[string]systemOneReplayFixture, len(fixtures))
 	for index, fixture := range fixtures {
 		requestKey, err := canonicalReplayJSON(fixture.request)
@@ -150,10 +150,14 @@ func startSystemOneReplay(fixtures []systemOneReplayFixture) (decide.SystemOneCl
 
 	policy := typesafe.DefaultRetryPolicy()
 	policy.MaxRetries = 0
+	replayModel := strings.TrimSpace(model)
+	if replayModel == "" {
+		replayModel = "jev-replay"
+	}
 	client, err := typesafe.NewClient(
 		typesafe.WithAPIKey("local-replay-key"),
 		typesafe.WithBaseURL(server.URL),
-		typesafe.WithDefaultModel("jev-replay"),
+		typesafe.WithDefaultModel(replayModel),
 		typesafe.WithRetryPolicy(policy),
 	)
 	if err != nil {
