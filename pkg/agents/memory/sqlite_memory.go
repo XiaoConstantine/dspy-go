@@ -10,7 +10,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // SQLiteStore implements the Memory interface using SQLite as the backend.
@@ -30,9 +30,9 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if path == ":memory:" {
 		// Shared cache keeps the single in-memory database visible to
 		// every connection in the database/sql pool.
-		dsn = ":memory:?cache=shared&mode=memory"
+		dsn = "file::memory:?cache=shared"
 	}
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.Unknown, "failed to open SQLite database"),

@@ -13,7 +13,7 @@ import (
 
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const defaultBranchName = "main"
@@ -46,7 +46,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, dspyerrors.WithFields(
 			dspyerrors.Wrap(err, dspyerrors.Unknown, "failed to open session event sqlite database"),
@@ -1032,9 +1032,9 @@ func nullString(value sql.NullString) string {
 
 func sqliteDSN(path string) string {
 	if path == ":memory:" {
-		return "file::memory:?cache=shared&_foreign_keys=on&_busy_timeout=5000&_txlock=immediate"
+		return "file::memory:?cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate"
 	}
-	return path + "?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_txlock=immediate"
+	return path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate"
 }
 
 func rollbackTx(ctx context.Context, tx *sql.Tx) {
