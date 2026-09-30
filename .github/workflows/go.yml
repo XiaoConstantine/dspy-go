@@ -63,7 +63,7 @@ jobs:
           flags: pkg
 
   portable-build:
-    name: Build only, CGO disabled (${{ matrix.os }})
+    name: Portable build and SQLite tests, CGO disabled (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
