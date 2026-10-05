@@ -12,7 +12,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/traefik/yaegi v0.16.1
 	golang.org/x/text v0.41.0
-	google.golang.org/genai v1.71.0
+	google.golang.org/genai v1.72.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
