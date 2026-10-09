@@ -6,12 +6,12 @@ require (
 	github.com/XiaoConstantine/llm-go v0.3.6
 	github.com/XiaoConstantine/mcp-go v0.3.1
 	github.com/apache/arrow/go/v13 v13.0.0
-	github.com/go-playground/validator/v10 v10.30.4
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.12.1
 	github.com/traefik/yaegi v0.16.1
 	golang.org/x/text v0.42.0
-	google.golang.org/genai v1.71.0
+	google.golang.org/genai v1.72.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
 )

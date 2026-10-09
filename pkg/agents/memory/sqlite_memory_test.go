@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -77,15 +77,11 @@ func TestSQLiteStore(t *testing.T) {
 	})
 
 	t.Run("Concurrent Access", func(t *testing.T) {
-		dbPath := "/tmp/test_ttl.db"
-		os.Remove(dbPath) // Clean up before test
+		dbPath := filepath.Join(t.TempDir(), "test_concurrent.db")
 
 		store, err := NewSQLiteStore(dbPath)
 		require.NoError(t, err)
-		defer func() {
-			store.Close()
-			os.Remove(dbPath)
-		}()
+		defer store.Close()
 		const numGoroutines = 10
 		done := make(chan bool, numGoroutines)
 		var wg sync.WaitGroup

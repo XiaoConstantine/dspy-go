@@ -25,14 +25,17 @@ type SQLiteStore struct {
 // NewSQLiteStore creates a new SQLite-backed memory store.
 // The path parameter specifies the database file location.
 // If path is ":memory:", the database will be created in-memory.
-func NewSQLiteStore(path string) (*SQLiteStore, error) {
-	dsn := path
+func sqliteMemoryDSN(path string) string {
 	if path == ":memory:" {
 		// Shared cache keeps the single in-memory database visible to
 		// every connection in the database/sql pool.
-		dsn = "file::memory:?cache=shared"
+		return "file::memory:?cache=shared&_pragma=busy_timeout(5000)"
 	}
-	db, err := sql.Open("sqlite", dsn)
+	return path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+}
+
+func NewSQLiteStore(path string) (*SQLiteStore, error) {
+	db, err := sql.Open("sqlite", sqliteMemoryDSN(path))
 	if err != nil {
 		return nil, errors.WithFields(
 			errors.Wrap(err, errors.Unknown, "failed to open SQLite database"),
@@ -54,15 +57,6 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 func (s *SQLiteStore) ensureInitialized() error {
 	var initErr error
 	s.initialized.Do(func() {
-		// Enable WAL mode for better concurrency
-		if _, err := s.db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-			initErr = errors.WithFields(
-				errors.Wrap(err, errors.Unknown, "failed to enable WAL mode"),
-				errors.Fields{},
-			)
-			return
-		}
-
 		// Create table with JSON value column and metadata
 		query := `
         CREATE TABLE IF NOT EXISTS memory_store (

@@ -438,10 +438,11 @@ func TestSQLiteCache_ErrorHandling(t *testing.T) {
 		}
 
 		// Try to create new cache - this may or may not fail depending on the OS
-		_, err = NewSQLiteCache(config)
-		// Just ensure we can handle the error gracefully
+		cache2, err := NewSQLiteCache(config)
 		if err != nil {
 			assert.Error(t, err)
+		} else {
+			require.NoError(t, cache2.Close())
 		}
 
 		// Restore permissions for cleanup
@@ -456,10 +457,10 @@ func TestSQLiteCache_Cleanup(t *testing.T) {
 	config := CacheConfig{
 		Type:       "sqlite",
 		MaxSize:    1024,
-		DefaultTTL: 50 * time.Millisecond,
+		DefaultTTL: 500 * time.Millisecond,
 		SQLiteConfig: SQLiteConfig{
 			Path:           dbPath,
-			VacuumInterval: 200 * time.Millisecond,
+			VacuumInterval: time.Second,
 		},
 	}
 
@@ -470,10 +471,10 @@ func TestSQLiteCache_Cleanup(t *testing.T) {
 	ctx := context.Background()
 
 	// Set values with short TTL
-	err = cache.Set(ctx, "sqlite-cleanup1", []byte("value1"), 40*time.Millisecond)
+	err = cache.Set(ctx, "sqlite-cleanup1", []byte("value1"), 200*time.Millisecond)
 	assert.NoError(t, err)
 
-	err = cache.Set(ctx, "sqlite-cleanup2", []byte("value2"), 40*time.Millisecond)
+	err = cache.Set(ctx, "sqlite-cleanup2", []byte("value2"), 200*time.Millisecond)
 	assert.NoError(t, err)
 
 	// Values should be available initially
@@ -481,8 +482,8 @@ func TestSQLiteCache_Cleanup(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, found)
 
-	// Wait for TTL expiration and cleanup
-	time.Sleep(100 * time.Millisecond)
+	// Wait for TTL expiration
+	time.Sleep(300 * time.Millisecond)
 
 	// Values should be expired (but cleanup may not have run yet)
 	_, found, err = cache.Get(ctx, "sqlite-cleanup1")
