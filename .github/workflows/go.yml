@@ -63,7 +63,7 @@ jobs:
           flags: pkg
 
   portable-build:
-    name: Build only, CGO disabled (${{ matrix.os }})
+    name: Portable build and SQLite tests, CGO disabled (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -90,3 +90,6 @@ jobs:
       - name: Build CLI module
         working-directory: cmd/dspy-cli
         run: go build ./...
+
+      - name: Test SQLite packages with CGO disabled
+        run: go test -tags skip ./pkg/agents/sessionevent/ ./pkg/agents/memory/ ./pkg/cache/

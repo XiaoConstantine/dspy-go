@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // SQLiteCache implements Cache interface using SQLite as storage.
@@ -32,7 +32,7 @@ func NewSQLiteCache(config CacheConfig) (*SQLiteCache, error) {
 		config.SQLiteConfig.Path = "dspy_cache.db"
 	}
 
-	db, err := sql.Open("sqlite3", config.SQLiteConfig.Path)
+	db, err := sql.Open("sqlite", config.SQLiteConfig.Path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
