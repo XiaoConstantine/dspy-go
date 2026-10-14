@@ -107,7 +107,7 @@ func TestSQLiteCache_TTL(t *testing.T) {
 	config := CacheConfig{
 		Type:       "sqlite",
 		MaxSize:    1024,
-		DefaultTTL: 100 * time.Millisecond,
+		DefaultTTL: 500 * time.Millisecond,
 		SQLiteConfig: SQLiteConfig{
 			Path:           dbPath,
 			VacuumInterval: time.Hour,
@@ -125,7 +125,7 @@ func TestSQLiteCache_TTL(t *testing.T) {
 		value := []byte("sqlite-ttl-value")
 
 		// Set with short TTL
-		err := cache.Set(ctx, key, value, 50*time.Millisecond)
+		err := cache.Set(ctx, key, value, 250*time.Millisecond)
 		assert.NoError(t, err)
 
 		// Should be available immediately
@@ -135,7 +135,7 @@ func TestSQLiteCache_TTL(t *testing.T) {
 		assert.Equal(t, value, retrieved)
 
 		// Wait for expiration
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(350 * time.Millisecond)
 
 		// Should be expired
 		retrieved, found, err = cache.Get(ctx, key)
@@ -159,7 +159,7 @@ func TestSQLiteCache_TTL(t *testing.T) {
 		assert.Equal(t, value, retrieved)
 
 		// Wait for default TTL to expire
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(600 * time.Millisecond)
 
 		// Should be expired
 		retrieved, found, err = cache.Get(ctx, key)
