@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
 
 jobs:
   deploy:
@@ -17,8 +21,11 @@ jobs:
       - name: Set up Hugo
         uses: peaceiris/actions-hugo@v3
         with:
-          hugo-version: '0.151.0'
+          hugo-version: '0.168.0'
           extended: true
+
+      - name: Install Dart Sass
+        run: sudo snap install dart-sass
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -36,6 +43,7 @@ jobs:
         run: npm run build
 
       - name: Deploy to gh-pages branch
+        if: github.event_name == 'push'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

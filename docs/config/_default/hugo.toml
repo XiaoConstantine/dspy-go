@@ -6,7 +6,7 @@ disableHugoGeneratorInject = true
 enableEmoji = true
 enableGitInfo = false
 enableRobotsTXT = true
-languageCode = "en-US"
+locale = "en-US"
 rssLimit = 10
 summarylength = 20 # 70 (default)
 
@@ -43,11 +43,6 @@ copyRight = "Copyright (c) 2025 dspy-go"
   changefreq = "monthly"
   filename = "sitemap.xml"
   priority = 0.5
-
-[caches]
-  [caches.getjson]
-    dir = ":cacheDir/:project"
-    maxAge = -1 # "30m"
 
 [taxonomies]
   contributor = "contributors"
