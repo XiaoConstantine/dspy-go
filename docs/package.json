@@ -19,7 +19,7 @@
     "@tabler/icons": "^3.34.1",
     "@thulite/doks-core": "^1.8.3",
     "@thulite/images": "^3.3.4",
-    "@thulite/inline-svg": "^1.2.0",
+    "@thulite/inline-svg": "^1.2.2",
     "@thulite/seo": "^2.4.1",
     "thulite": "^2.6.3"
   },
