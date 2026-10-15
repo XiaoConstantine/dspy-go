@@ -21,7 +21,7 @@
     "@thulite/images": "^3.3.4",
     "@thulite/inline-svg": "^1.2.0",
     "@thulite/seo": "^2.4.1",
-    "thulite": "^2.6.3"
+    "thulite": "^3.0.3"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
