@@ -38,11 +38,11 @@ jobs:
             echo "## Changes"
             echo
             if [ -n "$PREV_TAG" ]; then
-              echo "_From $PREV_TAG to $TAG_"
+              echo "_From ${PREV_TAG} to ${TAG}_"
               echo
               git log --pretty='- %h %s' "$PREV_TAG..$TAG"
             else
-              echo "_Initial release for $TAG_"
+              echo "_Initial release for ${TAG}_"
               echo
               git log --pretty='- %h %s' "$TAG"
             fi
