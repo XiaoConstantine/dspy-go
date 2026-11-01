@@ -31,8 +31,9 @@
   },
   "overrides": {
     "postcss": "^8.5.18",
-    "brace-expansion": "^1.1.21",
-    "@babel/plugin-transform-modules-systemjs": "^7.29.4"
+    "@babel/plugin-transform-modules-systemjs": "^7.29.4",
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   },
   "engines": {
     "node": ">=20.11.0"
