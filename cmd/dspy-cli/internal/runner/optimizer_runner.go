@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/cmd/dspy-cli/internal/samples"
@@ -299,7 +302,7 @@ func createOptimizer(name string) (core.Optimizer, error) {
 		metricFunc := func(example, prediction map[string]any, ctx context.Context) bool {
 			expected, ok1 := example["answer"].(string)
 			predicted, ok2 := prediction["answer"].(string)
-			return ok1 && ok2 && predicted == expected
+			return ok1 && ok2 && answersMatch(expected, predicted)
 		}
 		return optimizers.NewBootstrapFewShot(metricFunc, 3), nil
 	case "mipro":
@@ -309,7 +312,7 @@ func createOptimizer(name string) (core.Optimizer, error) {
 			if !ok1 || !ok2 {
 				return 0.0
 			}
-			if predicted == expected {
+			if answersMatch(expected, predicted) {
 				return 1.0
 			}
 			return 0.0
@@ -346,7 +349,7 @@ func createOptimizer(name string) (core.Optimizer, error) {
 			if !ok1 || !ok2 {
 				return 0.0
 			}
-			if actualAnswer == expectedAnswer {
+			if answersMatch(expectedAnswer, actualAnswer) {
 				return 1.0
 			}
 			return 0.0
@@ -364,7 +367,7 @@ func createMetric() core.Metric {
 		if !ok1 || !ok2 {
 			return 0.0
 		}
-		if actualAnswer == expectedAnswer {
+		if answersMatch(expectedAnswer, actualAnswer) {
 			return 1.0
 		}
 		return 0.0
@@ -422,7 +425,7 @@ func evaluateModule(ctx context.Context, module core.Module, examples []core.Exa
 
 		if predicted, ok := result["answer"].(string); ok {
 			if expected, ok := example.Outputs["answer"].(string); ok {
-				if predicted == expected {
+				if answersMatch(expected, predicted) {
 					correct++
 				}
 			}
@@ -446,7 +449,7 @@ func evaluateProgram(ctx context.Context, program core.Program, examples []core.
 
 		if predicted, ok := result["answer"].(string); ok {
 			if expected, ok := example.Outputs["answer"].(string); ok {
-				if predicted == expected {
+				if answersMatch(expected, predicted) {
 					correct++
 				}
 			}
@@ -470,7 +473,7 @@ func evaluateModuleMIPRO(ctx context.Context, module core.Module, examples []cor
 
 		if predicted, ok := result["completion"].(string); ok {
 			if expected, ok := example.Outputs["completion"].(string); ok {
-				if predicted == expected {
+				if answersMatch(expected, predicted) {
 					correct++
 				}
 			}
@@ -494,7 +497,7 @@ func evaluateProgramMIPRO(ctx context.Context, program core.Program, examples []
 
 		if predicted, ok := result["completion"].(string); ok {
 			if expected, ok := example.Outputs["completion"].(string); ok {
-				if predicted == expected {
+				if answersMatch(expected, predicted) {
 					correct++
 				}
 			}
@@ -502,4 +505,26 @@ func evaluateProgramMIPRO(ctx context.Context, program core.Program, examples []
 	}
 
 	return float64(correct) / float64(len(examples))
+}
+
+var numberPattern = regexp.MustCompile(`-?\d[\d,]*(?:\.\d+)?`)
+
+// answersMatch reports whether predicted matches expected. When expected is a
+// number, it compares the last number in predicted, so a sentence such as
+// "Josh made a profit of $70,000." matches "70000".
+func answersMatch(expected, predicted string) bool {
+	expected, predicted = strings.TrimSpace(expected), strings.TrimSpace(predicted)
+	if predicted == expected {
+		return true
+	}
+	want, err := strconv.ParseFloat(expected, 64)
+	if err != nil {
+		return false
+	}
+	numbers := numberPattern.FindAllString(predicted, -1)
+	if len(numbers) == 0 {
+		return false
+	}
+	got, err := strconv.ParseFloat(strings.ReplaceAll(numbers[len(numbers)-1], ",", ""), 64)
+	return err == nil && got == want
 }
