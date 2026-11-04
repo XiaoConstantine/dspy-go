@@ -137,6 +137,7 @@ interceptors.ApplyXMLInterceptors(predict, interceptors.DefaultXMLConfig())
 - **[a2a_composition](examples/a2a_composition/)** - Multi-agent deep research
 - **[agents](examples/agents/)** - ReAct patterns and orchestration
 - **[parallel_search](examples/parallel_search/)** - Keyless web search and page fetch through MCP
+- **[deed_page](examples/deed_page/)** - Keyless HTML publishing to a public URL through MCP
 
 ### Modules
 - **[rlm](examples/rlm/)** - Large context exploration
