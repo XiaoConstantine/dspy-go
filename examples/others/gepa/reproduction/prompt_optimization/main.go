@@ -207,31 +207,19 @@ func (exp *Figure2ReproductionExperiment) runFigure2Reproduction(apiKey string) 
 	examples := createMultiHopRetrievalData()
 	exp.logger.Info(exp.ctx, "📊 Created %d multi-hop retrieval examples", len(examples))
 
-	// Configure GEPA for EXTREME prompt evolution (to match Figure 2's sophistication)
-	config := &optimizers.GEPAConfig{
-		PopulationSize:       25, // Larger population for more diversity
-		MaxGenerations:       30, // Many more generations for evolution
-		SelectionStrategy:    "adaptive_pareto",
-		MutationRate:         0.8,  // VERY high mutation rate for dramatic evolution
-		CrossoverRate:        0.3,  // Low crossover, focus on creative mutation
-		ElitismRate:          0.2,  // Higher elitism to preserve good prompts
-		ReflectionFreq:       1,    // Reflect EVERY generation for maximum improvement
-		ReflectionDepth:      5,    // Very deep reflection analysis
-		SelfCritiqueTemp:     0.95, // Very high temperature for creative critique
-		TournamentSize:       4,
-		ConvergenceThreshold: 0.001, // Very strict convergence
-		StagnationLimit:      8,     // Allow many generations of stagnation
-		EvaluationBatchSize:  8,     // Larger batch for thorough evaluation
-		ConcurrencyLevel:     2,     // Lower concurrency to allow longer processing
-		Temperature:          0.95,  // Very high temp for maximum creativity
-		MaxTokens:            8192,  // Much more tokens for very detailed prompts
-	}
+	// Propose once per iteration, with a metric budget and an iteration safety cap.
+	config := optimizers.DefaultGEPAConfig()
+	config.MaxGenerations = 30
+	config.ReflectionDepth = 5
+	config.TournamentSize = 4
+	config.ConvergenceThreshold = 0.001
+	config.StagnationLimit = 8
+	config.EvaluationBatchSize = 8
+	config.ConcurrencyLevel = 2
 
-	exp.logger.Info(exp.ctx, "🔧 GEPA Configuration for Sophisticated Evolution:")
-	exp.logger.Info(exp.ctx, "   Population: %d, Max Generations: %d", config.PopulationSize, config.MaxGenerations)
-	exp.logger.Info(exp.ctx, "   Mutation Rate: %.1f%% (higher for creativity)", config.MutationRate*100)
-	exp.logger.Info(exp.ctx, "   Temperature: %.1f (higher for detailed prompts)", config.Temperature)
-	exp.logger.Info(exp.ctx, "   Max Tokens: %d (allow detailed evolution)", config.MaxTokens)
+	exp.logger.Info(exp.ctx, "🔧 GEPA Configuration:")
+	exp.logger.Info(exp.ctx, "   Metric Call Budget: %d, Max Generations: %d", config.MaxMetricCalls, config.MaxGenerations)
+	exp.logger.Info(exp.ctx, "   Proposal Probability: %.1f%%", config.MutationRate*100)
 	exp.logger.Info(exp.ctx, "")
 
 	gepa, err := optimizers.NewGEPA(config)

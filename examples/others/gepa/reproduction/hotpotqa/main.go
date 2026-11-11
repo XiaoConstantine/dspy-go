@@ -275,31 +275,16 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 		},
 	)
 
-	// Configure GEPA with paper parameters
-	gepaConfig := &optimizers.GEPAConfig{
-		PopulationSize:       exp.config.PopulationSize,
-		MaxGenerations:       exp.config.MaxGenerations,
-		SelectionStrategy:    "adaptive_pareto",            // Paper's multi-objective approach
-		MutationRate:         0.3,                          // Standard evolutionary rate
-		CrossoverRate:        0.7,                          // Standard evolutionary rate
-		ElitismRate:          0.1,                          // Elite preservation
-		ReflectionFreq:       exp.config.ReflectionFreq,    // LLM reflection frequency
-		ReflectionDepth:      3,                            // Depth of reflection analysis
-		SelfCritiqueTemp:     exp.config.Temperature,       // Paper temperature
-		TournamentSize:       3,                            // Tournament selection
-		ConvergenceThreshold: exp.config.MinImprovement,    // Paper's min improvement
-		StagnationLimit:      exp.config.EarlyStopPatience, // Paper's early stopping
-		EvaluationBatchSize:  5,                            // Batch evaluation
-		ConcurrencyLevel:     3,                            // Concurrent processing
-		Temperature:          exp.config.Temperature,       // Generation temperature
-		MaxTokens:            500,                          // Token limit
-	}
+	// Bound metric evaluations, including full validation of accepted children.
+	gepaConfig := optimizers.DefaultGEPAConfig()
+	gepaConfig.MaxGenerations = exp.config.MaxGenerations
+	gepaConfig.MaxMetricCalls = exp.config.Budget
+	gepaConfig.ConvergenceThreshold = exp.config.MinImprovement
+	gepaConfig.StagnationLimit = exp.config.EarlyStopPatience
 
-	exp.logger.Info(exp.ctx, "🔧 Creating GEPA optimizer with paper configuration:")
-	exp.logger.Info(exp.ctx, "   Population Size: %d", gepaConfig.PopulationSize)
+	exp.logger.Info(exp.ctx, "🔧 Creating GEPA optimizer with a retained seed pool:")
 	exp.logger.Info(exp.ctx, "   Max Generations: %d", gepaConfig.MaxGenerations)
-	exp.logger.Info(exp.ctx, "   Rollout Budget: ~%d", exp.config.Budget)
-	exp.logger.Info(exp.ctx, "   Reflection Frequency: every %d generations", gepaConfig.ReflectionFreq)
+	exp.logger.Info(exp.ctx, "   Metric Call Budget: %d", gepaConfig.MaxMetricCalls)
 	exp.logger.Info(exp.ctx, "   Selection Strategy: %s", gepaConfig.SelectionStrategy)
 	exp.logger.Info(exp.ctx, "   Early Stop Patience: %d", gepaConfig.StagnationLimit)
 

@@ -27,8 +27,8 @@
 //     * MIPRO: Multi-step interactive prompt optimization
 //     * Copro: Collaborative prompt optimization
 //     * SIMBA: Stochastic Introspective Mini-Batch Ascent with self-analysis
-//     * GEPA: Generative Evolutionary Prompt Adaptation with multi-objective Pareto optimization,
-//       LLM-based self-reflection, semantic diversity metrics, and elite archive management
+//     * GEPA: Generative Evolutionary Prompt Adaptation with metric-driven Pareto selection,
+//       minibatch reflection, retained parents, and a metric-call budget
 //     * TPE: Tree-structured Parzen Estimator for Bayesian optimization
 //
 //   - Agents: Advanced patterns for building sophisticated AI systems:
@@ -263,15 +263,10 @@
 //	        },
 //	    )
 //
-//	    // Configure GEPA optimizer with multi-objective optimization
-//	    config := &optimizers.GEPAConfig{
-//	        PopulationSize:    20,              // Population size for evolutionary search
-//	        MaxGenerations:    10,              // Maximum number of generations
-//	        SelectionStrategy: "adaptive_pareto", // Use adaptive Pareto-based selection
-//	        MutationRate:      0.3,             // Probability of mutation
-//	        CrossoverRate:     0.7,             // Probability of crossover
-//	        ReflectionFreq:    2,               // Perform reflection every 2 generations
-//	    }
+//	    // Start from one seed; validate children only after minibatch improvement.
+//	    config := optimizers.DefaultGEPAConfig()
+//	    config.MaxMetricCalls = 1000 // Budget includes seed and child validation.
+//	    config.MaxGenerations = 10   // Additional iteration safety cap.
 //
 //	    gepa, err := optimizers.NewGEPA(config)
 //	    if err != nil {

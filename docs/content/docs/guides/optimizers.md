@@ -42,31 +42,25 @@ Manual prompt engineering is:
 | **COPRO** | Multi-module systems | ⚡⚡ | ⭐⭐⭐⭐ | Medium |
 | **MIPRO** | Systematic optimization | ⚡⚡ | ⭐⭐⭐⭐ | Medium |
 | **SIMBA** | Introspective learning | ⚡ | ⭐⭐⭐⭐⭐ | High |
-| **GEPA** | Multi-objective evolution | ⚡ | ⭐⭐⭐⭐⭐ | High |
+| **GEPA** | Reflective prompt evolution | ⚡ | ⭐⭐⭐⭐⭐ | High |
 
 ---
 
 ## GEPA - Generative Evolutionary Prompt Adaptation
 
-**The most advanced optimizer** in dspy-go. Uses evolutionary algorithms with multi-objective Pareto optimization and LLM-based self-reflection.
+GEPA evolves prompts using execution feedback and the metric you supply. It starts from your seed program, retains parents, and adds only children that strictly improve the total score on the parent's current minibatch.
 
 ### What Makes GEPA Special?
 
-- 🧬 **Evolutionary Optimization**: Genetic algorithms for prompt evolution
-- 🎯 **Multi-Objective**: Optimizes across 7 dimensions simultaneously
-- 🏆 **Pareto Selection**: Maintains diverse solutions for different trade-offs
-- 🧠 **LLM Self-Reflection**: Uses LLMs to analyze and critique prompts
-- 📊 **Elite Archive**: Preserves high-quality solutions across generations
+- **Fresh evidence**: Epoch-shuffled training minibatches supply case-specific inputs, outputs, scores, feedback, and module traces.
+- **One proposal call**: The reflection LM rewrites the selected parent's instructions; failed, empty, or unchanged proposals are skipped, not replaced with random edits.
+- **Selective validation**: Only the seed and accepted children receive full validation. Parents and children use the same minibatch for acceptance.
+- **Metric-driven Pareto selection**: Per-example validation winners guide parent selection; final selection uses aggregate validation score.
+- **Bounded evaluation**: The metric-call budget includes training and validation evaluations; cached cases do not consume it.
 
-### The 7 Optimization Dimensions
+### Metrics and diagnostics
 
-1. **Success Rate**: How often the program succeeds
-2. **Quality**: Answer accuracy and completeness
-3. **Efficiency**: Token usage and speed
-4. **Robustness**: Performance across edge cases
-5. **Generalization**: How well it handles new inputs
-6. **Diversity**: Variety in reasoning approaches
-7. **Innovation**: Novel problem-solving strategies
+The user metric determines acceptance and selection. `MultiObjectiveFitness` remains available to agent integrations for diagnostics, but its seven diagnostic dimensions do not drive GEPA's prompt search.
 
 ### When to Use GEPA
 
@@ -94,6 +88,7 @@ import (
     "github.com/XiaoConstantine/dspy-go/pkg/core"
     "github.com/XiaoConstantine/dspy-go/pkg/optimizers"
     "github.com/XiaoConstantine/dspy-go/pkg/datasets"
+    "github.com/XiaoConstantine/dspy-go/pkg/llms"
 )
 
 func main() {
@@ -105,29 +100,35 @@ func main() {
     program := createMyProgram() // Your application
 
     // 3. Load dataset
-    dataset, _ := datasets.LoadGSM8K("path/to/gsm8k")
+    examples, err := datasets.LoadGSM8K()
+    if err != nil {
+        log.Fatal(err)
+    }
+    training := make([]core.Example, len(examples))
+    for i, example := range examples {
+        training[i] = core.Example{
+            Inputs: map[string]any{"question": example.Question},
+            Outputs: map[string]any{"answer": example.Answer},
+        }
+    }
+    dataset := datasets.NewSimpleDataset(training)
 
     // 4. Define metric
-    metricFunc := func(example, prediction map[string]interface{}, trace *core.Trace) (float64, map[string]interface{}) {
+    metricFunc := func(example, prediction map[string]any) float64 {
         expected := example["answer"].(string)
         actual := prediction["answer"].(string)
 
         if expected == actual {
-            return 1.0, map[string]interface{}{"correct": true}
+            return 1.0
         }
-        return 0.0, map[string]interface{}{"correct": false}
+        return 0.0
     }
 
     // 5. Configure GEPA
-    config := &optimizers.GEPAConfig{
-        PopulationSize:    20,                // Size of population
-        MaxGenerations:    10,                // Number of generations
-        SelectionStrategy: "adaptive_pareto", // Multi-objective Pareto
-        MutationRate:      0.3,               // Mutation probability
-        CrossoverRate:     0.7,               // Crossover probability
-        ReflectionFreq:    2,                 // LLM reflection every 2 generations
-        ElitismRate:       0.1,               // Preserve top 10%
-    }
+    config := optimizers.DefaultGEPAConfig()
+    config.MaxMetricCalls = 1000 // Includes seed and accepted-child validation.
+    config.MaxGenerations = 10   // Additional safety cap, including the seed.
+    config.MutationRate = 1.0    // Attempt a proposal each iteration (the default).
 
     gepa, err := optimizers.NewGEPA(config)
     if err != nil {
@@ -146,51 +147,30 @@ func main() {
     fmt.Printf("Best fitness: %.3f\n", state.BestFitness)
     fmt.Printf("Generations: %d\n", state.CurrentGeneration)
 
-    // 8. Get Pareto archive (multiple solutions optimized for different trade-offs)
+    // 8. Get Pareto archive (candidates covering different examples)
     archive := state.GetParetoArchive()
     fmt.Printf("Elite solutions: %d\n", len(archive))
 
-    // Each solution in archive excels in different ways:
-    // - Some optimized for speed
-    // - Some optimized for accuracy
-    // - Some balanced between both
+    // The archive uses per-example user-metric scores, not diagnostic objectives.
 }
 ```
 
 ### GEPA Configuration Guide
 
 ```go
-// Quick optimization (5-10 minutes)
-config := &optimizers.GEPAConfig{
-    PopulationSize:    10,
-    MaxGenerations:    5,
-    SelectionStrategy: "adaptive_pareto",
-    MutationRate:      0.3,
-    CrossoverRate:     0.7,
-    ReflectionFreq:    3,
-}
-
-// Balanced optimization (15-30 minutes)
-config := &optimizers.GEPAConfig{
-    PopulationSize:    20,
-    MaxGenerations:    10,
-    SelectionStrategy: "adaptive_pareto",
-    MutationRate:      0.3,
-    CrossoverRate:     0.7,
-    ReflectionFreq:    2,
-}
-
-// Deep optimization (1-2 hours)
-config := &optimizers.GEPAConfig{
-    PopulationSize:    40,
-    MaxGenerations:    20,
-    SelectionStrategy: "adaptive_pareto",
-    MutationRate:      0.2,
-    CrossoverRate:     0.8,
-    ReflectionFreq:    1,
-    ElitismRate:       0.15,
-}
+config := optimizers.DefaultGEPAConfig()
+config.MaxMetricCalls = 1000     // Primary evaluation budget; 0 disables.
+config.MaxGenerations = 1000     // Safety cap for skipped/failed proposals; 0 disables.
+config.EvaluationBatchSize = 5   // Epoch-shuffled training minibatch size.
+config.ValidationSplit = 0.2    // Optional holdout; explicit ValidationExamples also supported.
+config.SkipPerfectScore = true  // Skip minibatches already solved by the parent.
+config.PerfectScore = 1.0        // Set to the maximum of your metric, or disable skipping.
+config.RandomSeed = 42          // Reproducible sampling.
 ```
+
+Use a budget large enough for full seed validation plus proposed-child evaluation. A complete evaluation must fit the remaining budget; GEPA never adds a partially validated candidate to the frontier. With no holdout or explicit validation examples, validation uses the full training set. Runtime depends on your model and dataset, not just the iteration cap. `StagnationLimit` defaults to 0 (disabled); at least one of the metric budget and generation cap must be enabled.
+
+**Migration:** `PopulationSize`, `ReflectionFreq`, and `ValidationFrequency` remain for compatibility with lower-level orchestration but no longer control `Compile`. `CrossoverRate`, `ElitismRate`, `Temperature`, `MaxTokens`, and `SelfCritiqueTemp` were removed from `GEPAConfig`, along with the unused `PopulationInsights` and `IndividualReflectionInsights` types. Remove those fields from configuration literals. Sampling settings belong on the supplied LMs; GEPA's removed temperature/token fields never configured them. `DefaultGEPAConfig` now uses a 1000-call budget, a 1000-generation safety cap, and no stagnation limit.
 
 ---
 

@@ -167,25 +167,10 @@ func runGEPAExperiment(ctx context.Context, logger *logging.Logger, trainExample
 
 	program, _, metricFunc := createHotpotQAProgram()
 
-	// GEPA configuration matching paper
-	config := &optimizers.GEPAConfig{
-		PopulationSize:       20,
-		MaxGenerations:       15,
-		SelectionStrategy:    "adaptive_pareto",
-		MutationRate:         0.3,
-		CrossoverRate:        0.7,
-		ElitismRate:          0.1,
-		ReflectionFreq:       2,
-		ReflectionDepth:      3,
-		SelfCritiqueTemp:     0.7,
-		TournamentSize:       3,
-		ConvergenceThreshold: 0.01,
-		StagnationLimit:      3,
-		EvaluationBatchSize:  5,
-		ConcurrencyLevel:     3,
-		Temperature:          0.8,
-		MaxTokens:            8192,
-	}
+	// Use metric-driven selection with one reflection proposal per iteration.
+	config := optimizers.DefaultGEPAConfig()
+	config.MaxGenerations = 15
+	config.StagnationLimit = 3
 
 	gepa, err := optimizers.NewGEPA(config)
 	if err != nil {

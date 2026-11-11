@@ -1,38 +1,30 @@
 # GEPA (Generative Evolutionary Prompt Adaptation) Example
 
-This example demonstrates the GEPA optimizer, a state-of-the-art evolutionary approach to prompt optimization that implements the key innovations from the research paper ["GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning"](https://arxiv.org/pdf/2507.19457).
+This example demonstrates metric-driven prompt optimization based on ["GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning"](https://arxiv.org/pdf/2507.19457).
 
 ## Overview
 
-GEPA represents a breakthrough in prompt optimization by combining:
-
-- **Multi-objective Pareto optimization** across 7 dimensions
-- **LLM-based self-reflection** for prompt analysis and critique
-- **Semantic diversity metrics** using language model similarity
-- **Elite archive management** preserving diverse high-quality solutions
-- **Real-time system monitoring** with context-aware performance tracking
+GEPA starts from the original program and retains accepted children alongside their parents. It selects parents using per-example user-metric scores, not synthetic quality or style objectives.
 
 ## Key Features Demonstrated
 
-### 🧬 **Evolutionary Multi-Objective Optimization**
-- Population-based evolution with 7-dimensional fitness evaluation
-- Success rate, quality, efficiency, robustness, generalization, diversity, innovation
-- Pareto-based selection maintaining diverse trade-off solutions
+### Minibatch acceptance
+- Draw an epoch-shuffled training minibatch each iteration.
+- Evaluate parent and proposed child on the same examples.
+- Accept only strict improvement in the sum of metric scores.
 
-### 🤔 **LLM-Based Self-Reflection**
-- Language models analyze and critique their own prompt performance
-- Structured feedback with strengths, weaknesses, and improvement suggestions
-- Reflection-driven evolution every few generations
+### Evidence-based reflection
+- Make one reflection-model proposal call from the selected parent's minibatch inputs, outputs, scores, feedback, and module traces.
+- Skip already-solved batches and failed, empty, or unchanged proposals.
+- Never replace a failed proposal with random style edits.
 
-### 🎯 **Pareto Archive of Elite Solutions**
-- Maintains diverse high-quality solutions across generations
-- Each solution optimized for different objective trade-offs
-- Users can select solutions based on their specific needs
+### Validation and budget
+- Fully validate only the seed and accepted children; cache equivalent candidate/example evaluations.
+- Keep parents so later proposals can revisit useful alternatives.
+- Choose the final program by aggregate validation score.
+- Stop at the metric budget, a perfect validation result, or an enabled safety cap.
 
-### 📊 **Real-Time System Monitoring**
-- Context-aware performance tracking with actual system metrics
-- CPU load, memory usage, and concurrency monitoring
-- Adaptive parameter adjustment based on system state
+The seven `MultiObjectiveFitness` dimensions remain available as agent diagnostics; they do not drive this optimizer's acceptance or selection.
 
 ## Usage
 
@@ -46,7 +38,7 @@ go run main.go -api-key YOUR_GEMINI_API_KEY
 go run main.go -api-key YOUR_KEY -dataset hotpotqa
 
 # Customize evolution parameters
-go run main.go -api-key YOUR_KEY -population 20 -generations 10
+go run main.go -api-key YOUR_KEY -generations 10
 
 # Enable verbose logging to see evolution details
 go run main.go -api-key YOUR_KEY -verbose
@@ -56,100 +48,11 @@ go run main.go -api-key YOUR_KEY -verbose
 
 - `-api-key`: **Required** - Your Google Gemini API key
 - `-dataset`: Dataset to use (`gsm8k` or `hotpotqa`, default: `gsm8k`)
-- `-population`: Population size for evolution (default: 12)
-- `-generations`: Maximum number of generations (default: 8)
+- `-population`: Deprecated compatibility flag; ignored by `Compile`
+- `-generations`: Safety cap including seed validation (default: 8)
 - `-verbose`: Enable detailed logging of the evolutionary process
 
-## Example Output
-
-```
-🧬 Starting GEPA (Generative Evolutionary Prompt Adaptation) Example
-Dataset: gsm8k, Population: 12, Generations: 8
-✅ Configured Gemini Flash model for GEPA optimization
-📊 Loaded 50 training examples from gsm8k dataset
-
-🚀 Starting GEPA optimization - this demonstrates the paper's key innovations:
-   • Multi-objective Pareto optimization across 7 dimensions
-   • LLM-based self-reflection and critique (every 2 generations)
-   • Semantic diversity metrics using LLM similarity
-   • Elite archive management with crowding distance
-   • Real-time system monitoring and context awareness
-
-🧬 GEPA Evolution: 2/8 (25.0%) - Generation 2
-🧬 GEPA Evolution: 4/8 (50.0%) - Generation 4
-🧬 GEPA Evolution: 6/8 (75.0%) - Generation 6
-🧬 GEPA Evolution: 8/8 (100.0%) - Generation 8
-
-✅ GEPA optimization completed in 2m15s
-
-🏆 GEPA Optimization Results:
-==================================================
-Dataset: gsm8k
-Total Generations: 8
-Optimization Duration: 2m15s
-Best Fitness Achieved: 0.8400
-
-🥇 Best Evolved Prompt:
-Generation: 6
-Instruction: Solve the math problem step by step, showing detailed calculations and checking your work at each stage.
-
-📊 Pareto Archive (Elite Solutions):
-Elite solutions preserved: 5
-These solutions represent different trade-offs:
-• High accuracy vs fast execution
-• Quality vs efficiency balance
-• Robustness vs generalization optimization
-
-🎯 GEPA Paper's Key Innovation - Pareto Archive Analysis:
-=======================================================
-The archive contains 5 elite solutions, each optimized for different objectives:
-
-Elite Solution 1:
-  Generation: 6
-  Fitness: 0.8400
-  Instruction: Solve the math problem step by step, showing detailed calculations and checking your work at each stage.
-  Optimization Focus: High accuracy with detailed reasoning
-
-Elite Solution 2:
-  Generation: 4
-  Fitness: 0.7800
-  Instruction: Solve this math problem efficiently with clear steps.
-  Optimization Focus: Fast execution with good quality
-
-Elite Solution 3:
-  Generation: 5
-  Fitness: 0.7600
-  Instruction: Carefully analyze the problem, solve systematically, and verify the answer.
-  Optimization Focus: Robust performance across diverse inputs
-
-💡 This demonstrates GEPA's key advantage over single-objective optimizers:
-   Instead of one 'best' solution, you get a diverse set of elite solutions
-   optimized for different trade-offs, allowing you to choose based on your needs.
-```
-
-## Paper Implementation Details
-
-This example faithfully implements the key contributions from the GEPA research paper:
-
-### **Natural Language Reflection**
-- Uses LLMs to analyze prompt performance in natural language
-- Generates structured critique with strengths, weaknesses, suggestions
-- Reflection-driven evolution every few generations
-
-### **Multi-Objective Optimization**
-- 7-dimensional fitness evaluation across multiple objectives
-- Pareto-based selection maintaining solution diversity
-- Crowding distance for diversity preservation
-
-### **System-Level Trajectory Sampling**
-- Captures complete execution traces for analysis
-- Context-aware performance tracking
-- Real-time system monitoring integration
-
-### **Semantic Diversity Assessment**
-- LLM-based similarity for true semantic diversity
-- Beyond simple string matching to meaningful prompt differences
-- Enhanced with cosine similarity and Jaccard coefficients
+The example keeps the default 1000 metric-call budget. Progress output reports the best metric score, metric-call count, and retained archive; scores and runtime depend on the model and examples.
 
 ## Datasets Supported
 
@@ -165,36 +68,34 @@ This example faithfully implements the key contributions from the GEPA research 
 
 ## Configuration Options
 
-The example demonstrates advanced GEPA configuration:
+Start with defaults rather than a partial configuration literal:
 
 ```go
-config := &optimizers.GEPAConfig{
-    PopulationSize:    12,              // Population for evolution
-    MaxGenerations:    8,               // Maximum generations
-    SelectionStrategy: "adaptive_pareto", // Multi-objective selection
-    MutationRate:      0.3,             // Mutation probability
-    CrossoverRate:     0.7,             // Crossover probability
-    ReflectionFreq:    2,               // Reflection every 2 generations
-    ReflectionDepth:   3,               // Depth of reflection analysis
-    // ... additional parameters
-}
+config := optimizers.DefaultGEPAConfig()
+config.MaxMetricCalls = 1000
+config.MaxGenerations = 8
+config.MutationRate = 1.0 // Propose each iteration (the default).
+config.EvaluationBatchSize = 5
+config.RandomSeed = 42
 ```
+
+`PopulationSize`, `ReflectionFreq`, and `ValidationFrequency` no longer control `Compile`. The unused `CrossoverRate`, `ElitismRate`, `Temperature`, `MaxTokens`, and `SelfCritiqueTemp` fields were removed. Configure sampling on the supplied LM, not on GEPA. `SkipPerfectScore` defaults to true with `PerfectScore=1`; change that threshold or disable skipping for other metric scales.
 
 ## Performance Considerations
 
-- **Population Size**: Larger populations explore more diverse solutions but require more computation
-- **Generations**: More generations allow for better evolution but increase runtime
-- **Reflection Frequency**: More frequent reflection improves quality but increases LLM usage
-- **Dataset Size**: Larger training sets improve optimization but slow evaluation
+- **Metric budget**: Counts uncached training and validation evaluations, not reflection calls. Complete evaluations must fit the remaining budget.
+- **Generation cap**: Bounds failed or skipped proposals that may consume no new metric calls.
+- **Validation set**: Use `ValidationExamples` or `ValidationSplit` for a holdout; otherwise each accepted child is validated on the full training set.
+- **Dataset size**: Full validation cost still scales with the validation set; it no longer scales with an upfront paraphrase population.
 
 ## Comparison with Other Optimizers
 
 | Aspect | GEPA | MIPRO | SIMBA | BootstrapFewShot |
 |--------|------|-------|-------|------------------|
-| **Approach** | Multi-objective evolution | TPE search | Introspective learning | Example selection |
-| **Objectives** | 7-dimensional Pareto | Single objective | Self-analysis | Few-shot quality |
+| **Approach** | Reflective prompt evolution | TPE search | Introspective learning | Example selection |
+| **Objectives** | Per-example user metric | Single objective | Self-analysis | Few-shot quality |
 | **Reflection** | LLM-based critique | None | Self-introspection | None |
-| **Diversity** | Semantic + archive | Limited | Batch-based | Example-based |
+| **Diversity** | Retained parents + validation archive | Limited | Batch-based | Example-based |
 | **Complexity** | High (comprehensive) | Medium | Medium-High | Low |
 | **Quality** | Highest | High | High | Medium |
 
@@ -207,11 +108,11 @@ config := &optimizers.GEPAConfig{
 
 ## Tips for Best Results
 
-1. **Start Small**: Begin with smaller populations and fewer generations for testing
+1. **Start Small**: Use a budget sufficient for seed validation and a few proposals
 2. **Monitor Progress**: Use `-verbose` flag to understand the evolutionary process
 3. **Dataset Quality**: Higher quality training examples lead to better optimization
 4. **Patience**: GEPA's comprehensive approach takes time but delivers superior results
-5. **Archive Analysis**: Examine the Pareto archive to understand different solution trade-offs
+5. **Archive Analysis**: Examine which validation examples each candidate solves
 
 ## Paper Reference
 

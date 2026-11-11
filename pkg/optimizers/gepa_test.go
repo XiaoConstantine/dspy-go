@@ -396,7 +396,6 @@ func TestGEPASelectionUsesPerExampleMetric(t *testing.T) {
 				// Evolve through the public API with mutation disabled, observing
 				// which candidate's generation changes rather than a private helper.
 				config.MutationRate = 0
-				config.CrossoverRate = 0
 				if resume {
 					callsBefore := state.MetricCallCount()
 					config.MaxGenerations = 2
@@ -449,7 +448,6 @@ func TestGEPACompileConcurrentPredictKeepsMetricBest(t *testing.T) {
 				config.PopulationSize = 3
 				config.MaxGenerations = 3
 				config.MutationRate = 0
-				config.CrossoverRate = 0
 				config.ReflectionFreq = 0
 				config.RandomSeed = seed
 				gepa, err := NewGEPA(config)
@@ -588,7 +586,6 @@ func TestNewGEPA(t *testing.T) {
 		PopulationSize: 10,
 		MaxGenerations: 5,
 		MutationRate:   0.3,
-		CrossoverRate:  0.7,
 	}
 
 	gepa, err := NewGEPA(config)
@@ -629,8 +626,6 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 20, config.PopulationSize)
 	assert.Equal(t, 1000, config.MaxGenerations)
 	assert.Equal(t, 1.0, config.MutationRate)
-	assert.Equal(t, 0.7, config.CrossoverRate)
-	assert.Equal(t, 0.1, config.ElitismRate)
 	assert.Equal(t, 2, config.ReflectionFreq)
 	assert.Equal(t, 3, config.TournamentSize)
 	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
@@ -2441,7 +2436,6 @@ func TestEvolutionaryOperators(t *testing.T) {
 	config := &GEPAConfig{
 		PopulationSize: 4,
 		TournamentSize: 2,
-		CrossoverRate:  1.0, // Always apply crossover for testing
 		MutationRate:   1.0, // Always apply mutation for testing
 	}
 
@@ -3089,115 +3083,6 @@ func TestExtractInstructionCandidateStripsCodeFences(t *testing.T) {
 	assert.Equal(t, "feedback tuned classifier instruction", instruction)
 }
 
-func TestSelfCritiqueSystem(t *testing.T) {
-	// Set up mock LLM with critique response
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-
-	// Add specific mock for self-critique
-	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
-		return containsAny(prompt, []string{"critique", "analyze", "performance"})
-	}), mock.Anything).Return(&core.LLMResponse{
-		Content: `PERFORMANCE ANALYSIS:
-- Success rate: 75%
-- Response quality: Good
-- Efficiency: Moderate
-
-PATTERN ANALYSIS:
-- Input handling: Consistent
-- Output format: Structured
-- Error patterns: Minimal
-
-COMPARATIVE ANALYSIS:
-- Better than baseline
-- Room for improvement in speed
-
-OVERALL ASSESSMENT:
-Good performance with potential for optimization.`,
-	}, nil)
-
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	candidate := &GEPACandidate{
-		ID:          "critique-candidate",
-		ModuleName:  "test_module",
-		Instruction: "Test instruction for self-critique",
-		Fitness:     0.75,
-		Generation:  1,
-	}
-
-	// Create some traces for the candidate
-	traces := []ExecutionTrace{
-		{
-			CandidateID: candidate.ID,
-			Success:     true,
-			Duration:    100 * time.Millisecond,
-		},
-	}
-
-	// Add traces to state so selfCritiqueCandidate can find them
-	for _, trace := range traces {
-		gepa.state.AddTrace(&trace)
-	}
-
-	// Test critique prompt building
-	prompt := gepa.buildCritiquePrompt(candidate, traces)
-	assert.Contains(t, prompt, candidate.Instruction)
-	assert.Contains(t, prompt, "Execution Performance Analysis")
-
-	// Test self-critique
-	critique, err := gepa.selfCritiqueCandidate(ctx, candidate)
-	require.NoError(t, err)
-	assert.Equal(t, candidate.ID, critique.CandidateID)
-	assert.NotEmpty(t, critique.Strengths)
-}
-
-func TestMultiLevelReflectionSystem(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	// Initialize some population data
-	candidates := []*GEPACandidate{
-		{ID: "ml-1", Fitness: 0.9, Generation: 0},
-		{ID: "ml-2", Fitness: 0.7, Generation: 0},
-		{ID: "ml-3", Fitness: 0.5, Generation: 1},
-	}
-
-	population := &Population{
-		Candidates: candidates,
-		Generation: 1,
-	}
-
-	gepa.state.PopulationHistory = []*Population{population}
-
-	// Test candidate selection for reflection
-	diverseCandidates := gepa.selectDiverseCandidates(candidates, 2)
-	assert.LessOrEqual(t, len(diverseCandidates), 2)
-
-	interestingCandidates := gepa.selectInterestingCandidates(candidates, 2)
-	assert.LessOrEqual(t, len(interestingCandidates), 2)
-
-	// Test individual reflection
-	individualResults := gepa.performIndividualReflection(ctx)
-	assert.NotNil(t, individualResults)
-
-	// Test population pattern analysis
-	patterns := gepa.analyzePopulationPatterns()
-	assert.NotNil(t, patterns)
-
-}
-
 func TestErrorHandlingAndEdgeCases(t *testing.T) {
 	// Set up mock LLM
 	mockLLM := &testutil.MockLLM{}
@@ -3256,7 +3141,6 @@ func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
 		config: &GEPAConfig{
 			PopulationSize:    2,
 			MutationRate:      1.0,
-			ElitismRate:       0.0,
 			TournamentSize:    1,
 			SelectionStrategy: "tournament",
 		},
@@ -3724,7 +3608,6 @@ func TestEvolvePopulationCarriesForwardCandidatesWithoutSelectedParents(t *testi
 		config: &GEPAConfig{
 			PopulationSize:    1,
 			MutationRate:      0.0,
-			ElitismRate:       0.0,
 			TournamentSize:    1,
 			SelectionStrategy: "tournament",
 		},
@@ -3851,59 +3734,6 @@ func TestInterceptorIntegration(t *testing.T) {
 	result3, err := gepa.gepaReflectionLogger(ctx, inputs, info, handler)
 	require.NoError(t, err)
 	assert.Equal(t, outputs, result3)
-}
-
-func TestAdvancedAnalysisFunctions(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	candidate := &GEPACandidate{
-		ID:          "analysis-candidate",
-		ModuleName:  "test_module",
-		Instruction: "Complex analysis instruction",
-		Generation:  1,
-	}
-
-	// Add execution traces
-	traces := []ExecutionTrace{
-		{
-			CandidateID: candidate.ID,
-			Inputs:      map[string]any{"type": "question", "content": "What is AI?"},
-			Outputs:     map[string]any{"answer": "Artificial Intelligence..."},
-			Success:     true,
-		},
-		{
-			CandidateID: candidate.ID,
-			Inputs:      map[string]any{"type": "request", "content": "Explain ML"},
-			Outputs:     map[string]any{"response": "Machine Learning..."},
-			Success:     true,
-		},
-	}
-
-	// Test input pattern analysis
-	inputPatterns := gepa.analyzeInputPatterns(traces)
-	assert.NotNil(t, inputPatterns)
-
-	// Test output pattern analysis
-	outputPatterns := gepa.analyzeOutputPatterns(traces)
-	assert.NotNil(t, outputPatterns)
-
-	// Test failure pattern analysis (with failed trace)
-	failedTraces := []ExecutionTrace{
-		{
-			CandidateID: candidate.ID,
-			Success:     false,
-			Error:       assert.AnError,
-		},
-	}
-
-	failurePatterns := gepa.analyzeFailurePatterns(failedTraces)
-	assert.NotNil(t, failurePatterns)
 }
 
 func TestEvolutionOperationsAdvanced(t *testing.T) {

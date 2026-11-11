@@ -43,7 +43,7 @@ func (d *SimpleDataset) Size() int {
 func main() {
 	apiKey := flag.String("api-key", "", "API Key for the Gemini LLM provider")
 	dataset := flag.String("dataset", "gsm8k", "Dataset to use (gsm8k or hotpotqa)")
-	populationSize := flag.Int("population", 12, "GEPA population size")
+	populationSize := flag.Int("population", 12, "Deprecated: GEPA starts from one seed; this flag is ignored")
 	generations := flag.Int("generations", 8, "Maximum number of generations")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging for GEPA evolution")
 	flag.Parse()
@@ -76,7 +76,7 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 	ctx := core.WithExecutionState(context.Background())
 
 	logger.Info(ctx, "🧬 Starting GEPA (Generative Evolutionary Prompt Adaptation) Example")
-	logger.Info(ctx, "Dataset: %s, Population: %d, Generations: %d", datasetName, populationSize, generations)
+	logger.Info(ctx, "Dataset: %s, Generation cap: %d", datasetName, generations)
 
 	// Configure Gemini LLM (as specified in the request)
 	llms.EnsureFactory()
@@ -114,27 +114,12 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 		},
 	)
 
-	// Configure GEPA with paper-inspired settings
-	config := &optimizers.GEPAConfig{
-		PopulationSize:       populationSize,    // Population size for evolutionary search
-		MaxGenerations:       generations,       // Maximum number of generations
-		SelectionStrategy:    "adaptive_pareto", // Multi-objective Pareto selection (paper's approach)
-		MutationRate:         0.3,               // Mutation probability
-		CrossoverRate:        0.7,               // Crossover probability
-		ElitismRate:          0.1,               // Elite preservation rate
-		ReflectionFreq:       2,                 // LLM-based reflection every 2 generations (key paper feature)
-		ReflectionDepth:      3,                 // Depth of reflection analysis
-		SelfCritiqueTemp:     0.7,               // Temperature for self-critique
-		TournamentSize:       3,                 // Tournament selection size
-		ConvergenceThreshold: 0.01,              // Convergence threshold
-		StagnationLimit:      3,                 // Stagnation limit
-		EvaluationBatchSize:  5,                 // Batch size for evaluation
-		ConcurrencyLevel:     3,                 // Concurrent evaluation level
-		Temperature:          0.8,               // LLM generation temperature
-		MaxTokens:            8192,              // Maximum tokens for generation
-	}
+	// Keep the default metric-call budget and attempt one proposal per iteration.
+	config := optimizers.DefaultGEPAConfig()
+	config.PopulationSize = populationSize // Retained for compatibility; Compile ignores it.
+	config.MaxGenerations = generations
 
-	logger.Info(ctx, "🔧 Creating GEPA optimizer with multi-objective evolutionary configuration")
+	logger.Info(ctx, "🔧 Creating GEPA optimizer with a %d metric-call budget", config.MaxMetricCalls)
 	gepa, err := optimizers.NewGEPA(config)
 	if err != nil {
 		logger.Fatalf(ctx, "Failed to create GEPA optimizer: %v", err)
@@ -143,12 +128,11 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 	// Set up progress reporting
 	gepa.SetProgressReporter(&ProgressReporter{logger: logger, ctx: ctx})
 
-	logger.Info(ctx, "🚀 Starting GEPA optimization - this demonstrates the paper's key innovations:")
-	logger.Info(ctx, "   • Multi-objective Pareto optimization across 7 dimensions")
-	logger.Info(ctx, "   • LLM-based self-reflection and critique (every %d generations)", config.ReflectionFreq)
-	logger.Info(ctx, "   • Semantic diversity metrics using LLM similarity")
-	logger.Info(ctx, "   • Elite archive management with crowding distance")
-	logger.Info(ctx, "   • Real-time system monitoring and context awareness")
+	logger.Info(ctx, "🚀 Starting GEPA optimization:")
+	logger.Info(ctx, "   • One seed program, retaining accepted children and their parents")
+	logger.Info(ctx, "   • One reflection proposal from each selected parent's minibatch evidence")
+	logger.Info(ctx, "   • Strict minibatch improvement before full validation")
+	logger.Info(ctx, "   • Pareto selection using per-example user-metric scores")
 
 	startTime := time.Now()
 
@@ -303,16 +287,13 @@ func displayOptimizationResults(ctx context.Context, logger *logging.Logger, gep
 	archive := state.GetParetoArchive()
 	logger.Info(ctx, "📊 Pareto Archive (Elite Solutions):")
 	logger.Info(ctx, "Elite solutions preserved: %d", len(archive))
-	logger.Info(ctx, "These solutions represent different trade-offs:")
-	logger.Info(ctx, "• High accuracy vs fast execution")
-	logger.Info(ctx, "• Quality vs efficiency balance")
-	logger.Info(ctx, "• Robustness vs generalization optimization")
+	logger.Info(ctx, "These candidates cover different examples under the supplied metric.")
 	logger.Info(ctx, "")
 
 	// Show evolution statistics
 	logger.Info(ctx, "🧬 Evolution Statistics:")
 	logger.Info(ctx, "Population History: %d generations", len(state.PopulationHistory))
-	logger.Info(ctx, "Reflection Events: %d", len(state.ReflectionHistory))
+	logger.Info(ctx, "Metric Calls: %d", state.MetricCallCount())
 	logger.Info(ctx, "")
 }
 
@@ -370,7 +351,7 @@ func demonstrateParetoArchive(ctx context.Context, logger *logging.Logger, gepa 
 		return
 	}
 
-	logger.Info(ctx, "The archive contains %d elite solutions, each optimized for different objectives:", len(archive))
+	logger.Info(ctx, "The archive contains %d solutions covering different examples:", len(archive))
 
 	// Show up to 3 diverse solutions from the archive
 	showCount := 3
@@ -385,25 +366,10 @@ func demonstrateParetoArchive(ctx context.Context, logger *logging.Logger, gepa 
 		logger.Info(ctx, "  Generation: %d", candidate.Generation)
 		logger.Info(ctx, "  Fitness: %.4f", candidate.Fitness)
 		logger.Info(ctx, "  Instruction: %s", candidate.Instruction)
-		logger.Info(ctx, "  Optimization Focus: %s", getOptimizationFocus(i))
 	}
 
 	logger.Info(ctx, "")
-	logger.Info(ctx, "💡 This demonstrates GEPA's key advantage over single-objective optimizers:")
-	logger.Info(ctx, "   Instead of one 'best' solution, you get a diverse set of elite solutions")
-	logger.Info(ctx, "   optimized for different trade-offs, allowing you to choose based on your needs.")
-}
-
-func getOptimizationFocus(index int) string {
-	focuses := []string{
-		"High accuracy with detailed reasoning",
-		"Fast execution with good quality",
-		"Robust performance across diverse inputs",
-	}
-	if index < len(focuses) {
-		return focuses[index]
-	}
-	return "Balanced multi-objective performance"
+	logger.Info(ctx, "The returned program maximizes aggregate validation score; the archive retains alternatives.")
 }
 
 // ProgressReporter implements core.ProgressReporter for GEPA.
@@ -413,8 +379,8 @@ type ProgressReporter struct {
 }
 
 func (pr *ProgressReporter) Report(operation string, current, total int) {
-	if current%2 == 0 || current == total { // Report every 2 generations or at completion
+	if current%2 == 0 || current == total {
 		percentage := float64(current) / float64(total) * 100
-		pr.logger.Info(pr.ctx, "🧬 %s: %d/%d (%.1f%%) - Generation %d", operation, current, total, percentage, current)
+		pr.logger.Info(pr.ctx, "🧬 %s: %d/%d (%.1f%%)", operation, current, total, percentage)
 	}
 }

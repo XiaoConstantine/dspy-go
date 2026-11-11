@@ -330,14 +330,8 @@ func createOptimizer(name string) (core.Optimizer, error) {
 			optimizers.WithFastMode(true),
 		), nil
 	case "gepa":
-		config := &optimizers.GEPAConfig{
-			PopulationSize:    4,
-			MaxGenerations:    2,
-			SelectionStrategy: "adaptive_pareto",
-			MutationRate:      0.3,
-			CrossoverRate:     0.7,
-			ReflectionFreq:    5, // Avoid division by zero
-		}
+		config := optimizers.DefaultGEPAConfig()
+		config.MaxGenerations = 2
 		return optimizers.NewGEPA(config)
 	case "copro":
 		metricFunc := func(expected, actual map[string]any) float64 {
