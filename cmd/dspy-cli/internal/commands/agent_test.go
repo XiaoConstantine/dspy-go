@@ -27,6 +27,24 @@ func TestDecodeTerminalTaskRequest_RequiresCoreFields(t *testing.T) {
 	assert.Contains(t, err.Error(), "task_dir is required")
 }
 
+func TestRunTerminalTaskCommand_OptionalTemperature(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		cmd := newRunTerminalTaskCommand(func(cfg *terminalTaskCommandConfig) (tblite.Agent, error) {
+			assert.Equal(t, explicit, cfg.TemperatureSet)
+			assert.Zero(t, cfg.Temperature)
+			return stubTerminalTaskAgent{result: &tblite.TerminalTaskResult{Completed: true}}, nil
+		})
+		cmd.SetIn(bytes.NewBufferString(`{"task_id":"task-1","task_dir":"/tmp/task","environment_dir":"/tmp/env","instruction":"finish"}`))
+		cmd.SetOut(&bytes.Buffer{})
+		args := []string{}
+		if explicit {
+			args = append(args, "--temperature=0")
+		}
+		cmd.SetArgs(args)
+		require.NoError(t, cmd.Execute())
+	}
+}
+
 func TestRunTerminalTaskCommand_EncodesResult(t *testing.T) {
 	var out bytes.Buffer
 

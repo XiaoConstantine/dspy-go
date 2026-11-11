@@ -151,19 +151,26 @@ func TestAdaptGeneratePreservesOptionsUsageAndMetadata(t *testing.T) {
 	assert.Equal(t, cost, response.Metadata["usage_cost"])
 }
 
-func TestAdaptOmitsUnsupportedImplicitDefaults(t *testing.T) {
+func TestAdaptOmitsImplicitDefaults(t *testing.T) {
 	tests := []struct {
 		name  string
 		info  llm.ModelInfo
 		check func(*testing.T, llm.Request)
 	}{
 		{
-			name: "Codex max output tokens",
+			name: "Ordinary provider temperature",
+			info: llm.ModelInfo{Provider: "openai", Model: "test-model"},
+			check: func(t *testing.T, request llm.Request) {
+				assert.Equal(t, 8192, request.MaxOutputTokens)
+				assert.Nil(t, request.Temperature)
+			},
+		},
+		{
+			name: "Codex max output tokens and temperature",
 			info: llm.ModelInfo{Provider: "openai-codex", Model: "gpt-5.4"},
 			check: func(t *testing.T, request llm.Request) {
 				assert.Zero(t, request.MaxOutputTokens)
-				require.NotNil(t, request.Temperature)
-				assert.InDelta(t, 0.5, *request.Temperature, 0.0001)
+				assert.Nil(t, request.Temperature)
 			},
 		},
 		{
@@ -214,6 +221,15 @@ func TestAdaptPreservesExplicitUnsupportedOptions(t *testing.T) {
 			},
 		},
 		{
+			name:    "Codex temperature",
+			info:    llm.ModelInfo{Provider: "openai-codex", Model: "gpt-5.4"},
+			options: []core.GenerateOption{core.WithTemperature(0.25)},
+			check: func(t *testing.T, request llm.Request) {
+				require.NotNil(t, request.Temperature)
+				assert.InDelta(t, 0.25, *request.Temperature, 0.0001)
+			},
+		},
+		{
 			name: "Anthropic temperature",
 			info: llm.ModelInfo{
 				Provider: "anthropic", Model: "claude-opus-5",
@@ -242,6 +258,27 @@ func TestAdaptPreservesExplicitUnsupportedOptions(t *testing.T) {
 			_, err = adapted.Generate(context.Background(), "hi", test.options...)
 			require.NoError(t, err)
 			test.check(t, generator.request)
+		})
+	}
+}
+
+func TestAdaptPreservesExplicitTemperature(t *testing.T) {
+	for _, provider := range []string{"openai", "openai-codex", "anthropic"} {
+		t.Run(provider, func(t *testing.T) {
+			for _, temperature := range []float64{0, 0.5, 0.9} {
+				generator := &generatorStub{
+					info: llm.ModelInfo{Provider: provider, Model: "test-model"},
+					response: &llm.Response{Message: llm.Message{
+						Role: llm.RoleAssistant, Content: []llm.Part{{Text: "ok"}},
+					}},
+				}
+				adapted, err := Adapt(generator)
+				require.NoError(t, err)
+				_, err = adapted.Generate(context.Background(), "hi", core.WithTemperature(temperature))
+				require.NoError(t, err)
+				require.NotNil(t, generator.request.Temperature)
+				assert.Equal(t, temperature, *generator.request.Temperature)
+			}
 		})
 	}
 }

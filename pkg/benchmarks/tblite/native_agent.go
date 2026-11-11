@@ -24,9 +24,11 @@ const (
 
 // NativeAgentConfig controls the TBLite adapter over the shared native agent.
 type NativeAgentConfig struct {
-	MaxTurns       int
-	MaxTokens      int
-	Temperature    float64
+	MaxTurns    int
+	MaxTokens   int
+	Temperature float64
+	// TemperatureSet distinguishes explicit zero from provider-default sampling.
+	TemperatureSet bool
 	Toolset        ToolsetConfig
 	SystemPrompt   string
 	ToolPolicy     string
@@ -147,6 +149,7 @@ func (a *NativeAgent) RunTask(ctx context.Context, req TerminalTaskRequest) (*Te
 		MaxTurns:       a.config.MaxTurns,
 		MaxTokens:      a.config.MaxTokens,
 		Temperature:    a.config.Temperature,
+		TemperatureSet: a.config.TemperatureSet,
 		SystemPrompt:   a.config.SystemPrompt,
 		ToolPolicy:     a.config.ToolPolicy,
 		FinishToolText: a.config.FinishToolText,

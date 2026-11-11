@@ -50,6 +50,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 		Use:   "tblite",
 		Short: "Run a fixed-slice TBLite evaluation with the native benchmark agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			agentCfg.TemperatureSet = cmd.Flags().Changed("temperature")
 			source, err := resolveTBLiteTaskSource(cmd.Context(), tbliteTaskSourceConfig{
 				Split:          split,
 				Offset:         offset,

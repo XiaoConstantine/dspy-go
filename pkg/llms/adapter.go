@@ -275,11 +275,10 @@ func canonicalRequest(messages []llm.Message, options []core.GenerateOption, inf
 	if info.Provider != "openai-codex" || configured.MaxTokens != defaults.MaxTokens {
 		request.MaxOutputTokens = configured.MaxTokens
 	}
-	temperatureDisabled := info.Compatibility != nil &&
-		info.Compatibility.Anthropic != nil &&
-		info.Compatibility.Anthropic.Temperature == llm.CompatibilityDisabled
-	if !temperatureDisabled || configured.Temperature != defaults.Temperature {
-		temperature := float64(configured.Temperature)
+	// Preserve explicit choices even for providers that reject temperature;
+	// capability validation belongs to llm-go, not a silent option override.
+	if configured.TemperatureSet || configured.Temperature != 0 {
+		temperature := configured.Temperature
 		request.Temperature = &temperature
 	}
 	if configured.TopP != 0 {

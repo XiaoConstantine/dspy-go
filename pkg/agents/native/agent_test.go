@@ -28,6 +28,35 @@ func TestNewAgent_RequiresToolCalling(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not support tool calling")
 }
 
+func TestAgent_Execute_OptionalTemperature(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   Config
+		explicit bool
+	}{
+		{name: "provider default"},
+		{name: "explicit zero", config: Config{TemperatureSet: true}, explicit: true},
+		{name: "nonzero", config: Config{Temperature: 0.7}, explicit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			llm := &stubLLM{
+				capabilities: []core.Capability{core.CapabilityToolCalling},
+				results: []map[string]any{{"function_call": map[string]any{
+					"name": "Finish", "arguments": map[string]any{"answer": "done"},
+				}}},
+			}
+			agent, err := NewAgent(llm, tc.config)
+			require.NoError(t, err)
+			result, err := agent.Execute(context.Background(), map[string]any{"task": "Finish immediately."})
+			require.NoError(t, err)
+			assert.Equal(t, true, result["completed"])
+			require.NotNil(t, llm.options)
+			assert.Equal(t, tc.explicit, llm.options.TemperatureSet)
+			assert.Equal(t, tc.config.Temperature, llm.options.Temperature)
+		})
+	}
+}
+
 func TestNewAgent_LoadsPersistedSkillPrompt(t *testing.T) {
 	store := skills.NewMemoryStore()
 	require.NoError(t, store.Save(context.Background(), skills.Skill{
@@ -2067,6 +2096,7 @@ type stubLLM struct {
 	index        int
 	capabilities []core.Capability
 	prompts      []string
+	options      *core.GenerateOptions
 }
 
 func (m *stubLLM) Generate(context.Context, string, ...core.GenerateOption) (*core.LLMResponse, error) {
@@ -2079,6 +2109,10 @@ func (m *stubLLM) GenerateWithJSON(context.Context, string, ...core.GenerateOpti
 
 func (m *stubLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
 	m.prompts = append(m.prompts, prompt)
+	m.options = core.NewGenerateOptions()
+	for _, option := range options {
+		option(m.options)
+	}
 	if m.index >= len(m.results) {
 		return nil, fmt.Errorf("no more stubbed results")
 	}

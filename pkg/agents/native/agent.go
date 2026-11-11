@@ -23,9 +23,12 @@ const defaultMaxConsecutiveNoCallResponses = 3
 
 // Config controls the shared native tool-calling agent behavior.
 type Config struct {
-	MaxTurns                      int
-	MaxTokens                     int
-	Temperature                   float64
+	MaxTurns    int
+	MaxTokens   int
+	Temperature float64
+	// TemperatureSet sends an explicit zero temperature. Nonzero values are
+	// always sent; the zero-value Config leaves sampling to the provider.
+	TemperatureSet                bool
 	SystemPrompt                  string
 	ToolPolicy                    string
 	FinishToolText                string
@@ -211,13 +214,14 @@ func (a *Agent) Execute(ctx context.Context, input map[string]any) (map[string]a
 		)
 	}
 
+	options := []core.GenerateOption{core.WithMaxTokens(runConfig.MaxTokens)}
+	if runConfig.TemperatureSet || runConfig.Temperature != 0 {
+		options = append(options, core.WithTemperature(runConfig.Temperature))
+	}
 	loopResult, runErr := agents.RunLoop(ctx, model, a.toolRegistry.List(), initialMessages, agents.LoopConfig{
 		RunID: taskID, Task: task, MaxTurns: maxTurns,
-		Completion: agents.FinishCompletion(runConfig.FinishToolText),
-		Options: []core.GenerateOption{
-			core.WithMaxTokens(runConfig.MaxTokens),
-			core.WithTemperature(runConfig.Temperature),
-		},
+		Completion:                agents.FinishCompletion(runConfig.FinishToolText),
+		Options:                   options,
 		Events:                    eventSink,
 		Execute:                   executor,
 		MaxConsecutiveNoToolCalls: runConfig.MaxConsecutiveNoCallResponses,

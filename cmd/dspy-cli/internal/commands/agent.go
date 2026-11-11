@@ -21,6 +21,7 @@ type terminalTaskCommandConfig struct {
 	MaxTurns        int
 	MaxTokens       int
 	Temperature     float64
+	TemperatureSet  bool
 	ToolOutputLimit int
 	SystemPrompt    string
 }
@@ -52,6 +53,7 @@ benchmark agent, and emit tblite.TerminalTaskResult JSON on stdout.`,
 				req.MaxTurns = cfg.MaxTurns
 			}
 
+			cfg.TemperatureSet = cmd.Flags().Changed("temperature")
 			agent, err := factory(cfg)
 			if err != nil {
 				return err
@@ -117,9 +119,10 @@ func newNativeBenchmarkAgent(cfg *terminalTaskCommandConfig) (*tblite.NativeAgen
 
 func newNativeBenchmarkAgentWithLLM(llm core.LLM, cfg *terminalTaskCommandConfig) (*tblite.NativeAgent, error) {
 	return tblite.NewNativeAgent(llm, tblite.NativeAgentConfig{
-		MaxTurns:    cfg.MaxTurns,
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
+		MaxTurns:       cfg.MaxTurns,
+		MaxTokens:      cfg.MaxTokens,
+		Temperature:    cfg.Temperature,
+		TemperatureSet: cfg.TemperatureSet,
 		Toolset: tblite.ToolsetConfig{
 			OutputLimit: cfg.ToolOutputLimit,
 		},

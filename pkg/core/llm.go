@@ -218,8 +218,12 @@ type GenerateOption func(*GenerateOptions)
 
 // GenerateOptions holds configuration for text generation.
 type GenerateOptions struct {
-	MaxTokens        int
-	Temperature      float64
+	MaxTokens   int
+	Temperature float64
+	// TemperatureSet distinguishes an explicit zero from an omitted temperature.
+	// Use WithTemperature to set both fields. Nonzero Temperature values are
+	// also treated as explicit for compatibility with custom GenerateOptions.
+	TemperatureSet   bool
 	TopP             float64
 	PresencePenalty  float64
 	FrequencyPenalty float64
@@ -261,8 +265,7 @@ type EmbeddingOption func(*EmbeddingOptions)
 // NewGenerateOptions creates a new GenerateOptions with default values.
 func NewGenerateOptions() *GenerateOptions {
 	return &GenerateOptions{
-		MaxTokens:   8192, // Default max tokens
-		Temperature: 0.5,  // Default temperature
+		MaxTokens: 8192, // Default max tokens; sampling uses the provider's default.
 	}
 }
 
@@ -273,10 +276,12 @@ func WithMaxTokens(n int) GenerateOption {
 	}
 }
 
-// WithTemperature sets the sampling temperature.
+// WithTemperature explicitly sets the sampling temperature, including zero.
+// Without it, generation leaves temperature unspecified for the provider.
 func WithTemperature(t float64) GenerateOption {
 	return func(o *GenerateOptions) {
 		o.Temperature = t
+		o.TemperatureSet = true
 	}
 }
 
