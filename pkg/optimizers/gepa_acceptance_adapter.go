@@ -149,12 +149,27 @@ func (g *GEPA) cachedOrEvaluateCandidate(ctx context.Context, candidate *GEPACan
 	}
 
 	if allowStateCache && g != nil && g.state != nil {
-		if evaluation := g.state.GetCandidateEvaluation(candidate.ID); evaluation != nil {
+		if evaluation := g.state.GetCandidateEvaluation(candidate.ID); evaluationMatchesBatch(evaluation, candidate, adapter) {
 			return evaluation
 		}
 	}
 
 	return g.evaluateCandidateWithAdapter(ctx, candidate, adapter)
+}
+
+func evaluationMatchesBatch(evaluation *gepaCandidateEvaluation, candidate *GEPACandidate, adapter *gepaEvaluationAdapter) bool {
+	if evaluation == nil || adapter == nil || len(evaluation.Cases) != len(adapter.batch) {
+		return false
+	}
+	if candidateComponentCacheKey(evaluation.Candidate) != candidateComponentCacheKey(candidate) {
+		return false
+	}
+	for i, example := range adapter.batch {
+		if exampleCacheKey(evaluation.Cases[i].Example) != exampleCacheKey(example) {
+			return false
+		}
+	}
+	return true
 }
 
 func totalScoreFromEvaluation(evaluation *gepaCandidateEvaluation) float64 {

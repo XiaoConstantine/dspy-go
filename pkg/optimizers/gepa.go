@@ -87,11 +87,13 @@ type GEPAConfig struct {
 	ConvergenceThreshold float64 `json:"convergence_threshold"` // Default: 0.01
 	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3 attempted updates without improvement (also minutes without improvement)
 
-	// Performance parameters
+	// Performance parameters. Compile uses epoch-shuffled training minibatches
+	// (the last batch may be smaller). Validation uses the explicit examples or
+	// holdout below; with neither, it scores the full training set, not a batch.
 	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
 	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Default: 3
 	ValidationFrequency        int                   `json:"validation_frequency"`  // Default: 1
-	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (disabled)
+	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (no holdout)
 	ValidationExamples         []core.Example        `json:"-"`
 	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
 	MaxMergeInvocations        int                   `json:"max_merge_invocations"` // Default: 5
@@ -1311,6 +1313,24 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 	if err != nil {
 		return err
 	}
+	if trainDataset == nil {
+		return fmt.Errorf("optimizers: training dataset is required")
+	}
+	trainExamples, err := core.MaterializeDatasetContext(ctx, trainDataset)
+	if err != nil {
+		return err
+	}
+	if len(trainExamples) == 0 {
+		return fmt.Errorf("optimizers: training dataset must not be empty")
+	}
+	// A rotating minibatch is not a comparable all-time score. Without a
+	// holdout, use the complete training set for validation/final selection.
+	if len(validationExamples) == 0 {
+		validationExamples = cloneEvaluationExamples(trainExamples)
+	}
+	batchDataset := func(generation int) core.Dataset {
+		return newGEPAExampleDataset(g.evaluationBatchForGeneration(trainExamples, generation))
+	}
 	if g.getCurrentPopulation() == nil {
 		g.resetValidationState()
 		if err := g.initializePopulation(ctx, program); err != nil {
@@ -1318,7 +1338,7 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		}
 
 		g.state.CurrentGeneration = 0
-		if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, trainDataset, metric); err != nil {
+		if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, batchDataset(0), metric); err != nil {
 			return fmt.Errorf("evaluation failed at generation 0: %w", err)
 		}
 		validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, 0)
@@ -1344,27 +1364,23 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 			return g.saveRunState()
 		}
 	} else {
-		g.setLatestEvaluationAdapter(g.newEvaluationAdapter(program, trainDataset, metric))
-		// Checkpoints omit per-example evaluations. Rebuild them before Pareto
-		// selection rather than silently resuming with scalar-only selection.
-		if g.config.SelectionStrategy == "pareto" || g.config.SelectionStrategy == "adaptive_pareto" {
-			if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), false); !ok {
-				if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, trainDataset, metric); err != nil {
-					return err
-				}
+		g.setLatestEvaluationAdapter(g.newEvaluationAdapter(program, batchDataset(g.state.CurrentGeneration), metric))
+		// Checkpoints omit per-example evaluations. Rebuild both training and
+		// validation scores before selection, including scalar strategies.
+		if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), false); !ok {
+			if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, batchDataset(g.state.CurrentGeneration), metric); err != nil {
+				return err
 			}
-			if len(validationExamples) > 0 {
-				if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), true); !ok {
-					if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
-						return err
-					}
-					g.state.LastValidatedGeneration = g.state.CurrentGeneration
-				}
+		}
+		if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), true); !ok {
+			if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
+				return err
 			}
-			if decision := g.metricBudgetStopDecision(); decision != nil {
-				g.recordStopDecision(decision)
-				return g.saveRunState()
-			}
+			g.state.LastValidatedGeneration = g.state.CurrentGeneration
+		}
+		if decision := g.metricBudgetStopDecision(); decision != nil {
+			g.recordStopDecision(decision)
+			return g.saveRunState()
 		}
 		logger.Info(ctx, "Resuming GEPA optimization from generation %d", g.state.CurrentGeneration)
 	}
@@ -1374,9 +1390,19 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 			return err
 		}
 
-		g.state.CurrentGeneration = generation
 		logger.Info(ctx, "Starting generation %d", generation)
 
+		// Refresh every candidate on the same batch before selection/proposal.
+		// Keeping the generational population requires aligned scores; cached
+		// per-example results avoid executing already-seen candidate/case pairs.
+		if err := g.evaluatePopulation(ctx, program, batchDataset(generation), metric); err != nil {
+			return fmt.Errorf("evaluation failed at generation %d: %w", generation, err)
+		}
+		if decision := g.metricBudgetStopDecision(); decision != nil {
+			g.recordStopDecision(decision)
+			return g.saveRunState()
+		}
+		g.state.CurrentGeneration = generation
 		if err := g.evolvePopulation(ctx); err != nil {
 			return fmt.Errorf("evolution failed at generation %d: %w", generation, err)
 		}
@@ -2652,6 +2678,14 @@ func (g *GEPA) selectCandidates(population *Population, count int) []*GEPACandid
 	selectionPopulation, hasCoverage := g.metricSelectionPopulation(population, true)
 	if !hasCoverage {
 		selectionPopulation = population
+	} else if g.config.SelectionStrategy != "pareto" && g.config.SelectionStrategy != "adaptive_pareto" {
+		// Coverage is a Pareto sampling weight, not a scalar fitness. In
+		// particular, pruning tied winners must not penalize equally accurate
+		// candidates in tournament or metric-weighted roulette selection.
+		for _, candidate := range selectionPopulation.Candidates {
+			candidate.Fitness = g.state.GetCandidateValidationEvaluation(candidate.ID).AverageScore
+		}
+		g.recomputePopulationBest(selectionPopulation)
 	}
 
 	var selected []*GEPACandidate

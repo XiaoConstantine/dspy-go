@@ -6,6 +6,7 @@ import (
 	jsonv1 "encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"math/rand"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -93,6 +94,32 @@ func (g *GEPA) newEvaluationAdapterForExamples(program core.Program, examples []
 
 func newGEPAExampleDataset(examples []core.Example) core.Dataset {
 	return datasets.NewSimpleDataset(examples)
+}
+
+// evaluationBatchForGeneration visits every training example once per epoch.
+// The final batch may be smaller: padding it would overweight repeated cases.
+// Deriving the shuffle from the epoch avoids coupling it to proposal RNG calls
+// and lets a checkpoint reconstruct its batch without persisting a cursor.
+func (g *GEPA) evaluationBatchForGeneration(examples []core.Example, generation int) []core.Example {
+	if len(examples) == 0 {
+		return nil
+	}
+	size := max(1, g.config.EvaluationBatchSize)
+	batchesPerEpoch := 1 + (len(examples)-1)/size
+	generation = max(0, generation)
+	epoch := generation / batchesPerEpoch
+	seed := g.config.RandomSeed
+	if seed == 0 {
+		seed = g.state.StartTime.UnixNano()
+	}
+	order := rand.New(rand.NewSource(seed + int64(epoch))).Perm(len(examples))
+	start := (generation % batchesPerEpoch) * size
+	end := start + min(size, len(examples)-start)
+	batch := make([]core.Example, 0, end-start)
+	for _, index := range order[start:end] {
+		batch = append(batch, cloneEvaluationExample(examples[index]))
+	}
+	return batch
 }
 
 func (g *GEPA) materializeEvaluationBatch(dataset core.Dataset) []core.Example {

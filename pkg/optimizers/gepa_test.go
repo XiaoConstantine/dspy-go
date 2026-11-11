@@ -1949,6 +1949,19 @@ func TestMutateAcceptsImprovingProposalOnMinibatch(t *testing.T) {
 	assert.Equal(t, 2.0, mutated.Metadata["proposal_candidate_total"])
 	assert.Equal(t, 0.0, mutated.Metadata["proposal_baseline_average"])
 	assert.Equal(t, 1.0, mutated.Metadata["proposal_candidate_average"])
+
+	// The next equally sized batch gives both parent and child a total of 1. Comparing
+	// against the cached parent total of 0 from the old batch would accept it.
+	nextBatch := gepa.newEvaluationAdapterForExamples(
+		newCandidateEvaluationTestProgram("alpha base"),
+		[]core.Example{
+			{Outputs: map[string]any{"output": "alpha base"}},
+			{Outputs: map[string]any{"output": "alpha tuned"}},
+		}, exactOutputMetric,
+	)
+	gepa.setLatestEvaluationAdapter(nextBatch)
+	rejected, _ := gepa.mutate(context.Background(), baseline)
+	assert.Same(t, baseline, rejected, "acceptance must compare parent and child on the new batch")
 }
 
 func TestMutateRejectsNonImprovingProposalOnMinibatch(t *testing.T) {
@@ -2149,7 +2162,92 @@ func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
 
 	resetCalls, nextCalls := dataset.counts()
 	assert.Equal(t, 1, resetCalls)
-	assert.Equal(t, 2, nextCalls)
+	assert.Equal(t, 3, nextCalls, "materialization must read through EOF, not just the first batch")
+}
+
+func TestGEPACompileEpochBatches(t *testing.T) {
+	examples := make([]core.Example, 5)
+	for i := range examples {
+		examples[i] = core.Example{Outputs: map[string]any{"index": i, "output": "alpha base"}}
+	}
+	for _, batchSize := range []int{1, 2, 9} {
+		t.Run(fmt.Sprint(batchSize), func(t *testing.T) {
+			batchesPerEpoch := (len(examples) + batchSize - 1) / batchSize
+			run := func(runDir string, stopGeneration int) [][]int {
+				llm := &compatSingleInstructionLLM{proposal: "unused instruction"}
+				config := DefaultGEPAConfig()
+				config.GenerationLLM, config.ReflectionLLM = llm, llm
+				config.PopulationSize = 1
+				config.MaxGenerations = 2 * batchesPerEpoch
+				config.MutationRate = 0
+				config.ReflectionFreq = 0
+				config.EvaluationBatchSize = batchSize
+				config.RandomSeed = 43
+				config.RunDir = runDir
+				var batches [][]int
+				config.StopCallbacks = []GEPAStopper{func(_ context.Context, optimizer *GEPA) *GEPAStopDecision {
+					state := optimizer.GetOptimizationState()
+					candidate := optimizer.CurrentPopulation().Candidates[0]
+					evaluation := state.GetCandidateEvaluation(candidate.ID)
+					var indexes []int
+					for _, evalCase := range evaluation.Cases {
+						indexes = append(indexes, evalCase.Example.Outputs["index"].(int))
+					}
+					batches = append(batches, indexes)
+					if state.CurrentGeneration == stopGeneration {
+						return &GEPAStopDecision{Reason: "test_pause"}
+					}
+					return nil
+				}}
+				optimizer, err := NewGEPA(config)
+				require.NoError(t, err)
+				_, err = optimizer.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), datasets.NewSimpleDataset(examples), exactOutputMetric)
+				require.NoError(t, err)
+				return batches
+			}
+			batches := run("", -1)
+			require.Len(t, batches, 2*batchesPerEpoch)
+			for epoch := range 2 {
+				var visited []int
+				for _, batch := range batches[epoch*batchesPerEpoch : (epoch+1)*batchesPerEpoch] {
+					require.NotEmpty(t, batch)
+					require.LessOrEqual(t, len(batch), batchSize)
+					visited = append(visited, batch...)
+				}
+				assert.ElementsMatch(t, []int{0, 1, 2, 3, 4}, visited, "each epoch visits every example exactly once")
+			}
+			assert.NotEqual(t, batches[:batchesPerEpoch], batches[batchesPerEpoch:], "reshuffle between epochs")
+			assert.Equal(t, batches, run("", -1), "seeded replay")
+			runDir := t.TempDir()
+			stopped := run(runDir, 0)
+			resumed := run(runDir, -1)
+			assert.Equal(t, batches, append(stopped, resumed...), "resume reconstructs the same epoch position")
+		})
+	}
+}
+
+func TestGEPACompileUsesFullTrainingSetForFinalSelection(t *testing.T) {
+	llm := &compatSingleInstructionLLM{proposal: "alpha tuned"}
+	config := DefaultGEPAConfig()
+	config.GenerationLLM, config.ReflectionLLM = llm, llm
+	config.PopulationSize = 2
+	config.MaxGenerations = 1
+	config.EvaluationBatchSize = 1
+	config.ReflectionFreq = 0
+	config.RandomSeed = 1
+	optimizer, err := NewGEPA(config)
+	require.NoError(t, err)
+	// A specialist wins the old fixed first example, but the seed wins overall.
+	examples := []core.Example{
+		{Outputs: map[string]any{"output": "alpha tuned"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
+		{Outputs: map[string]any{"output": "alpha base"}},
+	}
+	result, err := optimizer.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), datasets.NewSimpleDataset(examples), exactOutputMetric)
+	require.NoError(t, err)
+	assert.Equal(t, "alpha base", result.Modules["alpha"].GetSignature().Instruction)
+	_, score, _ := optimizer.GetOptimizationState().BestCandidateForApplication()
+	assert.InDelta(t, 2.0/3.0, score, 1e-9)
 }
 
 func TestCompileResumesFromSavedRunState(t *testing.T) {
@@ -2262,7 +2360,7 @@ func TestCompileStopsWhenScoreThresholdReached(t *testing.T) {
 	assert.Equal(t, gepaStopReasonScoreThreshold, gepa.state.StopReason)
 	assert.Equal(t, 0, gepa.state.CurrentGeneration)
 	require.NotNil(t, gepa.state.StopMetadata)
-	assert.Equal(t, gepaStopScoreSourceTraining, gepa.state.StopMetadata["score_source"])
+	assert.Equal(t, gepaStopScoreSourceValidation, gepa.state.StopMetadata["score_source"])
 }
 
 func TestCompileStopsWithCustomStopper(t *testing.T) {
@@ -3568,43 +3666,28 @@ func TestAcceptMergeProposalReevaluatesAcceptedCandidateOnLatestBatch(t *testing
 	}
 
 	dataset := datasets.NewSimpleDataset([]core.Example{
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
-		{Outputs: map[string]any{"output": "alpha tuned|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta base"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta base"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta base"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta base"}},
+		{Outputs: map[string]any{"output": "alpha tuned|beta base"}},
+		{Outputs: map[string]any{"output": "alpha base|beta tuned"}},
+		{Outputs: map[string]any{"output": "alpha base|beta tuned"}},
 	})
 	adapter := gepa.newEvaluationAdapter(
 		newTwoModuleCandidateEvaluationTestProgram("alpha base", "beta base"),
 		dataset,
-		exactOutputMetric,
+		func(expected, actual map[string]any) float64 {
+			if actual["output"] == "alpha tuned|beta tuned" {
+				return 1
+			}
+			return exactOutputMetric(expected, actual)
+		},
 	)
 	gepa.setLatestEvaluationAdapter(adapter)
 	gepa.state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
-		"source": {
-			Cases: []gepaEvaluationCase{
-				{Score: 1.0},
-				{Score: 1.0},
-				{Score: 1.0},
-				{Score: 1.0},
-				{Score: 1.0},
-				{Score: 0.0},
-				{Score: 0.0},
-			},
-		},
-		"partner": {
-			Cases: []gepaEvaluationCase{
-				{Score: 0.0},
-				{Score: 0.0},
-				{Score: 0.0},
-				{Score: 0.0},
-				{Score: 0.0},
-				{Score: 1.0},
-				{Score: 1.0},
-			},
-		},
+		"source":  gepa.evaluateCandidateWithAdapter(context.Background(), source, adapter),
+		"partner": gepa.evaluateCandidateWithAdapter(context.Background(), partner, adapter),
 	})
 
 	accepted := gepa.acceptMergeProposal(context.Background(), source, partner, proposed)
