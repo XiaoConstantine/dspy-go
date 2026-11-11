@@ -32,7 +32,6 @@ func TestGEPAAgentOptimizer_Optimize_UsesMainlineGEPACompile(t *testing.T) {
 		GEPAAdapterConfig{
 			PopulationSize:  3,
 			MaxGenerations:  2,
-			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 2,
 			PassThreshold:   0.5,
@@ -84,7 +83,6 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_UsesSearchBatchAndStagnationLimit(
 		GEPAAdapterConfig{
 			PopulationSize:  4,
 			MaxGenerations:  3,
-			ReflectionFreq:  1,
 			SearchBatchSize: 4,
 			StagnationLimit: 60,
 			EvalConcurrency: 2,
@@ -139,7 +137,6 @@ func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T)
 		GEPAAdapterConfig{
 			PopulationSize:  3,
 			MaxGenerations:  2,
-			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
 			PassThreshold:   0.5,
@@ -228,7 +225,6 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 		GEPAAdapterConfig{
 			PopulationSize:  6,
 			MaxGenerations:  4,
-			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
 			PassThreshold:   0.5,
@@ -331,7 +327,6 @@ func TestGEPAAgentOptimizer_CachedValidationEvaluation_DoesNotMutateInputCandida
 		GEPAAdapterConfig{
 			PopulationSize:  3,
 			MaxGenerations:  1,
-			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
 			PassThreshold:   0.5,
@@ -502,7 +497,6 @@ func TestGEPAAgentOptimizer_Optimize_StoresAggregateCandidateFitnessForSynthetic
 		GEPAAdapterConfig{
 			PopulationSize:  1,
 			MaxGenerations:  1,
-			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
 			PassThreshold:   0.5,

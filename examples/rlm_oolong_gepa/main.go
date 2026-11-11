@@ -177,7 +177,6 @@ func main() {
 			Config: optimize.GEPAAdapterConfig{
 				PopulationSize:  *population,
 				MaxGenerations:  *generations,
-				ReflectionFreq:  1,
 				EvalConcurrency: 1,
 				PassThreshold:   passThreshold,
 				PrimaryArtifact: optimize.ArtifactRLMIterationPrompt,

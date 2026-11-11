@@ -127,8 +127,6 @@ workflow, err := optimize.RunGEPAWorkflow(ctx, baseAgent, optimize.GEPAWorkflowR
     Config: optimize.GEPAAdapterConfig{
         PopulationSize:             4,
         MaxGenerations:             2,
-        ReflectionFreq:             1,
-        ValidationFrequency:        1,
         MaxMetricCalls:             50,
         AddFormatFailureAsFeedback: true,
         PrimaryArtifact:            optimize.ArtifactRLMIterationPrompt,
@@ -244,7 +242,6 @@ go run -mod=mod . benchmark tblite \
   --gepa \
   --population 4 \
   --generations 2 \
-  --reflection-freq 1 \
   --validation-split 0.2 \
   --test-split 0.2
 ```

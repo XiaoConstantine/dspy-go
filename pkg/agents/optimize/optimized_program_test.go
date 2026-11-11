@@ -329,7 +329,6 @@ func TestRunGEPAWorkflow_BaselineOptimizeReplay(t *testing.T) {
 		Config: GEPAAdapterConfig{
 			PopulationSize:  3,
 			MaxGenerations:  1,
-			ReflectionFreq:  1,
 			EvalConcurrency: 1,
 			PrimaryArtifact: ArtifactSkillPack,
 			ArtifactKeys:    []ArtifactKey{ArtifactSkillPack, ArtifactToolPolicy},

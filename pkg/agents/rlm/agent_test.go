@@ -252,7 +252,6 @@ func TestGEPAAgentOptimizer_Optimize_RLMIterationPrompt(t *testing.T) {
 		optimize.GEPAAdapterConfig{
 			PopulationSize:  3,
 			MaxGenerations:  1,
-			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
 			PassThreshold:   0.5,

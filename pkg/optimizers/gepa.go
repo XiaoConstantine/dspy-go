@@ -66,8 +66,7 @@ type GEPAConfig struct {
 	MutationRate   float64 `json:"mutation_rate"`   // Per-selected-component proposal probability; default: 1.0
 
 	// Reflection parameters
-	ReflectionFreq  int `json:"reflection_frequency"` // Deprecated: Compile proposes from fresh evidence each iteration.
-	ReflectionDepth int `json:"reflection_depth"`     // Default: 3
+	ReflectionDepth int `json:"reflection_depth"` // Default: 3
 
 	// Selection parameters
 	TournamentSize     int    `json:"tournament_size"`     // Default: 3
@@ -83,7 +82,6 @@ type GEPAConfig struct {
 	// holdout below; with neither, it scores the full training set, not a batch.
 	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
 	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Default: 3
-	ValidationFrequency        int                   `json:"validation_frequency"`  // Deprecated: Compile validates the seed and each accepted child.
 	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (no holdout)
 	ValidationExamples         []core.Example        `json:"-"`
 	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
@@ -111,7 +109,6 @@ func DefaultGEPAConfig() *GEPAConfig {
 		PopulationSize:       20,
 		MaxGenerations:       1000,
 		MutationRate:         1.0, // The single-candidate loop should attempt an update on every iteration
-		ReflectionFreq:       2,
 		ReflectionDepth:      3,
 		TournamentSize:       3,
 		SelectionStrategy:    "adaptive_pareto", // Sample per-example metric winners by coverage
@@ -120,7 +117,6 @@ func DefaultGEPAConfig() *GEPAConfig {
 		StagnationLimit:      0,
 		EvaluationBatchSize:  5,
 		ConcurrencyLevel:     3,
-		ValidationFrequency:  1,
 		ValidationSplit:      0.0,
 		MaxMergeInvocations:  5,
 		MaxMetricCalls:       1000,
@@ -1166,9 +1162,6 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	if config.EvaluationBatchSize <= 0 {
 		config.EvaluationBatchSize = defaults.EvaluationBatchSize
 	}
-	if config.ValidationFrequency <= 0 {
-		config.ValidationFrequency = defaults.ValidationFrequency
-	}
 	if config.ValidationSplit < 0 {
 		config.ValidationSplit = defaults.ValidationSplit
 	}
@@ -1411,20 +1404,6 @@ func (g *GEPA) prepareOptimizationDatasets(dataset core.Dataset) (core.Dataset, 
 	}
 
 	return newGEPAExampleDataset(trainExamples), validationExamples, nil
-}
-
-func (g *GEPA) validateIfScheduled(ctx context.Context, program core.Program, metric core.Metric, validationExamples []core.Example, generation int) (bool, error) {
-	if len(validationExamples) == 0 {
-		return false, nil
-	}
-	frequency := g.config.ValidationFrequency
-	if frequency <= 0 {
-		frequency = 1
-	}
-	if generation != 0 && generation%frequency != 0 {
-		return false, nil
-	}
-	return true, g.evaluateValidationPopulation(ctx, program, validationExamples, metric)
 }
 
 func (g *GEPA) resetValidationState() {

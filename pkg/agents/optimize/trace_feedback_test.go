@@ -27,11 +27,9 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_PropagatesAdvancedControls(t *test
 		GEPAAdapterConfig{
 			PopulationSize:             4,
 			MaxGenerations:             3,
-			ReflectionFreq:             1,
 			SearchBatchSize:            4,
 			StagnationLimit:            60,
 			ValidationSplit:            0,
-			ValidationFrequency:        2,
 			EvalConcurrency:            2,
 			PassThreshold:              0.5,
 			PrimaryArtifact:            ArtifactSkillPack,
@@ -44,7 +42,6 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_PropagatesAdvancedControls(t *test
 	)
 
 	engineConfig := optimizer.buildEngineConfig(agent.GetArtifacts(), 11)
-	assert.Equal(t, 2, engineConfig.ValidationFrequency)
 	assert.Equal(t, 7, engineConfig.MaxMetricCalls)
 	assert.Equal(t, 0.9, engineConfig.ScoreThreshold)
 	assert.Equal(t, 3*time.Second, engineConfig.MaxRuntime)

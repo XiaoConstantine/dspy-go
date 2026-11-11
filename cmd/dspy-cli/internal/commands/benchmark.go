@@ -39,7 +39,6 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	var useGEPA bool
 	var populationSize int
 	var generations int
-	var reflectionFreq int
 	var gepaSearchBatchSize int
 	var gepaEvalConcurrency int
 	var gepaStagnationLimit int
@@ -114,7 +113,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 				return nil
 			}
 
-			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, reflectionFreq, gepaSearchBatchSize, gepaEvalConcurrency, gepaStagnationLimit, validationSplit, testSplit)
+			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, gepaSearchBatchSize, gepaEvalConcurrency, gepaStagnationLimit, validationSplit, testSplit)
 		},
 	}
 
@@ -139,7 +138,6 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	cmd.Flags().BoolVar(&useGEPA, "gepa", false, "Optimize the tool-calling system prompt with GEPA before evaluating on a held-out test split")
 	cmd.Flags().IntVar(&populationSize, "population", 4, "GEPA population size for --gepa runs")
 	cmd.Flags().IntVar(&generations, "generations", 2, "GEPA generations for --gepa runs")
-	cmd.Flags().IntVar(&reflectionFreq, "reflection-freq", 1, "GEPA reflection frequency for --gepa runs")
 	cmd.Flags().IntVar(&gepaSearchBatchSize, "gepa-search-batch-size", 4, "Training tasks scored per GEPA candidate evaluation during search")
 	cmd.Flags().IntVar(&gepaEvalConcurrency, "gepa-eval-concurrency", 4, "Concurrent GEPA candidate evaluations for --gepa runs")
 	cmd.Flags().IntVar(&gepaStagnationLimit, "gepa-stagnation-limit-minutes", 60, "Wall-clock stagnation window in minutes before GEPA stops early")
@@ -260,7 +258,6 @@ func runTBLiteGEPABenchmark(
 	label string,
 	populationSize int,
 	generations int,
-	reflectionFreq int,
 	gepaSearchBatchSize int,
 	gepaEvalConcurrency int,
 	gepaStagnationLimit int,
@@ -311,7 +308,6 @@ func runTBLiteGEPABenchmark(
 		optimize.GEPAAdapterConfig{
 			PopulationSize:  populationSize,
 			MaxGenerations:  generations,
-			ReflectionFreq:  reflectionFreq,
 			SearchBatchSize: gepaSearchBatchSize,
 			StagnationLimit: gepaStagnationLimit,
 			ValidationSplit: validationSplit,

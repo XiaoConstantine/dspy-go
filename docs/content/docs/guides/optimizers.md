@@ -170,7 +170,7 @@ config.RandomSeed = 42          // Reproducible sampling.
 
 Use a budget large enough for full seed validation plus proposed-child evaluation. A complete evaluation must fit the remaining budget; GEPA never adds a partially validated candidate to the frontier. With no holdout or explicit validation examples, validation uses the full training set. Runtime depends on your model and dataset, not just the iteration cap. `StagnationLimit` defaults to 0 (disabled); at least one of the metric budget and generation cap must be enabled.
 
-**Migration:** `PopulationSize`, `ReflectionFreq`, and `ValidationFrequency` remain for compatibility with lower-level orchestration but no longer control `Compile`. `CrossoverRate`, `ElitismRate`, `Temperature`, `MaxTokens`, and `SelfCritiqueTemp` were removed from `GEPAConfig`, along with the unused `PopulationInsights` and `IndividualReflectionInsights` types. Remove those fields from configuration literals. Sampling settings belong on the supplied LMs; GEPA's removed temperature/token fields never configured them. `DefaultGEPAConfig` now uses a 1000-call budget, a 1000-generation safety cap, and no stagnation limit.
+**Migration:** `PopulationSize` remains for compatibility with lower-level orchestration but no longer controls `Compile`. `ReflectionFreq`, `ValidationFrequency`, `CrossoverRate`, `ElitismRate`, `Temperature`, `MaxTokens`, and `SelfCritiqueTemp` were removed from `GEPAConfig`, along with the unused `PopulationInsights` and `IndividualReflectionInsights` types. Remove those fields from configuration literals. Sampling settings belong on the supplied LMs; GEPA's removed temperature/token fields never configured them. `DefaultGEPAConfig` now uses a 1000-call budget, a 1000-generation safety cap, and no stagnation limit.
 
 ---
 
@@ -213,7 +213,6 @@ func main() {
         Config: optimize.GEPAAdapterConfig{
             PopulationSize:             4,
             MaxGenerations:             2,
-            ValidationFrequency:        1,
             MaxMetricCalls:             50,
             ScoreThreshold:             0.95,
             MaxRuntime:                 2 * time.Minute,
@@ -271,7 +270,6 @@ That makes saved optimized programs much safer to carry across agent revisions.
 
 For agent workflows, the most useful GEPA controls are:
 
-- `ValidationFrequency`
 - `MaxMetricCalls`
 - `ScoreThreshold`
 - `MaxRuntime`

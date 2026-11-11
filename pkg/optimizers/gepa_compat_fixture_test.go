@@ -605,7 +605,6 @@ func runCompatSelectorScenario(t *testing.T, ctx context.Context, selector strin
 	config.PopulationSize = 1
 	config.MaxGenerations = 2
 	config.MutationRate = 1.0
-	config.ReflectionFreq = 0
 	config.ComponentSelection = selector
 	config.SelectionStrategy = "tournament"
 	config.TournamentSize = 1
@@ -663,7 +662,6 @@ func runCompatValidationFrontierScenario(t *testing.T, ctx context.Context) comp
 	config := DefaultGEPAConfig()
 	config.PopulationSize = 4
 	config.MaxGenerations = 1
-	config.ReflectionFreq = 0
 	config.ConcurrencyLevel = 1
 	config.EvaluationBatchSize = 1
 	config.ValidationSplit = 0.8
@@ -863,7 +861,6 @@ func runCompatFeedbackScenario(t *testing.T, ctx context.Context) compatFeedback
 	config := DefaultGEPAConfig()
 	config.PopulationSize = 1
 	config.MaxGenerations = 2
-	config.ReflectionFreq = 1
 	config.SelectionStrategy = "tournament"
 	config.TournamentSize = 1
 	config.ConcurrencyLevel = 1
@@ -924,7 +921,6 @@ func runCompatFormatFailureScenario(t *testing.T, ctx context.Context) compatFee
 	config := DefaultGEPAConfig()
 	config.PopulationSize = 1
 	config.MaxGenerations = 2
-	config.ReflectionFreq = 1
 	config.SelectionStrategy = "tournament"
 	config.TournamentSize = 1
 	config.ConcurrencyLevel = 1
@@ -981,7 +977,6 @@ func runCompatMinibatchScenario(t *testing.T, ctx context.Context, proposal, dat
 	config.PopulationSize = 1
 	config.MaxGenerations = 2
 	config.MutationRate = 1.0
-	config.ReflectionFreq = 0
 	config.SelectionStrategy = "tournament"
 	config.TournamentSize = 1
 	config.ConcurrencyLevel = 1
@@ -1045,7 +1040,6 @@ func runCompatEarlyStopScenario(t *testing.T, ctx context.Context, stoppedConfig
 		config.PopulationSize = 1
 		config.MaxGenerations = 3
 		config.MutationRate = 1.0
-		config.ReflectionFreq = 0
 		config.SelectionStrategy = "tournament"
 		config.TournamentSize = 1
 		config.ConcurrencyLevel = 1
@@ -1147,7 +1141,6 @@ func runCompatResumeScenario(t *testing.T, ctx context.Context) compatResumeResu
 		config.PopulationSize = 1
 		config.MaxGenerations = 3
 		config.MutationRate = 1.0
-		config.ReflectionFreq = 0
 		config.SelectionStrategy = "tournament"
 		config.TournamentSize = 1
 		config.ConcurrencyLevel = 1

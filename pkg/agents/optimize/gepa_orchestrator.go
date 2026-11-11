@@ -101,10 +101,8 @@ func (o *GEPAAgentOptimizer) buildEngineConfig(seed AgentArtifacts, trainingCoun
 	engineConfig := optimizers.DefaultGEPAConfig()
 	engineConfig.PopulationSize = o.config.PopulationSize
 	engineConfig.MaxGenerations = o.config.MaxGenerations
-	engineConfig.ReflectionFreq = o.config.ReflectionFreq
 	engineConfig.ConcurrencyLevel = o.config.EvalConcurrency
 	engineConfig.StagnationLimit = o.config.StagnationLimit
-	engineConfig.ValidationFrequency = o.config.ValidationFrequency
 	engineConfig.MaxMetricCalls = o.config.MaxMetricCalls
 	engineConfig.ScoreThreshold = o.config.ScoreThreshold
 	engineConfig.MaxRuntime = o.config.MaxRuntime

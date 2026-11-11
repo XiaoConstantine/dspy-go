@@ -333,7 +333,6 @@ func TestGEPASelectionUsesPerExampleMetric(t *testing.T) {
 				config.ReflectionLLM = llm
 				config.PopulationSize = 3
 				config.MaxGenerations = 1
-				config.ReflectionFreq = 0
 				config.RandomSeed = 31
 				config.EvaluationBatchSize = 3
 				if validation {
@@ -448,7 +447,6 @@ func TestGEPACompileConcurrentPredictKeepsMetricBest(t *testing.T) {
 				config.PopulationSize = 3
 				config.MaxGenerations = 3
 				config.MutationRate = 0
-				config.ReflectionFreq = 0
 				config.RandomSeed = seed
 				gepa, err := NewGEPA(config)
 				require.NoError(t, err)
@@ -497,7 +495,6 @@ func TestGEPACompileStagnationCountsProposals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config := DefaultGEPAConfig()
 			config.RandomSeed = 4
-			config.ReflectionFreq = 0
 			config.MutationRate = tc.mutationRate
 			config.StagnationLimit = 3
 			llm := &testutil.MockLLM{}
@@ -626,7 +623,6 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 20, config.PopulationSize)
 	assert.Equal(t, 1000, config.MaxGenerations)
 	assert.Equal(t, 1.0, config.MutationRate)
-	assert.Equal(t, 2, config.ReflectionFreq)
 	assert.Equal(t, 3, config.TournamentSize)
 	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
 	assert.Equal(t, 5, config.MaxMergeInvocations)
@@ -1737,51 +1733,6 @@ func TestBuildValidationFrontierPrunesDominatedTiedWinners(t *testing.T) {
 	assert.NotContains(t, coverage, "candidate-c")
 }
 
-func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
-	gepa := &GEPA{
-		config: DefaultGEPAConfig(),
-		state:  NewGEPAState(),
-		rng:    rand.New(rand.NewSource(1)),
-	}
-	gepa.config.ValidationFrequency = 2
-	gepa.config.ConcurrencyLevel = 1
-
-	candidate := &GEPACandidate{
-		ID:          "candidate-a",
-		ModuleName:  "alpha",
-		Instruction: "alpha a",
-		ComponentTexts: map[string]string{
-			"alpha": "alpha a",
-		},
-	}
-	gepa.state.PopulationHistory = []*Population{{
-		Generation: 1,
-		Candidates: []*GEPACandidate{candidate},
-	}}
-
-	validated, err := gepa.validateIfScheduled(
-		context.Background(),
-		newCandidateEvaluationTestProgram("alpha base"),
-		exactOutputMetric,
-		[]core.Example{{Outputs: map[string]any{"output": "alpha a"}}},
-		1,
-	)
-	require.NoError(t, err)
-	assert.False(t, validated)
-	assert.Nil(t, gepa.state.BestValidationCandidate)
-
-	validated, err = gepa.validateIfScheduled(
-		context.Background(),
-		newCandidateEvaluationTestProgram("alpha base"),
-		exactOutputMetric,
-		[]core.Example{{Outputs: map[string]any{"output": "alpha a"}}},
-		2,
-	)
-	require.NoError(t, err)
-	assert.True(t, validated)
-	require.NotNil(t, gepa.state.BestValidationCandidate)
-}
-
 func TestMetricSelectionPopulationUsesFrontierCoverage(t *testing.T) {
 	gepa := &GEPA{
 		config: DefaultGEPAConfig(),
@@ -2152,7 +2103,6 @@ func TestCompileMaterializesDatasetOnceForIterativeLoop(t *testing.T) {
 	config.PopulationSize = 2
 	config.MaxGenerations = 3
 	config.MutationRate = 0.0
-	config.ReflectionFreq = 0
 	config.EvaluationBatchSize = 2
 
 	gepa, err := NewGEPA(config)
@@ -2187,7 +2137,6 @@ func TestGEPACompileEpochBatches(t *testing.T) {
 				config.MaxGenerations = 2*batchesPerEpoch + 2
 				config.SkipPerfectScore = false
 				config.MutationRate = 0
-				config.ReflectionFreq = 0
 				config.EvaluationBatchSize = batchSize
 				config.RandomSeed = 43
 				config.RunDir = runDir
@@ -2243,7 +2192,6 @@ func TestGEPACompileUsesFullTrainingSetForFinalSelection(t *testing.T) {
 	config.PopulationSize = 2
 	config.MaxGenerations = 1
 	config.EvaluationBatchSize = 1
-	config.ReflectionFreq = 0
 	config.RandomSeed = 1
 	optimizer, err := NewGEPA(config)
 	require.NoError(t, err)
@@ -2271,7 +2219,6 @@ func TestCompileResumesFromSavedRunState(t *testing.T) {
 	config.PopulationSize = 1
 	config.MaxGenerations = 3
 	config.MutationRate = 0.0
-	config.ReflectionFreq = 0
 	config.EvaluationBatchSize = 1
 	config.StopCallbacks = []GEPAStopper{
 		func(ctx context.Context, gepa *GEPA) *GEPAStopDecision {
@@ -2303,7 +2250,6 @@ func TestCompileResumesFromSavedRunState(t *testing.T) {
 	resumeConfig.MaxGenerations = 3
 	resumeConfig.SkipPerfectScore = false
 	resumeConfig.MutationRate = 0.0
-	resumeConfig.ReflectionFreq = 0
 	resumeConfig.EvaluationBatchSize = 1
 
 	secondRun, err := NewGEPA(resumeConfig)
@@ -2325,7 +2271,6 @@ func TestCompileStopsWhenMetricBudgetReached(t *testing.T) {
 	config.PopulationSize = 2
 	config.MaxGenerations = 5
 	config.MutationRate = 0.0
-	config.ReflectionFreq = 0
 	config.EvaluationBatchSize = 2
 	config.MaxMetricCalls = 2
 
@@ -2354,7 +2299,6 @@ func TestCompileStopsWhenScoreThresholdReached(t *testing.T) {
 	config.PopulationSize = 1
 	config.MaxGenerations = 5
 	config.MutationRate = 0.0
-	config.ReflectionFreq = 0
 	config.EvaluationBatchSize = 1
 	config.ScoreThreshold = 1.0
 
@@ -2383,7 +2327,6 @@ func TestCompileStopsWithCustomStopper(t *testing.T) {
 	config.PopulationSize = 1
 	config.MaxGenerations = 5
 	config.MutationRate = 0.0
-	config.ReflectionFreq = 0
 	config.EvaluationBatchSize = 1
 	config.StopCallbacks = []GEPAStopper{
 		func(ctx context.Context, gepa *GEPA) *GEPAStopDecision {
@@ -2501,7 +2444,6 @@ func TestGEPACompileBasic(t *testing.T) {
 		PopulationSize:      4,
 		MaxGenerations:      2,
 		EvaluationBatchSize: 2,
-		ReflectionFreq:      1,
 		ConcurrencyLevel:    2, // Set a positive concurrency level
 	}
 

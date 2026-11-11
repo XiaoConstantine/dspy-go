@@ -44,11 +44,9 @@ type IntMutationConfig struct {
 type GEPAAdapterConfig struct {
 	PopulationSize             int
 	MaxGenerations             int
-	ReflectionFreq             int
 	SearchBatchSize            int
 	StagnationLimit            int
 	ValidationSplit            float64
-	ValidationFrequency        int
 	ArtifactKeys               []ArtifactKey
 	EvalConcurrency            int
 	PassThreshold              float64
@@ -66,15 +64,13 @@ type GEPAAdapterConfig struct {
 // DefaultGEPAAdapterConfig returns a conservative default adapter config.
 func DefaultGEPAAdapterConfig() GEPAAdapterConfig {
 	return GEPAAdapterConfig{
-		PopulationSize:      8,
-		MaxGenerations:      4,
-		ReflectionFreq:      1,
-		SearchBatchSize:     4,
-		StagnationLimit:     60,
-		ValidationSplit:     0.2,
-		ValidationFrequency: 1,
-		EvalConcurrency:     1,
-		PassThreshold:       1.0,
+		PopulationSize:  8,
+		MaxGenerations:  4,
+		SearchBatchSize: 4,
+		StagnationLimit: 60,
+		ValidationSplit: 0.2,
+		EvalConcurrency: 1,
+		PassThreshold:   1.0,
 	}
 }
 
@@ -317,9 +313,6 @@ func (cfg GEPAAdapterConfig) withDefaults() GEPAAdapterConfig {
 	if cfg.MaxGenerations <= 0 {
 		cfg.MaxGenerations = defaults.MaxGenerations
 	}
-	if cfg.ReflectionFreq < 0 {
-		cfg.ReflectionFreq = defaults.ReflectionFreq
-	}
 	if cfg.SearchBatchSize <= 0 {
 		cfg.SearchBatchSize = defaults.SearchBatchSize
 	}
@@ -328,9 +321,6 @@ func (cfg GEPAAdapterConfig) withDefaults() GEPAAdapterConfig {
 	}
 	if cfg.ValidationSplit < 0 {
 		cfg.ValidationSplit = defaults.ValidationSplit
-	}
-	if cfg.ValidationFrequency <= 0 {
-		cfg.ValidationFrequency = defaults.ValidationFrequency
 	}
 	if cfg.EvalConcurrency <= 0 {
 		cfg.EvalConcurrency = defaults.EvalConcurrency
