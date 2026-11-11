@@ -11,13 +11,11 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -30,9 +28,8 @@ import (
 type contextKey string
 
 const (
-	gepaStateKey      contextKey = "gepa_state"
-	candidateIDKey    contextKey = "current_candidate_id"
-	executionPhaseKey contextKey = "execution_phase"
+	gepaStateKey   contextKey = "gepa_state"
+	candidateIDKey contextKey = "current_candidate_id"
 )
 
 const (
@@ -53,17 +50,8 @@ const (
 
 const gepaComponentSelectionCursorMetadataKey = "component_selection_cursor"
 
-var multiObjectiveNames = []string{
-	objectiveSuccess,
-	objectiveQuality,
-	objectiveEfficiency,
-	objectiveRobustness,
-	objectiveGeneralization,
-	objectiveDiversity,
-	objectiveInnovation,
-}
-
-// DefaultMultiObjectiveWeights returns a fresh copy of the baseline GEPA objective weights.
+// DefaultMultiObjectiveWeights returns baseline weights for external diagnostic
+// objectives. GEPA's parent selection does not use these weights.
 func DefaultMultiObjectiveWeights() map[string]float64 {
 	return map[string]float64{
 		objectiveSuccess:        0.25,
@@ -81,7 +69,7 @@ type GEPAConfig struct {
 	// Evolutionary parameters
 	PopulationSize int     `json:"population_size"` // Default: 20
 	MaxGenerations int     `json:"max_generations"` // Default: 10
-	MutationRate   float64 `json:"mutation_rate"`   // Default: 0.3
+	MutationRate   float64 `json:"mutation_rate"`   // Per-selected-component proposal probability; default: 1.0
 	CrossoverRate  float64 `json:"crossover_rate"`  // Default: 0.7
 	ElitismRate    float64 `json:"elitism_rate"`    // Default: 0.1
 
@@ -92,12 +80,12 @@ type GEPAConfig struct {
 
 	// Selection parameters
 	TournamentSize     int    `json:"tournament_size"`     // Default: 3
-	SelectionStrategy  string `json:"selection_strategy"`  // Default: "tournament" | "roulette" | "pareto" | "adaptive_pareto"
+	SelectionStrategy  string `json:"selection_strategy"`  // Default: "adaptive_pareto"; both Pareto strategies sample per-example metric winners
 	ComponentSelection string `json:"component_selection"` // Default: "round_robin" | "random" | "all"
 
 	// Convergence parameters
 	ConvergenceThreshold float64 `json:"convergence_threshold"` // Default: 0.01
-	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3
+	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3 attempted updates without improvement (also minutes without improvement)
 
 	// Performance parameters
 	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
@@ -129,14 +117,14 @@ func DefaultGEPAConfig() *GEPAConfig {
 	return &GEPAConfig{
 		PopulationSize:       20,
 		MaxGenerations:       10,
-		MutationRate:         0.3,
+		MutationRate:         1.0, // The single-candidate loop should attempt an update on every iteration
 		CrossoverRate:        0.7,
 		ElitismRate:          0.1,
 		ReflectionFreq:       2,
 		ReflectionDepth:      3,
 		SelfCritiqueTemp:     0.7,
 		TournamentSize:       3,
-		SelectionStrategy:    "adaptive_pareto", // Use adaptive Pareto as default for sophisticated multi-objective optimization
+		SelectionStrategy:    "adaptive_pareto", // Sample per-example metric winners by coverage
 		ComponentSelection:   componentSelectionRoundRobin,
 		ConvergenceThreshold: 0.01,
 		StagnationLimit:      3,
@@ -762,220 +750,55 @@ func (s *GEPAState) UpsertCandidateEvaluation(candidateID string, evaluation *ge
 	s.candidateEvaluations[candidateID] = cloneGEPACandidateEvaluation(evaluation)
 }
 
-// UpdateParetoArchive maintains elite Pareto-optimal solutions across generations.
+// UpdateParetoArchive retains per-example metric winners across generations.
+// fitnessMap is retained for compatibility as diagnostic data only; archive
+// membership requires cached candidate evaluations and never uses these vectors.
 func (s *GEPAState) UpdateParetoArchive(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Combine current archive with new candidates
-	combined := make([]*GEPACandidate, 0, len(s.ParetoArchive)+len(candidates))
+	combined := make(map[string]*GEPACandidate, len(s.ParetoArchive)+len(candidates))
 	combinedFitness := make(map[string]*MultiObjectiveFitness)
-
-	// Add existing archive
-	for _, candidate := range s.ParetoArchive {
-		combined = append(combined, candidate)
-		if fitness, exists := s.ArchiveFitnessMap[candidate.ID]; exists {
-			combinedFitness[candidate.ID] = fitness
+	evaluations := make(map[string]*gepaCandidateEvaluation)
+	for _, group := range [][]*GEPACandidate{s.ParetoArchive, candidates} {
+		for _, candidate := range group {
+			if candidate == nil || s.candidateEvaluations[candidate.ID] == nil {
+				continue
+			}
+			combined[candidate.ID] = candidate
+			evaluations[candidate.ID] = s.candidateEvaluations[candidate.ID]
+			if fitness := fitnessMap[candidate.ID]; fitness != nil {
+				combinedFitness[candidate.ID] = fitness
+			} else if fitness := s.ArchiveFitnessMap[candidate.ID]; fitness != nil {
+				combinedFitness[candidate.ID] = fitness
+			}
 		}
 	}
-
-	// Add new candidates
-	for _, candidate := range candidates {
-		combined = append(combined, candidate)
-		if fitness, exists := fitnessMap[candidate.ID]; exists {
-			combinedFitness[candidate.ID] = fitness
+	_, coverage := buildValidationFrontier(evaluations)
+	archive := make([]*GEPACandidate, 0, len(coverage))
+	for id := range coverage {
+		archive = append(archive, combined[id])
+	}
+	sort.Slice(archive, func(i, j int) bool {
+		left, right := archive[i].ID, archive[j].ID
+		if coverage[left] != coverage[right] {
+			return coverage[left] > coverage[right]
 		}
+		if evaluations[left].AverageScore != evaluations[right].AverageScore {
+			return evaluations[left].AverageScore > evaluations[right].AverageScore
+		}
+		return left < right
+	})
+	if len(archive) > s.MaxArchiveSize {
+		archive = archive[:max(0, s.MaxArchiveSize)]
 	}
-
-	// Extract Pareto-optimal candidates
-	paretoOptimal := s.extractParetoOptimal(combined, combinedFitness)
-
-	// Maintain archive size limit with diversity preservation
-	if len(paretoOptimal) > s.MaxArchiveSize {
-		paretoOptimal = s.maintainArchiveDiversity(paretoOptimal, combinedFitness)
-	}
-
-	// Update archive and fitness map
-	s.ParetoArchive = paretoOptimal
+	s.ParetoArchive = archive
 	s.ArchiveFitnessMap = make(map[string]*MultiObjectiveFitness)
-	for _, candidate := range paretoOptimal {
-		if fitness, exists := combinedFitness[candidate.ID]; exists {
+	for _, candidate := range archive {
+		if fitness := combinedFitness[candidate.ID]; fitness != nil {
 			s.ArchiveFitnessMap[candidate.ID] = fitness
 		}
 	}
-}
-
-// extractParetoOptimal identifies non-dominated solutions.
-func (s *GEPAState) extractParetoOptimal(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) []*GEPACandidate {
-	paretoOptimal := make([]*GEPACandidate, 0)
-
-	for _, candidate1 := range candidates {
-		fitness1, exists1 := fitnessMap[candidate1.ID]
-		if !exists1 {
-			continue
-		}
-
-		isDominated := false
-		for _, candidate2 := range candidates {
-			if candidate1.ID == candidate2.ID {
-				continue
-			}
-
-			fitness2, exists2 := fitnessMap[candidate2.ID]
-			if !exists2 {
-				continue
-			}
-
-			// Check if candidate2 dominates candidate1
-			if s.dominates(fitness2, fitness1) {
-				isDominated = true
-				break
-			}
-		}
-
-		if !isDominated {
-			paretoOptimal = append(paretoOptimal, candidate1)
-		}
-	}
-
-	return paretoOptimal
-}
-
-// dominates checks if fitness1 dominates fitness2 (all objectives >= and at least one >).
-func (s *GEPAState) dominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
-	return multiObjectiveDominates(fitness1, fitness2)
-}
-
-// multiObjectiveDominates is a package-level helper that checks if fitness1 dominates fitness2.
-// fitness1 dominates if it's >= in all objectives and > in at least one.
-func multiObjectiveDominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
-	if fitness1 == nil || fitness2 == nil {
-		return false
-	}
-
-	objectives1 := []float64{
-		fitness1.SuccessRate, fitness1.OutputQuality, fitness1.Efficiency,
-		fitness1.Robustness, fitness1.Generalization, fitness1.Diversity, fitness1.Innovation,
-	}
-	objectives2 := []float64{
-		fitness2.SuccessRate, fitness2.OutputQuality, fitness2.Efficiency,
-		fitness2.Robustness, fitness2.Generalization, fitness2.Diversity, fitness2.Innovation,
-	}
-
-	allGreaterOrEqual := true
-	atLeastOneGreater := false
-
-	for i := range objectives1 {
-		if objectives1[i] < objectives2[i] {
-			allGreaterOrEqual = false
-			break
-		}
-		if objectives1[i] > objectives2[i] {
-			atLeastOneGreater = true
-		}
-	}
-
-	return allGreaterOrEqual && atLeastOneGreater
-}
-
-// maintainArchiveDiversity reduces archive size while preserving diversity.
-func (s *GEPAState) maintainArchiveDiversity(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) []*GEPACandidate {
-	if len(candidates) <= s.MaxArchiveSize {
-		return candidates
-	}
-
-	// Calculate crowding distances
-	crowdingDistances := s.calculateCrowdingDistances(candidates, fitnessMap)
-
-	// Sort by crowding distance (descending) to preserve most diverse solutions
-	type candidateDistance struct {
-		candidate *GEPACandidate
-		distance  float64
-	}
-
-	candidateDistances := make([]candidateDistance, len(candidates))
-	for i, candidate := range candidates {
-		candidateDistances[i] = candidateDistance{
-			candidate: candidate,
-			distance:  crowdingDistances[candidate.ID],
-		}
-	}
-
-	// Sort by distance (descending - keep most diverse)
-	for i := 0; i < len(candidateDistances)-1; i++ {
-		for j := i + 1; j < len(candidateDistances); j++ {
-			if candidateDistances[i].distance < candidateDistances[j].distance {
-				candidateDistances[i], candidateDistances[j] = candidateDistances[j], candidateDistances[i]
-			}
-		}
-	}
-
-	// Select top candidates
-	result := make([]*GEPACandidate, s.MaxArchiveSize)
-	for i := 0; i < s.MaxArchiveSize; i++ {
-		result[i] = candidateDistances[i].candidate
-	}
-
-	return result
-}
-
-// calculateCrowdingDistances computes crowding distances for diversity maintenance.
-func (s *GEPAState) calculateCrowdingDistances(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) map[string]float64 {
-	distances := make(map[string]float64)
-
-	// Initialize distances
-	for _, candidate := range candidates {
-		distances[candidate.ID] = 0.0
-	}
-
-	// Calculate for each objective
-	for _, objective := range multiObjectiveNames {
-		// Sort candidates by this objective
-		sortedCandidates := make([]*GEPACandidate, len(candidates))
-		copy(sortedCandidates, candidates)
-
-		// Simple bubble sort by objective value
-		for i := 0; i < len(sortedCandidates)-1; i++ {
-			for j := i + 1; j < len(sortedCandidates); j++ {
-				val1 := s.getObjectiveValue(sortedCandidates[i], objective, fitnessMap)
-				val2 := s.getObjectiveValue(sortedCandidates[j], objective, fitnessMap)
-				if val1 > val2 {
-					sortedCandidates[i], sortedCandidates[j] = sortedCandidates[j], sortedCandidates[i]
-				}
-			}
-		}
-
-		// Set boundary solutions to infinite distance
-		if len(sortedCandidates) > 0 {
-			distances[sortedCandidates[0].ID] = 1e9
-			distances[sortedCandidates[len(sortedCandidates)-1].ID] = 1e9
-		}
-
-		// Calculate crowding distance for intermediate solutions
-		if len(sortedCandidates) > 2 {
-			minVal := s.getObjectiveValue(sortedCandidates[0], objective, fitnessMap)
-			maxVal := s.getObjectiveValue(sortedCandidates[len(sortedCandidates)-1], objective, fitnessMap)
-
-			if maxVal > minVal {
-				for i := 1; i < len(sortedCandidates)-1; i++ {
-					prevVal := s.getObjectiveValue(sortedCandidates[i-1], objective, fitnessMap)
-					nextVal := s.getObjectiveValue(sortedCandidates[i+1], objective, fitnessMap)
-					distances[sortedCandidates[i].ID] += (nextVal - prevVal) / (maxVal - minVal)
-				}
-			}
-		}
-	}
-
-	return distances
-}
-
-// getObjectiveValue extracts objective value for crowding distance calculation.
-func (s *GEPAState) getObjectiveValue(candidate *GEPACandidate, objective string, fitnessMap map[string]*MultiObjectiveFitness) float64 {
-	fitness, exists := fitnessMap[candidate.ID]
-	if !exists {
-		return 0.0
-	}
-	return fitness.ObjectiveValue(objective)
 }
 
 // GetParetoArchive returns the current Pareto archive of elite solutions.
@@ -1035,18 +858,15 @@ type GEPA struct {
 	// Interceptor integration
 	interceptorChain *core.InterceptorChain
 
-	// Performance monitoring
-	progressReporter  core.ProgressReporter
-	performanceLogger *PerformanceLogger
+	// Progress reporting
+	progressReporter core.ProgressReporter
 
 	// Random number generator
 	rng *rand.Rand
-
-	// System monitoring
-	concurrentTaskCounter atomic.Int64
 }
 
-// MultiObjectiveFitness represents fitness across multiple objectives for Pareto-based selection.
+// MultiObjectiveFitness stores diagnostic objectives for external evaluators.
+// GEPA selection uses per-example metric scores, not this vector.
 type MultiObjectiveFitness struct {
 	// Core objectives
 	SuccessRate    float64 `json:"success_rate"`   // Objective 1: Basic success rate
@@ -1177,169 +997,6 @@ type PerformanceContext struct {
 	CustomData map[string]any `json:"custom_data"`
 }
 
-// calculateMultiObjectiveFitness calculates fitness across multiple objectives.
-func (g *GEPA) calculateMultiObjectiveFitness(candidateID string, inputs, outputs map[string]any, err error, context map[string]any) *MultiObjectiveFitness {
-	fitness := &MultiObjectiveFitness{}
-
-	// Objective 1: Success Rate (0-1)
-	if err == nil && outputs != nil && len(outputs) > 0 {
-		fitness.SuccessRate = 1.0
-	} else {
-		fitness.SuccessRate = 0.0
-	}
-
-	// Objective 2: Output Quality (0-1)
-	if outputs != nil {
-		fitness.OutputQuality = g.assessOutputQuality(outputs)
-	}
-
-	// Objective 3: Efficiency (0-1, higher is better) - Context-aware
-	fitness.Efficiency = g.assessContextAwareEfficiency(candidateID, inputs, outputs, err, context)
-
-	// Objective 4: Robustness (0-1, based on error handling and edge cases)
-	fitness.Robustness = g.assessRobustness(inputs, outputs, err, candidateID)
-
-	// Objective 5: Generalization (0-1, based on performance across different contexts)
-	fitness.Generalization = g.assessGeneralization(candidateID, inputs, outputs)
-
-	// Objective 6: Diversity (0-1, contribution to population diversity)
-	fitness.Diversity = g.assessDiversityContribution(candidateID)
-
-	// Objective 7: Innovation (0-1, novelty of the solution)
-	fitness.Innovation = g.assessInnovation(candidateID, outputs)
-
-	// Calculate weighted score for backward compatibility
-	weights := DefaultMultiObjectiveWeights()
-	fitness.WeightedScore = fitness.ComputeWeightedScore(weights)
-
-	return fitness
-}
-
-// assessRobustness evaluates how well a candidate handles edge cases and errors.
-func (g *GEPA) assessRobustness(inputs, outputs map[string]any, err error, candidateID string) float64 {
-	// Get historical performance for this candidate
-	metrics := g.state.CandidateMetrics[candidateID]
-	if metrics == nil {
-		return 0.5 // Default for new candidates
-	}
-
-	robustness := 0.0
-
-	// Factor 1: Error handling capability (40%)
-	if metrics.TotalEvaluations > 0 {
-		errorRate := float64(metrics.TotalEvaluations-metrics.SuccessCount) / float64(metrics.TotalEvaluations)
-		robustness += 0.4 * (1.0 - errorRate)
-	}
-
-	// Factor 2: Consistency across different inputs (30%)
-	if len(metrics.ExecutionTimes) > 1 {
-		// Calculate coefficient of variation for execution times
-		var sum, mean, variance float64
-		for _, duration := range metrics.ExecutionTimes {
-			sum += float64(duration.Nanoseconds())
-		}
-		mean = sum / float64(len(metrics.ExecutionTimes))
-
-		for _, duration := range metrics.ExecutionTimes {
-			diff := float64(duration.Nanoseconds()) - mean
-			variance += diff * diff
-		}
-		variance /= float64(len(metrics.ExecutionTimes))
-
-		stdDev := variance
-		if mean > 0 {
-			cv := stdDev / mean
-			consistency := 1.0 / (1.0 + cv) // Lower CV = higher consistency
-			robustness += 0.3 * consistency
-		}
-	} else {
-		robustness += 0.15 // Partial credit for single execution
-	}
-
-	// Factor 3: Graceful degradation (30%)
-	if err != nil {
-		// Check if error is informative rather than catastrophic
-		errorMsg := err.Error()
-		if strings.Contains(errorMsg, "validation") ||
-			strings.Contains(errorMsg, "format") ||
-			strings.Contains(errorMsg, "input") {
-			robustness += 0.1 // Partial credit for graceful errors
-		}
-	} else if outputs != nil {
-		robustness += 0.3 // Full credit for successful execution
-	}
-
-	return robustness
-}
-
-// assessGeneralization evaluates performance across different contexts.
-func (g *GEPA) assessGeneralization(candidateID string, inputs, outputs map[string]any) float64 {
-	// Get execution history for this candidate
-	traces := g.state.GetTracesForCandidate(candidateID)
-	if len(traces) < 2 {
-		return 0.5 // Default for candidates with limited history
-	}
-
-	// Analyze performance across different input patterns
-	inputPatterns := make(map[string][]float64)
-	for _, trace := range traces {
-		// Create a simple pattern key based on input types and sizes
-		pattern := g.createInputPattern(trace.Inputs)
-
-		// Calculate success score for this trace
-		score := 0.0
-		if trace.Success && trace.Outputs != nil {
-			score = 1.0
-		}
-
-		inputPatterns[pattern] = append(inputPatterns[pattern], score)
-	}
-
-	// Calculate generalization as consistency across patterns
-	if len(inputPatterns) < 2 {
-		return 0.7 // Good but not excellent for single pattern
-	}
-
-	totalVariance := 0.0
-	patternCount := 0
-
-	for _, scores := range inputPatterns {
-		if len(scores) > 1 {
-			// Calculate variance for this pattern
-			var sum, mean, variance float64
-			for _, score := range scores {
-				sum += score
-			}
-			mean = sum / float64(len(scores))
-
-			for _, score := range scores {
-				diff := score - mean
-				variance += diff * diff
-			}
-			variance /= float64(len(scores))
-
-			totalVariance += variance
-			patternCount++
-		}
-	}
-
-	if patternCount == 0 {
-		return 0.6
-	}
-
-	avgVariance := totalVariance / float64(patternCount)
-	generalization := 1.0 - avgVariance // Lower variance = better generalization
-
-	if generalization < 0 {
-		generalization = 0
-	}
-	if generalization > 1 {
-		generalization = 1
-	}
-
-	return generalization
-}
-
 // assessDiversityContribution evaluates how much a candidate contributes to population diversity.
 func (g *GEPA) assessDiversityContribution(candidateID string) float64 {
 	// Get current population
@@ -1389,55 +1046,6 @@ func (g *GEPA) assessDiversityContribution(candidateID string) float64 {
 	}
 
 	return uniqueness
-}
-
-// assessInnovation evaluates the novelty of a candidate's solution.
-func (g *GEPA) assessInnovation(candidateID string, outputs map[string]any) float64 {
-	// Innovation based on novel output patterns and solution approaches
-	innovation := 0.0
-
-	// Factor 1: Output pattern novelty (50%)
-	if outputs != nil {
-		patternNovelty := g.assessOutputPatternNovelty(outputs, candidateID)
-		innovation += 0.5 * patternNovelty
-	}
-
-	// Factor 2: Solution approach uniqueness (30%)
-	approachUniqueness := g.assessApproachUniqueness(candidateID)
-	innovation += 0.3 * approachUniqueness
-
-	// Factor 3: Problem-solving creativity (20%)
-	creativity := g.assessCreativity(candidateID, outputs)
-	innovation += 0.2 * creativity
-
-	return innovation
-}
-
-// Helper methods for multi-objective fitness
-
-// createInputPattern creates a pattern key from input data.
-func (g *GEPA) createInputPattern(inputs map[string]any) string {
-	if inputs == nil {
-		return "empty"
-	}
-
-	pattern := fmt.Sprintf("count:%d", len(inputs))
-
-	// Add type information
-	types := make([]string, 0)
-	for _, value := range inputs {
-		if value == nil {
-			types = append(types, "nil")
-		} else {
-			types = append(types, fmt.Sprintf("%T", value))
-		}
-	}
-
-	if len(types) > 0 {
-		pattern += fmt.Sprintf("_types:%v", types)
-	}
-
-	return pattern
 }
 
 // calculateHotPathInstructionSimilarity keeps pairwise diversity loops off the LLM path.
@@ -1545,237 +1153,6 @@ func (g *GEPA) calculateCosineSimilarity(words1, words2 []string) float64 {
 	return dotProduct / (math.Sqrt(norm1) * math.Sqrt(norm2))
 }
 
-// assessOutputPatternNovelty evaluates the novelty of output patterns.
-func (g *GEPA) assessOutputPatternNovelty(outputs map[string]any, candidateID string) float64 {
-	// Compare with historical output patterns
-	allTraces := make([]ExecutionTrace, 0)
-	for _, traces := range g.state.ExecutionTraces {
-		allTraces = append(allTraces, traces...)
-	}
-
-	if len(allTraces) < 2 {
-		return 1.0 // High novelty for early candidates
-	}
-
-	// Create pattern signature for current outputs
-	currentPattern := g.createOutputPattern(outputs)
-
-	// Compare with historical patterns
-	similarities := make([]float64, 0)
-	for _, trace := range allTraces {
-		if trace.CandidateID != candidateID && trace.Outputs != nil {
-			historicalPattern := g.createOutputPattern(trace.Outputs)
-			similarity := g.calculatePatternSimilarity(currentPattern, historicalPattern)
-			similarities = append(similarities, similarity)
-		}
-	}
-
-	if len(similarities) == 0 {
-		return 1.0
-	}
-
-	// Calculate average similarity and return novelty as 1 - similarity
-	var avgSimilarity float64
-	for _, sim := range similarities {
-		avgSimilarity += sim
-	}
-	avgSimilarity /= float64(len(similarities))
-
-	novelty := 1.0 - avgSimilarity
-	if novelty < 0 {
-		novelty = 0
-	}
-
-	return novelty
-}
-
-// assessApproachUniqueness evaluates the uniqueness of the problem-solving approach.
-func (g *GEPA) assessApproachUniqueness(candidateID string) float64 {
-	// Get the candidate
-	var candidate *GEPACandidate
-	if len(g.state.PopulationHistory) > 0 {
-		currentPop := g.state.PopulationHistory[len(g.state.PopulationHistory)-1]
-		for _, c := range currentPop.Candidates {
-			if c.ID == candidateID {
-				candidate = c
-				break
-			}
-		}
-	}
-
-	if candidate == nil {
-		return 0.5
-	}
-
-	// Analyze instruction patterns for uniqueness
-	instruction := candidate.Instruction
-
-	// Look for unique keywords or patterns
-	uniqueKeywords := []string{
-		"innovative", "creative", "novel", "unique", "original",
-		"alternative", "unconventional", "breakthrough", "revolutionary",
-	}
-
-	uniqueness := 0.0
-	for _, keyword := range uniqueKeywords {
-		if strings.Contains(strings.ToLower(instruction), keyword) {
-			uniqueness += 0.1
-		}
-	}
-
-	// Add uniqueness based on instruction length and complexity
-	words := strings.Fields(instruction)
-	if len(words) > 20 {
-		uniqueness += 0.2 // Bonus for detailed instructions
-	}
-
-	// Check for specific methodological approaches
-	methodKeywords := []string{
-		"step-by-step", "systematic", "analytical", "holistic",
-		"iterative", "recursive", "meta", "multi-level",
-	}
-
-	for _, keyword := range methodKeywords {
-		if strings.Contains(strings.ToLower(instruction), keyword) {
-			uniqueness += 0.15
-		}
-	}
-
-	if uniqueness > 1.0 {
-		uniqueness = 1.0
-	}
-
-	return uniqueness
-}
-
-// assessCreativity evaluates the creativity of the solution.
-func (g *GEPA) assessCreativity(candidateID string, outputs map[string]any) float64 {
-	if outputs == nil {
-		return 0.0
-	}
-
-	creativity := 0.0
-
-	// Factor 1: Output diversity within single execution (40%)
-	outputTypes := make(map[string]int)
-	for _, value := range outputs {
-		if value != nil {
-			outputTypes[fmt.Sprintf("%T", value)]++
-		}
-	}
-
-	if len(outputTypes) > 1 {
-		creativity += 0.4 * (float64(len(outputTypes)) / float64(len(outputs)))
-	}
-
-	// Factor 2: Creative language patterns in string outputs (40%)
-	for _, value := range outputs {
-		if str, ok := value.(string); ok {
-			if g.containsCreativePatterns(str) {
-				creativity += 0.4
-				break // Only award once per execution
-			}
-		}
-	}
-
-	// Factor 3: Solution completeness and depth (20%)
-	if len(outputs) > 0 {
-		avgLength := 0
-		validOutputs := 0
-
-		for _, value := range outputs {
-			if str, ok := value.(string); ok && str != "" {
-				avgLength += len(str)
-				validOutputs++
-			}
-		}
-
-		if validOutputs > 0 {
-			avgLength /= validOutputs
-			if avgLength > 100 { // Substantial outputs
-				creativity += 0.2
-			} else if avgLength > 50 {
-				creativity += 0.1
-			}
-		}
-	}
-
-	return creativity
-}
-
-// createOutputPattern creates a pattern signature from outputs.
-func (g *GEPA) createOutputPattern(outputs map[string]any) string {
-	if outputs == nil {
-		return "empty"
-	}
-
-	pattern := fmt.Sprintf("count:%d", len(outputs))
-
-	// Add type and size information
-	for key, value := range outputs {
-		if value == nil {
-			pattern += fmt.Sprintf("_%s:nil", key)
-		} else {
-			valueType := fmt.Sprintf("%T", value)
-			if str, ok := value.(string); ok {
-				pattern += fmt.Sprintf("_%s:%s:len%d", key, valueType, len(str))
-			} else {
-				pattern += fmt.Sprintf("_%s:%s", key, valueType)
-			}
-		}
-	}
-
-	return pattern
-}
-
-// calculatePatternSimilarity calculates similarity between two patterns.
-func (g *GEPA) calculatePatternSimilarity(pattern1, pattern2 string) float64 {
-	if pattern1 == pattern2 {
-		return 1.0
-	}
-
-	// Simple substring similarity
-	shorter, longer := pattern1, pattern2
-	if len(pattern1) > len(pattern2) {
-		shorter, longer = pattern2, pattern1
-	}
-
-	if len(shorter) == 0 {
-		if len(longer) == 0 {
-			return 1.0
-		}
-		return 0.0
-	}
-
-	// Calculate longest common subsequence ratio
-	commonChars := 0
-	for i := 0; i < len(shorter); i++ {
-		if i < len(longer) && shorter[i] == longer[i] {
-			commonChars++
-		}
-	}
-
-	return float64(commonChars) / float64(len(longer))
-}
-
-// containsCreativePatterns checks for creative language patterns.
-func (g *GEPA) containsCreativePatterns(text string) bool {
-	creativePatterns := []string{
-		"metaphor", "analogy", "creative", "innovative", "imagine",
-		"envision", "conceptual", "abstract", "artistic", "elegant",
-		"sophisticated", "nuanced", "multifaceted", "dynamic",
-	}
-
-	lowerText := strings.ToLower(text)
-	for _, pattern := range creativePatterns {
-		if strings.Contains(lowerText, pattern) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // Context-Aware Performance Tracking Methods
 
 // NewContextAwarePerformanceTracker creates a new context-aware performance tracker.
@@ -1787,1101 +1164,6 @@ func NewContextAwarePerformanceTracker() *ContextAwarePerformanceTracker {
 	}
 }
 
-// assessContextAwareEfficiency evaluates efficiency with context awareness.
-func (g *GEPA) assessContextAwareEfficiency(candidateID string, inputs, outputs map[string]any, err error, context map[string]any) float64 {
-	if g.performanceLogger == nil {
-		return g.fallbackEfficiencyAssessment(context)
-	}
-
-	// Create performance context
-	perfContext := g.createPerformanceContext(candidateID, inputs, outputs, context)
-
-	// Get historical performance for similar contexts
-	contextualBaseline := g.getContextualBaseline(perfContext)
-
-	// Calculate raw efficiency
-	rawEfficiency := g.calculateRawEfficiency(context, contextualBaseline)
-
-	// Apply context-specific adjustments
-	contextAdjustedEfficiency := g.applyContextAdjustments(rawEfficiency, perfContext)
-
-	// Update context tracking
-	g.updateContextMetrics(perfContext, outputs, err, contextAdjustedEfficiency)
-
-	return contextAdjustedEfficiency
-}
-
-// createPerformanceContext creates a performance context from execution data.
-func (g *GEPA) createPerformanceContext(candidateID string, inputs, outputs map[string]any, context map[string]any) *PerformanceContext {
-	perfContext := &PerformanceContext{
-		ExecutionID: fmt.Sprintf("%s-%d", candidateID, time.Now().UnixNano()),
-		CandidateID: candidateID,
-		Generation:  g.state.CurrentGeneration,
-		CustomData:  make(map[string]any),
-	}
-
-	// Extract input characteristics
-	if inputs != nil {
-		perfContext.InputSize = len(inputs)
-		perfContext.InputTypes = make([]string, 0)
-		for _, value := range inputs {
-			if value != nil {
-				perfContext.InputTypes = append(perfContext.InputTypes, fmt.Sprintf("%T", value))
-			}
-		}
-		perfContext.InputComplexity = g.calculateInputComplexity(inputs)
-	}
-
-	// Extract system context from provided context
-	if context != nil {
-		if moduleName, ok := context["module_name"].(string); ok {
-			perfContext.ModuleName = moduleName
-		}
-		if systemLoad, ok := context["system_load"].(float64); ok {
-			perfContext.SystemLoad = systemLoad
-		}
-		if memUsage, ok := context["memory_usage"].(float64); ok {
-			perfContext.MemoryUsage = memUsage
-		}
-		if concurrentTasks, ok := context["concurrent_tasks"].(int); ok {
-			perfContext.ConcurrentTasks = concurrentTasks
-		}
-		if phase, ok := context["execution_phase"].(string); ok {
-			perfContext.ExecutionPhase = phase
-		}
-
-		// Copy custom data
-		for key, value := range context {
-			if !g.isReservedContextKey(key) {
-				perfContext.CustomData[key] = value
-			}
-		}
-	}
-
-	// Set temporal context
-	perfContext.TimeOfDay = time.Now().Hour()
-
-	// Set generation context
-	if len(g.state.PopulationHistory) > 0 {
-		currentPop := g.state.PopulationHistory[len(g.state.PopulationHistory)-1]
-		if currentPop != nil {
-			perfContext.PopulationSize = len(currentPop.Candidates)
-			// Calculate selection pressure based on population diversity
-			perfContext.SelectionPressure = g.calculateSelectionPressure(currentPop)
-		}
-	}
-
-	return perfContext
-}
-
-// getContextualBaseline gets performance baseline for similar contexts.
-func (g *GEPA) getContextualBaseline(perfContext *PerformanceContext) time.Duration {
-	// Find similar contexts
-	similarContexts := g.findSimilarContexts(perfContext)
-
-	if len(similarContexts) == 0 {
-		return time.Second // Default baseline
-	}
-
-	// Calculate weighted average of similar contexts
-	totalLatency := time.Duration(0)
-	totalWeight := 0.0
-
-	for contextType, similarity := range similarContexts {
-		if g.performanceLogger != nil {
-			g.performanceLogger.mu.RLock()
-			if metrics, exists := g.performanceLogger.contextMetrics[contextType]; exists {
-				weight := similarity * float64(metrics.ExecutionCount)
-				totalLatency += time.Duration(float64(metrics.AverageLatency) * weight)
-				totalWeight += weight
-			}
-			g.performanceLogger.mu.RUnlock()
-		}
-	}
-
-	if totalWeight > 0 {
-		return time.Duration(float64(totalLatency) / totalWeight)
-	}
-
-	return time.Second
-}
-
-// calculateRawEfficiency calculates basic efficiency from execution time.
-func (g *GEPA) calculateRawEfficiency(context map[string]any, baseline time.Duration) float64 {
-	if context == nil {
-		return 0.5
-	}
-
-	duration, ok := context["execution_time"].(time.Duration)
-	if !ok {
-		return 0.5
-	}
-
-	// Normalize against contextual baseline
-	if duration <= baseline {
-		return 1.0 - (float64(duration.Nanoseconds()) / float64(baseline.Nanoseconds()) * 0.3)
-	} else {
-		return 0.7 * (float64(baseline.Nanoseconds()) / float64(duration.Nanoseconds()))
-	}
-}
-
-// applyContextAdjustments applies context-specific efficiency adjustments.
-func (g *GEPA) applyContextAdjustments(rawEfficiency float64, perfContext *PerformanceContext) float64 {
-	adjustedEfficiency := rawEfficiency
-
-	// System load adjustment
-	if perfContext.SystemLoad > 0.8 {
-		adjustedEfficiency *= 1.1 // Bonus for performing well under high load
-	} else if perfContext.SystemLoad < 0.2 {
-		adjustedEfficiency *= 0.95 // Slight penalty for not utilizing available resources
-	}
-
-	// Memory usage adjustment
-	if perfContext.MemoryUsage > 0.9 {
-		adjustedEfficiency *= 0.9 // Penalty for high memory usage
-	}
-
-	// Concurrent tasks adjustment
-	if perfContext.ConcurrentTasks > 5 {
-		adjustedEfficiency *= 1.05 // Bonus for good performance under concurrency
-	}
-
-	// Input complexity adjustment
-	if perfContext.InputComplexity > 0.8 {
-		adjustedEfficiency *= 1.1 // Bonus for handling complex inputs efficiently
-	}
-
-	// Generation-based adjustment (favor efficiency improvements over time)
-	generationBonus := float64(perfContext.Generation) * 0.01
-	adjustedEfficiency *= (1.0 + generationBonus)
-
-	// Time-of-day adjustment (some hours might be more resource-constrained)
-	if perfContext.TimeOfDay >= 9 && perfContext.TimeOfDay <= 17 {
-		adjustedEfficiency *= 0.98 // Slight penalty during business hours
-	}
-
-	// Clamp to [0, 1]
-	if adjustedEfficiency > 1.0 {
-		adjustedEfficiency = 1.0
-	}
-	if adjustedEfficiency < 0.0 {
-		adjustedEfficiency = 0.0
-	}
-
-	return adjustedEfficiency
-}
-
-// updateContextMetrics updates performance metrics for the given context.
-func (g *GEPA) updateContextMetrics(perfContext *PerformanceContext, outputs map[string]any, err error, efficiency float64) {
-	if g.performanceLogger == nil {
-		return
-	}
-
-	contextType := g.deriveContextType(perfContext)
-
-	g.performanceLogger.mu.Lock()
-	defer g.performanceLogger.mu.Unlock()
-
-	if g.performanceLogger.contextMetrics == nil {
-		g.performanceLogger.contextMetrics = make(map[string]*ContextPerformanceMetrics)
-	}
-
-	metrics, exists := g.performanceLogger.contextMetrics[contextType]
-	if !exists {
-		metrics = &ContextPerformanceMetrics{
-			ContextType:      contextType,
-			ExecutionCount:   0,
-			SuccessRate:      0.0,
-			AverageLatency:   0,
-			QualityScore:     0.0,
-			ErrorPatterns:    make(map[string]int),
-			PerformanceTrend: make([]float64, 0),
-			Metadata:         make(map[string]any),
-		}
-		g.performanceLogger.contextMetrics[contextType] = metrics
-	}
-
-	// Update metrics
-	metrics.ExecutionCount++
-
-	// Update success rate
-	if err == nil && outputs != nil && len(outputs) > 0 {
-		metrics.SuccessRate = (metrics.SuccessRate*float64(metrics.ExecutionCount-1) + 1.0) / float64(metrics.ExecutionCount)
-	} else {
-		metrics.SuccessRate = (metrics.SuccessRate * float64(metrics.ExecutionCount-1)) / float64(metrics.ExecutionCount)
-
-		// Track error patterns
-		if err != nil {
-			errorType := g.categorizeError(err)
-			metrics.ErrorPatterns[errorType]++
-		}
-	}
-
-	// Update latency (if available)
-	if perfContext.CustomData != nil {
-		if duration, ok := perfContext.CustomData["execution_time"].(time.Duration); ok {
-			if metrics.ExecutionCount == 1 {
-				metrics.AverageLatency = duration
-			} else {
-				// Exponential moving average
-				alpha := 0.1
-				metrics.AverageLatency = time.Duration(float64(metrics.AverageLatency)*(1-alpha) + float64(duration)*alpha)
-			}
-		}
-	}
-
-	// Update quality score
-	if outputs != nil {
-		qualityScore := g.assessOutputQuality(outputs)
-		if metrics.ExecutionCount == 1 {
-			metrics.QualityScore = qualityScore
-		} else {
-			alpha := 0.1
-			metrics.QualityScore = metrics.QualityScore*(1-alpha) + qualityScore*alpha
-		}
-	}
-
-	// Update performance trend
-	metrics.PerformanceTrend = append(metrics.PerformanceTrend, efficiency)
-	if len(metrics.PerformanceTrend) > 100 {
-		// Keep only last 100 measurements
-		metrics.PerformanceTrend = metrics.PerformanceTrend[1:]
-	}
-
-	metrics.LastUpdated = time.Now()
-}
-
-// Helper methods for context-aware performance tracking
-
-// calculateInputComplexity estimates the complexity of input data.
-func (g *GEPA) calculateInputComplexity(inputs map[string]any) float64 {
-	if inputs == nil {
-		return 0.0
-	}
-
-	complexity := 0.0
-
-	for _, value := range inputs {
-		if value == nil {
-			continue
-		}
-
-		switch v := value.(type) {
-		case string:
-			// String complexity based on length and content variety
-			length := float64(len(v))
-			complexity += (length / 1000.0) * 0.3 // Length component
-
-			// Content variety (unique characters)
-			uniqueChars := make(map[rune]bool)
-			for _, char := range v {
-				uniqueChars[char] = true
-			}
-			complexity += (float64(len(uniqueChars)) / 256.0) * 0.2 // Character variety
-
-		case []any:
-			// Array complexity based on size and nesting
-			complexity += (float64(len(v)) / 100.0) * 0.4
-
-		case map[string]any:
-			// Map complexity based on key count and nesting
-			complexity += (float64(len(v)) / 50.0) * 0.5
-
-		default:
-			// Basic types get minimal complexity
-			complexity += 0.1
-		}
-	}
-
-	// Normalize complexity to [0, 1]
-	if complexity > 1.0 {
-		complexity = 1.0
-	}
-
-	return complexity
-}
-
-// isReservedContextKey checks if a context key is reserved for system use.
-func (g *GEPA) isReservedContextKey(key string) bool {
-	reservedKeys := []string{
-		"execution_time", "module_name", "system_load", "memory_usage",
-		"concurrent_tasks", "execution_phase",
-	}
-
-	for _, reserved := range reservedKeys {
-		if key == reserved {
-			return true
-		}
-	}
-
-	return false
-}
-
-// calculateSelectionPressure calculates selection pressure from population diversity.
-func (g *GEPA) calculateSelectionPressure(population *Population) float64 {
-	if population == nil || len(population.Candidates) < 2 {
-		return 0.5
-	}
-
-	// Calculate fitness variance as a proxy for selection pressure
-	var fitnessSum, fitnessSquareSum float64
-	count := 0
-
-	for _, candidate := range population.Candidates {
-		fitness := candidate.Fitness
-		fitnessSum += fitness
-		fitnessSquareSum += fitness * fitness
-		count++
-	}
-
-	if count == 0 {
-		return 0.5
-	}
-
-	mean := fitnessSum / float64(count)
-	variance := (fitnessSquareSum / float64(count)) - (mean * mean)
-
-	// High variance = low selection pressure, low variance = high selection pressure
-	selectionPressure := 1.0 / (1.0 + variance)
-
-	return selectionPressure
-}
-
-// findSimilarContexts finds contexts similar to the given context.
-func (g *GEPA) findSimilarContexts(perfContext *PerformanceContext) map[string]float64 {
-	if g.performanceLogger == nil {
-		return make(map[string]float64)
-	}
-
-	g.performanceLogger.mu.RLock()
-	defer g.performanceLogger.mu.RUnlock()
-
-	similarContexts := make(map[string]float64)
-
-	for contextType, metrics := range g.performanceLogger.contextMetrics {
-		// Calculate similarity based on context features
-		similarity := g.calculateContextSimilarity(perfContext, contextType, metrics)
-
-		if similarity > 0.5 { // Only consider contexts with > 50% similarity
-			similarContexts[contextType] = similarity
-		}
-	}
-
-	return similarContexts
-}
-
-// calculateContextSimilarity calculates similarity between contexts.
-func (g *GEPA) calculateContextSimilarity(perfContext *PerformanceContext, contextType string, metrics *ContextPerformanceMetrics) float64 {
-	// Parse context type to extract features
-	contextFeatures := g.parseContextType(contextType)
-
-	similarity := 0.0
-	factors := 0
-
-	// Input size similarity
-	if contextFeatures["input_size"] != nil {
-		if refSize, ok := contextFeatures["input_size"].(int); ok {
-			sizeDiff := float64(abs(perfContext.InputSize - refSize))
-			sizeSim := 1.0 / (1.0 + sizeDiff/10.0)
-			similarity += sizeSim
-			factors++
-		}
-	}
-
-	// Generation similarity
-	if contextFeatures["generation"] != nil {
-		if refGen, ok := contextFeatures["generation"].(int); ok {
-			genDiff := float64(abs(perfContext.Generation - refGen))
-			genSim := 1.0 / (1.0 + genDiff/5.0)
-			similarity += genSim
-			factors++
-		}
-	}
-
-	// Time of day similarity
-	if contextFeatures["time_of_day"] != nil {
-		if refTime, ok := contextFeatures["time_of_day"].(int); ok {
-			timeDiff := float64(abs(perfContext.TimeOfDay - refTime))
-			timeSim := 1.0 / (1.0 + timeDiff/6.0)
-			similarity += timeSim
-			factors++
-		}
-	}
-
-	// Module name similarity
-	if contextFeatures["module_name"] != nil {
-		if refModule, ok := contextFeatures["module_name"].(string); ok {
-			if perfContext.ModuleName == refModule {
-				similarity += 1.0
-			}
-			factors++
-		}
-	}
-
-	if factors == 0 {
-		return 0.0
-	}
-
-	return similarity / float64(factors)
-}
-
-// deriveContextType creates a context type string from performance context.
-func (g *GEPA) deriveContextType(perfContext *PerformanceContext) string {
-	// Create a context type based on key features
-	features := []string{}
-
-	if perfContext.ModuleName != "" {
-		features = append(features, fmt.Sprintf("module:%s", perfContext.ModuleName))
-	}
-
-	features = append(features, fmt.Sprintf("input_size:%d", perfContext.InputSize))
-	features = append(features, fmt.Sprintf("generation:%d", perfContext.Generation))
-	features = append(features, fmt.Sprintf("time_of_day:%d", perfContext.TimeOfDay))
-
-	if perfContext.ExecutionPhase != "" {
-		features = append(features, fmt.Sprintf("phase:%s", perfContext.ExecutionPhase))
-	}
-
-	// Discretize continuous values
-	if perfContext.InputComplexity > 0.7 {
-		features = append(features, "complexity:high")
-	} else if perfContext.InputComplexity > 0.3 {
-		features = append(features, "complexity:medium")
-	} else {
-		features = append(features, "complexity:low")
-	}
-
-	return strings.Join(features, "_")
-}
-
-// parseContextType parses a context type string back into features.
-func (g *GEPA) parseContextType(contextType string) map[string]any {
-	features := make(map[string]any)
-	parts := strings.Split(contextType, "_")
-
-	for _, part := range parts {
-		if colonIdx := strings.Index(part, ":"); colonIdx != -1 {
-			key := part[:colonIdx]
-			value := part[colonIdx+1:]
-
-			// Try to parse as int first
-			if intVal, err := fmt.Sscanf(value, "%d", new(int)); err == nil && intVal == 1 {
-				var parsedInt int
-				if _, err := fmt.Sscanf(value, "%d", &parsedInt); err == nil {
-					features[key] = parsedInt
-				} else {
-					features[key] = value
-				}
-			} else {
-				features[key] = value
-			}
-		}
-	}
-
-	return features
-}
-
-// fallbackEfficiencyAssessment provides fallback when context tracking is unavailable.
-func (g *GEPA) fallbackEfficiencyAssessment(context map[string]any) float64 {
-	if context == nil {
-		return 0.5
-	}
-
-	duration, ok := context["execution_time"].(time.Duration)
-	if !ok {
-		return 0.5
-	}
-
-	// Simple baseline approach
-	baseline := time.Second
-	if duration <= baseline {
-		return 1.0 - (float64(duration.Nanoseconds()) / float64(baseline.Nanoseconds()) * 0.5)
-	} else {
-		return 0.5 * (float64(baseline.Nanoseconds()) / float64(duration.Nanoseconds()))
-	}
-}
-
-// abs returns the absolute value of an integer.
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// Pareto-based Selection Methods
-
-// calculateParetoFronts calculates Pareto fronts for multi-objective optimization.
-func (g *GEPA) calculateParetoFronts(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) []*ParetoFront {
-	if len(candidates) == 0 {
-		return []*ParetoFront{}
-	}
-
-	fronts := make([]*ParetoFront, 0)
-	remaining := make([]*GEPACandidate, len(candidates))
-	copy(remaining, candidates)
-
-	rank := 1
-
-	for len(remaining) > 0 {
-		currentFront := &ParetoFront{
-			Candidates: make([]*GEPACandidate, 0),
-			Rank:       rank,
-		}
-
-		// Find non-dominated candidates
-		nonDominated := make([]*GEPACandidate, 0)
-
-		for i, candidate := range remaining {
-			isDominated := false
-
-			for j, other := range remaining {
-				if i == j {
-					continue
-				}
-
-				if g.dominates(fitnessMap[other.ID], fitnessMap[candidate.ID]) {
-					isDominated = true
-					break
-				}
-			}
-
-			if !isDominated {
-				nonDominated = append(nonDominated, candidate)
-			}
-		}
-
-		// Add non-dominated candidates to current front
-		currentFront.Candidates = nonDominated
-		currentFront.Size = len(nonDominated)
-		fronts = append(fronts, currentFront)
-
-		// Remove non-dominated candidates from remaining
-		newRemaining := make([]*GEPACandidate, 0)
-		for _, candidate := range remaining {
-			isDominated := false
-			for _, nonDom := range nonDominated {
-				if candidate.ID == nonDom.ID {
-					isDominated = true
-					break
-				}
-			}
-			if !isDominated {
-				newRemaining = append(newRemaining, candidate)
-			}
-		}
-		remaining = newRemaining
-		rank++
-	}
-
-	return fronts
-}
-
-// dominates checks if fitness1 dominates fitness2 in multi-objective space.
-func (g *GEPA) dominates(fitness1, fitness2 *MultiObjectiveFitness) bool {
-	return multiObjectiveDominates(fitness1, fitness2)
-}
-
-// selectWithParetoRanking selects candidates using Pareto ranking and crowding distance.
-func (g *GEPA) selectWithParetoRanking(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness, selectionSize int) []*GEPACandidate {
-	if len(candidates) <= selectionSize {
-		return candidates
-	}
-
-	// Calculate Pareto fronts
-	fronts := g.calculateParetoFronts(candidates, fitnessMap)
-
-	selected := make([]*GEPACandidate, 0, selectionSize)
-
-	// Add candidates from fronts in order
-	for _, front := range fronts {
-		if len(selected)+len(front.Candidates) <= selectionSize {
-			// Add entire front
-			selected = append(selected, front.Candidates...)
-		} else {
-			// Need to select subset based on crowding distance
-			remaining := selectionSize - len(selected)
-			crowdingDistances := g.calculateCrowdingDistance(front.Candidates, fitnessMap)
-
-			// Sort by crowding distance (descending)
-			frontCandidates := make([]*GEPACandidate, len(front.Candidates))
-			copy(frontCandidates, front.Candidates)
-
-			for i := 0; i < len(frontCandidates)-1; i++ {
-				for j := 0; j < len(frontCandidates)-1-i; j++ {
-					if crowdingDistances[frontCandidates[j].ID] < crowdingDistances[frontCandidates[j+1].ID] {
-						frontCandidates[j], frontCandidates[j+1] = frontCandidates[j+1], frontCandidates[j]
-					}
-				}
-			}
-
-			// Add candidates with highest crowding distance
-			selected = append(selected, frontCandidates[:remaining]...)
-			break
-		}
-
-		if len(selected) >= selectionSize {
-			break
-		}
-	}
-
-	return selected
-}
-
-// calculateCrowdingDistance calculates crowding distance for diversity preservation.
-func (g *GEPA) calculateCrowdingDistance(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) map[string]float64 {
-	distances := make(map[string]float64)
-
-	if len(candidates) <= 2 {
-		// Assign infinite distance to boundary points
-		for _, candidate := range candidates {
-			distances[candidate.ID] = 1e9
-		}
-		return distances
-	}
-
-	// Initialize distances to 0
-	for _, candidate := range candidates {
-		distances[candidate.ID] = 0.0
-	}
-
-	// Objective names for easier processing
-	objectiveNames := multiObjectiveNames
-
-	// Calculate crowding distance for each objective
-	for _, objectiveName := range objectiveNames {
-		// Sort candidates by this objective
-		sortedCandidates := make([]*GEPACandidate, len(candidates))
-		copy(sortedCandidates, candidates)
-
-		// Sort by objective value
-		for i := 0; i < len(sortedCandidates)-1; i++ {
-			for j := 0; j < len(sortedCandidates)-1-i; j++ {
-				val1 := g.getObjectiveValue(fitnessMap[sortedCandidates[j].ID], objectiveName)
-				val2 := g.getObjectiveValue(fitnessMap[sortedCandidates[j+1].ID], objectiveName)
-				if val1 > val2 {
-					sortedCandidates[j], sortedCandidates[j+1] = sortedCandidates[j+1], sortedCandidates[j]
-				}
-			}
-		}
-
-		// Boundary points get infinite distance
-		distances[sortedCandidates[0].ID] = 1e9
-		distances[sortedCandidates[len(sortedCandidates)-1].ID] = 1e9
-
-		// Calculate range for normalization
-		minVal := g.getObjectiveValue(fitnessMap[sortedCandidates[0].ID], objectiveName)
-		maxVal := g.getObjectiveValue(fitnessMap[sortedCandidates[len(sortedCandidates)-1].ID], objectiveName)
-		objRange := maxVal - minVal
-
-		if objRange > 0 {
-			// Calculate distance for intermediate points
-			for i := 1; i < len(sortedCandidates)-1; i++ {
-				prevVal := g.getObjectiveValue(fitnessMap[sortedCandidates[i-1].ID], objectiveName)
-				nextVal := g.getObjectiveValue(fitnessMap[sortedCandidates[i+1].ID], objectiveName)
-
-				distances[sortedCandidates[i].ID] += (nextVal - prevVal) / objRange
-			}
-		}
-	}
-
-	return distances
-}
-
-// buildMultiObjectiveFitnessMap creates a fitness map from candidate metrics for Pareto operations.
-func (g *GEPA) buildMultiObjectiveFitnessMap(candidates []*GEPACandidate) map[string]*MultiObjectiveFitness {
-	fitnessMap := make(map[string]*MultiObjectiveFitness)
-
-	for _, candidate := range candidates {
-		// Try to get multi-objective fitness from candidate metrics
-		if metrics, exists := g.state.CandidateMetrics[candidate.ID]; exists {
-			if fitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok {
-				fitnessMap[candidate.ID] = fitness
-			}
-		}
-
-		// Fallback: create fitness from single objective score if multi-objective not available
-		if _, exists := fitnessMap[candidate.ID]; !exists {
-			// Convert single fitness to multi-objective fitness for compatibility
-			fallbackFitness := &MultiObjectiveFitness{
-				SuccessRate:    candidate.Fitness,
-				OutputQuality:  candidate.Fitness,
-				Efficiency:     0.5, // Default neutral value
-				Robustness:     0.5, // Default neutral value
-				Generalization: 0.5, // Default neutral value
-				Diversity:      0.5, // Default neutral value
-				Innovation:     0.5, // Default neutral value
-				WeightedScore:  candidate.Fitness,
-			}
-			fitnessMap[candidate.ID] = fallbackFitness
-		}
-	}
-
-	return fitnessMap
-}
-
-// getObjectiveValue extracts objective value by name from fitness struct.
-func (g *GEPA) getObjectiveValue(fitness *MultiObjectiveFitness, objectiveName string) float64 {
-	return fitness.ObjectiveValue(objectiveName)
-}
-
-// adaptiveWeightedSelection provides fallback selection when Pareto optimization is not suitable.
-func (g *GEPA) adaptiveWeightedSelection(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness, selectionSize int, generation int) []*GEPACandidate {
-	if len(candidates) <= selectionSize {
-		return candidates
-	}
-
-	// Adapt weights based on generation and population characteristics
-	weights := g.calculateAdaptiveWeights(generation, candidates, fitnessMap)
-
-	// Calculate weighted scores
-	weightedScores := make(map[string]float64)
-	for _, candidate := range candidates {
-		fitness := fitnessMap[candidate.ID]
-		if fitness != nil {
-			weightedScores[candidate.ID] = fitness.ComputeWeightedScore(weights)
-		}
-	}
-
-	// Sort candidates by weighted score
-	sortedCandidates := make([]*GEPACandidate, len(candidates))
-	copy(sortedCandidates, candidates)
-
-	for i := 0; i < len(sortedCandidates)-1; i++ {
-		for j := 0; j < len(sortedCandidates)-1-i; j++ {
-			if weightedScores[sortedCandidates[j].ID] < weightedScores[sortedCandidates[j+1].ID] {
-				sortedCandidates[j], sortedCandidates[j+1] = sortedCandidates[j+1], sortedCandidates[j]
-			}
-		}
-	}
-
-	return sortedCandidates[:selectionSize]
-}
-
-// paretoBasedSelection implements pure Pareto-based selection using non-dominated sorting and crowding distance.
-func (g *GEPA) paretoBasedSelection(population *Population, selectionSize int) []*GEPACandidate {
-	logger := logging.GetLogger()
-
-	if len(population.Candidates) <= selectionSize {
-		logger.Debug(context.Background(), "Population size (%d) <= selection size (%d), returning all candidates",
-			len(population.Candidates), selectionSize)
-		return population.Candidates
-	}
-
-	// Use stored multi-objective fitness map from current evaluation
-	fitnessMap := g.getCurrentMultiObjectiveFitnessMap()
-
-	// Fallback to building from metrics if not available
-	if len(fitnessMap) == 0 {
-		logger.Debug(context.Background(), "No stored multi-objective fitness map, building from candidate metrics")
-		fitnessMap = g.buildMultiObjectiveFitnessMap(population.Candidates)
-	}
-
-	// Check if we have valid multi-objective fitness data
-	hasValidFitness := false
-	for _, fitness := range fitnessMap {
-		if fitness != nil {
-			hasValidFitness = true
-			break
-		}
-	}
-
-	if !hasValidFitness {
-		logger.Warn(context.Background(), "No valid multi-objective fitness data found, fallback to tournament selection")
-		return g.tournamentSelection(population, selectionSize)
-	}
-
-	logger.Debug(context.Background(), "Performing Pareto-based selection: population=%d, target=%d",
-		len(population.Candidates), selectionSize)
-
-	// Use existing Pareto ranking method
-	selected := g.selectWithParetoRanking(population.Candidates, fitnessMap, selectionSize)
-
-	// Log detailed selection statistics for debugging
-	g.logParetoSelectionStats(context.Background(), population.Candidates, fitnessMap, selected, "Pure Pareto")
-
-	logger.Debug(context.Background(), "Pareto selection completed: selected=%d candidates", len(selected))
-	return selected
-}
-
-// adaptiveParetoSelection combines Pareto selection with adaptive strategies based on population diversity and generation.
-func (g *GEPA) adaptiveParetoSelection(population *Population, selectionSize int) []*GEPACandidate {
-	logger := logging.GetLogger()
-
-	if len(population.Candidates) <= selectionSize {
-		return population.Candidates
-	}
-
-	// Use stored multi-objective fitness map from current evaluation
-	fitnessMap := g.getCurrentMultiObjectiveFitnessMap()
-
-	// Fallback to building from metrics if not available
-	if len(fitnessMap) == 0 {
-		logger.Debug(context.Background(), "No stored multi-objective fitness map, building from candidate metrics")
-		fitnessMap = g.buildMultiObjectiveFitnessMap(population.Candidates)
-	}
-
-	// Assess population diversity and convergence state
-	diversityScore := g.assessPopulationDiversity(population.Candidates, fitnessMap)
-	convergenceProgress := float64(g.state.CurrentGeneration) / float64(g.config.MaxGenerations)
-
-	logger.Debug(context.Background(), "Adaptive Pareto selection: diversity=%.3f, progress=%.3f",
-		diversityScore, convergenceProgress)
-
-	// Choose selection strategy based on population state
-	if diversityScore < 0.3 && convergenceProgress > 0.5 {
-		// Low diversity, late stage: use weighted selection to encourage exploration
-		logger.Debug(context.Background(), "Low diversity detected, using adaptive weighted selection")
-		selected := g.adaptiveWeightedSelection(population.Candidates, fitnessMap, selectionSize, g.state.CurrentGeneration)
-		g.logParetoSelectionStats(context.Background(), population.Candidates, fitnessMap, selected, "Adaptive Pareto - Weighted Fallback")
-		return selected
-	} else if convergenceProgress < 0.3 {
-		// Early stage: pure Pareto with emphasis on diversity
-		logger.Debug(context.Background(), "Early stage, using diversity-enhanced Pareto selection")
-		selected := g.diversityEnhancedParetoSelection(population.Candidates, fitnessMap, selectionSize)
-		return selected
-	} else {
-		// Standard Pareto selection
-		logger.Debug(context.Background(), "Using standard Pareto selection")
-		selected := g.selectWithParetoRanking(population.Candidates, fitnessMap, selectionSize)
-		g.logParetoSelectionStats(context.Background(), population.Candidates, fitnessMap, selected, "Adaptive Pareto - Standard")
-		return selected
-	}
-}
-
-// diversityEnhancedParetoSelection performs Pareto selection with additional diversity pressure.
-func (g *GEPA) diversityEnhancedParetoSelection(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness, selectionSize int) []*GEPACandidate {
-	if len(candidates) <= selectionSize {
-		return candidates
-	}
-
-	// First, get Pareto fronts
-	fronts := g.calculateParetoFronts(candidates, fitnessMap)
-	if len(fronts) == 0 {
-		return candidates[:selectionSize]
-	}
-
-	selected := make([]*GEPACandidate, 0, selectionSize)
-
-	// Add candidates from fronts with enhanced diversity consideration
-	for _, front := range fronts {
-		if len(selected)+len(front.Candidates) <= selectionSize {
-			// Add entire front
-			selected = append(selected, front.Candidates...)
-		} else {
-			// Need to select subset with diversity enhancement
-			remaining := selectionSize - len(selected)
-			crowdingDistances := g.calculateCrowdingDistance(front.Candidates, fitnessMap)
-
-			// Enhance crowding distances with instruction diversity
-			for _, candidate := range front.Candidates {
-				instructionDiversity := g.calculateInstructionDiversityScore(candidate, selected)
-				crowdingDistances[candidate.ID] += instructionDiversity * 0.5 // Boost diversity
-			}
-
-			// Sort by enhanced crowding distance
-			frontCandidates := make([]*GEPACandidate, len(front.Candidates))
-			copy(frontCandidates, front.Candidates)
-
-			for i := 0; i < len(frontCandidates)-1; i++ {
-				for j := 0; j < len(frontCandidates)-1-i; j++ {
-					if crowdingDistances[frontCandidates[j].ID] < crowdingDistances[frontCandidates[j+1].ID] {
-						frontCandidates[j], frontCandidates[j+1] = frontCandidates[j+1], frontCandidates[j]
-					}
-				}
-			}
-
-			selected = append(selected, frontCandidates[:remaining]...)
-			break
-		}
-
-		if len(selected) >= selectionSize {
-			break
-		}
-	}
-
-	// Log diversity-enhanced selection statistics
-	g.logParetoSelectionStats(context.Background(), candidates, fitnessMap, selected, "Diversity Enhanced Pareto")
-
-	return selected
-}
-
-// assessPopulationDiversity calculates diversity score of current population.
-func (g *GEPA) assessPopulationDiversity(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) float64 {
-	if len(candidates) <= 1 {
-		return 0.0
-	}
-
-	// Calculate diversity in objective space
-	objectiveDiversity := g.calculateObjectiveSpaceDiversity(fitnessMap)
-
-	// Calculate diversity in instruction space
-	instructionDiversity := g.calculateInstructionSpaceDiversity(candidates)
-
-	// Combine both measures
-	return (objectiveDiversity + instructionDiversity) / 2.0
-}
-
-// calculateObjectiveSpaceDiversity measures diversity in the multi-objective fitness space.
-func (g *GEPA) calculateObjectiveSpaceDiversity(fitnessMap map[string]*MultiObjectiveFitness) float64 {
-	if len(fitnessMap) <= 1 {
-		return 0.0
-	}
-
-	objectives := [][]float64{}
-	for _, fitness := range fitnessMap {
-		if fitness != nil {
-			objectives = append(objectives, []float64{
-				fitness.SuccessRate,
-				fitness.OutputQuality,
-				fitness.Efficiency,
-				fitness.Robustness,
-				fitness.Generalization,
-				fitness.Diversity,
-				fitness.Innovation,
-			})
-		}
-	}
-
-	if len(objectives) <= 1 {
-		return 0.0
-	}
-
-	// Calculate average pairwise distance in objective space
-	totalDistance := 0.0
-	pairCount := 0
-
-	for i := 0; i < len(objectives); i++ {
-		for j := i + 1; j < len(objectives); j++ {
-			distance := 0.0
-			for k := 0; k < len(objectives[i]); k++ {
-				diff := objectives[i][k] - objectives[j][k]
-				distance += diff * diff
-			}
-			totalDistance += distance
-			pairCount++
-		}
-	}
-
-	if pairCount == 0 {
-		return 0.0
-	}
-
-	avgDistance := totalDistance / float64(pairCount)
-	// Normalize to [0, 1] range (sqrt of sum of squares can be at most sqrt(7) for 7 objectives)
-	return avgDistance / 7.0
-}
-
-// calculateInstructionSpaceDiversity measures diversity in instruction content.
-func (g *GEPA) calculateInstructionSpaceDiversity(candidates []*GEPACandidate) float64 {
-	if len(candidates) <= 1 {
-		return 0.0
-	}
-
-	totalSimilarity := 0.0
-	pairCount := 0
-
-	for i := 0; i < len(candidates); i++ {
-		for j := i + 1; j < len(candidates); j++ {
-			similarity := g.calculateHotPathInstructionSimilarity(candidates[i].Instruction, candidates[j].Instruction)
-			totalSimilarity += similarity
-			pairCount++
-		}
-	}
-
-	if pairCount == 0 {
-		return 0.0
-	}
-
-	avgSimilarity := totalSimilarity / float64(pairCount)
-	return 1.0 - avgSimilarity // Convert similarity to diversity
-}
-
-// calculateInstructionDiversityScore calculates how diverse a candidate's instruction is compared to a set.
-func (g *GEPA) calculateInstructionDiversityScore(candidate *GEPACandidate, compareSet []*GEPACandidate) float64 {
-	if len(compareSet) == 0 {
-		return 1.0 // Maximum diversity if nothing to compare to
-	}
-
-	totalSimilarity := 0.0
-	for _, other := range compareSet {
-		similarity := g.calculateHotPathInstructionSimilarity(candidate.Instruction, other.Instruction)
-		totalSimilarity += similarity
-	}
-
-	avgSimilarity := totalSimilarity / float64(len(compareSet))
-	return 1.0 - avgSimilarity // Convert to diversity score
-}
-
-// logParetoSelectionStats logs detailed statistics about Pareto-based selection for debugging.
-func (g *GEPA) logParetoSelectionStats(ctx context.Context, candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness, selected []*GEPACandidate, selectionType string) {
-	logger := logging.GetLogger()
-
-	if len(candidates) == 0 {
-		return
-	}
-
-	// Calculate Pareto fronts for statistics
-	fronts := g.calculateParetoFronts(candidates, fitnessMap)
-
-	// Log basic selection statistics
-	logger.Info(ctx, "Pareto Selection Stats [%s]: candidates=%d, selected=%d, fronts=%d",
-		selectionType, len(candidates), len(selected), len(fronts))
-
-	// Log front distribution
-	for i, front := range fronts {
-		logger.Debug(ctx, "Pareto Front %d: size=%d, rank=%d", i+1, front.Size, front.Rank)
-	}
-
-	// Calculate and log objective statistics
-	if len(fitnessMap) > 0 {
-		objStats := g.calculateObjectiveStatistics(fitnessMap)
-		logger.Debug(ctx, "Objective Statistics: %+v", objStats)
-	}
-
-	// Log diversity metrics
-	diversityScore := g.assessPopulationDiversity(candidates, fitnessMap)
-	selectedDiversity := g.assessPopulationDiversity(selected, g.buildMultiObjectiveFitnessMap(selected))
-
-	logger.Debug(ctx, "Diversity: population=%.3f, selected=%.3f", diversityScore, selectedDiversity)
-
-	// Log selection pressure metrics
-	convergenceProgress := float64(g.state.CurrentGeneration) / float64(g.config.MaxGenerations)
-	logger.Debug(ctx, "Selection Context: generation=%d/%d, progress=%.3f",
-		g.state.CurrentGeneration, g.config.MaxGenerations, convergenceProgress)
-}
-
-// calculateObjectiveStatistics computes statistics for each objective across the population.
-func (g *GEPA) calculateObjectiveStatistics(fitnessMap map[string]*MultiObjectiveFitness) map[string]ObjectiveStats {
-	if len(fitnessMap) == 0 {
-		return make(map[string]ObjectiveStats)
-	}
-
-	stats := make(map[string]ObjectiveStats)
-	objectiveNames := multiObjectiveNames
-
-	for _, objName := range objectiveNames {
-		values := make([]float64, 0, len(fitnessMap))
-		for _, fitness := range fitnessMap {
-			if fitness != nil {
-				values = append(values, g.getObjectiveValue(fitness, objName))
-			}
-		}
-
-		if len(values) > 0 {
-			stats[objName] = ObjectiveStats{
-				Mean:   g.calculateMean(values),
-				StdDev: g.calculateStdDev(values),
-				Min:    g.calculateMin(values),
-				Max:    g.calculateMax(values),
-				Range:  g.calculateMax(values) - g.calculateMin(values),
-			}
-		}
-	}
-
-	return stats
-}
-
 // ObjectiveStats represents statistical information for a single objective.
 type ObjectiveStats struct {
 	Mean   float64 `json:"mean"`
@@ -2889,127 +1171,6 @@ type ObjectiveStats struct {
 	Min    float64 `json:"min"`
 	Max    float64 `json:"max"`
 	Range  float64 `json:"range"`
-}
-
-// Helper statistical functions.
-func (g *GEPA) calculateMean(values []float64) float64 {
-	if len(values) == 0 {
-		return 0.0
-	}
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
-}
-
-func (g *GEPA) calculateStdDev(values []float64) float64 {
-	if len(values) <= 1 {
-		return 0.0
-	}
-	mean := g.calculateMean(values)
-	sumSquares := 0.0
-	for _, v := range values {
-		diff := v - mean
-		sumSquares += diff * diff
-	}
-	return sumSquares / float64(len(values)-1)
-}
-
-func (g *GEPA) calculateMin(values []float64) float64 {
-	if len(values) == 0 {
-		return 0.0
-	}
-	min := values[0]
-	for _, v := range values[1:] {
-		if v < min {
-			min = v
-		}
-	}
-	return min
-}
-
-func (g *GEPA) calculateMax(values []float64) float64 {
-	if len(values) == 0 {
-		return 0.0
-	}
-	max := values[0]
-	for _, v := range values[1:] {
-		if v > max {
-			max = v
-		}
-	}
-	return max
-}
-
-// calculateAdaptiveWeights calculates adaptive weights based on generation and population state.
-func (g *GEPA) calculateAdaptiveWeights(generation int, candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness) map[string]float64 {
-	weights := DefaultMultiObjectiveWeights()
-
-	maxGenerations := float64(g.config.MaxGenerations)
-	progress := float64(generation) / maxGenerations
-
-	// Early generations: prioritize exploration (diversity + innovation)
-	if progress < 0.3 {
-		weights[objectiveDiversity] = 0.15
-		weights[objectiveInnovation] = 0.15
-		weights[objectiveSuccess] = 0.20
-		weights[objectiveQuality] = 0.15
-		weights[objectiveEfficiency] = 0.10
-		weights[objectiveRobustness] = 0.15
-		weights[objectiveGeneralization] = 0.10
-	} else if progress < 0.7 {
-		// Middle generations: balanced approach
-		weights[objectiveSuccess] = 0.25
-		weights[objectiveQuality] = 0.20
-		weights[objectiveEfficiency] = 0.15
-		weights[objectiveRobustness] = 0.15
-		weights[objectiveGeneralization] = 0.15
-		weights[objectiveDiversity] = 0.05
-		weights[objectiveInnovation] = 0.05
-	} else {
-		// Late generations: prioritize exploitation (success + quality)
-		weights[objectiveSuccess] = 0.35
-		weights[objectiveQuality] = 0.25
-		weights[objectiveEfficiency] = 0.15
-		weights[objectiveRobustness] = 0.15
-		weights[objectiveGeneralization] = 0.10
-		weights[objectiveDiversity] = 0.00
-		weights[objectiveInnovation] = 0.00
-	}
-
-	// Adjust based on population diversity
-	if len(candidates) > 1 {
-		avgDiversity := 0.0
-		count := 0
-
-		for _, candidate := range candidates {
-			if fitness := fitnessMap[candidate.ID]; fitness != nil {
-				avgDiversity += fitness.Diversity
-				count++
-			}
-		}
-
-		if count > 0 {
-			avgDiversity /= float64(count)
-
-			// If diversity is low, increase diversity weight
-			if avgDiversity < 0.3 {
-				diversityBoost := 0.1
-				weights[objectiveDiversity] += diversityBoost
-				// Reduce other weights proportionally
-				reduction := diversityBoost / 6.0
-				weights[objectiveSuccess] -= reduction
-				weights[objectiveQuality] -= reduction
-				weights[objectiveEfficiency] -= reduction
-				weights[objectiveRobustness] -= reduction
-				weights[objectiveGeneralization] -= reduction
-				weights[objectiveInnovation] -= reduction
-			}
-		}
-	}
-
-	return weights
 }
 
 // NewGEPA creates a new GEPA optimizer with the given configuration.
@@ -3078,13 +1239,12 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	rng := rand.New(rand.NewSource(seed))
 
 	gepa := &GEPA{
-		config:            config,
-		state:             NewGEPAState(),
-		generationLLM:     generationLLM,
-		reflectionLLM:     reflectionLLM,
-		interceptorChain:  core.NewInterceptorChain(),
-		performanceLogger: NewPerformanceLogger(),
-		rng:               rng,
+		config:           config,
+		state:            NewGEPAState(),
+		generationLLM:    generationLLM,
+		reflectionLLM:    reflectionLLM,
+		interceptorChain: core.NewInterceptorChain(),
+		rng:              rng,
 	}
 
 	// Set up interceptors
@@ -3185,6 +1345,27 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		}
 	} else {
 		g.setLatestEvaluationAdapter(g.newEvaluationAdapter(program, trainDataset, metric))
+		// Checkpoints omit per-example evaluations. Rebuild them before Pareto
+		// selection rather than silently resuming with scalar-only selection.
+		if g.config.SelectionStrategy == "pareto" || g.config.SelectionStrategy == "adaptive_pareto" {
+			if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), false); !ok {
+				if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, trainDataset, metric); err != nil {
+					return err
+				}
+			}
+			if len(validationExamples) > 0 {
+				if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), true); !ok {
+					if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
+						return err
+					}
+					g.state.LastValidatedGeneration = g.state.CurrentGeneration
+				}
+			}
+			if decision := g.metricBudgetStopDecision(); decision != nil {
+				g.recordStopDecision(decision)
+				return g.saveRunState()
+			}
+		}
 		logger.Info(ctx, "Resuming GEPA optimization from generation %d", g.state.CurrentGeneration)
 	}
 
@@ -3201,7 +1382,7 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		}
 		currentPop := g.getCurrentPopulation()
 		if currentPop != nil {
-			g.state.UpdateParetoArchive(currentPop.Candidates, g.getCurrentMultiObjectiveFitnessMap())
+			g.state.UpdateParetoArchive(currentPop.Candidates, nil)
 		}
 		validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, generation)
 		if err != nil {
@@ -3240,15 +1421,13 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 }
 
 func (g *GEPA) evaluateAndArchiveCurrentPopulation(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
-	multiObjFitnessMap, err := g.evaluatePopulation(ctx, program, dataset, metric)
-	if err != nil {
+	if err := g.evaluatePopulation(ctx, program, dataset, metric); err != nil {
 		return err
 	}
 
-	g.setCurrentMultiObjectiveFitnessMap(multiObjFitnessMap)
 	currentPop := g.getCurrentPopulation()
 	if currentPop != nil {
-		g.state.UpdateParetoArchive(currentPop.Candidates, multiObjFitnessMap)
+		g.state.UpdateParetoArchive(currentPop.Candidates, nil)
 	}
 
 	return nil
@@ -3369,6 +1548,7 @@ func (g *GEPA) evaluateValidationPopulation(ctx context.Context, program core.Pr
 		candidateEvaluations[candidate.ID] = evaluation
 		if bestCandidate == nil || score > bestFitness || (score == bestFitness && candidate.ID < bestCandidate.ID) {
 			bestCandidate = g.copyCandidate(candidate)
+			bestCandidate.Fitness = score
 			bestFitness = score
 			if bestCandidate.Metadata == nil {
 				bestCandidate.Metadata = make(map[string]any)
@@ -3389,7 +1569,9 @@ func (g *GEPA) evaluateValidationPopulation(ctx context.Context, program core.Pr
 
 		candidate := candidate
 		p.Go(func() {
-			evaluation := g.evaluateCandidateWithAdapter(ctx, candidate, adapter)
+			// Validation must not overwrite training fitness on the working
+			// population or on the all-time best candidate it may reference.
+			evaluation := g.evaluateCandidateWithAdapter(ctx, g.copyCandidate(candidate), adapter)
 			recordValidationEvaluation(candidate, evaluation)
 		})
 	}
@@ -3445,6 +1627,9 @@ func buildValidationFrontier(evaluations map[string]*gepaCandidateEvaluation) (m
 
 		for caseIndex, evalCase := range evaluation.Cases {
 			score := evalCase.Score
+			if evalCase.Err != nil || math.IsNaN(score) || math.IsInf(score, 0) {
+				continue
+			}
 			current := frontier[caseIndex]
 			switch {
 			case current == nil || score > current.Score:
@@ -3636,7 +1821,6 @@ func GetGEPAState(ctx context.Context) *GEPAState {
 func (g *GEPA) setupInterceptors() {
 	g.interceptorChain.
 		AddModuleInterceptor(g.gepaExecutionTracker).
-		AddModuleInterceptor(g.gepaPerformanceCollector).
 		AddModuleInterceptor(g.gepaReflectionLogger)
 }
 
@@ -3648,7 +1832,6 @@ func (g *GEPA) installInterceptors(program core.Program) core.Program {
 	// Install GEPA tracking interceptors using the interceptor chain
 	chain := core.NewInterceptorChain().
 		AddModuleInterceptor(g.gepaExecutionTracker).
-		AddModuleInterceptor(g.gepaPerformanceCollector).
 		AddModuleInterceptor(g.gepaReflectionLogger)
 
 	// Apply interceptors to all modules that support them
@@ -3697,64 +1880,6 @@ func (g *GEPA) gepaExecutionTracker(ctx context.Context, inputs map[string]any,
 	return outputs, err
 }
 
-// gepaPerformanceCollector collects performance metrics for fitness calculation.
-func (g *GEPA) gepaPerformanceCollector(ctx context.Context, inputs map[string]any,
-	info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
-
-	// Real-time performance tracking start
-	start := time.Now()
-	candidateID := g.getCurrentCandidateID(ctx)
-
-	// Execute with real-time monitoring
-	outputs, err := handler(ctx, inputs, opts...)
-	duration := time.Since(start)
-
-	// Create enhanced context for multi-objective fitness calculation
-	perfContext := map[string]any{
-		"execution_time":   duration,
-		"module_name":      info.ModuleName,
-		"system_load":      g.getCurrentSystemLoad(),
-		"memory_usage":     g.getCurrentMemoryUsage(),
-		"concurrent_tasks": g.getCurrentConcurrentTasks(),
-		"execution_phase":  g.getCurrentExecutionPhase(ctx),
-		"generation":       g.state.CurrentGeneration,
-	}
-
-	// Calculate multi-objective fitness with context awareness
-	fitness := g.calculateFitness(inputs, outputs, err)
-	multiObjFitness := g.calculateMultiObjectiveFitness(candidateID, inputs, outputs, err, perfContext)
-
-	// Real-time fitness broadcasting for live monitoring
-	g.broadcastFitnessUpdate(candidateID, fitness, multiObjFitness, perfContext)
-
-	// Store fitness information in context or state
-	if gepaState := GetGEPAState(ctx); gepaState != nil {
-		if metrics, exists := gepaState.CandidateMetrics[candidateID]; exists {
-			// Update running fitness averages
-			totalEvals := float64(metrics.TotalEvaluations)
-			metrics.AverageFitness = (metrics.AverageFitness*totalEvals + fitness) / (totalEvals + 1)
-			if fitness > metrics.BestFitness {
-				metrics.BestFitness = fitness
-			}
-
-			// Store multi-objective fitness in metadata
-			if metrics.Metadata == nil {
-				metrics.Metadata = make(map[string]any)
-			}
-			metrics.Metadata["multi_objective_fitness"] = multiObjFitness
-			metrics.Metadata["last_execution_context"] = perfContext
-
-			// Log to performance logger with enhanced metrics
-			g.performanceLogger.LogCandidateMetrics(candidateID, metrics)
-		}
-
-		// Update real-time population statistics
-		g.updateRealTimePopulationStats(candidateID, fitness, multiObjFitness)
-	}
-
-	return outputs, err
-}
-
 // gepaReflectionLogger logs data needed for reflection analysis.
 func (g *GEPA) gepaReflectionLogger(ctx context.Context, inputs map[string]any,
 	info *core.ModuleInfo, handler core.ModuleHandler, opts ...core.Option) (map[string]any, error) {
@@ -3782,15 +1907,20 @@ func (g *GEPA) gepaReflectionLogger(ctx context.Context, inputs map[string]any,
 	}
 
 	// Store in candidate metrics for later reflection
+	gepaState.mu.Lock()
+	defer gepaState.mu.Unlock()
 	if metrics, exists := gepaState.CandidateMetrics[candidateID]; exists {
 		if metrics.Metadata == nil {
 			metrics.Metadata = make(map[string]any)
 		}
-		if _, exists := metrics.Metadata["reflection_data"]; !exists {
-			metrics.Metadata["reflection_data"] = make([]map[string]any, 0)
+		switch previous := metrics.Metadata["reflection_data"].(type) {
+		case []map[string]any:
+			metrics.Metadata["reflection_data"] = append(previous, reflectionData)
+		case []any: // JSON-decoded checkpoint metadata.
+			metrics.Metadata["reflection_data"] = append(previous, reflectionData)
+		default:
+			metrics.Metadata["reflection_data"] = []map[string]any{reflectionData}
 		}
-		reflectionDataSlice := metrics.Metadata["reflection_data"].([]map[string]any)
-		metrics.Metadata["reflection_data"] = append(reflectionDataSlice, reflectionData)
 	}
 
 	return outputs, err
@@ -3811,164 +1941,6 @@ func CurrentCandidateID(ctx context.Context) string {
 		return candidateID
 	}
 	return "unknown"
-}
-
-// Real-time tracking support methods
-
-// getCurrentSystemLoad gets current system load for context-aware tracking.
-func (g *GEPA) getCurrentSystemLoad() float64 {
-	// Get number of goroutines as a proxy for system load
-	numGoroutines := runtime.NumGoroutine()
-	numCPU := runtime.NumCPU()
-
-	// Normalize by CPU count and apply sigmoid scaling
-	load := float64(numGoroutines) / float64(numCPU*10) // Scale relative to 10 goroutines per CPU
-	if load > 1.0 {
-		load = 1.0
-	}
-	return load
-}
-
-// getCurrentMemoryUsage gets current memory usage for context-aware tracking.
-func (g *GEPA) getCurrentMemoryUsage() float64 {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
-	// Calculate memory usage ratio (heap in use / total allocated)
-	heapInUse := float64(memStats.HeapInuse)
-	heapSys := float64(memStats.HeapSys)
-
-	if heapSys == 0 {
-		return 0.0
-	}
-
-	usageRatio := heapInUse / heapSys
-	if usageRatio > 1.0 {
-		usageRatio = 1.0
-	}
-	return usageRatio
-}
-
-// getCurrentConcurrentTasks gets current number of concurrent tasks.
-func (g *GEPA) getCurrentConcurrentTasks() int {
-	return int(g.concurrentTaskCounter.Load())
-}
-
-// incrementConcurrentTasks increments the concurrent task counter.
-func (g *GEPA) incrementConcurrentTasks() {
-	g.concurrentTaskCounter.Add(1)
-}
-
-// decrementConcurrentTasks decrements the concurrent task counter.
-func (g *GEPA) decrementConcurrentTasks() {
-	g.concurrentTaskCounter.Add(-1)
-}
-
-// getCurrentExecutionPhase determines the current phase of execution.
-func (g *GEPA) getCurrentExecutionPhase(ctx context.Context) string {
-	if phase, ok := ctx.Value(executionPhaseKey).(string); ok {
-		return phase
-	}
-
-	// Infer phase from generation state
-	if g.state.CurrentGeneration == 0 {
-		return "initialization"
-	} else if g.state.CurrentGeneration%g.config.ReflectionFreq == 0 {
-		return "reflection"
-	} else {
-		return "evolution"
-	}
-}
-
-// broadcastFitnessUpdate broadcasts fitness updates for real-time monitoring.
-func (g *GEPA) broadcastFitnessUpdate(candidateID string, fitness float64, multiObjFitness *MultiObjectiveFitness, perfContext map[string]any) {
-	// Real-time fitness update notification
-	_ = map[string]any{
-		"candidate_id":            candidateID,
-		"fitness":                 fitness,
-		"multi_objective_fitness": multiObjFitness,
-		"context":                 perfContext,
-		"timestamp":               time.Now(),
-		"generation":              g.state.CurrentGeneration,
-	}
-
-	// In a real implementation, this would broadcast to monitoring systems
-	// For now, log the update
-	logger := logging.GetLogger()
-	logger.Debug(context.Background(),
-		"Real-time fitness update: candidate=%s, fitness=%.3f, success_rate=%.3f, quality=%.3f",
-		candidateID, fitness, multiObjFitness.SuccessRate, multiObjFitness.OutputQuality)
-}
-
-// updateRealTimePopulationStats updates population statistics in real-time.
-func (g *GEPA) updateRealTimePopulationStats(candidateID string, fitness float64, multiObjFitness *MultiObjectiveFitness) {
-	g.state.mu.Lock()
-	defer g.state.mu.Unlock()
-
-	// Update best fitness if necessary
-	if fitness > g.state.BestFitness {
-		g.state.BestFitness = fitness
-		g.state.LastImprovement = time.Now()
-
-		// Find and update best candidate
-		if len(g.state.PopulationHistory) > 0 {
-			currentPop := g.state.PopulationHistory[len(g.state.PopulationHistory)-1]
-			for _, candidate := range currentPop.Candidates {
-				if candidate.ID == candidateID {
-					g.state.BestCandidate = candidate
-					candidate.Fitness = fitness
-					break
-				}
-			}
-		}
-	}
-
-	// Update convergence monitoring
-	g.updateConvergenceMonitoring(fitness, multiObjFitness)
-}
-
-// updateConvergenceMonitoring updates convergence status based on real-time fitness data.
-func (g *GEPA) updateConvergenceMonitoring(fitness float64, multiObjFitness *MultiObjectiveFitness) {
-	if g.state.ConvergenceStatus == nil {
-		return
-	}
-
-	// Check for stagnation
-	if fitness <= g.state.BestFitness {
-		g.state.ConvergenceStatus.StagnationCount++
-	} else {
-		g.state.ConvergenceStatus.StagnationCount = 0
-	}
-
-	// Update diversity index based on current fitness distribution
-	if len(g.state.PopulationHistory) > 0 {
-		currentPop := g.state.PopulationHistory[len(g.state.PopulationHistory)-1]
-		diversity := g.calculatePopulationDiversity(currentPop)
-		g.state.ConvergenceStatus.DiversityIndex = diversity
-
-		// Update exploration-exploitation balance
-		if diversity > 0.7 {
-			g.state.ConvergenceStatus.ExplorationExploitationBalance = "exploration"
-		} else if diversity < 0.3 {
-			g.state.ConvergenceStatus.ExplorationExploitationBalance = "exploitation"
-		} else {
-			g.state.ConvergenceStatus.ExplorationExploitationBalance = "balanced"
-		}
-
-		// Update premature convergence risk
-		if g.state.ConvergenceStatus.StagnationCount > g.config.StagnationLimit/2 && diversity < 0.2 {
-			g.state.ConvergenceStatus.PrematureConvergenceRisk = "high"
-		} else if g.state.ConvergenceStatus.StagnationCount > g.config.StagnationLimit/4 && diversity < 0.4 {
-			g.state.ConvergenceStatus.PrematureConvergenceRisk = "medium"
-		} else {
-			g.state.ConvergenceStatus.PrematureConvergenceRisk = "low"
-		}
-	}
-
-	// Check for convergence
-	if g.state.ConvergenceStatus.StagnationCount >= g.config.StagnationLimit {
-		g.state.ConvergenceStatus.IsConverged = true
-	}
 }
 
 // calculatePopulationDiversity calculates diversity index for a population.
@@ -4076,159 +2048,6 @@ func (g *GEPA) monitorInterceptorHealth() {
 		logger.Warn(context.Background(),
 			"High interceptor latency detected: %v", avgLatency)
 	}
-}
-
-// calculateFitness calculates fitness score for a given execution using enhanced metrics.
-func (g *GEPA) calculateFitness(inputs, outputs map[string]any, err error) float64 {
-	if err != nil {
-		return 0.0
-	}
-
-	// Enhanced fitness calculation based on multiple factors
-	fitness := 0.0
-
-	// Base success score (40% weight)
-	if len(outputs) > 0 {
-		fitness += 0.4
-	}
-
-	// Output completeness score (30% weight)
-	if outputs != nil {
-		nonNilOutputs := 0
-		for _, value := range outputs {
-			if value != nil {
-				nonNilOutputs++
-			}
-		}
-		if len(outputs) > 0 {
-			completeness := float64(nonNilOutputs) / float64(len(outputs))
-			fitness += 0.3 * completeness
-		}
-	}
-
-	// Output quality indicators (20% weight)
-	if outputs != nil {
-		qualityScore := g.assessOutputQuality(outputs)
-		fitness += 0.2 * qualityScore
-	}
-
-	// Input utilization score (10% weight)
-	if inputs != nil && outputs != nil {
-		utilizationScore := g.assessInputUtilization(inputs, outputs)
-		fitness += 0.1 * utilizationScore
-	}
-
-	return fitness
-}
-
-// Helper methods for enhanced fitness calculation
-
-// assessOutputQuality evaluates the quality of outputs based on various indicators.
-func (g *GEPA) assessOutputQuality(outputs map[string]any) float64 {
-	qualityScore := 0.0
-	qualityFactors := 0
-
-	for _, value := range outputs {
-		if value == nil {
-			continue
-		}
-
-		qualityFactors++
-
-		// Check for string outputs
-		if str, ok := value.(string); ok {
-			if len(str) > 10 && len(str) < 1000 { // Reasonable length
-				qualityScore += 0.5
-			}
-			if !containsErrorKeywords(str) { // No error indicators
-				qualityScore += 0.3
-			}
-			if containsStructuredContent(str) { // Has structure
-				qualityScore += 0.2
-			}
-		} else {
-			// Non-string outputs get base quality score
-			qualityScore += 0.5
-		}
-	}
-
-	if qualityFactors == 0 {
-		return 0.0
-	}
-
-	return qualityScore / float64(qualityFactors)
-}
-
-// assessInputUtilization evaluates how well inputs were utilized in generating outputs.
-func (g *GEPA) assessInputUtilization(inputs, outputs map[string]any) float64 {
-	if len(inputs) == 0 {
-		return 1.0 // No inputs to utilize
-	}
-
-	utilizationScore := 0.0
-
-	for _, inputValue := range inputs {
-		if inputValue == nil {
-			continue
-		}
-
-		// Check if input appears to be reflected in outputs
-		if inputStr, ok := inputValue.(string); ok && inputStr != "" {
-			for _, outputValue := range outputs {
-				if outputStr, ok := outputValue.(string); ok {
-					// Simple heuristic: check if input concepts appear in output
-					if containsInputConcepts(inputStr, outputStr) {
-						utilizationScore += 1.0
-						break
-					}
-				}
-			}
-		} else {
-			// Non-string inputs: assume utilized if there are outputs
-			if len(outputs) > 0 {
-				utilizationScore += 1.0
-			}
-		}
-	}
-
-	return utilizationScore / float64(len(inputs))
-}
-
-// Helper functions for quality assessment
-
-func containsErrorKeywords(text string) bool {
-	errorKeywords := []string{"error", "failed", "unable", "cannot", "invalid", "undefined"}
-	lowerText := strings.ToLower(text)
-	for _, keyword := range errorKeywords {
-		if strings.Contains(lowerText, keyword) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsStructuredContent(text string) bool {
-	// Simple heuristics for structured content
-	return strings.Contains(text, ":") ||
-		strings.Contains(text, "-") ||
-		strings.Contains(text, ".") ||
-		strings.Contains(text, "\n")
-}
-
-func containsInputConcepts(input, output string) bool {
-	// Simple heuristic: check if key words from input appear in output
-	inputWords := strings.Fields(strings.ToLower(input))
-	outputLower := strings.ToLower(output)
-
-	matchedWords := 0
-	for _, word := range inputWords {
-		if len(word) > 3 && strings.Contains(outputLower, word) { // Only count significant words
-			matchedWords++
-		}
-	}
-
-	// Consider utilized if at least 30% of significant words appear
-	return len(inputWords) > 0 && float64(matchedWords)/float64(len(inputWords)) >= 0.3
 }
 
 // getInputTypes extracts type information from inputs for reflection.
@@ -4555,13 +2374,6 @@ func (g *GEPA) setCurrentMultiObjectiveFitnessMap(fitnessMap map[string]*MultiOb
 	g.state.MultiObjectiveFitnessMap = fitnessMap
 }
 
-// getCurrentMultiObjectiveFitnessMap returns the current multi-objective fitness map.
-func (g *GEPA) getCurrentMultiObjectiveFitnessMap() map[string]*MultiObjectiveFitness {
-	g.state.mu.RLock()
-	defer g.state.mu.RUnlock()
-	return g.state.MultiObjectiveFitnessMap
-}
-
 // updateBestCandidate updates the best candidate if a better one is found.
 func (g *GEPA) updateBestCandidate(candidate *GEPACandidate) {
 	g.state.mu.Lock()
@@ -4602,9 +2414,9 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 		return fmt.Errorf("no candidates available for proposal evolution")
 	}
 
-	nextCandidate := g.proposeNextGenerationCandidate(ctx, currentPop, source, nextGeneration)
+	nextCandidate, attempted := g.proposeNextGenerationCandidate(ctx, currentPop, source, nextGeneration)
 	g.ensureCandidateMetrics(nextCandidate.ID)
-	g.syncCandidateUpdateState(ctx, source, nextCandidate)
+	g.syncCandidateUpdateState(ctx, nextCandidate)
 
 	newPopulation, replaced := g.populationSnapshotWithReplacement(currentPop, source.ID, nextCandidate, nextGeneration)
 	if !replaced {
@@ -4615,6 +2427,16 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	// Add to population history
 	g.state.mu.Lock()
 	g.state.PopulationHistory = append(g.state.PopulationHistory, newPopulation)
+	// A skipped mutation provides no evidence of stagnation. Count an update
+	// only when a proposal was attempted, including proposals rejected by the
+	// metric. Advance the counter here, not each time HasConverged is queried.
+	if attempted {
+		if newPopulation.BestFitness-currentPop.BestFitness < g.config.ConvergenceThreshold {
+			g.state.ConvergenceStatus.StagnationCount++
+		} else {
+			g.state.ConvergenceStatus.StagnationCount = 0
+		}
+	}
 	g.state.mu.Unlock()
 	if newPopulation.BestCandidate != nil {
 		g.updateBestCandidate(newPopulation.BestCandidate)
@@ -4629,42 +2451,44 @@ func (g *GEPA) evolvePopulation(ctx context.Context) error {
 	return nil
 }
 
-func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, population *Population, source *GEPACandidate, nextGeneration int) *GEPACandidate {
+func (g *GEPA) proposeNextGenerationCandidate(ctx context.Context, population *Population, source *GEPACandidate, nextGeneration int) (*GEPACandidate, bool) {
 	if population == nil || source == nil {
-		return nil
+		return nil, false
 	}
 
 	componentSelection := g.selectComponentsForUpdate(source)
 
-	if merged := g.tryAncestorMergeProposal(ctx, population, source, nextGeneration); merged != nil {
-		return g.applyComponentSelectionState(merged, componentSelection.nextCursor)
+	merged, mergeAttempted := g.tryAncestorMergeProposal(ctx, population, source, nextGeneration)
+	if merged != nil {
+		return g.applyComponentSelectionState(merged, componentSelection.nextCursor), true
 	}
 
 	var proposed *GEPACandidate
+	var mutationAttempted bool
 	switch len(componentSelection.modules) {
 	case 0:
 		proposed = nil
 	case 1:
 		focusedSource := g.prepareCandidateForComponentUpdate(source, componentSelection.modules[0])
-		proposed = g.mutate(ctx, focusedSource)
+		proposed, mutationAttempted = g.mutate(ctx, focusedSource)
 		if proposed == focusedSource {
 			proposed = source
 		}
 	default:
-		proposed = g.proposeMultiComponentCandidate(ctx, source, componentSelection.modules, nextGeneration)
+		proposed, mutationAttempted = g.proposeMultiComponentCandidate(ctx, source, componentSelection.modules, nextGeneration)
 	}
 
 	if proposed == nil || proposed == source {
 		carried := g.copyCandidate(source)
 		carried.Generation = nextGeneration
-		return g.applyComponentSelectionState(carried, componentSelection.nextCursor)
+		return g.applyComponentSelectionState(carried, componentSelection.nextCursor), mergeAttempted || mutationAttempted
 	}
 
 	if proposed.Generation < nextGeneration {
 		proposed.Generation = nextGeneration
 	}
 
-	return g.applyComponentSelectionState(proposed, componentSelection.nextCursor)
+	return g.applyComponentSelectionState(proposed, componentSelection.nextCursor), true
 }
 
 func (g *GEPA) prepareCandidateForComponentUpdate(source *GEPACandidate, moduleName string) *GEPACandidate {
@@ -4751,15 +2575,15 @@ func (g *GEPA) applyComponentSelectionState(candidate *GEPACandidate, nextCursor
 	return candidate
 }
 
-func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPACandidate, modules []string, nextGeneration int) *GEPACandidate {
+func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPACandidate, modules []string, nextGeneration int) (*GEPACandidate, bool) {
 	if source == nil || len(modules) == 0 {
-		return nil
+		return nil, false
 	}
 
 	working := g.copyCandidate(source)
 	componentTexts := cloneCandidateComponentTexts(source)
 	if len(componentTexts) == 0 {
-		return nil
+		return nil, false
 	}
 
 	appliedModules := make([]string, 0, len(modules))
@@ -4787,7 +2611,7 @@ func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPAC
 	}
 
 	if len(appliedModules) == 0 {
-		return nil
+		return nil, false
 	}
 
 	proposed := &GEPACandidate{
@@ -4808,15 +2632,14 @@ func (g *GEPA) proposeMultiComponentCandidate(ctx context.Context, source *GEPAC
 
 	accepted := g.acceptCandidateProposal(ctx, source, proposed)
 	if accepted == source {
-		return nil
+		return nil, true
 	}
-	return accepted
+	return accepted, true
 }
 
 // selectCandidates returns candidates sampled according to the configured
 // selection strategy.
 func (g *GEPA) selectCandidates(population *Population, count int) []*GEPACandidate {
-	logger := logging.GetLogger()
 	if population == nil || len(population.Candidates) == 0 {
 		return nil
 	}
@@ -4824,30 +2647,41 @@ func (g *GEPA) selectCandidates(population *Population, count int) []*GEPACandid
 		count = 1
 	}
 
-	switch g.config.SelectionStrategy {
-	case "tournament":
-		logger.Debug(context.Background(), "Using tournament selection for candidate updates")
-		return g.tournamentSelection(population, count)
-	case "roulette":
-		logger.Debug(context.Background(), "Using roulette selection for candidate updates")
-		return g.rouletteSelection(population, count)
-	case "pareto":
-		logger.Debug(context.Background(), "Using Pareto-based selection for candidate updates")
-		return g.paretoBasedSelection(population, count)
-	case "adaptive_pareto":
-		logger.Debug(context.Background(), "Using adaptive Pareto-based selection for candidate updates")
-		return g.adaptiveParetoSelection(population, count)
-	default:
-		logger.Debug(context.Background(), "Using default tournament selection for candidate updates")
-		return g.tournamentSelection(population, count)
+	// Never mix training and holdout scores. A partially validated population
+	// falls back to the stable training batch until the next validation pass.
+	selectionPopulation, hasCoverage := g.metricSelectionPopulation(population, true)
+	if !hasCoverage {
+		selectionPopulation = population
 	}
+
+	var selected []*GEPACandidate
+	switch g.config.SelectionStrategy {
+	case "roulette":
+		selected = g.rouletteSelection(selectionPopulation, count)
+	case "pareto", "adaptive_pareto":
+		// Both names use the paper's per-example frontier, sampled in proportion
+		// to coverage after pruning redundant tied winners. No heuristic fallback.
+		if !hasCoverage {
+			selectionPopulation, hasCoverage = g.metricSelectionPopulation(population, false)
+		}
+		if hasCoverage {
+			selected = g.rouletteSelection(selectionPopulation, count)
+		} else {
+			selected = g.tournamentSelection(population, count)
+		}
+	default:
+		selected = g.tournamentSelection(selectionPopulation, count)
+	}
+
+	// Coverage lives only on selection copies; candidate fitness remains the
+	// user's average metric for acceptance, convergence, and final selection.
+	for i, candidate := range selected {
+		selected[i] = g.findPopulationCandidateByID(population, candidate.ID)
+	}
+	return selected
 }
 
 func (g *GEPA) selectCandidateForUpdate(population *Population) *GEPACandidate {
-	if selected := g.selectValidationCandidateForUpdate(population); selected != nil {
-		return selected
-	}
-
 	selected := g.selectCandidates(population, 1)
 	if len(selected) > 0 && selected[0] != nil {
 		return selected[0]
@@ -4858,114 +2692,54 @@ func (g *GEPA) selectCandidateForUpdate(population *Population) *GEPACandidate {
 	return population.Candidates[g.rng.Intn(len(population.Candidates))]
 }
 
-func (g *GEPA) selectValidationCandidateForUpdate(population *Population) *GEPACandidate {
-	validationPopulation, validationFitnessMap, ok := g.validationSelectionPopulation(population)
-	if !ok {
-		return nil
+// metricSelectionPopulation derives coverage from a complete, aligned batch of
+// metric evaluations. It is shared by training and validation selection.
+func (g *GEPA) metricSelectionPopulation(population *Population, validation bool) (*Population, bool) {
+	if population == nil || len(population.Candidates) == 0 || g.state == nil {
+		return nil, false
 	}
-
-	var selected []*GEPACandidate
-	switch g.config.SelectionStrategy {
-	case "roulette":
-		selected = g.rouletteSelection(validationPopulation, 1)
-	case "pareto":
-		selected = g.selectWithParetoRanking(validationPopulation.Candidates, validationFitnessMap, 1)
-	case "adaptive_pareto":
-		selected = g.adaptiveParetoSelectionWithFitnessMap(validationPopulation, validationFitnessMap, 1)
-	default:
-		selected = g.tournamentSelection(validationPopulation, 1)
-	}
-
-	if len(selected) == 0 || selected[0] == nil {
-		return nil
-	}
-
-	return g.findPopulationCandidateByID(population, selected[0].ID)
-}
-
-func (g *GEPA) validationSelectionPopulation(population *Population) (*Population, map[string]*MultiObjectiveFitness, bool) {
-	if population == nil || len(population.Candidates) == 0 {
-		return nil, nil, false
-	}
-
-	validationPopulation := &Population{
-		Candidates:  make([]*GEPACandidate, 0, len(population.Candidates)),
-		Generation:  population.Generation,
-		BestFitness: math.Inf(-1),
-	}
-	validationFitnessMap := make(map[string]*MultiObjectiveFitness, len(population.Candidates))
-	currentFitnessMap := g.getCurrentMultiObjectiveFitnessMap()
-	frontier, coverage := g.state.ValidationFrontierSnapshot()
-	if len(frontier) == 0 {
-		return nil, nil, false
-	}
-	totalFrontierCases := float64(len(frontier))
-
+	evaluations := make(map[string]*gepaCandidateEvaluation, len(population.Candidates))
+	var batchKeys []string
 	for _, candidate := range population.Candidates {
 		if candidate == nil {
 			continue
 		}
-
-		evaluation := g.state.GetCandidateValidationEvaluation(candidate.ID)
-		if evaluation == nil {
-			return nil, nil, false
+		var evaluation *gepaCandidateEvaluation
+		if validation {
+			evaluation = g.state.GetCandidateValidationEvaluation(candidate.ID)
+		} else {
+			evaluation = g.state.GetCandidateEvaluation(candidate.ID)
 		}
+		if evaluation == nil || len(evaluation.Cases) == 0 {
+			return nil, false
+		}
+		keys := make([]string, len(evaluation.Cases))
+		for i, evalCase := range evaluation.Cases {
+			keys[i] = exampleCacheKey(evalCase.Example)
+		}
+		if batchKeys == nil {
+			batchKeys = keys
+		} else if !slices.Equal(batchKeys, keys) {
+			return nil, false
+		}
+		evaluations[candidate.ID] = evaluation
+	}
 
+	frontier, coverage := buildValidationFrontier(evaluations)
+	if len(coverage) == 0 {
+		return nil, false
+	}
+	selectionPopulation := &Population{Generation: population.Generation}
+	for _, candidate := range population.Candidates {
+		if candidate == nil {
+			continue
+		}
 		cloned := g.copyCandidate(candidate)
-		coverageScore := float64(coverage[candidate.ID]) / totalFrontierCases
-		cloned.Fitness = coverageScore
-		validationPopulation.Candidates = append(validationPopulation.Candidates, cloned)
-		validationFitnessMap[candidate.ID] = validationAdjustedMultiObjectiveFitness(currentFitnessMap[candidate.ID], coverageScore, evaluation.AverageScore)
-
-		if validationPopulation.BestCandidate == nil || cloned.Fitness > validationPopulation.BestFitness || (cloned.Fitness == validationPopulation.BestFitness && cloned.ID < validationPopulation.BestCandidate.ID) {
-			validationPopulation.BestCandidate = cloned
-			validationPopulation.BestFitness = cloned.Fitness
-		}
+		cloned.Fitness = float64(coverage[candidate.ID]) / float64(len(frontier))
+		selectionPopulation.Candidates = append(selectionPopulation.Candidates, cloned)
 	}
-
-	if len(validationPopulation.Candidates) == 0 {
-		return nil, nil, false
-	}
-
-	return validationPopulation, validationFitnessMap, true
-}
-
-func validationAdjustedMultiObjectiveFitness(base *MultiObjectiveFitness, coverageScore, validationScore float64) *MultiObjectiveFitness {
-	fitness := &MultiObjectiveFitness{
-		SuccessRate:    coverageScore,
-		OutputQuality:  validationScore,
-		Efficiency:     0.5,
-		Robustness:     0.5,
-		Generalization: 0.5,
-		Diversity:      0.5,
-		Innovation:     0.5,
-	}
-
-	if base != nil {
-		*fitness = *base
-		fitness.SuccessRate = coverageScore
-		fitness.OutputQuality = validationScore
-	}
-
-	fitness.WeightedScore = fitness.ComputeWeightedScore(nil)
-	return fitness
-}
-
-func (g *GEPA) adaptiveParetoSelectionWithFitnessMap(population *Population, fitnessMap map[string]*MultiObjectiveFitness, selectionSize int) []*GEPACandidate {
-	if population == nil || len(population.Candidates) <= selectionSize {
-		return population.Candidates
-	}
-
-	diversityScore := g.assessPopulationDiversity(population.Candidates, fitnessMap)
-	convergenceProgress := float64(g.state.CurrentGeneration) / float64(g.config.MaxGenerations)
-
-	if diversityScore < 0.3 && convergenceProgress > 0.5 {
-		return g.adaptiveWeightedSelection(population.Candidates, fitnessMap, selectionSize, g.state.CurrentGeneration)
-	}
-	if convergenceProgress < 0.3 {
-		return g.diversityEnhancedParetoSelection(population.Candidates, fitnessMap, selectionSize)
-	}
-	return g.selectWithParetoRanking(population.Candidates, fitnessMap, selectionSize)
+	g.recomputePopulationBest(selectionPopulation)
+	return selectionPopulation, true
 }
 
 func (g *GEPA) findPopulationCandidateByID(population *Population, candidateID string) *GEPACandidate {
@@ -5028,7 +2802,7 @@ func (g *GEPA) recomputePopulationBest(population *Population) {
 	}
 }
 
-func (g *GEPA) syncCandidateUpdateState(ctx context.Context, source, updated *GEPACandidate) {
+func (g *GEPA) syncCandidateUpdateState(ctx context.Context, updated *GEPACandidate) {
 	if updated == nil {
 		return
 	}
@@ -5044,68 +2818,6 @@ func (g *GEPA) syncCandidateUpdateState(ctx context.Context, source, updated *GE
 	if evaluation != nil {
 		updated.Fitness = evaluation.AverageScore
 	}
-
-	g.upsertCurrentMultiObjectiveFitness(source, updated)
-}
-
-func (g *GEPA) upsertCurrentMultiObjectiveFitness(source, updated *GEPACandidate) {
-	currentFitnessMap := g.getCurrentMultiObjectiveFitnessMap()
-	nextFitnessMap := make(map[string]*MultiObjectiveFitness, len(currentFitnessMap)+1)
-	for candidateID, fitness := range currentFitnessMap {
-		if source != nil && source.ID != updated.ID && candidateID == source.ID {
-			continue
-		}
-		nextFitnessMap[candidateID] = fitness
-	}
-
-	multiObjFitness := g.latestOrFallbackMultiObjectiveFitness(source, updated)
-	if updated != nil && multiObjFitness != nil {
-		nextFitnessMap[updated.ID] = multiObjFitness
-		g.state.RecordCandidateFitness(updated, multiObjFitness, updated.Fitness)
-	}
-
-	g.setCurrentMultiObjectiveFitnessMap(nextFitnessMap)
-}
-
-func (g *GEPA) latestOrFallbackMultiObjectiveFitness(source, updated *GEPACandidate) *MultiObjectiveFitness {
-	if updated == nil {
-		return nil
-	}
-
-	if g.performanceLogger != nil {
-		if metrics := g.performanceLogger.GetCandidateMetrics(updated.ID); metrics != nil {
-			if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok && multiObjFitness != nil {
-				return multiObjFitness
-			}
-		}
-	}
-
-	// Iterative GEPA steps only re-evaluate the updated candidate, so preserve a
-	// usable Pareto record even when no fresh interceptor-derived multi-objective
-	// metrics are available. This keeps selection quality from collapsing to
-	// implicit zeroes for post-initialization candidates.
-	fallback := &MultiObjectiveFitness{
-		SuccessRate:    updated.Fitness,
-		OutputQuality:  updated.Fitness,
-		Efficiency:     0.5,
-		Robustness:     0.5,
-		Generalization: 0.5,
-		Diversity:      0.5,
-		Innovation:     0.5,
-	}
-
-	if source != nil {
-		if sourceFitness, ok := g.getCurrentMultiObjectiveFitnessMap()[source.ID]; ok && sourceFitness != nil {
-			fallback.Efficiency = sourceFitness.Efficiency
-			fallback.Robustness = sourceFitness.Robustness
-			fallback.Generalization = sourceFitness.Generalization
-			fallback.Diversity = sourceFitness.Diversity
-			fallback.Innovation = sourceFitness.Innovation
-		}
-	}
-
-	fallback.WeightedScore = fallback.ComputeWeightedScore(nil)
-	return fallback
 }
 
 // tournamentSelection implements tournament selection.
@@ -5159,7 +2871,7 @@ func (g *GEPA) rouletteSelection(population *Population, count int) []*GEPACandi
 
 		for _, candidate := range population.Candidates {
 			cumulative += candidate.Fitness
-			if cumulative >= spin {
+			if cumulative > spin {
 				selected = append(selected, candidate)
 				break
 			}
@@ -5169,134 +2881,14 @@ func (g *GEPA) rouletteSelection(population *Population, count int) []*GEPACandi
 	return selected
 }
 
-// selectElite selects the best candidates for elitism using multi-objective Pareto-based or single-objective methods.
-func (g *GEPA) selectElite(population *Population, count int) []*GEPACandidate {
-	logger := logging.GetLogger()
-
-	if count <= 0 {
-		return []*GEPACandidate{}
-	}
-
-	// Try to use Pareto-based elite selection for multi-objective optimization
-	if g.config.SelectionStrategy == "pareto" || g.config.SelectionStrategy == "adaptive_pareto" {
-		fitnessMap := g.buildMultiObjectiveFitnessMap(population.Candidates)
-
-		// Check if we have valid multi-objective fitness data
-		hasValidFitness := false
-		for _, fitness := range fitnessMap {
-			if fitness != nil {
-				hasValidFitness = true
-				break
-			}
-		}
-
-		if hasValidFitness {
-			logger.Debug(context.Background(), "Using Pareto-based elite selection: count=%d", count)
-			paretoElite := g.selectParetoElite(population.Candidates, fitnessMap, count)
-
-			// Create copies for next generation
-			elite := make([]*GEPACandidate, len(paretoElite))
-			for i, candidate := range paretoElite {
-				elite[i] = g.copyCandidate(candidate)
-				elite[i].Generation = population.Generation + 1
-			}
-
-			logger.Debug(context.Background(), "Pareto elite selection completed: selected=%d candidates", len(elite))
-			return elite
-		}
-	}
-
-	// Fallback to traditional single-objective elite selection
-	logger.Debug(context.Background(), "Using single-objective elite selection: count=%d", count)
-
-	// Sort candidates by fitness (descending)
-	candidates := make([]*GEPACandidate, len(population.Candidates))
-	copy(candidates, population.Candidates)
-
-	for i := 0; i < len(candidates); i++ {
-		for j := i + 1; j < len(candidates); j++ {
-			if candidates[j].Fitness > candidates[i].Fitness {
-				candidates[i], candidates[j] = candidates[j], candidates[i]
-			}
-		}
-	}
-
-	// Take top candidates
-	if count > len(candidates) {
-		count = len(candidates)
-	}
-
-	elite := make([]*GEPACandidate, count)
-	for i := 0; i < count; i++ {
-		// Create copies of elite candidates for next generation
-		elite[i] = g.copyCandidate(candidates[i])
-		elite[i].Generation = population.Generation + 1
-	}
-
-	return elite
-}
-
-// selectParetoElite selects elite candidates using Pareto dominance and crowding distance.
-func (g *GEPA) selectParetoElite(candidates []*GEPACandidate, fitnessMap map[string]*MultiObjectiveFitness, count int) []*GEPACandidate {
-	if len(candidates) <= count {
-		return candidates
-	}
-
-	// Calculate Pareto fronts
-	fronts := g.calculateParetoFronts(candidates, fitnessMap)
-	if len(fronts) == 0 {
-		// Fallback to first N candidates if no fronts
-		if count > len(candidates) {
-			count = len(candidates)
-		}
-		return candidates[:count]
-	}
-
-	selected := make([]*GEPACandidate, 0, count)
-
-	// Add candidates from Pareto fronts in order of rank
-	for _, front := range fronts {
-		if len(selected)+len(front.Candidates) <= count {
-			// Add entire front
-			selected = append(selected, front.Candidates...)
-		} else {
-			// Need to select subset from this front using crowding distance
-			remaining := count - len(selected)
-			crowdingDistances := g.calculateCrowdingDistance(front.Candidates, fitnessMap)
-
-			// Sort front candidates by crowding distance (descending)
-			frontCandidates := make([]*GEPACandidate, len(front.Candidates))
-			copy(frontCandidates, front.Candidates)
-
-			for i := 0; i < len(frontCandidates)-1; i++ {
-				for j := 0; j < len(frontCandidates)-1-i; j++ {
-					if crowdingDistances[frontCandidates[j].ID] < crowdingDistances[frontCandidates[j+1].ID] {
-						frontCandidates[j], frontCandidates[j+1] = frontCandidates[j+1], frontCandidates[j]
-					}
-				}
-			}
-
-			// Add the most diverse candidates from this front
-			selected = append(selected, frontCandidates[:remaining]...)
-			break
-		}
-
-		if len(selected) >= count {
-			break
-		}
-	}
-
-	return selected
-}
-
-// mutate applies mutation to a candidate.
-func (g *GEPA) mutate(ctx context.Context, candidate *GEPACandidate) *GEPACandidate {
+// mutate applies mutation to a candidate and reports whether a proposal was attempted.
+func (g *GEPA) mutate(ctx context.Context, candidate *GEPACandidate) (*GEPACandidate, bool) {
 	proposed := g.proposeMutationCandidate(ctx, candidate)
 	if proposed == candidate {
-		return candidate
+		return candidate, false
 	}
 
-	return g.acceptMutationProposal(ctx, candidate, proposed)
+	return g.acceptMutationProposal(ctx, candidate, proposed), true
 }
 
 func (g *GEPA) proposeMutationCandidate(ctx context.Context, candidate *GEPACandidate) *GEPACandidate {
@@ -5527,12 +3119,12 @@ func (g *GEPA) copyCandidate(original *GEPACandidate) *GEPACandidate {
 
 // Population Evaluation Methods
 
-// evaluatePopulation evaluates all candidates in the current population and returns multi-objective fitness map.
-func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (map[string]*MultiObjectiveFitness, error) {
+// evaluatePopulation evaluates all candidates using the user's metric.
+func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
 	logger := logging.GetLogger()
 	population := g.getCurrentPopulation()
 	if population == nil {
-		return nil, fmt.Errorf("no current population to evaluate")
+		return fmt.Errorf("no current population to evaluate")
 	}
 
 	logger.Info(ctx, "Evaluating population: generation=%d, candidates=%d",
@@ -5547,15 +3139,11 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 
 	var mu sync.Mutex
 	evaluatedCount := 0
-	multiObjFitnessMap := make(map[string]*MultiObjectiveFitness)
 	candidateEvaluations := make(map[string]*gepaCandidateEvaluation, len(population.Candidates))
 
 	for _, candidate := range population.Candidates {
 		candidate := candidate // Capture loop variable
 		p.Go(func() {
-			g.incrementConcurrentTasks()
-			defer g.decrementConcurrentTasks()
-
 			evaluation := g.evaluateCandidateWithAdapter(ctx, candidate, adapter)
 			fitness := evaluation.AverageScore
 
@@ -5563,21 +3151,6 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 			candidate.Fitness = fitness
 			evaluatedCount++
 			candidateEvaluations[candidate.ID] = evaluation
-
-			// Prefer interceptor-derived multi-objective fitness when available,
-			// but fall back to state-recorded values from external adapter paths.
-			if multiObjFitness := g.lookupStoredMultiObjectiveFitness(candidate.ID); multiObjFitness != nil {
-				multiObjFitnessMap[candidate.ID] = multiObjFitness
-			}
-
-			// Update best candidate
-			g.updateBestCandidate(candidate)
-
-			// Update population stats
-			if fitness > population.BestFitness {
-				population.BestFitness = fitness
-				population.BestCandidate = candidate
-			}
 
 			// Check for progress logging while still holding the mutex
 			if evaluatedCount%5 == 0 {
@@ -5592,35 +3165,16 @@ func (g *GEPA) evaluatePopulation(ctx context.Context, program core.Program, dat
 
 	p.Wait()
 	g.state.SetCandidateEvaluations(candidateEvaluations)
+	g.recomputePopulationBest(population)
+	// Publish aggregate fitness only after all examples and module calls finish.
+	for _, candidate := range population.Candidates {
+		g.updateBestCandidate(candidate)
+	}
 
-	logger.Info(ctx, "Population evaluation completed: generation=%d, best_fitness=%.3f, evaluated_candidates=%d, multi_objective_entries=%d",
+	logger.Info(ctx, "Population evaluation completed: generation=%d, best_fitness=%.3f, evaluated_candidates=%d",
 		population.Generation,
 		population.BestFitness,
-		evaluatedCount,
-		len(multiObjFitnessMap))
-
-	return multiObjFitnessMap, nil
-}
-
-func (g *GEPA) lookupStoredMultiObjectiveFitness(candidateID string) *MultiObjectiveFitness {
-	if g == nil || strings.TrimSpace(candidateID) == "" {
-		return nil
-	}
-
-	if metrics := g.performanceLogger.GetCandidateMetrics(candidateID); metrics != nil && metrics.Metadata != nil {
-		if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok && multiObjFitness != nil {
-			return multiObjFitness
-		}
-	}
-
-	g.state.mu.RLock()
-	defer g.state.mu.RUnlock()
-
-	if metrics, exists := g.state.CandidateMetrics[candidateID]; exists && metrics != nil && metrics.Metadata != nil {
-		if multiObjFitness, ok := metrics.Metadata["multi_objective_fitness"].(*MultiObjectiveFitness); ok && multiObjFitness != nil {
-			return multiObjFitness
-		}
-	}
+		evaluatedCount)
 
 	return nil
 }
@@ -6188,21 +3742,9 @@ func (g *GEPA) hasConverged() bool {
 		return true
 	}
 
-	// Check if fitness improvement is below threshold
-	if len(g.state.PopulationHistory) >= 2 {
-		current := g.state.PopulationHistory[len(g.state.PopulationHistory)-1]
-		previous := g.state.PopulationHistory[len(g.state.PopulationHistory)-2]
-
-		improvement := current.BestFitness - previous.BestFitness
-		if improvement < g.config.ConvergenceThreshold {
-			g.state.ConvergenceStatus.StagnationCount++
-			if g.state.ConvergenceStatus.StagnationCount >= g.config.StagnationLimit {
-				g.state.ConvergenceStatus.IsConverged = true
-				return true
-			}
-		} else {
-			g.state.ConvergenceStatus.StagnationCount = 0
-		}
+	if g.state.ConvergenceStatus.StagnationCount >= g.config.StagnationLimit {
+		g.state.ConvergenceStatus.IsConverged = true
+		return true
 	}
 
 	return false
@@ -6735,9 +4277,6 @@ func (g *GEPA) batchSelfCritique(ctx context.Context, candidates []*GEPACandidat
 	for _, candidate := range candidates {
 		candidate := candidate // Capture loop variable
 		p.Go(func() {
-			g.incrementConcurrentTasks()
-			defer g.decrementConcurrentTasks()
-
 			result, err := g.selfCritiqueCandidate(ctx, candidate)
 			if err != nil {
 				errorChan <- err

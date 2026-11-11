@@ -43,6 +43,9 @@ jobs:
       - name: Vet root module
         run: go vet ./...
 
+      - name: Offline optimizer score gate (no API keys)
+        run: go test -tags skip -race -count=1 -timeout=2m -run '^TestOffline' -v ./pkg/optimizers
+
       - name: Test root packages
         run: go test -tags skip -race -covermode atomic -v ./pkg/... -coverprofile ./coverage.txt
 

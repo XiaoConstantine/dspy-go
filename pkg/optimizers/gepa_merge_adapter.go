@@ -16,33 +16,33 @@ type gepaAncestorMergeChoice struct {
 	mergeKey              string
 }
 
-func (g *GEPA) tryAncestorMergeProposal(ctx context.Context, population *Population, source *GEPACandidate, nextGeneration int) *GEPACandidate {
+func (g *GEPA) tryAncestorMergeProposal(ctx context.Context, population *Population, source *GEPACandidate, nextGeneration int) (*GEPACandidate, bool) {
 	if g == nil || g.state == nil || !g.state.MergeBudgetAvailable(g.config.MaxMergeInvocations) {
-		return nil
+		return nil, false
 	}
 
 	choice := g.selectAncestorMergePartner(population, source)
 	if choice == nil {
-		return nil
+		return nil, false
 	}
 	if !g.state.RecordMergeInvocation(choice.mergeKey, g.config.MaxMergeInvocations) {
-		return nil
+		return nil, false
 	}
 
 	merged := g.buildAncestorMergedCandidate(source, choice, nextGeneration)
 	if merged == nil {
-		return nil
+		return nil, false
 	}
 
 	accepted := g.acceptMergeProposal(ctx, source, choice.partner, merged)
 	if accepted == nil || accepted == source {
-		return nil
+		return nil, true
 	}
 	if accepted.Generation < nextGeneration {
 		accepted.Generation = nextGeneration
 	}
 
-	return accepted
+	return accepted, true
 }
 
 func (g *GEPA) selectAncestorMergePartner(population *Population, source *GEPACandidate) *gepaAncestorMergeChoice {

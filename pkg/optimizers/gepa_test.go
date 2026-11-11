@@ -15,6 +15,7 @@ import (
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -289,6 +290,285 @@ func exactOutputMetric(expected, actual map[string]any) float64 {
 	return 0.0
 }
 
+// Exercise the real Predict interceptor path with deterministic task outputs.
+func newMetricFrontierPredictProgram(instruction string) core.Program {
+	llm := &testutil.MockLLM{}
+	for _, text := range []string{"elegant metaphor", "first specialist", "error specialist"} {
+		llm.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+			return strings.Contains(prompt, text)
+		}), mock.Anything).Return(&core.LLMResponse{Content: "output: " + text}, nil)
+	}
+	predict := modules.NewPredict(core.Signature{
+		Instruction: instruction,
+		Outputs:     []core.OutputField{{Field: core.NewField("output")}},
+	}).WithTextOutput()
+	predict.SetLLM(llm)
+	return core.NewProgramWithForwardFactory(map[string]core.Module{"alpha": predict},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				module := modules["alpha"].(core.InterceptableModule)
+				// Multiple module calls must not replace a candidate's batch scores.
+				if _, err := module.ProcessWithInterceptors(ctx, inputs, nil); err != nil {
+					return nil, err
+				}
+				return module.ProcessWithInterceptors(ctx, inputs, nil)
+			}
+		})
+}
+
+func TestGEPACompileParetoUsesPerExampleMetric(t *testing.T) {
+	for _, strategy := range []string{"adaptive_pareto", "pareto"} {
+		for _, mode := range []string{"plain", "predict", "resume", "validation", "validation_resume"} {
+			t.Run(strategy+"/"+mode, func(t *testing.T) {
+				validation := strings.HasPrefix(mode, "validation")
+				resume := strings.HasSuffix(mode, "resume")
+				llm := &testutil.MockLLM{}
+				llm.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+					Content: "1. first specialist\n2. error specialist",
+				}, nil)
+				config := DefaultGEPAConfig()
+				require.Equal(t, "adaptive_pareto", config.SelectionStrategy)
+				config.SelectionStrategy = strategy
+				config.GenerationLLM = llm
+				config.ReflectionLLM = llm
+				config.PopulationSize = 3
+				config.MaxGenerations = 1
+				config.ReflectionFreq = 0
+				config.RandomSeed = 31
+				config.EvaluationBatchSize = 3
+				if validation {
+					config.ValidationExamples = []core.Example{{Outputs: map[string]any{"validation": true}}}
+				}
+				if resume {
+					config.RunDir = t.TempDir()
+				}
+				gepa, err := NewGEPA(config)
+				require.NoError(t, err)
+
+				program := newCandidateEvaluationTestProgram("elegant metaphor")
+				if mode != "plain" {
+					program = newMetricFrontierPredictProgram("elegant metaphor")
+				}
+				// The high-average compromise is never best on any example. Two
+				// specialists must both remain selectable, including the one that
+				// loses on the last example and has a lower average.
+				scores := map[string][]float64{
+					"elegant metaphor": {0.7, 0.7, 0.7},
+					"first specialist": {1, 1, 0},
+					"error specialist": {0, 0, 1},
+				}
+				examples := []core.Example{
+					{Outputs: map[string]any{"index": 0}},
+					{Outputs: map[string]any{"index": 1}},
+					{Outputs: map[string]any{"index": 2}},
+				}
+				metric := func(expected, actual map[string]any) float64 {
+					if expected["validation"] == true {
+						if actual["output"] == "elegant metaphor" {
+							return 1
+						}
+						return 0
+					}
+					return scores[actual["output"].(string)][expected["index"].(int)]
+				}
+				_, err = gepa.Compile(context.Background(), program, datasets.NewSimpleDataset(examples), metric)
+				require.NoError(t, err)
+				state := gepa.GetOptimizationState()
+				assert.Equal(t, "elegant metaphor", state.BestCandidate.Instruction)
+				assert.InDelta(t, 0.7, state.BestFitness, 1e-9)
+				assert.False(t, state.ConvergenceStatus.IsConverged, "module calls must not trigger generation-0 convergence")
+				for _, candidate := range gepa.CurrentPopulation().Candidates {
+					assert.InDelta(t, gepa.state.GetCandidateEvaluation(candidate.ID).AverageScore, candidate.Fitness, 1e-9,
+						"validation and selection must not overwrite training fitness")
+				}
+				archive := state.GetParetoArchive()
+				require.Len(t, archive, 2)
+				assert.ElementsMatch(t, []string{"first specialist", "error specialist"}, []string{archive[0].Instruction, archive[1].Instruction})
+
+				// Evolve through the public API with mutation disabled, observing
+				// which candidate's generation changes rather than a private helper.
+				config.MutationRate = 0
+				config.CrossoverRate = 0
+				if resume {
+					callsBefore := state.MetricCallCount()
+					config.MaxGenerations = 2
+					gepa, err = NewGEPA(config)
+					require.NoError(t, err)
+					_, err = gepa.Compile(context.Background(), program, datasets.NewSimpleDataset(examples), metric)
+					require.NoError(t, err)
+					// Per-example caches are not persisted; restoring the frontier
+					// costs one full training/holdout pass, charged to the budget.
+					expectedCalls := 9
+					if validation {
+						expectedCalls += 3
+					}
+					assert.Equal(t, callsBefore+expectedCalls, gepa.state.MetricCallCount())
+				}
+				counts := make(map[string]int)
+				for step := 0; step < 300; step++ {
+					require.NoError(t, gepa.EvolveCurrentPopulation(context.Background()))
+					population := gepa.CurrentPopulation()
+					for _, candidate := range population.Candidates {
+						if candidate.Generation == population.Generation {
+							counts[candidate.Instruction]++
+						}
+					}
+				}
+				if validation {
+					assert.Equal(t, map[string]int{"elegant metaphor": 300}, counts, "holdout coverage takes precedence over training coverage")
+				} else {
+					assert.Zero(t, counts["elegant metaphor"], "a high average alone does not put a candidate on the frontier")
+					assert.InDelta(t, 200, counts["first specialist"], 35, "sampling weight is the number of best-scoring examples")
+					assert.InDelta(t, 100, counts["error specialist"], 35)
+				}
+			})
+		}
+	}
+}
+
+func TestGEPACompileConcurrentPredictKeepsMetricBest(t *testing.T) {
+	for _, strategy := range []string{"adaptive_pareto", "tournament"} {
+		for seed := int64(1); seed <= 8; seed++ {
+			t.Run(fmt.Sprintf("%s/seed=%d", strategy, seed), func(t *testing.T) {
+				llm := &testutil.MockLLM{}
+				llm.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{
+					Content: "1. elegant metaphor\n2. first specialist",
+				}, nil)
+				config := DefaultGEPAConfig()
+				config.SelectionStrategy = strategy
+				config.GenerationLLM = llm
+				config.ReflectionLLM = llm
+				config.PopulationSize = 3
+				config.MaxGenerations = 3
+				config.MutationRate = 0
+				config.CrossoverRate = 0
+				config.ReflectionFreq = 0
+				config.RandomSeed = seed
+				gepa, err := NewGEPA(config)
+				require.NoError(t, err)
+				examples := make([]core.Example, config.EvaluationBatchSize)
+				for i := range examples {
+					examples[i] = core.Example{Outputs: map[string]any{"index": i}}
+				}
+				metric := func(_, actual map[string]any) float64 {
+					if actual["output"] == "error specialist" {
+						return 0.25
+					}
+					return 0
+				}
+				compiled, err := gepa.Compile(context.Background(), newMetricFrontierPredictProgram("error specialist"), datasets.NewSimpleDataset(examples), metric)
+				require.NoError(t, err)
+				outputs, err := compiled.Execute(context.Background(), nil)
+				require.NoError(t, err)
+				assert.Equal(t, 0.25, metric(nil, outputs), "attractive prose cannot displace the metric winner")
+				state := gepa.GetOptimizationState()
+				assert.Equal(t, 0.25, state.BestFitness)
+				assert.Equal(t, 2, state.CurrentGeneration, "module calls cannot stop optimization before evolution")
+				assert.False(t, state.ConvergenceStatus.IsConverged)
+				for _, candidate := range gepa.CurrentPopulation().Candidates {
+					expected := 0.0
+					if candidate.Instruction == "error specialist" {
+						expected = 0.25
+					}
+					assert.Equal(t, expected, candidate.Fitness)
+				}
+			})
+		}
+	}
+}
+
+func TestGEPACompileStagnationCountsProposals(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mutationRate float64
+		proposal     string
+		wantScore    float64
+	}{
+		{"default", DefaultGEPAConfig().MutationRate, "improved instruction", 1},
+		{"skipped_then_improving", 0.3, "improved instruction", 1},
+		{"rejected", 1, "weaker instruction", 0.25},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := DefaultGEPAConfig()
+			config.RandomSeed = 4
+			config.ReflectionFreq = 0
+			config.MutationRate = tc.mutationRate
+			llm := &testutil.MockLLM{}
+			llm.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+				return strings.HasPrefix(prompt, "Generate ")
+			}), mock.Anything).Return(&core.LLMResponse{
+				Content: strings.Repeat("initial instruction\n", config.PopulationSize-1),
+			}, nil)
+			llm.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
+				return strings.HasPrefix(prompt, "Apply a ")
+			}), mock.Anything).Return(&core.LLMResponse{Content: tc.proposal}, nil)
+			config.GenerationLLM = llm
+			config.ReflectionLLM = llm
+			metric := func(_, actual map[string]any) float64 {
+				switch actual["output"] {
+				case "initial instruction":
+					return 0.25
+				case "improved instruction":
+					return 1
+				default:
+					return 0
+				}
+			}
+			gepa, err := NewGEPA(config)
+			require.NoError(t, err)
+			compiled, err := gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("initial instruction"),
+				datasets.NewSimpleDataset([]core.Example{{}}), metric)
+			require.NoError(t, err)
+			output, err := compiled.Execute(context.Background(), nil)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantScore, metric(nil, output))
+			state := gepa.GetOptimizationState()
+			switch tc.name {
+			case "default":
+				require.Greater(t, len(state.PopulationHistory), 1)
+				assert.Equal(t, 1.0, state.PopulationHistory[1].BestFitness, "the default loop must attempt a proposal on its first update")
+				assert.Equal(t, 1+config.StagnationLimit, state.CurrentGeneration)
+			case "rejected":
+				assert.Equal(t, config.StagnationLimit, state.CurrentGeneration, "rejected proposals still count toward convergence")
+				assert.True(t, state.ConvergenceStatus.IsConverged)
+			default:
+				assert.Greater(t, state.CurrentGeneration, config.StagnationLimit, "skipping mutation is not a failed improvement attempt")
+			}
+			stagnation := state.ConvergenceStatus.StagnationCount
+			for range 3 {
+				gepa.HasConverged()
+			}
+			assert.Equal(t, stagnation, state.ConvergenceStatus.StagnationCount, "observing convergence must not advance its counter")
+		})
+	}
+}
+
+func TestGEPAStateParetoArchiveUsesValidMetricCases(t *testing.T) {
+	state := NewGEPAState()
+	state.SetCandidateEvaluations(map[string]*gepaCandidateEvaluation{
+		"compromise": {AverageScore: -2, Cases: []gepaEvaluationCase{{Score: -2}, {Score: -2}, {Score: -2}}},
+		"first":      {AverageScore: -5.0 / 3, Cases: []gepaEvaluationCase{{Score: -1}, {Score: -1}, {Score: -3}}},
+		"last":       {AverageScore: -7.0 / 3, Cases: []gepaEvaluationCase{{Score: -3}, {Score: -3}, {Score: -1}}},
+		"invalid":    {AverageScore: 0, Cases: []gepaEvaluationCase{{Err: assert.AnError}, {Score: math.NaN()}, {Score: math.Inf(1)}}},
+	})
+	candidates := []*GEPACandidate{{ID: "compromise"}, {ID: "first"}, {ID: "last"}, {ID: "invalid"}}
+	// A failed example's default zero and legacy objective vectors must not beat
+	// legitimate negative metric scores. Repeated updates must not duplicate IDs.
+	legacy := map[string]*MultiObjectiveFitness{"invalid": {SuccessRate: 1, OutputQuality: 1, WeightedScore: 1}}
+	state.UpdateParetoArchive(candidates, legacy)
+	state.UpdateParetoArchive(candidates, legacy)
+	archive := state.GetParetoArchive()
+	require.Len(t, archive, 2)
+	assert.Equal(t, "first", archive[0].ID)
+	assert.Equal(t, "last", archive[1].ID)
+
+	state.MaxArchiveSize = 1
+	state.UpdateParetoArchive(candidates, legacy)
+	archive = state.GetParetoArchive()
+	require.Len(t, archive, 1)
+	assert.Equal(t, "first", archive[0].ID, "the archive cap prioritizes greater example coverage")
+}
+
 func TestNewGEPA(t *testing.T) {
 	// Set up mock LLM
 	mockLLM := &testutil.MockLLM{}
@@ -339,7 +619,7 @@ func TestDefaultGEPAConfig(t *testing.T) {
 
 	assert.Equal(t, 20, config.PopulationSize)
 	assert.Equal(t, 10, config.MaxGenerations)
-	assert.Equal(t, 0.3, config.MutationRate)
+	assert.Equal(t, 1.0, config.MutationRate)
 	assert.Equal(t, 0.7, config.CrossoverRate)
 	assert.Equal(t, 0.1, config.ElitismRate)
 	assert.Equal(t, 2, config.ReflectionFreq)
@@ -463,7 +743,7 @@ func TestNewGEPAHonorsRandomSeed(t *testing.T) {
 
 func TestDefaultMultiObjectiveWeights(t *testing.T) {
 	weights := DefaultMultiObjectiveWeights()
-	require.Len(t, weights, len(multiObjectiveNames))
+	require.Len(t, weights, 7)
 	assert.Equal(t, 0.25, weights[objectiveSuccess])
 	assert.Equal(t, 0.20, weights[objectiveQuality])
 	assert.Equal(t, 0.15, weights[objectiveEfficiency])
@@ -1496,7 +1776,7 @@ func TestValidateIfScheduledHonorsValidationFrequency(t *testing.T) {
 	require.NotNil(t, gepa.state.BestValidationCandidate)
 }
 
-func TestValidationSelectionPopulationUsesFrontierCoverage(t *testing.T) {
+func TestMetricSelectionPopulationUsesFrontierCoverage(t *testing.T) {
 	gepa := &GEPA{
 		config: DefaultGEPAConfig(),
 		state:  NewGEPAState(),
@@ -1510,30 +1790,17 @@ func TestValidationSelectionPopulationUsesFrontierCoverage(t *testing.T) {
 		},
 	}
 	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
-		"candidate-a": {AverageScore: 0.4},
-		"candidate-b": {AverageScore: 0.9},
+		"candidate-a": {AverageScore: 0.4, Cases: []gepaEvaluationCase{{Score: 0.6}, {Score: 0.6}, {Score: 0}}},
+		"candidate-b": {AverageScore: 0.3, Cases: []gepaEvaluationCase{{Score: 0}, {Score: 0}, {Score: 0.9}}},
 	})
-	gepa.state.SetValidationFrontier(
-		map[int]*gepaValidationFrontierEntry{
-			0: {CaseIndex: 0, CandidateID: "candidate-a", CandidateIDs: []string{"candidate-a"}, Score: 0.4},
-			1: {CaseIndex: 1, CandidateID: "candidate-a", CandidateIDs: []string{"candidate-a", "candidate-b"}, Score: 0.4},
-			2: {CaseIndex: 2, CandidateID: "candidate-b", CandidateIDs: []string{"candidate-b"}, Score: 0.9},
-		},
-		map[string]int{
-			"candidate-a": 2,
-			"candidate-b": 1,
-		},
-	)
 
-	validationPopulation, validationFitnessMap, ok := gepa.validationSelectionPopulation(population)
+	validationPopulation, ok := gepa.metricSelectionPopulation(population, true)
 	require.True(t, ok)
 	require.Len(t, validationPopulation.Candidates, 2)
 	assert.InDelta(t, 2.0/3.0, validationPopulation.Candidates[0].Fitness, 1e-9)
 	assert.InDelta(t, 1.0/3.0, validationPopulation.Candidates[1].Fitness, 1e-9)
-	assert.InDelta(t, 2.0/3.0, validationFitnessMap["candidate-a"].SuccessRate, 1e-9)
-	assert.Equal(t, 0.4, validationFitnessMap["candidate-a"].OutputQuality)
-	assert.InDelta(t, 1.0/3.0, validationFitnessMap["candidate-b"].SuccessRate, 1e-9)
-	assert.Equal(t, 0.9, validationFitnessMap["candidate-b"].OutputQuality)
+	assert.Equal(t, 0.9, population.Candidates[0].Fitness)
+	assert.Equal(t, 0.4, population.Candidates[1].Fitness)
 }
 
 func TestSelectCandidateForUpdatePrefersValidationFrontierContributor(t *testing.T) {
@@ -1552,18 +1819,9 @@ func TestSelectCandidateForUpdatePrefersValidationFrontierContributor(t *testing
 		},
 	}
 	gepa.state.SetCandidateValidationEvaluations(map[string]*gepaCandidateEvaluation{
-		"candidate-a": {AverageScore: 0.4},
-		"candidate-b": {AverageScore: 0.9},
+		"candidate-a": {AverageScore: 0.4, Cases: []gepaEvaluationCase{{Score: 0.4}}},
+		"candidate-b": {AverageScore: 0.3, Cases: []gepaEvaluationCase{{Score: 0.3}}},
 	})
-	gepa.state.SetValidationFrontier(
-		map[int]*gepaValidationFrontierEntry{
-			0: {CaseIndex: 0, CandidateID: "candidate-a", CandidateIDs: []string{"candidate-a"}, Score: 0.4},
-		},
-		map[string]int{
-			"candidate-a": 1,
-			"candidate-b": 0,
-		},
-	)
 
 	selected := gepa.selectCandidateForUpdate(population)
 	require.NotNil(t, selected)
@@ -1594,38 +1852,11 @@ func TestSelectCandidateForUpdateFallsBackWhenValidationCoverageIsPartial(t *tes
 	assert.Equal(t, "candidate-a", selected.ID)
 }
 
-func TestValidationAdjustedMultiObjectiveFitness(t *testing.T) {
-	base := &MultiObjectiveFitness{
-		SuccessRate:    0.2,
-		OutputQuality:  0.8,
-		Efficiency:     0.4,
-		Robustness:     0.6,
-		Generalization: 0.7,
-		Diversity:      0.3,
-		Innovation:     0.5,
-	}
-
-	withBase := validationAdjustedMultiObjectiveFitness(base, 0.9, 0.7)
-	require.NotNil(t, withBase)
-	assert.Equal(t, 0.9, withBase.SuccessRate)
-	assert.Equal(t, 0.7, withBase.OutputQuality)
-	assert.Equal(t, base.Efficiency, withBase.Efficiency)
-	assert.Equal(t, base.Robustness, withBase.Robustness)
-
-	withoutBase := validationAdjustedMultiObjectiveFitness(nil, 0.7, 0.6)
-	require.NotNil(t, withoutBase)
-	assert.Equal(t, 0.7, withoutBase.SuccessRate)
-	assert.Equal(t, 0.6, withoutBase.OutputQuality)
-	assert.Equal(t, 0.5, withoutBase.Efficiency)
-	assert.Equal(t, 0.5, withoutBase.Robustness)
-}
-
 func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
 	gepa := &GEPA{
-		config:            DefaultGEPAConfig(),
-		state:             NewGEPAState(),
-		performanceLogger: NewPerformanceLogger(),
-		rng:               rand.New(rand.NewSource(1)),
+		config: DefaultGEPAConfig(),
+		state:  NewGEPAState(),
+		rng:    rand.New(rand.NewSource(1)),
 	}
 	gepa.config.ConcurrencyLevel = 2
 	gepa.config.EvaluationBatchSize = 2
@@ -1658,9 +1889,8 @@ func TestEvaluatePopulationSnapshotsBatchOnce(t *testing.T) {
 		{Outputs: map[string]any{"output": "match"}},
 		{Outputs: map[string]any{"output": "unused"}},
 	})
-	fitnessMap, err := gepa.evaluatePopulation(context.Background(), program, dataset, exactOutputMetric)
+	err := gepa.evaluatePopulation(context.Background(), program, dataset, exactOutputMetric)
 	require.NoError(t, err)
-	assert.Empty(t, fitnessMap)
 
 	assert.Equal(t, 1.0, candidate1.Fitness)
 	assert.Equal(t, 0.0, candidate2.Fitness)
@@ -1709,7 +1939,7 @@ func TestMutateAcceptsImprovingProposalOnMinibatch(t *testing.T) {
 		baseline.ID: gepa.evaluateCandidateWithAdapter(context.Background(), baseline, adapter),
 	})
 
-	mutated := gepa.mutate(context.Background(), baseline)
+	mutated, _ := gepa.mutate(context.Background(), baseline)
 	require.NotNil(t, mutated)
 	assert.NotEqual(t, baseline.ID, mutated.ID)
 	assert.Equal(t, "alpha tuned", mutated.Instruction)
@@ -1754,7 +1984,7 @@ func TestMutateRejectsNonImprovingProposalOnMinibatch(t *testing.T) {
 		baseline.ID: gepa.evaluateCandidateWithAdapter(context.Background(), baseline, adapter),
 	})
 
-	mutated := gepa.mutate(context.Background(), baseline)
+	mutated, _ := gepa.mutate(context.Background(), baseline)
 	require.NotNil(t, mutated)
 	assert.Same(t, baseline, mutated)
 	assert.Equal(t, "alpha base", mutated.Instruction)
@@ -1794,7 +2024,7 @@ func TestMutateSkipsAcceptanceForNoOpFallbackMutation(t *testing.T) {
 		Instruction: "",
 	}
 
-	mutated := gepa.mutate(context.Background(), baseline)
+	mutated, _ := gepa.mutate(context.Background(), baseline)
 	assert.Same(t, baseline, mutated)
 	assert.Equal(t, 0, executeCalls)
 }
@@ -2148,7 +2378,7 @@ func TestEvolutionaryOperators(t *testing.T) {
 	assert.Len(t, selected, 2)
 
 	// Test mutation
-	mutated := gepa.mutate(context.Background(), candidates[0])
+	mutated, _ := gepa.mutate(context.Background(), candidates[0])
 	assert.NotEqual(t, candidates[0].ID, mutated.ID)
 	assert.Equal(t, candidates[0].Generation+1, mutated.Generation)
 }
@@ -2302,171 +2532,6 @@ func TestConvergenceDetection(t *testing.T) {
 	assert.True(t, gepa.hasConverged())
 }
 
-func TestMultiObjectiveFitnessSystem(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	// Test multi-objective fitness calculation
-	candidate := &GEPACandidate{
-		ID:          "test-candidate-1",
-		ModuleName:  "test_module",
-		Instruction: "Test instruction for fitness calculation",
-		Generation:  0,
-	}
-
-	// Mock execution traces for robustness assessment
-	traces := []ExecutionTrace{
-		{
-			CandidateID: candidate.ID,
-			Success:     true,
-			Duration:    100 * time.Millisecond,
-			Inputs:      map[string]any{"input": "test1"},
-			Outputs:     map[string]any{"output": "result1"},
-		},
-		{
-			CandidateID: candidate.ID,
-			Success:     true,
-			Duration:    120 * time.Millisecond,
-			Inputs:      map[string]any{"input": "test2"},
-			Outputs:     map[string]any{"output": "result2"},
-		},
-	}
-
-	// Add traces to state
-	for _, trace := range traces {
-		gepa.state.AddTrace(&trace)
-	}
-
-	// Test fitness calculation
-	testInputs := map[string]any{"input": "test"}
-	testOutputs := map[string]any{"output": "result"}
-	testContext := map[string]any{"duration": 150 * time.Millisecond}
-	fitness := gepa.calculateMultiObjectiveFitness(candidate.ID, testInputs, testOutputs, nil, testContext)
-
-	// Verify fitness components
-	assert.Greater(t, fitness.SuccessRate, 0.0)
-	assert.Greater(t, fitness.OutputQuality, 0.0)
-	assert.Greater(t, fitness.Efficiency, 0.0)
-	assert.GreaterOrEqual(t, fitness.Robustness, 0.0)
-	assert.GreaterOrEqual(t, fitness.Generalization, 0.0)
-	assert.GreaterOrEqual(t, fitness.Diversity, 0.0)
-	assert.GreaterOrEqual(t, fitness.Innovation, 0.0)
-	assert.Greater(t, fitness.WeightedScore, 0.0)
-}
-
-func TestContextAwarePerformanceTracking(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	candidate := &GEPACandidate{
-		ID:          "context-test-candidate",
-		ModuleName:  "test_module",
-		Instruction: "Context-aware test instruction",
-		Generation:  0,
-	}
-
-	duration := 100 * time.Millisecond
-
-	// Test context-aware efficiency assessment
-	testInputs := map[string]any{"input": "test"}
-	testOutputs := map[string]any{"output": "result"}
-	testContext := map[string]any{"duration": duration}
-	efficiency := gepa.assessContextAwareEfficiency(candidate.ID, testInputs, testOutputs, nil, testContext)
-	assert.GreaterOrEqual(t, efficiency, 0.0)
-	assert.LessOrEqual(t, efficiency, 1.0)
-
-	// Test performance context creation
-	perfContext := gepa.createPerformanceContext(candidate.ID, testInputs, testOutputs, testContext)
-	assert.NotNil(t, perfContext)
-	assert.Equal(t, candidate.ID, perfContext.CandidateID)
-	assert.GreaterOrEqual(t, perfContext.SystemLoad, 0.0)
-	assert.GreaterOrEqual(t, perfContext.MemoryUsage, 0.0)
-	assert.GreaterOrEqual(t, perfContext.ConcurrentTasks, 0)
-}
-
-func TestParetoBasedSelection(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	// Create test candidates with different fitness profiles
-	candidates := []*GEPACandidate{
-		{
-			ID:          "pareto-candidate-1",
-			ModuleName:  "test",
-			Instruction: "High success, low efficiency",
-			Fitness:     0.9,
-		},
-		{
-			ID:          "pareto-candidate-2",
-			ModuleName:  "test",
-			Instruction: "Medium success, high efficiency",
-			Fitness:     0.7,
-		},
-		{
-			ID:          "pareto-candidate-3",
-			ModuleName:  "test",
-			Instruction: "Low success, medium efficiency",
-			Fitness:     0.5,
-		},
-	}
-
-	// Create multi-objective fitness map
-	fitnessMap := map[string]*MultiObjectiveFitness{
-		"pareto-candidate-1": {
-			SuccessRate:   0.9,
-			Efficiency:    0.3,
-			OutputQuality: 0.8,
-			Robustness:    0.7,
-			WeightedScore: 0.675,
-		},
-		"pareto-candidate-2": {
-			SuccessRate:   0.7,
-			Efficiency:    0.9,
-			OutputQuality: 0.6,
-			Robustness:    0.8,
-			WeightedScore: 0.75,
-		},
-		"pareto-candidate-3": {
-			SuccessRate:   0.5,
-			Efficiency:    0.6,
-			OutputQuality: 0.4,
-			Robustness:    0.5,
-			WeightedScore: 0.5,
-		},
-	}
-
-	// Test Pareto front calculation
-	fronts := gepa.calculateParetoFronts(candidates, fitnessMap)
-	assert.NotEmpty(t, fronts)
-	assert.GreaterOrEqual(t, len(fronts), 1)
-
-	// Test Pareto-based selection
-	selected := gepa.selectWithParetoRanking(candidates, fitnessMap, 2)
-	assert.Len(t, selected, 2)
-
-	// Test crowding distance calculation
-	distances := gepa.calculateCrowdingDistance(candidates, fitnessMap)
-	assert.Len(t, distances, len(candidates))
-	for _, distance := range distances {
-		assert.GreaterOrEqual(t, distance, 0.0)
-	}
-}
-
 func TestAdvancedSelectionStrategies(t *testing.T) {
 	// Set up mock LLM
 	mockLLM := &testutil.MockLLM{}
@@ -2490,17 +2555,6 @@ func TestAdvancedSelectionStrategies(t *testing.T) {
 	// Test roulette selection
 	selected := gepa.rouletteSelection(population, 2)
 	assert.Len(t, selected, 2)
-
-	// Test adaptive weighted selection
-	fitnessMap := map[string]*MultiObjectiveFitness{
-		"sel-1": {WeightedScore: 0.9},
-		"sel-2": {WeightedScore: 0.7},
-		"sel-3": {WeightedScore: 0.5},
-		"sel-4": {WeightedScore: 0.3},
-	}
-
-	adaptiveSelected := gepa.adaptiveWeightedSelection(candidates, fitnessMap, 2, 1)
-	assert.Len(t, adaptiveSelected, 2)
 }
 
 func TestReflectionEngine(t *testing.T) {
@@ -2835,7 +2889,7 @@ func TestMutateUsesReflectionGuidedProposal(t *testing.T) {
 		},
 	})
 
-	mutated := gepa.mutate(context.Background(), candidate)
+	mutated, _ := gepa.mutate(context.Background(), candidate)
 	require.NotNil(t, mutated)
 	assert.NotEqual(t, candidate.ID, mutated.ID)
 	assert.Equal(t, "reflection_guided", mutated.Metadata["mutation_type"])
@@ -2885,7 +2939,7 @@ func TestMutateUsesParentReflectionGuidanceForOffspring(t *testing.T) {
 		ParentIDs:   []string{parentID, "other-parent"},
 	}
 
-	mutated := gepa.mutate(context.Background(), offspring)
+	mutated, _ := gepa.mutate(context.Background(), offspring)
 	require.NotNil(t, mutated)
 	assert.Equal(t, "reflection_guided", mutated.Metadata["mutation_type"])
 	assert.Equal(t, parentID, mutated.Metadata["guidance_candidate_id"])
@@ -3051,10 +3105,6 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 	selected := gepa.tournamentSelection(emptyPopulation, 0)
 	assert.Empty(t, selected)
 
-	// Test with nil fitness map
-	nilFitnessSelected := gepa.selectWithParetoRanking([]*GEPACandidate{}, nil, 1)
-	assert.Empty(t, nilFitnessSelected)
-
 	// Test candidate copying
 	original := &GEPACandidate{
 		ID:          "copy-test",
@@ -3078,16 +3128,6 @@ func TestErrorHandlingAndEdgeCases(t *testing.T) {
 	gepa.state.BestFitness = 1.0
 	gepa.state.ConvergenceStatus.StagnationCount = 0
 	assert.False(t, gepa.hasConverged()) // High fitness but no stagnation
-
-	// Test system monitoring functions
-	systemLoad := gepa.getCurrentSystemLoad()
-	assert.GreaterOrEqual(t, systemLoad, 0.0)
-
-	memoryUsage := gepa.getCurrentMemoryUsage()
-	assert.GreaterOrEqual(t, memoryUsage, 0.0)
-
-	concurrentTasks := gepa.getCurrentConcurrentTasks()
-	assert.GreaterOrEqual(t, concurrentTasks, 0)
 }
 
 func TestEvolvePopulationUsesCandidateCentricProposalLoop(t *testing.T) {
@@ -3209,7 +3249,7 @@ func TestProposeNextGenerationCandidateAllSelectionUpdatesBothComponents(t *test
 		Candidates: []*GEPACandidate{source},
 	}
 
-	proposed := gepa.proposeNextGenerationCandidate(context.Background(), population, source, 2)
+	proposed, _ := gepa.proposeNextGenerationCandidate(context.Background(), population, source, 2)
 	require.NotNil(t, proposed)
 	assert.Equal(t, 2, proposed.Generation)
 	assert.Equal(t, 1.0, proposed.Fitness)
@@ -3250,7 +3290,7 @@ func TestProposeNextGenerationCandidateCarriesRoundRobinCursorForward(t *testing
 	}
 	population := &Population{Generation: 1, Candidates: []*GEPACandidate{source}}
 
-	proposed := gepa.proposeNextGenerationCandidate(context.Background(), population, source, 2)
+	proposed, _ := gepa.proposeNextGenerationCandidate(context.Background(), population, source, 2)
 	require.NotNil(t, proposed)
 	assert.Equal(t, source.ID, proposed.ID)
 	assert.Equal(t, 1, proposed.Metadata[gepaComponentSelectionCursorMetadataKey])
@@ -3415,7 +3455,7 @@ func TestProposeNextGenerationCandidateUsesAncestorMergeWhenImproving(t *testing
 	gepa, current, source, _ := newAncestorMergeProposalTestFixture()
 	generationLLM := gepa.generationLLM.(*countingLLM)
 
-	proposed := gepa.proposeNextGenerationCandidate(context.Background(), current, source, 2)
+	proposed, _ := gepa.proposeNextGenerationCandidate(context.Background(), current, source, 2)
 	require.NotNil(t, proposed)
 
 	assert.Equal(t, 0, generationLLM.generateCalls)
@@ -3443,7 +3483,7 @@ func TestTryAncestorMergeProposalSkipsRecordedMergeAttempts(t *testing.T) {
 	mergeKey := buildAncestorMergeAttemptKey("source", "partner", "root", []string{"beta"})
 	gepa.state.PerformedMerges[mergeKey] = true
 
-	proposed := gepa.tryAncestorMergeProposal(context.Background(), current, source, 2)
+	proposed, _ := gepa.tryAncestorMergeProposal(context.Background(), current, source, 2)
 	assert.Nil(t, proposed)
 	assert.Zero(t, gepa.state.MergeInvocations)
 }
@@ -3453,7 +3493,7 @@ func TestTryAncestorMergeProposalHonorsMergeInvocationCap(t *testing.T) {
 	gepa.config.MaxMergeInvocations = 1
 	gepa.state.MergeInvocations = 1
 
-	proposed := gepa.tryAncestorMergeProposal(context.Background(), current, source, 2)
+	proposed, _ := gepa.tryAncestorMergeProposal(context.Background(), current, source, 2)
 	assert.Nil(t, proposed)
 }
 
@@ -3618,7 +3658,7 @@ func TestEvolvePopulationCarriesForwardCandidatesWithoutSelectedParents(t *testi
 	assert.Equal(t, original.Instruction, current.Candidates[0].Instruction)
 }
 
-func TestEvolvePopulationPreservesFitnessMapForUpdatedCandidates(t *testing.T) {
+func TestEvolvePopulationPreservesMetricEvaluationForUpdatedCandidates(t *testing.T) {
 	mockLLM := &testutil.MockLLM{}
 	mockLLM.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
 		return strings.Contains(prompt, "Apply a")
@@ -3644,17 +3684,6 @@ func TestEvolvePopulationPreservesFitnessMapForUpdatedCandidates(t *testing.T) {
 	adapter := gepa.newEvaluationAdapter(newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)
 	gepa.setLatestEvaluationAdapter(adapter)
 
-	sourceFitness := &MultiObjectiveFitness{
-		SuccessRate:    0.8,
-		OutputQuality:  0.7,
-		Efficiency:     0.4,
-		Robustness:     0.6,
-		Generalization: 0.5,
-		Diversity:      0.3,
-		Innovation:     0.2,
-	}
-	sourceFitness.WeightedScore = sourceFitness.ComputeWeightedScore(nil)
-
 	population := &Population{
 		Generation: 0,
 		Candidates: []*GEPACandidate{
@@ -3663,10 +3692,6 @@ func TestEvolvePopulationPreservesFitnessMapForUpdatedCandidates(t *testing.T) {
 		},
 	}
 	gepa.state.PopulationHistory = []*Population{population}
-	gepa.setCurrentMultiObjectiveFitnessMap(map[string]*MultiObjectiveFitness{
-		"cand-1": sourceFitness,
-		"cand-2": sourceFitness,
-	})
 
 	err := gepa.evolvePopulation(context.Background())
 	require.NoError(t, err)
@@ -3683,15 +3708,12 @@ func TestEvolvePopulationPreservesFitnessMapForUpdatedCandidates(t *testing.T) {
 	}
 	require.NotNil(t, updated)
 
-	fitnessMap := gepa.getCurrentMultiObjectiveFitnessMap()
-	require.Contains(t, fitnessMap, updated.ID)
-	assert.Equal(t, 1.0, fitnessMap[updated.ID].SuccessRate)
-	assert.Equal(t, 1.0, fitnessMap[updated.ID].OutputQuality)
-	assert.Equal(t, sourceFitness.Efficiency, fitnessMap[updated.ID].Efficiency)
-	assert.Equal(t, sourceFitness.Robustness, fitnessMap[updated.ID].Robustness)
-	assert.Equal(t, sourceFitness.Generalization, fitnessMap[updated.ID].Generalization)
-	assert.Equal(t, sourceFitness.Diversity, fitnessMap[updated.ID].Diversity)
-	assert.Equal(t, sourceFitness.Innovation, fitnessMap[updated.ID].Innovation)
+	evaluation := gepa.state.GetCandidateEvaluation(updated.ID)
+	require.NotNil(t, evaluation)
+	assert.Equal(t, 1.0, updated.Fitness)
+	assert.Equal(t, updated.Fitness, evaluation.AverageScore)
+	require.Len(t, evaluation.Cases, 1)
+	assert.Equal(t, 1.0, evaluation.Cases[0].Score)
 }
 
 func TestInterceptorIntegration(t *testing.T) {
@@ -3725,11 +3747,6 @@ func TestInterceptorIntegration(t *testing.T) {
 	result, err := gepa.gepaExecutionTracker(ctx, inputs, info, handler)
 	require.NoError(t, err)
 	assert.Equal(t, outputs, result)
-
-	// Test performance collector
-	result2, err := gepa.gepaPerformanceCollector(ctx, inputs, info, handler)
-	require.NoError(t, err)
-	assert.Equal(t, outputs, result2)
 
 	// Test reflection logger
 	result3, err := gepa.gepaReflectionLogger(ctx, inputs, info, handler)
@@ -3788,27 +3805,6 @@ func TestAdvancedAnalysisFunctions(t *testing.T) {
 
 	failurePatterns := gepa.analyzeFailurePatterns(failedTraces)
 	assert.NotNil(t, failurePatterns)
-
-	// Test fitness calculation components
-	fitness := gepa.calculateFitness(
-		map[string]any{"input": "test"},
-		map[string]any{"output": "result"},
-		nil,
-	)
-	assert.GreaterOrEqual(t, fitness, 0.0)
-
-	// Test quality assessment
-	quality := gepa.assessOutputQuality(
-		map[string]any{"output": "high quality response"},
-	)
-	assert.GreaterOrEqual(t, quality, 0.0)
-
-	// Test input utilization
-	utilization := gepa.assessInputUtilization(
-		map[string]any{"output": "response using input concepts"},
-		map[string]any{"input": "test input concepts"},
-	)
-	assert.GreaterOrEqual(t, utilization, 0.0)
 }
 
 func TestEvolutionOperationsAdvanced(t *testing.T) {
@@ -3839,84 +3835,6 @@ func TestEvolutionOperationsAdvanced(t *testing.T) {
 	// Test evolvePopulation function
 	_ = gepa.evolvePopulation(ctx)
 	// This may fail due to empty population but should not panic - we don't check error here
-
-	// Test selectElite
-	elite := gepa.selectElite(population, 1)
-	assert.LessOrEqual(t, len(elite), 1)
-
-	// Test selectParetoElite
-	fitnessMap := map[string]*MultiObjectiveFitness{
-		"evo-1": {WeightedScore: 0.9},
-		"evo-2": {WeightedScore: 0.7},
-	}
-
-	paretoElite := gepa.selectParetoElite(candidates, fitnessMap, 1)
-	assert.LessOrEqual(t, len(paretoElite), 1)
-}
-
-func TestPatternAnalysisAndSimilarity(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	// Test pattern similarity calculation with string patterns
-	pattern1 := "test pattern 1 with question content"
-	pattern2 := "test pattern 2 with request content"
-
-	similarity := gepa.calculatePatternSimilarity(pattern1, pattern2)
-	assert.GreaterOrEqual(t, similarity, 0.0)
-	assert.LessOrEqual(t, similarity, 1.0)
-
-	// Test context-aware performance tracker (global function)
-	tracker := NewContextAwarePerformanceTracker()
-	assert.NotNil(t, tracker)
-
-	// Test selection pressure calculation
-	population := &Population{
-		Candidates: []*GEPACandidate{
-			{Fitness: 0.9},
-			{Fitness: 0.7},
-			{Fitness: 0.5},
-		},
-	}
-
-	pressure := gepa.calculateSelectionPressure(population)
-	assert.GreaterOrEqual(t, pressure, 0.0)
-}
-
-func TestAdvancedDiversityAndInnovation(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	candidateID := "innovation-test"
-
-	// Test approach uniqueness assessment
-	uniqueness := gepa.assessApproachUniqueness(candidateID)
-	assert.GreaterOrEqual(t, uniqueness, 0.0)
-	assert.LessOrEqual(t, uniqueness, 1.0)
-
-	// Test output pattern novelty
-	outputMap := map[string]any{"pattern": "novel output pattern for testing with structured format"}
-
-	novelty := gepa.assessOutputPatternNovelty(outputMap, candidateID)
-	assert.GreaterOrEqual(t, novelty, 0.0)
-	assert.LessOrEqual(t, novelty, 1.0)
-
-	// Test generalization assessment
-	inputs := map[string]any{"input": "test generalization"}
-	outputs := map[string]any{"output": "test result"}
-	generalization := gepa.assessGeneralization(candidateID, inputs, outputs)
-	assert.GreaterOrEqual(t, generalization, 0.0)
-	assert.LessOrEqual(t, generalization, 1.0)
 }
 
 func TestDiversityHotPathsAvoidSemanticSimilarityCalls(t *testing.T) {
@@ -3939,40 +3857,7 @@ func TestDiversityHotPathsAvoidSemanticSimilarityCalls(t *testing.T) {
 
 	diversity := gepa.assessDiversityContribution("a")
 	assert.GreaterOrEqual(t, diversity, 0.0)
-
-	spaceDiversity := gepa.calculateInstructionSpaceDiversity(candidates)
-	assert.GreaterOrEqual(t, spaceDiversity, 0.0)
-
-	score := gepa.calculateInstructionDiversityScore(candidates[0], candidates[1:])
-	assert.GreaterOrEqual(t, score, 0.0)
-
-	selected := gepa.selectDiverseCandidates(candidates, 2)
-	assert.Len(t, selected, 2)
 	assert.Zero(t, counter.generateCalls)
-}
-
-func TestPerformanceLogging(t *testing.T) {
-	// Set up mock LLM
-	mockLLM := &testutil.MockLLM{}
-	setupGEPAMockLLM(mockLLM)
-	core.SetDefaultLLM(mockLLM)
-
-	gepa, err := NewGEPA(DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	// Test system monitoring functions
-	systemLoad := gepa.getCurrentSystemLoad()
-	assert.GreaterOrEqual(t, systemLoad, 0.0)
-
-	memoryUsage := gepa.getCurrentMemoryUsage()
-	assert.GreaterOrEqual(t, memoryUsage, 0.0)
-
-	concurrentTasks := gepa.getCurrentConcurrentTasks()
-	assert.GreaterOrEqual(t, concurrentTasks, 0)
-
-	ctx := context.Background()
-	executionPhase := gepa.getCurrentExecutionPhase(ctx)
-	assert.NotEmpty(t, executionPhase)
 }
 
 func TestSetProgressReporter(t *testing.T) {

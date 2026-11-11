@@ -810,7 +810,7 @@ func runCompatMergeScenario(t *testing.T, ctx context.Context) compatMergeResult
 	)
 	gepa.setLatestEvaluationAdapter(adapter)
 
-	proposed := gepa.proposeNextGenerationCandidate(ctx, current, source, 2)
+	proposed, _ := gepa.proposeNextGenerationCandidate(ctx, current, source, 2)
 	if proposed == nil {
 		t.Fatalf("expected merge proposal")
 	}
