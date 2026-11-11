@@ -23,6 +23,7 @@ type gepaEvaluationCase struct {
 	Feedback         string
 	FeedbackTarget   string
 	FeedbackMetadata map[string]any
+	TraceEvidence    []string
 }
 
 type gepaCachedEvaluationCase struct {
@@ -32,6 +33,7 @@ type gepaCachedEvaluationCase struct {
 	Feedback         string
 	FeedbackTarget   string
 	FeedbackMetadata map[string]any
+	TraceEvidence    []string
 }
 
 // gepaCandidateEvaluation captures a candidate evaluation against a stable
@@ -177,6 +179,9 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	spentMetricCalls := 0
 
 	for _, example := range adapter.batch {
+		if ctx.Err() != nil {
+			break
+		}
 		evalCase := gepaEvaluationCase{
 			Example: example,
 		}
@@ -189,10 +194,15 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				evalCase.Feedback = cached.Feedback
 				evalCase.FeedbackTarget = cached.FeedbackTarget
 				evalCase.FeedbackMetadata = cloneStringAnyMap(cached.FeedbackMetadata)
+				evalCase.TraceEvidence = append([]string(nil), cached.TraceEvidence...)
 			} else {
+				// Capture only traces emitted by this example, including internal
+				// module calls whose inputs differ from the program's outer input.
+				offsets := g.state.traceOffsets(candidate.ID)
 				outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
 				evalCase.Outputs = outputs
 				evalCase.Err = err
+				evalCase.TraceEvidence = g.state.traceEvidenceSince(offsets, candidate.ID)
 				if err == nil {
 					evalCase.Score = adapter.metric(example.Outputs, outputs)
 				}
@@ -205,6 +215,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 					Feedback:         evalCase.Feedback,
 					FeedbackTarget:   evalCase.FeedbackTarget,
 					FeedbackMetadata: evalCase.FeedbackMetadata,
+					TraceEvidence:    evalCase.TraceEvidence,
 				})
 			}
 		} else {
@@ -318,6 +329,7 @@ func cloneCachedEvaluationCase(cached *gepaCachedEvaluationCase) *gepaCachedEval
 		Feedback:         cached.Feedback,
 		FeedbackTarget:   cached.FeedbackTarget,
 		FeedbackMetadata: cloneStringAnyMap(cached.FeedbackMetadata),
+		TraceEvidence:    append([]string(nil), cached.TraceEvidence...),
 	}
 }
 
@@ -371,6 +383,7 @@ func cloneGEPACandidateEvaluation(evaluation *gepaCandidateEvaluation) *gepaCand
 				Feedback:         evalCase.Feedback,
 				FeedbackTarget:   evalCase.FeedbackTarget,
 				FeedbackMetadata: cloneStringAnyMap(evalCase.FeedbackMetadata),
+				TraceEvidence:    append([]string(nil), evalCase.TraceEvidence...),
 			}
 		}
 	}

@@ -67,14 +67,14 @@ func DefaultMultiObjectiveWeights() map[string]float64 {
 // GEPAConfig contains configuration options for GEPA optimizer.
 type GEPAConfig struct {
 	// Evolutionary parameters
-	PopulationSize int     `json:"population_size"` // Default: 20
-	MaxGenerations int     `json:"max_generations"` // Default: 10
+	PopulationSize int     `json:"population_size"` // Deprecated: Compile starts from one seed and retains accepted children.
+	MaxGenerations int     `json:"max_generations"` // Safety cap including seed validation; default: 1000; 0 disables.
 	MutationRate   float64 `json:"mutation_rate"`   // Per-selected-component proposal probability; default: 1.0
 	CrossoverRate  float64 `json:"crossover_rate"`  // Default: 0.7
 	ElitismRate    float64 `json:"elitism_rate"`    // Default: 0.1
 
 	// Reflection parameters
-	ReflectionFreq   int     `json:"reflection_frequency"` // Default: 2
+	ReflectionFreq   int     `json:"reflection_frequency"` // Deprecated: Compile proposes from fresh evidence each iteration.
 	ReflectionDepth  int     `json:"reflection_depth"`     // Default: 3
 	SelfCritiqueTemp float64 `json:"self_critique_temp"`   // Default: 0.7
 
@@ -85,19 +85,21 @@ type GEPAConfig struct {
 
 	// Convergence parameters
 	ConvergenceThreshold float64 `json:"convergence_threshold"` // Default: 0.01
-	StagnationLimit      int     `json:"stagnation_limit"`      // Default: 3 attempted updates without improvement (also minutes without improvement)
+	StagnationLimit      int     `json:"stagnation_limit"`      // Optional attempted updates without improvement; default: 0 (disabled).
 
 	// Performance parameters. Compile uses epoch-shuffled training minibatches
 	// (the last batch may be smaller). Validation uses the explicit examples or
 	// holdout below; with neither, it scores the full training set, not a batch.
 	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
 	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Default: 3
-	ValidationFrequency        int                   `json:"validation_frequency"`  // Default: 1
+	ValidationFrequency        int                   `json:"validation_frequency"`  // Deprecated: Compile validates the seed and each accepted child.
 	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (no holdout)
 	ValidationExamples         []core.Example        `json:"-"`
 	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
 	MaxMergeInvocations        int                   `json:"max_merge_invocations"` // Default: 5
-	MaxMetricCalls             int                   `json:"max_metric_calls"`      // Default: 0 (disabled)
+	MaxMetricCalls             int                   `json:"max_metric_calls"`      // Default: 1000; 0 disables. Complete evaluations must fit the remaining budget.
+	SkipPerfectScore           bool                  `json:"skip_perfect_score"`    // Default: true; skip proposals when every minibatch case reaches PerfectScore.
+	PerfectScore               float64               `json:"perfect_score"`         // Default: 1.0; configure for the supplied metric's scale.
 	ScoreThreshold             float64               `json:"score_threshold"`       // Default: 0.0 (disabled)
 	MaxRuntime                 time.Duration         `json:"max_runtime"`           // Default: 0 (disabled)
 	RunDir                     string                `json:"run_dir,omitempty"`
@@ -118,7 +120,7 @@ type GEPAConfig struct {
 func DefaultGEPAConfig() *GEPAConfig {
 	return &GEPAConfig{
 		PopulationSize:       20,
-		MaxGenerations:       10,
+		MaxGenerations:       1000,
 		MutationRate:         1.0, // The single-candidate loop should attempt an update on every iteration
 		CrossoverRate:        0.7,
 		ElitismRate:          0.1,
@@ -129,13 +131,15 @@ func DefaultGEPAConfig() *GEPAConfig {
 		SelectionStrategy:    "adaptive_pareto", // Sample per-example metric winners by coverage
 		ComponentSelection:   componentSelectionRoundRobin,
 		ConvergenceThreshold: 0.01,
-		StagnationLimit:      3,
+		StagnationLimit:      0,
 		EvaluationBatchSize:  5,
 		ConcurrencyLevel:     3,
 		ValidationFrequency:  1,
 		ValidationSplit:      0.0,
 		MaxMergeInvocations:  5,
-		MaxMetricCalls:       0,
+		MaxMetricCalls:       1000,
+		SkipPerfectScore:     true,
+		PerfectScore:         1.0,
 		ScoreThreshold:       0.0,
 		MaxRuntime:           0,
 		Temperature:          0.8,
@@ -1221,9 +1225,6 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	if generationLLM == nil {
 		generationLLM = core.GetDefaultLLM()
 	}
-	if generationLLM == nil {
-		return nil, fmt.Errorf("no default LLM available for generation")
-	}
 
 	reflectionLLM := config.ReflectionLLM
 	if reflectionLLM == nil {
@@ -1231,6 +1232,12 @@ func NewGEPA(config *GEPAConfig) (*GEPA, error) {
 	}
 	if reflectionLLM == nil {
 		reflectionLLM = generationLLM
+	}
+	if reflectionLLM == nil {
+		return nil, fmt.Errorf("no LLM available for GEPA reflection")
+	}
+	if generationLLM == nil {
+		generationLLM = reflectionLLM
 	}
 
 	// Initialize random number generator
@@ -1272,8 +1279,8 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	_ = span // Suppress unused variable warning
 
 	logger := logging.GetLogger()
-	logger.Info(ctx, "Starting GEPA optimization with population_size=%d, max_generations=%d",
-		g.config.PopulationSize,
+	logger.Info(ctx, "Starting GEPA optimization with max_metric_calls=%d, max_generations=%d",
+		g.config.MaxMetricCalls,
 		g.config.MaxGenerations)
 	resumed, err := g.prepareRunState()
 	if err != nil {
@@ -1293,6 +1300,9 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	if err != nil {
 		return program, err
 	}
+	if err := ctx.Err(); err != nil {
+		return program, err
+	}
 
 	// Apply best candidate to program
 	finalProgram := g.applyBestCandidate(optimizedProgram)
@@ -1304,9 +1314,11 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 }
 
 func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
-	logger := logging.GetLogger()
-	if g.config.MaxGenerations <= 0 {
-		return fmt.Errorf("optimizers: max generations must be positive")
+	if g.config.MaxGenerations <= 0 && g.config.MaxMetricCalls <= 0 {
+		return fmt.Errorf("optimizers: a metric budget or iteration limit is required")
+	}
+	if metric == nil {
+		return fmt.Errorf("optimizers: metric is required")
 	}
 
 	trainDataset, validationExamples, err := g.prepareOptimizationDatasets(dataset)
@@ -1328,135 +1340,55 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 	if len(validationExamples) == 0 {
 		validationExamples = cloneEvaluationExamples(trainExamples)
 	}
-	batchDataset := func(generation int) core.Dataset {
-		return newGEPAExampleDataset(g.evaluationBatchForGeneration(trainExamples, generation))
-	}
 	if g.getCurrentPopulation() == nil {
 		g.resetValidationState()
 		if err := g.initializePopulation(ctx, program); err != nil {
 			return fmt.Errorf("failed to initialize population: %w", err)
 		}
-
 		g.state.CurrentGeneration = 0
-		if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, batchDataset(0), metric); err != nil {
-			return fmt.Errorf("evaluation failed at generation 0: %w", err)
-		}
-		validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, 0)
-		if err != nil {
-			return fmt.Errorf("validation failed at generation 0: %w", err)
-		}
-		if validated {
-			g.state.LastValidatedGeneration = 0
-		}
-		if decision := g.evaluateStopDecision(ctx); decision != nil {
-			g.recordStopDecision(decision)
-			return g.saveRunState()
-		}
-		if err := g.reflectIfScheduled(ctx, 0); err != nil {
-			logger.Error(ctx, "reflection failed at generation 0: %v", err)
-		}
-		if err := g.saveRunState(); err != nil {
-			return err
-		}
-		g.reportOptimizationProgress("GEPA Evolution", 1, g.config.MaxGenerations)
-
-		if g.config.MaxGenerations == 1 {
-			return g.saveRunState()
-		}
-	} else {
-		g.setLatestEvaluationAdapter(g.newEvaluationAdapter(program, batchDataset(g.state.CurrentGeneration), metric))
-		// Checkpoints omit per-example evaluations. Rebuild both training and
-		// validation scores before selection, including scalar strategies.
-		if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), false); !ok {
-			if err := g.evaluateAndArchiveCurrentPopulation(ctx, program, batchDataset(g.state.CurrentGeneration), metric); err != nil {
-				return err
-			}
-		}
-		if _, ok := g.metricSelectionPopulation(g.getCurrentPopulation(), true); !ok {
-			if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
-				return err
-			}
-			g.state.LastValidatedGeneration = g.state.CurrentGeneration
-		}
-		if decision := g.metricBudgetStopDecision(); decision != nil {
-			g.recordStopDecision(decision)
-			return g.saveRunState()
-		}
-		logger.Info(ctx, "Resuming GEPA optimization from generation %d", g.state.CurrentGeneration)
 	}
 
-	for generation := g.state.CurrentGeneration + 1; generation < g.config.MaxGenerations; generation++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		logger.Info(ctx, "Starting generation %d", generation)
-
-		// Refresh every candidate on the same batch before selection/proposal.
-		// Keeping the generational population requires aligned scores; cached
-		// per-example results avoid executing already-seen candidate/case pairs.
-		if err := g.evaluatePopulation(ctx, program, batchDataset(generation), metric); err != nil {
-			return fmt.Errorf("evaluation failed at generation %d: %w", generation, err)
-		}
-		if decision := g.metricBudgetStopDecision(); decision != nil {
-			g.recordStopDecision(decision)
+	validationAdapter := g.newEvaluationAdapterForExamples(program, validationExamples, metric)
+	// Fresh runs validate only the seed. Checkpoints omit transient evaluations,
+	// so resumed runs rehydrate each retained candidate once, charging the budget.
+	for _, candidate := range g.getCurrentPopulation().Candidates {
+		if !g.validateRetainedCandidate(ctx, candidate, validationAdapter) {
 			return g.saveRunState()
 		}
-		g.state.CurrentGeneration = generation
-		if err := g.evolvePopulation(ctx); err != nil {
-			return fmt.Errorf("evolution failed at generation %d: %w", generation, err)
-		}
-		currentPop := g.getCurrentPopulation()
-		if currentPop != nil {
-			g.state.UpdateParetoArchive(currentPop.Candidates, nil)
-		}
-		validated, err := g.validateIfScheduled(ctx, program, metric, validationExamples, generation)
-		if err != nil {
-			return fmt.Errorf("validation failed at generation %d: %w", generation, err)
-		}
-		if validated {
-			g.state.LastValidatedGeneration = generation
-		}
-		if decision := g.evaluateStopDecision(ctx); decision != nil {
-			g.recordStopDecision(decision)
-			if err := g.saveRunState(); err != nil {
-				return err
-			}
-			break
-		}
-		if err := g.reflectIfScheduled(ctx, generation); err != nil {
-			logger.Error(ctx, "reflection failed at generation %d: %v", generation, err)
-		}
-		if err := g.saveRunState(); err != nil {
-			return err
-		}
-
-		g.reportOptimizationProgress("GEPA Evolution", generation+1, g.config.MaxGenerations)
 	}
-
-	if len(validationExamples) > 0 && g.state.LastValidatedGeneration != g.state.CurrentGeneration {
-		if err := g.evaluateValidationPopulation(ctx, program, validationExamples, metric); err != nil {
-			return fmt.Errorf("final validation failed: %w", err)
-		}
-		if err := g.saveRunState(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (g *GEPA) evaluateAndArchiveCurrentPopulation(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
-	if err := g.evaluatePopulation(ctx, program, dataset, metric); err != nil {
+	if err := g.saveRunState(); err != nil {
 		return err
 	}
 
-	currentPop := g.getCurrentPopulation()
-	if currentPop != nil {
-		g.state.UpdateParetoArchive(currentPop.Candidates, nil)
+	for generation := g.state.CurrentGeneration + 1; g.config.MaxGenerations <= 0 || generation < g.config.MaxGenerations; generation++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if decision := g.evaluateStopDecision(ctx); decision != nil {
+			g.recordStopDecision(decision)
+			return g.saveRunState()
+		}
+		if g.validationIsPerfect() {
+			g.recordStopDecision(&GEPAStopDecision{Reason: "perfect_validation"})
+			return g.saveRunState()
+		}
+		adapter := g.newEvaluationAdapterForExamples(program, g.evaluationBatchForGeneration(trainExamples, generation-1), metric)
+		g.setLatestEvaluationAdapter(adapter)
+		g.state.CurrentGeneration = generation
+		if !g.runCandidateIteration(ctx, adapter, validationAdapter) {
+			return g.saveRunState()
+		}
+		if err := g.saveRunState(); err != nil {
+			return err
+		}
+		if g.config.MaxMetricCalls > 0 {
+			g.reportOptimizationProgress("GEPA Metric Calls", g.state.MetricCallCount(), g.config.MaxMetricCalls)
+		} else {
+			g.reportOptimizationProgress("GEPA Iterations", generation+1, g.config.MaxGenerations)
+		}
 	}
-
-	return nil
+	g.recordStopDecision(&GEPAStopDecision{Reason: "iteration_limit"})
+	return g.saveRunState()
 }
 
 func (g *GEPA) prepareOptimizationDatasets(dataset core.Dataset) (core.Dataset, []core.Example, error) {
@@ -1813,16 +1745,6 @@ func validationFrontierEntryContainsCandidate(entry *gepaValidationFrontierEntry
 	return false
 }
 
-func (g *GEPA) reflectIfScheduled(ctx context.Context, generation int) error {
-	if g.config.ReflectionFreq <= 0 {
-		return nil
-	}
-	if generation != 0 && generation%g.config.ReflectionFreq != 0 {
-		return nil
-	}
-	return g.performReflection(ctx, generation)
-}
-
 func (g *GEPA) reportOptimizationProgress(phase string, current, total int) {
 	if g.progressReporter == nil {
 		return
@@ -2145,120 +2067,26 @@ func (g *GEPA) logOptimizationResults(ctx context.Context) {
 
 // initializePopulation creates the initial population of prompt candidates.
 func (g *GEPA) initializePopulation(ctx context.Context, program core.Program) error {
-	logger := logging.GetLogger()
-	logger.Info(ctx, "Initializing GEPA population with size %d", g.config.PopulationSize)
-
-	candidates := make([]*GEPACandidate, 0, g.config.PopulationSize)
 	baseComponentTexts := componentTextsFromProgram(program)
-
-	// Create diverse initial population for each module
-	for moduleName, module := range program.Modules {
-		baseInstruction := g.extractInstructionFromModule(module)
-
-		// Calculate how many candidates per module
-		candidatesPerModule := g.config.PopulationSize / len(program.Modules)
-		if candidatesPerModule == 0 {
-			candidatesPerModule = 1
-		}
-
-		// Generate variations for this module
-		variations, err := g.generateInitialVariations(ctx, baseInstruction, moduleName, candidatesPerModule)
-		if err != nil {
-			logger.Error(ctx, "Failed to generate variations for module %s: %v", moduleName, err)
-			// Fallback to base instruction
-			variations = []string{baseInstruction}
-		}
-
-		// Create candidates from variations
-		for i, variation := range variations {
-			if len(candidates) >= g.config.PopulationSize {
-				break
-			}
-
-			candidate := &GEPACandidate{
-				ID:             g.generateCandidateID(),
-				ModuleName:     moduleName,
-				Instruction:    variation,
-				ComponentTexts: deriveBaseComponentTexts(baseComponentTexts, moduleName, variation),
-				Generation:     0,
-				Fitness:        0.0,
-				ParentIDs:      []string{},
-				CreatedAt:      time.Now(),
-				Metadata: map[string]any{
-					"variation_index":  i,
-					"base_instruction": baseInstruction,
-				},
-			}
-			candidates = append(candidates, candidate)
-
-			// Initialize candidate metrics
-			g.state.CandidateMetrics[candidate.ID] = &CandidateMetrics{
-				TotalEvaluations: 0,
-				SuccessCount:     0,
-				AverageFitness:   0.0,
-				BestFitness:      0.0,
-				ExecutionTimes:   make([]time.Duration, 0),
-				ErrorCounts:      make(map[string]int),
-				Metadata:         make(map[string]any),
-			}
-		}
+	moduleNames := componentModuleNames(baseComponentTexts)
+	if len(moduleNames) == 0 {
+		return fmt.Errorf("optimizers: seed program must contain at least one module")
 	}
-
-	// Fill remaining slots if needed
-	for len(candidates) < g.config.PopulationSize {
-		// Duplicate and mutate existing candidates
-		if len(candidates) > 0 {
-			original := candidates[g.rng.Intn(len(candidates))]
-			mutated := g.createMutatedCandidate(original)
-			candidates = append(candidates, mutated)
-		} else {
-			break
-		}
+	moduleName := moduleNames[0]
+	seed := &GEPACandidate{
+		ID: g.generateCandidateID(), ModuleName: moduleName,
+		Instruction: baseComponentTexts[moduleName], ComponentTexts: baseComponentTexts,
+		CreatedAt: time.Now(),
 	}
-
-	// Create initial population
+	g.ensureCandidateMetrics(seed.ID)
 	population := &Population{
-		Candidates:    candidates,
-		Generation:    0,
-		BestFitness:   0.0,
-		BestCandidate: nil,
+		Candidates: []*GEPACandidate{seed},
 	}
-
 	g.state.mu.Lock()
 	g.state.PopulationHistory = []*Population{population}
 	g.state.mu.Unlock()
-
-	logger.Info(ctx, "Population initialized with %d candidates across %d modules",
-		len(candidates),
-		len(program.Modules))
-
+	logging.GetLogger().Info(ctx, "Initialized GEPA with the seed program (%d modules)", len(moduleNames))
 	return nil
-}
-
-// extractInstructionFromModule extracts the current instruction from a module.
-func (g *GEPA) extractInstructionFromModule(module core.Module) string {
-	signature := module.GetSignature()
-	if signature.Instruction != "" {
-		return signature.Instruction
-	}
-
-	// Fallback to a generic instruction based on signature
-	if len(signature.Inputs) > 0 && len(signature.Outputs) > 0 {
-		inputNames := make([]string, 0, len(signature.Inputs))
-		for _, input := range signature.Inputs {
-			inputNames = append(inputNames, input.Name)
-		}
-		outputNames := make([]string, 0, len(signature.Outputs))
-		for _, output := range signature.Outputs {
-			outputNames = append(outputNames, output.Name)
-		}
-
-		return fmt.Sprintf("Given %s, provide %s.",
-			strings.Join(inputNames, ", "),
-			strings.Join(outputNames, ", "))
-	}
-
-	return "Process the input and provide appropriate output."
 }
 
 // generateInitialVariations creates diverse variations of the base instruction.
@@ -3764,6 +3592,9 @@ func (g *GEPA) hasConverged() bool {
 	g.state.mu.Lock()
 	defer g.state.mu.Unlock()
 
+	if g.config.StagnationLimit <= 0 {
+		return false
+	}
 	if g.state.ConvergenceStatus.IsConverged {
 		return true
 	}

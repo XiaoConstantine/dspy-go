@@ -55,13 +55,13 @@ func TestGEPAAgentOptimizer_Optimize_UsesMainlineGEPACompile(t *testing.T) {
 	require.NotNil(t, result)
 	require.NotNil(t, result.BestCandidate)
 	require.NotNil(t, result.OptimizationState)
-	require.Len(t, result.OptimizationState.PopulationHistory, 2)
-	require.GreaterOrEqual(t, result.OptimizationState.CurrentGeneration, 1)
+	require.Len(t, result.OptimizationState.PopulationHistory, 1)
+	assert.Equal(t, "perfect_validation", result.OptimizationState.StopReason)
 	assert.Equal(t, 1, result.TrainingExampleCount)
 	assert.Equal(t, 0, result.ValidationExampleCount)
 	assert.NotEmpty(t, result.BestArtifacts.Text[ArtifactSkillPack])
 
-	secondGeneration := result.OptimizationState.PopulationHistory[1]
+	secondGeneration := result.OptimizationState.PopulationHistory[0]
 	require.NotNil(t, secondGeneration)
 	require.NotEmpty(t, secondGeneration.Candidates)
 	for _, candidate := range secondGeneration.Candidates {
@@ -120,11 +120,11 @@ func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T)
 		agentEvaluatorFunc(func(ctx context.Context, agent OptimizableAgent, ex AgentExample) (*EvalResult, error) {
 			score := 0.2
 			if strings.Contains(strings.ToLower(agent.GetArtifacts().Text[ArtifactSkillPack]), "carefully") {
-				if ex.ID == "validation" {
+				if ex.ID == "training" {
 					score = 1.0
 				}
-			} else if ex.ID == "training" {
-				score = 1.0
+			} else if ex.ID == "validation" {
+				score = 0.8
 			}
 			return &EvalResult{
 				Score: score,
@@ -138,7 +138,7 @@ func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T)
 		}),
 		GEPAAdapterConfig{
 			PopulationSize:  3,
-			MaxGenerations:  1,
+			MaxGenerations:  2,
 			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
@@ -170,10 +170,11 @@ func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T)
 
 	assert.NotNil(t, result.OptimizationState.BestCandidate)
 	assert.Equal(t, result.OptimizationState.BestValidationCandidate.ID, result.BestCandidate.ID)
-	assert.NotEqual(t, result.OptimizationState.BestCandidate.ID, result.BestCandidate.ID)
+	assert.Equal(t, result.OptimizationState.BestCandidate.ID, result.BestCandidate.ID)
+	require.Len(t, result.OptimizationState.PopulationHistory[1].Candidates, 2, "a training improvement is retained even if its validation score is lower")
 	assert.Equal(t, result.BestCandidate.ID, result.BestValidationEvaluation.Candidate.ID)
-	assert.InDelta(t, 1.0, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
-	assert.InDelta(t, 1.0, result.BestValidationEvaluation.AverageScore, 0.000001)
+	assert.InDelta(t, 0.8, result.BestValidationEvaluation.Fitness.OutputQuality, 0.000001)
+	assert.InDelta(t, 0.8, result.BestValidationEvaluation.AverageScore, 0.000001)
 	assert.Equal(t, 1, result.ValidationExampleCount)
 }
 
@@ -192,21 +193,21 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 			switch ex.ID {
 			case "train":
 				switch {
+				case strings.Contains(toolPolicy, "evidence-seeking"):
+					score = 0.8
 				case strings.Contains(skill, "carefully"):
-					score = 1.0
+					score = 0.6
 				case maxTurns == 12:
 					score = 0.4
-				case strings.Contains(toolPolicy, "evidence-seeking"):
-					score = 0.2
 				}
 			case "validation":
 				switch {
 				case strings.Contains(toolPolicy, "evidence-seeking"):
 					score = 1.0
-				case maxTurns == 12:
-					score = 0.6
 				case strings.Contains(skill, "carefully"):
 					score = 0.3
+				case maxTurns == 12:
+					score = 0.6
 				}
 			}
 
@@ -226,7 +227,7 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 		}),
 		GEPAAdapterConfig{
 			PopulationSize:  6,
-			MaxGenerations:  1,
+			MaxGenerations:  4,
 			ReflectionFreq:  0,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
@@ -266,10 +267,10 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 	require.NotNil(t, result.OptimizationState)
 	require.NotNil(t, result.OptimizationState.BestCandidate)
 	require.NotNil(t, result.OptimizationState.BestValidationCandidate)
-	require.Len(t, result.OptimizationState.PopulationHistory, 1)
-	require.Len(t, result.OptimizationState.PopulationHistory[0].Candidates, 6)
+	require.Len(t, result.OptimizationState.PopulationHistory, 4)
+	require.Len(t, result.OptimizationState.PopulationHistory[0].Candidates, 1)
 
-	assert.NotEqual(t, result.OptimizationState.BestCandidate.ID, result.OptimizationState.BestValidationCandidate.ID)
+	assert.Equal(t, result.OptimizationState.BestCandidate.ID, result.OptimizationState.BestValidationCandidate.ID)
 	assert.Equal(t, result.OptimizationState.BestValidationCandidate.ID, result.BestCandidate.ID)
 	assert.Equal(t, result.BestCandidate.ID, result.BestValidationEvaluation.Candidate.ID)
 	assert.Equal(t, 1, result.ValidationExampleCount)
@@ -283,10 +284,10 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 
 	assert.Equal(t, seed.Text[ArtifactSkillPack], result.BestArtifacts.Text[ArtifactSkillPack])
 	assert.Contains(t, strings.ToLower(result.BestArtifacts.Text[ArtifactToolPolicy]), "evidence-seeking")
-	assert.Equal(t, 16, result.BestArtifacts.Int["max_turns"])
+	assert.Equal(t, 12, result.BestArtifacts.Int["max_turns"])
 
 	var intCandidate *optimizers.GEPACandidate
-	for _, candidate := range result.OptimizationState.PopulationHistory[0].Candidates {
+	for _, candidate := range result.OptimizationState.PopulationHistory[3].Candidates {
 		if candidate == nil || candidate.ModuleName != intArtifactModuleName("max_turns") {
 			continue
 		}
@@ -580,11 +581,11 @@ type agentMultiArtifactFixtureLLM struct{}
 
 func (f *agentMultiArtifactFixtureLLM) Generate(_ context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
 	switch {
-	case strings.Contains(prompt, "for a skill_pack module."):
+	case strings.Contains(prompt, "for a skill_pack module."), strings.Contains(prompt, "MODULE: skill_pack"):
 		return &core.LLMResponse{Content: "1. Carefully analyze repository state before acting."}, nil
-	case strings.Contains(prompt, "for a tool_policy module."):
+	case strings.Contains(prompt, "for a tool_policy module."), strings.Contains(prompt, "MODULE: tool_policy"):
 		return &core.LLMResponse{Content: "1. Use narrow, evidence-seeking tool calls."}, nil
-	case strings.Contains(prompt, "for a __int__:max_turns module."):
+	case strings.Contains(prompt, "for a __int__:max_turns module."), strings.Contains(prompt, "MODULE: __int__:max_turns"):
 		return &core.LLMResponse{Content: "1. Set max_turns to 12."}, nil
 	default:
 		return &core.LLMResponse{Content: "1. Keep the current instruction."}, nil

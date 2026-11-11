@@ -133,7 +133,7 @@ REFLECTION SUGGESTIONS:
 EXAMPLE-LEVEL EVIDENCE:
 %s
 
-Rewrite the instruction to preserve the useful strengths while directly addressing the weaknesses and suggestions.
+Infer the instruction's failures from these inputs, expected and actual outputs, traces, scores, and feedback. Rewrite the instruction to correct those failures while preserving behavior supported by successful cases. Prior reflection notes, when present, are supplementary.
 
 Requirements:
 1. Keep the same overall task and module intent.

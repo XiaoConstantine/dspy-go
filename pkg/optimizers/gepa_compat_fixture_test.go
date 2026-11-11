@@ -57,6 +57,12 @@ type compatFixtureLLM struct{}
 
 func (f *compatFixtureLLM) Generate(_ context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
 	switch {
+	case strings.Contains(prompt, "Revise these module instructions together:"):
+		return &core.LLMResponse{Content: `{"classifier":"classifier improved","generator":"generator improved"}`}, nil
+	case strings.Contains(prompt, "MODULE: classifier"):
+		return &core.LLMResponse{Content: "classifier improved"}, nil
+	case strings.Contains(prompt, "MODULE: generator"):
+		return &core.LLMResponse{Content: "generator improved"}, nil
 	case strings.Contains(prompt, "Generate 1 diverse variations of the instruction for a classifier module."):
 		return &core.LLMResponse{Content: "1. classifier improved"}, nil
 	case strings.Contains(prompt, "Generate 1 diverse variations of the instruction for a generator module."):

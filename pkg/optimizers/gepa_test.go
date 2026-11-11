@@ -316,7 +316,7 @@ func newMetricFrontierPredictProgram(instruction string) core.Program {
 		})
 }
 
-func TestGEPACompileParetoUsesPerExampleMetric(t *testing.T) {
+func TestGEPASelectionUsesPerExampleMetric(t *testing.T) {
 	for _, strategy := range []string{"adaptive_pareto", "pareto"} {
 		for _, mode := range []string{"plain", "predict", "resume", "validation", "validation_resume"} {
 			t.Run(strategy+"/"+mode, func(t *testing.T) {
@@ -344,6 +344,13 @@ func TestGEPACompileParetoUsesPerExampleMetric(t *testing.T) {
 				}
 				gepa, err := NewGEPA(config)
 				require.NoError(t, err)
+				// Selection is independent of proposal generation. Supply an already
+				// retained pool; Compile no longer paraphrases a seed into this pool.
+				gepa.state.PopulationHistory = []*Population{{Candidates: []*GEPACandidate{
+					{ID: "compromise", ModuleName: "alpha", Instruction: "elegant metaphor"},
+					{ID: "first", ModuleName: "alpha", Instruction: "first specialist"},
+					{ID: "last", ModuleName: "alpha", Instruction: "error specialist"},
+				}}}
 
 				program := newCandidateEvaluationTestProgram("elegant metaphor")
 				if mode != "plain" {
@@ -375,15 +382,16 @@ func TestGEPACompileParetoUsesPerExampleMetric(t *testing.T) {
 				require.NoError(t, err)
 				state := gepa.GetOptimizationState()
 				assert.Equal(t, "elegant metaphor", state.BestCandidate.Instruction)
-				assert.InDelta(t, 0.7, state.BestFitness, 1e-9)
+				wantBest := 0.7
+				if validation {
+					wantBest = 1
+				}
+				assert.InDelta(t, wantBest, state.BestFitness, 1e-9)
 				assert.False(t, state.ConvergenceStatus.IsConverged, "module calls must not trigger generation-0 convergence")
 				for _, candidate := range gepa.CurrentPopulation().Candidates {
-					assert.InDelta(t, gepa.state.GetCandidateEvaluation(candidate.ID).AverageScore, candidate.Fitness, 1e-9,
-						"validation and selection must not overwrite training fitness")
+					assert.InDelta(t, gepa.state.GetCandidateValidationEvaluation(candidate.ID).AverageScore, candidate.Fitness, 1e-9,
+						"retained candidates use comparable validation fitness")
 				}
-				archive := state.GetParetoArchive()
-				require.Len(t, archive, 2)
-				assert.ElementsMatch(t, []string{"first specialist", "error specialist"}, []string{archive[0].Instruction, archive[1].Instruction})
 
 				// Evolve through the public API with mutation disabled, observing
 				// which candidate's generation changes rather than a private helper.
@@ -400,7 +408,7 @@ func TestGEPACompileParetoUsesPerExampleMetric(t *testing.T) {
 					// costs one full training/holdout pass, charged to the budget.
 					expectedCalls := 9
 					if validation {
-						expectedCalls += 3
+						expectedCalls = 3
 					}
 					assert.Equal(t, callsBefore+expectedCalls, gepa.state.MetricCallCount())
 				}
@@ -493,6 +501,7 @@ func TestGEPACompileStagnationCountsProposals(t *testing.T) {
 			config.RandomSeed = 4
 			config.ReflectionFreq = 0
 			config.MutationRate = tc.mutationRate
+			config.StagnationLimit = 3
 			llm := &testutil.MockLLM{}
 			llm.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
 				return strings.HasPrefix(prompt, "Generate ")
@@ -500,7 +509,7 @@ func TestGEPACompileStagnationCountsProposals(t *testing.T) {
 				Content: strings.Repeat("initial instruction\n", config.PopulationSize-1),
 			}, nil)
 			llm.On("Generate", mock.Anything, mock.MatchedBy(func(prompt string) bool {
-				return strings.HasPrefix(prompt, "Apply a ")
+				return strings.HasPrefix(prompt, "You are improving a GEPA instruction")
 			}), mock.Anything).Return(&core.LLMResponse{Content: tc.proposal}, nil)
 			config.GenerationLLM = llm
 			config.ReflectionLLM = llm
@@ -527,12 +536,12 @@ func TestGEPACompileStagnationCountsProposals(t *testing.T) {
 			case "default":
 				require.Greater(t, len(state.PopulationHistory), 1)
 				assert.Equal(t, 1.0, state.PopulationHistory[1].BestFitness, "the default loop must attempt a proposal on its first update")
-				assert.Equal(t, 1+config.StagnationLimit, state.CurrentGeneration)
+				assert.Equal(t, 1, state.CurrentGeneration)
 			case "rejected":
 				assert.Equal(t, config.StagnationLimit, state.CurrentGeneration, "rejected proposals still count toward convergence")
 				assert.True(t, state.ConvergenceStatus.IsConverged)
 			default:
-				assert.Greater(t, state.CurrentGeneration, config.StagnationLimit, "skipping mutation is not a failed improvement attempt")
+				assert.Zero(t, state.ConvergenceStatus.StagnationCount, "skipping mutation is not a failed improvement attempt")
 			}
 			stagnation := state.ConvergenceStatus.StagnationCount
 			for range 3 {
@@ -618,7 +627,7 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	require.NotNil(t, config)
 
 	assert.Equal(t, 20, config.PopulationSize)
-	assert.Equal(t, 10, config.MaxGenerations)
+	assert.Equal(t, 1000, config.MaxGenerations)
 	assert.Equal(t, 1.0, config.MutationRate)
 	assert.Equal(t, 0.7, config.CrossoverRate)
 	assert.Equal(t, 0.1, config.ElitismRate)
@@ -626,7 +635,9 @@ func TestDefaultGEPAConfig(t *testing.T) {
 	assert.Equal(t, 3, config.TournamentSize)
 	assert.Equal(t, componentSelectionRoundRobin, config.ComponentSelection)
 	assert.Equal(t, 5, config.MaxMergeInvocations)
-	assert.Zero(t, config.MaxMetricCalls)
+	assert.Equal(t, 1000, config.MaxMetricCalls)
+	assert.True(t, config.SkipPerfectScore)
+	assert.Equal(t, 1.0, config.PerfectScore)
 	assert.Zero(t, config.ScoreThreshold)
 	assert.Zero(t, config.MaxRuntime)
 	assert.Empty(t, config.RunDir)
@@ -853,7 +864,7 @@ func TestPopulationManagement(t *testing.T) {
 	population := gepa.getCurrentPopulation()
 	require.NotNil(t, population)
 	assert.Equal(t, 0, population.Generation)
-	assert.Len(t, population.Candidates, config.PopulationSize)
+	assert.Len(t, population.Candidates, 1)
 
 	// Verify candidates were created properly
 	for _, candidate := range population.Candidates {
@@ -2178,7 +2189,8 @@ func TestGEPACompileEpochBatches(t *testing.T) {
 				config := DefaultGEPAConfig()
 				config.GenerationLLM, config.ReflectionLLM = llm, llm
 				config.PopulationSize = 1
-				config.MaxGenerations = 2 * batchesPerEpoch
+				config.MaxGenerations = 2*batchesPerEpoch + 2
+				config.SkipPerfectScore = false
 				config.MutationRate = 0
 				config.ReflectionFreq = 0
 				config.EvaluationBatchSize = batchSize
@@ -2189,6 +2201,9 @@ func TestGEPACompileEpochBatches(t *testing.T) {
 					state := optimizer.GetOptimizationState()
 					candidate := optimizer.CurrentPopulation().Candidates[0]
 					evaluation := state.GetCandidateEvaluation(candidate.ID)
+					if evaluation == nil {
+						return nil
+					}
 					var indexes []int
 					for _, evalCase := range evaluation.Cases {
 						indexes = append(indexes, evalCase.Example.Outputs["index"].(int))
@@ -2219,7 +2234,7 @@ func TestGEPACompileEpochBatches(t *testing.T) {
 			assert.NotEqual(t, batches[:batchesPerEpoch], batches[batchesPerEpoch:], "reshuffle between epochs")
 			assert.Equal(t, batches, run("", -1), "seeded replay")
 			runDir := t.TempDir()
-			stopped := run(runDir, 0)
+			stopped := run(runDir, 1)
 			resumed := run(runDir, -1)
 			assert.Equal(t, batches, append(stopped, resumed...), "resume reconstructs the same epoch position")
 		})
@@ -2291,6 +2306,7 @@ func TestCompileResumesFromSavedRunState(t *testing.T) {
 	resumeConfig.RunDir = runDir
 	resumeConfig.PopulationSize = 1
 	resumeConfig.MaxGenerations = 3
+	resumeConfig.SkipPerfectScore = false
 	resumeConfig.MutationRate = 0.0
 	resumeConfig.ReflectionFreq = 0
 	resumeConfig.EvaluationBatchSize = 1
@@ -2322,8 +2338,8 @@ func TestCompileStopsWhenMetricBudgetReached(t *testing.T) {
 	require.NoError(t, err)
 
 	dataset := newCountingDataset([]core.Example{
-		{Outputs: map[string]any{"output": "alpha base"}},
-		{Outputs: map[string]any{"output": "alpha base"}},
+		{Inputs: map[string]any{"index": 0}, Outputs: map[string]any{"output": "alpha base"}},
+		{Inputs: map[string]any{"index": 1}, Outputs: map[string]any{"output": "alpha base"}},
 	})
 
 	_, err = gepa.Compile(context.Background(), newCandidateEvaluationTestProgram("alpha base"), dataset, exactOutputMetric)

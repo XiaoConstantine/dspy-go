@@ -20,6 +20,7 @@ type gepaReflectionCaseEvidence struct {
 	ErrorSummary    string
 	FeedbackSummary string
 	FeedbackTarget  string
+	TraceEvidence   []string
 	Score           float64
 }
 
@@ -58,6 +59,7 @@ func (g *GEPA) buildReflectionInput(evaluation *gepaCandidateEvaluation) *gepaRe
 			OutputSummary:   summarizeReflectionMap(evalCase.Outputs),
 			FeedbackSummary: truncateEvidence(evalCase.Feedback, maxReflectionValueChars),
 			FeedbackTarget:  truncateEvidence(evalCase.FeedbackTarget, maxReflectionValueChars),
+			TraceEvidence:   append([]string(nil), evalCase.TraceEvidence...),
 			Score:           evalCase.Score,
 		}
 		if evalCase.Err != nil {
@@ -141,6 +143,9 @@ func (g *GEPA) formatReflectionCaseEvidence(input *gepaReflectionInput) string {
 			if evidence.FeedbackSummary != "" {
 				fmt.Fprintf(&builder, "   Feedback: %s\n", evidence.FeedbackSummary)
 			}
+			for _, trace := range evidence.TraceEvidence {
+				fmt.Fprintf(&builder, "   Trace: %s\n", trace)
+			}
 		}
 	}
 
@@ -178,4 +183,34 @@ func summarizeReflectionMap(values map[string]any) string {
 	}
 
 	return truncateEvidence(string(content), maxReflectionValueChars)
+}
+
+func (s *GEPAState) traceOffsets(candidateID string) map[string]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	offsets := make(map[string]int)
+	for key, traces := range s.ExecutionTraces {
+		if strings.HasPrefix(key, candidateID+"-") {
+			offsets[key] = len(traces)
+		}
+	}
+	return offsets
+}
+
+func (s *GEPAState) traceEvidenceSince(offsets map[string]int, candidateID string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var evidence []string
+	for key, traces := range s.ExecutionTraces {
+		if !strings.HasPrefix(key, candidateID+"-") {
+			continue
+		}
+		for _, trace := range traces[offsets[key]:] {
+			evidence = append(evidence, fmt.Sprintf("module=%s inputs=%s outputs=%s error=%v %s",
+				trace.ModuleName, summarizeReflectionMap(trace.Inputs), summarizeReflectionMap(trace.Outputs), trace.Error,
+				strings.Join(extractRichTraceEvidence(trace), "; ")))
+		}
+	}
+	sort.Strings(evidence)
+	return evidence
 }
