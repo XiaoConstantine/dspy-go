@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -123,17 +124,54 @@ func (m *offlineLLM) respond(prompt string) (string, error) {
 	case strings.HasPrefix(prompt, "As an expert prompt engineer, critically analyze"),
 		strings.HasPrefix(prompt, "# Prompt Candidate Analysis and Critique"):
 		return "STRENGTHS:\n- Explicit routing rules.\nWEAKNESSES:\n- Some labels disagree with the examples.\nSUGGESTIONS:\n- Correct the missing label in a useful codebook.\nCONFIDENCE: 1.0", nil
-	case strings.HasPrefix(prompt, "Apply a "),
-		strings.HasPrefix(prompt, "You are improving a GEPA instruction"):
+	case strings.HasPrefix(prompt, "Apply a "):
 		// Inspect the parent, not expected answers in the reflection evidence.
 		parent := strings.SplitN(prompt, "\n\n", 2)[0]
-		if strings.HasPrefix(prompt, "You are improving") {
-			parent = strings.SplitN(prompt, "MODULE:", 2)[0]
-		}
 		return m.propose(offlineRefine(parent)), nil
+	case strings.HasPrefix(prompt, "You are improving a GEPA instruction"):
+		return m.propose(offlineGEPARefine(prompt)), nil
 	default:
 		return "", fmt.Errorf("offline script does not recognize prompt: %.160s", prompt)
 	}
+}
+
+// GEPA can refine the original seed without paraphrase initialization, but only
+// from concrete input/expected/actual evidence. Bad parents remain decoys; seeing
+// an expected answer somewhere in the prompt is not sufficient to improve them.
+func offlineGEPARefine(prompt string) string {
+	parent, _, _ := strings.Cut(prompt, "MODULE:")
+	_, evidence, _ := strings.Cut(prompt, "EXAMPLE-LEVEL EVIDENCE:")
+	lines := strings.Split(evidence, "\n")
+	labels := map[byte]string{'a': "amber", 'b': "blue", 'c': "coral", 'd': "dusk"}
+	for i, line := range lines {
+		_, inputJSON, ok := strings.Cut(line, "Inputs: ")
+		if !ok || i+2 >= len(lines) {
+			continue
+		}
+		var input, expected, actual map[string]string
+		if json.Unmarshal([]byte(inputJSON), &input) != nil ||
+			json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(lines[i+1]), "Expected: ")), &expected) != nil ||
+			json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(lines[i+2]), "Actual: ")), &actual) != nil {
+			continue
+		}
+		_, symbols, err := offlineInput(input["prompt"])
+		want, got := strings.Fields(expected["completion"]), strings.Fields(actual["completion"])
+		if err != nil || len(want) != 4 || len(got) != 4 {
+			continue
+		}
+		valid := true
+		for j := range symbols {
+			valid = valid && want[j] == labels[symbols[j]]
+		}
+		if !valid {
+			continue
+		}
+		if strings.Contains(parent, offlineBaseline) {
+			return offlinePartial
+		}
+		return offlineRefine(parent)
+	}
+	return offlineDecoy
 }
 
 func offlineRefine(parent string) string {
