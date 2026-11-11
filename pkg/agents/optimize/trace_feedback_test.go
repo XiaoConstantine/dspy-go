@@ -25,7 +25,6 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_PropagatesAdvancedControls(t *test
 			return &EvalResult{Score: 1.0}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:             4,
 			MaxGenerations:             3,
 			SearchBatchSize:            4,
 			StagnationLimit:            60,

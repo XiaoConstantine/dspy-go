@@ -232,7 +232,6 @@ func TestGEPAAgentOptimizer_buildEngineConfig_UsesConfiguredLLMOverrides(t *test
 	reflectionLLM := &testutil.MockLLM{}
 
 	optimizer := NewGEPAAgentOptimizer(nil, nil, GEPAAdapterConfig{
-		PopulationSize:  5,
 		MaxGenerations:  3,
 		GenerationLLM:   generationLLM,
 		ReflectionLLM:   reflectionLLM,

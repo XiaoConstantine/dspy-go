@@ -327,7 +327,6 @@ func TestRunGEPAWorkflow_BaselineOptimizeReplay(t *testing.T) {
 		},
 		PassThreshold: 0.9,
 		Config: GEPAAdapterConfig{
-			PopulationSize:  3,
 			MaxGenerations:  1,
 			EvalConcurrency: 1,
 			PrimaryArtifact: ArtifactSkillPack,

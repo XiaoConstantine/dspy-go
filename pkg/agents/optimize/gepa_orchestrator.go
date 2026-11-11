@@ -99,7 +99,6 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 
 func (o *GEPAAgentOptimizer) buildEngineConfig(seed AgentArtifacts, trainingCount int) *optimizers.GEPAConfig {
 	engineConfig := optimizers.DefaultGEPAConfig()
-	engineConfig.PopulationSize = o.config.PopulationSize
 	engineConfig.MaxGenerations = o.config.MaxGenerations
 	engineConfig.ConcurrencyLevel = o.config.EvalConcurrency
 	engineConfig.StagnationLimit = o.config.StagnationLimit

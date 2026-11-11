@@ -2,13 +2,11 @@ package optimizers
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 )
 
 type CandidateCaseObservation struct {
@@ -18,75 +16,6 @@ type CandidateCaseObservation struct {
 	TotalTokens       int64
 	ToolCalls         int
 	RobustnessFailure bool
-}
-
-// BootstrapPopulationFromSeed initializes a GEPA population from a single external seed candidate.
-func (g *GEPA) BootstrapPopulationFromSeed(ctx context.Context, seed *GEPACandidate) error {
-	if g == nil {
-		return fmt.Errorf("optimizers: nil GEPA optimizer")
-	}
-	if seed == nil {
-		return fmt.Errorf("optimizers: nil GEPA seed candidate")
-	}
-	if strings.TrimSpace(seed.Instruction) == "" {
-		return fmt.Errorf("optimizers: GEPA seed candidate must include a non-empty instruction")
-	}
-
-	logger := logging.GetLogger()
-	logger.Info(ctx, "Bootstrapping GEPA population from seed candidate: module=%s, population_size=%d",
-		seed.ModuleName,
-		g.config.PopulationSize)
-
-	g.state.mu.Lock()
-	if len(g.state.PopulationHistory) > 0 {
-		g.state.mu.Unlock()
-		return fmt.Errorf("optimizers: GEPA population has already been initialized")
-	}
-	g.state.mu.Unlock()
-
-	variations, err := g.generateInitialVariations(ctx, seed.Instruction, seedModuleName(seed), g.config.PopulationSize)
-	if err != nil {
-		logger.Warn(ctx, "Failed to generate seed variations, falling back to seed instruction: %v", err)
-		variations = []string{seed.Instruction}
-	}
-
-	candidates := make([]*GEPACandidate, 0, g.config.PopulationSize)
-	for i, variation := range variations {
-		if len(candidates) >= g.config.PopulationSize {
-			break
-		}
-
-		candidate := g.candidateFromSeed(seed, variation, 0, nil, map[string]any{
-			"variation_index":  i,
-			"base_instruction": seed.Instruction,
-		})
-		candidates = append(candidates, candidate)
-		g.ensureCandidateMetrics(candidate.ID)
-	}
-
-	for len(candidates) < g.config.PopulationSize {
-		original := candidates[g.rng.Intn(len(candidates))]
-		mutated := g.createMutatedCandidate(original)
-		mutated.Generation = 0
-		candidates = append(candidates, mutated)
-		g.ensureCandidateMetrics(mutated.ID)
-	}
-
-	population := &Population{
-		Candidates:    candidates,
-		Generation:    0,
-		BestFitness:   0.0,
-		BestCandidate: nil,
-	}
-
-	g.state.mu.Lock()
-	defer g.state.mu.Unlock()
-	if len(g.state.PopulationHistory) > 0 {
-		return fmt.Errorf("optimizers: GEPA population has already been initialized")
-	}
-	g.state.PopulationHistory = []*Population{population}
-
-	return nil
 }
 
 // CurrentPopulation returns the latest GEPA population.

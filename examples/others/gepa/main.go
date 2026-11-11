@@ -43,7 +43,6 @@ func (d *SimpleDataset) Size() int {
 func main() {
 	apiKey := flag.String("api-key", "", "API Key for the Gemini LLM provider")
 	dataset := flag.String("dataset", "gsm8k", "Dataset to use (gsm8k or hotpotqa)")
-	populationSize := flag.Int("population", 12, "Deprecated: GEPA starts from one seed; this flag is ignored")
 	generations := flag.Int("generations", 8, "Maximum number of generations")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging for GEPA evolution")
 	flag.Parse()
@@ -55,10 +54,10 @@ func main() {
 	}
 
 	// Run the GEPA example
-	RunGEPAExample(*apiKey, *dataset, *populationSize, *generations, *verbose)
+	RunGEPAExample(*apiKey, *dataset, *generations, *verbose)
 }
 
-func RunGEPAExample(apiKey, datasetName string, populationSize, generations int, verbose bool) {
+func RunGEPAExample(apiKey, datasetName string, generations int, verbose bool) {
 	// Setup enhanced logging for GEPA evolution tracking
 	logLevel := logging.INFO
 	if verbose {
@@ -116,7 +115,6 @@ func RunGEPAExample(apiKey, datasetName string, populationSize, generations int,
 
 	// Keep the default metric-call budget and attempt one proposal per iteration.
 	config := optimizers.DefaultGEPAConfig()
-	config.PopulationSize = populationSize // Retained for compatibility; Compile ignores it.
 	config.MaxGenerations = generations
 
 	logger.Info(ctx, "🔧 Creating GEPA optimizer with a %d metric-call budget", config.MaxMetricCalls)

@@ -36,7 +36,6 @@ type evalConfig struct {
 	ReplayOnly      bool    `json:"replay_only,omitempty"`
 	TaskOffset      int     `json:"task_offset"`
 	TaskCount       int     `json:"task_count"`
-	Population      int     `json:"population"`
 	Generations     int     `json:"generations"`
 	MaxIterations   int     `json:"max_iterations"`
 	ValidationSplit float64 `json:"validation_split"`
@@ -74,7 +73,6 @@ func main() {
 	provider := flag.String("provider", "anthropic", "LLM provider to use: anthropic, openai, or gemini")
 	model := flag.String("model", "", "Model to use (provider default if empty)")
 	apiKey := flag.String("api-key", "", "API key override (otherwise uses provider environment variable)")
-	population := flag.Int("population", 4, "GEPA population size")
 	generations := flag.Int("generations", 2, "GEPA generations")
 	taskFile := flag.String("file", "", "Path to OOLONG tasks JSON file")
 	useHuggingFace := flag.Bool("hf", false, "Fetch tasks from HuggingFace instead of using embedded samples")
@@ -175,7 +173,6 @@ func main() {
 			ApplyBest:          true,
 			ArtifactPath:       strings.TrimSpace(*artifactPath),
 			Config: optimize.GEPAAdapterConfig{
-				PopulationSize:  *population,
 				MaxGenerations:  *generations,
 				EvalConcurrency: 1,
 				PassThreshold:   passThreshold,
@@ -218,7 +215,6 @@ func main() {
 			ReplayOnly:      *replayOnly,
 			TaskOffset:      *taskOffset,
 			TaskCount:       len(tasks),
-			Population:      *population,
 			Generations:     *generations,
 			MaxIterations:   *maxIters,
 			ValidationSplit: defaultValidation,

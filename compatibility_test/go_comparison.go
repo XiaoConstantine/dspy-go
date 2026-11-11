@@ -65,7 +65,6 @@ func (cm *ComparisonMetrics) GetTotalTime() float64 {
 	return sum
 }
 
-
 // OptimizerComparison handles the comparison between Go and Python implementations.
 type OptimizerComparison struct {
 	ModelName string
@@ -395,9 +394,9 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 	// Create COPRO optimizer (prompt optimization algorithm)
 	coproOptimizer := optimizers.NewCOPRO(
 		metricFunc,
-		optimizers.WithBreadth(breadth),        // Number of prompt candidates
-		optimizers.WithDepth(depth),            // Refinement iterations
-		optimizers.WithInitTemperature(1.2),    // Exploration randomness
+		optimizers.WithBreadth(breadth),     // Number of prompt candidates
+		optimizers.WithDepth(depth),         // Refinement iterations
+		optimizers.WithInitTemperature(1.2), // Exploration randomness
 		optimizers.WithTrackStats(false),
 	)
 
@@ -531,7 +530,7 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 	return optimizedProgram, results
 }
 
-func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Example, populationSize int, maxGenerations int) (core.Program, map[string]interface{}) {
+func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Example, maxGenerations int) (core.Program, map[string]interface{}) {
 	log.Println("Testing GEPA optimizer")
 
 	// Create a simple program for testing
@@ -562,10 +561,9 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 
 	// Create GEPA optimizer with smaller parameters for compatibility testing
 	config := optimizers.DefaultGEPAConfig()
-	config.PopulationSize = populationSize
 	config.MaxGenerations = maxGenerations
-	config.EvaluationBatchSize = 3  // Smaller batch for testing
-	config.ConcurrencyLevel = 2     // Reduced concurrency for testing
+	config.EvaluationBatchSize = 3 // Smaller batch for testing
+	config.ConcurrencyLevel = 2    // Reduced concurrency for testing
 
 	gepaOptimizer, err := optimizers.NewGEPA(config)
 	if err != nil {
@@ -616,8 +614,7 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 		"compilation_time": compilationTime,
 		"average_score":    avgScore,
 		"total_examples":   len(valset),
-		"population_size":  populationSize,
-		"max_generations": maxGenerations,
+		"max_generations":  maxGenerations,
 		"demonstrations":   oc.extractDemonstrations(optimizedProgram),
 	}
 
@@ -786,7 +783,7 @@ func main() {
 
 	if *optimizer == "gepa" || *optimizer == "all" {
 		fmt.Println("Testing GEPA...")
-		_, gepaResults := comparison.TestGEPA(ctx, dataset, 8, 3)
+		_, gepaResults := comparison.TestGEPA(ctx, dataset, 3)
 		results["gepa"] = gepaResults
 	}
 
@@ -961,9 +958,6 @@ func main() {
 			fmt.Printf("  - Compilation time: %.2fs\n", compTime)
 		} else {
 			fmt.Printf("  - Compilation time: N/A\n")
-		}
-		if popSize, exists := gepaResults["population_size"]; exists && popSize != nil {
-			fmt.Printf("  - Population size: %v\n", popSize)
 		}
 		if maxGen, exists := gepaResults["max_generations"]; exists && maxGen != nil {
 			fmt.Printf("  - Max generations: %v\n", maxGen)

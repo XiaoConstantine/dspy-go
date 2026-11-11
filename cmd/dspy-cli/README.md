@@ -132,7 +132,6 @@ Enable GEPA optimization before held-out evaluation:
 ```bash
 ./dspy-cli benchmark tblite \
   --gepa \
-  --population 4 \
   --generations 2 \
   --validation-split 0.2 \
   --test-split 0.2 \

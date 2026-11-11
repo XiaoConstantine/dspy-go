@@ -42,7 +42,6 @@ type IntMutationConfig struct {
 
 // GEPAAdapterConfig configures the agent-to-GEPA bridge layer.
 type GEPAAdapterConfig struct {
-	PopulationSize             int
 	MaxGenerations             int
 	SearchBatchSize            int
 	StagnationLimit            int
@@ -64,7 +63,6 @@ type GEPAAdapterConfig struct {
 // DefaultGEPAAdapterConfig returns a conservative default adapter config.
 func DefaultGEPAAdapterConfig() GEPAAdapterConfig {
 	return GEPAAdapterConfig{
-		PopulationSize:  8,
 		MaxGenerations:  4,
 		SearchBatchSize: 4,
 		StagnationLimit: 60,
@@ -307,9 +305,6 @@ func (o *GEPAAgentOptimizer) evaluateCandidateWithBase(ctx context.Context, cand
 
 func (cfg GEPAAdapterConfig) withDefaults() GEPAAdapterConfig {
 	defaults := DefaultGEPAAdapterConfig()
-	if cfg.PopulationSize <= 0 {
-		cfg.PopulationSize = defaults.PopulationSize
-	}
 	if cfg.MaxGenerations <= 0 {
 		cfg.MaxGenerations = defaults.MaxGenerations
 	}

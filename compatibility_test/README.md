@@ -68,7 +68,6 @@ This harness:
 | Parameter | Python | Go | Notes |
 |-----------|--------|-----|--------|
 | Mode/Strategy | `auto="light"` | `adaptive_pareto` | Different APIs, equivalent functionality |
-| Population Size | Auto-configured | 8 | Go allows explicit control |
 | Max Generations | Auto-configured | 3 | Go allows explicit control |
 | Mutation Rate | Auto-configured | 0.3 | Go exposes evolutionary parameters |
 | Crossover Rate | Auto-configured | 0.7 | Go exposes evolutionary parameters |
@@ -97,7 +96,7 @@ All optimizers now use **matched configurations** between Python and Go implemen
 | MIPRO | `num_trials=5`, `max_bootstrapped_demos=3`, 3/4 dataset split |
 | SIMBA | `batch_size=4`, `max_steps=6`, `num_candidates=4`, `sampling_temperature=0.2`, 3/4 dataset split |
 | COPRO | `breadth=5`, `depth=2`, `init_temperature=1.2`, 3/4 dataset split |
-| GEPA | Python: `auto="light"`, Go: `population_size=8`, `max_generations=3`, 3/4 dataset split |
+| GEPA | Python: `auto="light"`, Go: `max_generations=3`, 3/4 dataset split |
 
 ### Compatibility Summary
 - **Overall Status**: ✅ **COMPATIBLE**
@@ -281,7 +280,7 @@ python compare_results.py
 - **Go**: `optimizers.GEPA`
 - **Parameters**:
   - Python: `auto="light"`
-  - Go: `population_size=8`, `max_generations=3`, `adaptive_pareto` selection
+  - Go: `max_generations=3`, `adaptive_pareto` selection
 
 ## Output Files
 
@@ -313,7 +312,6 @@ Results from Python DSPy implementation:
     "optimizer": "GEPA",
     "average_score": 0.67,
     "compilation_time": 99.24,
-    "population_size": 8,
     "max_generations": 3,
     "demonstrations": [...]
   }

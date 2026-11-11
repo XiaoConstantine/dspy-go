@@ -442,7 +442,6 @@ class OptimizerComparison:
         return optimized_program, results
 
     def test_gepa(self, dataset: List[dspy.Example],
-                  population_size: int = 8,
                   max_generations: int = 3) -> Tuple[dspy.Module, Dict[str, Any]]:
         """Test GEPA optimizer (if available)"""
         logger.info("Testing GEPA optimizer")
@@ -454,7 +453,6 @@ class OptimizerComparison:
                 "compilation_time": 0.0,
                 "average_score": 0.0,
                 "total_examples": 0,
-                "population_size": population_size,
                 "max_generations": max_generations,
                 "demonstrations": [],
                 "error": "GEPA not available in this DSPy version"
@@ -503,7 +501,6 @@ class OptimizerComparison:
                 "compilation_time": compilation_time,
                 "average_score": avg_score,
                 "total_examples": len(valset),
-                "population_size": population_size,
                 "max_generations": max_generations,
                 "demonstrations": self._extract_demonstrations(optimized_program)
             }
@@ -515,7 +512,6 @@ class OptimizerComparison:
                 "compilation_time": 0.0,
                 "average_score": 0.0,
                 "total_examples": len(valset),
-                "population_size": population_size,
                 "max_generations": max_generations,
                 "demonstrations": [],
                 "error": str(e)
@@ -752,7 +748,6 @@ def main():
         else:
             print(f"  - Average score: {results['gepa']['average_score']:.3f}")
             print(f"  - Compilation time: {results['gepa']['compilation_time']:.2f}s")
-            print(f"  - Population size: {results['gepa']['population_size']}")
             print(f"  - Max generations: {results['gepa']['max_generations']}")
             print(f"  - Demonstrations: {len(results['gepa']['demonstrations'])}")
 

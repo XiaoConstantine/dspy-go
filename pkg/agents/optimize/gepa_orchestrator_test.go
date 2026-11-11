@@ -30,7 +30,6 @@ func TestGEPAAgentOptimizer_Optimize_UsesMainlineGEPACompile(t *testing.T) {
 			}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:  3,
 			MaxGenerations:  2,
 			ValidationSplit: 0,
 			EvalConcurrency: 2,
@@ -81,7 +80,6 @@ func TestGEPAAgentOptimizer_BuildEngineConfig_UsesSearchBatchAndStagnationLimit(
 			return &EvalResult{Score: 1.0}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:  4,
 			MaxGenerations:  3,
 			SearchBatchSize: 4,
 			StagnationLimit: 60,
@@ -135,7 +133,6 @@ func TestGEPAAgentOptimizer_Optimize_PrefersEngineValidationWinner(t *testing.T)
 			}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:  3,
 			MaxGenerations:  2,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
@@ -223,7 +220,6 @@ func TestGEPAAgentOptimizer_Optimize_MultiArtifactValidationFixture(t *testing.T
 			}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:  6,
 			MaxGenerations:  4,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
@@ -325,7 +321,6 @@ func TestGEPAAgentOptimizer_CachedValidationEvaluation_DoesNotMutateInputCandida
 			}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:  3,
 			MaxGenerations:  1,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
@@ -495,7 +490,6 @@ func TestGEPAAgentOptimizer_Optimize_StoresAggregateCandidateFitnessForSynthetic
 			}, nil
 		}),
 		GEPAAdapterConfig{
-			PopulationSize:  1,
 			MaxGenerations:  1,
 			ValidationSplit: 0,
 			EvalConcurrency: 1,
@@ -531,24 +525,6 @@ func TestGEPAAgentOptimizer_Optimize_StoresAggregateCandidateFitnessForSynthetic
 	assert.InDelta(t, 0.5, metrics.AverageFitness, 0.000001)
 	assert.InDelta(t, 0.5, fitness.OutputQuality, 0.000001)
 	assert.InDelta(t, 0.5, fitness.SuccessRate, 0.000001)
-}
-
-func TestGEPA_BootstrapPopulationFromSeed_RejectsReinitialization(t *testing.T) {
-	setupAgentGEPAMockLLM(t)
-
-	engine, err := optimizers.NewGEPA(optimizers.DefaultGEPAConfig())
-	require.NoError(t, err)
-
-	seed := &optimizers.GEPACandidate{
-		ID:          "seed",
-		ModuleName:  "skill_pack",
-		Instruction: "Use the repository debugging guide.",
-	}
-
-	require.NoError(t, engine.BootstrapPopulationFromSeed(context.Background(), seed))
-	err = engine.BootstrapPopulationFromSeed(context.Background(), seed)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already been initialized")
 }
 
 func setupAgentGEPAMockLLM(t *testing.T) {

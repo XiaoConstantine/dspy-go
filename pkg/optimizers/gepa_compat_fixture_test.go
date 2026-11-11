@@ -602,7 +602,6 @@ func runCompatSelectorScenario(t *testing.T, ctx context.Context, selector strin
 	}()
 
 	config := DefaultGEPAConfig()
-	config.PopulationSize = 1
 	config.MaxGenerations = 2
 	config.MutationRate = 1.0
 	config.ComponentSelection = selector
@@ -660,7 +659,6 @@ func runCompatValidationFrontierScenario(t *testing.T, ctx context.Context) comp
 	}()
 
 	config := DefaultGEPAConfig()
-	config.PopulationSize = 4
 	config.MaxGenerations = 1
 	config.ConcurrencyLevel = 1
 	config.EvaluationBatchSize = 1
@@ -859,7 +857,6 @@ func runCompatFeedbackScenario(t *testing.T, ctx context.Context) compatFeedback
 	}()
 
 	config := DefaultGEPAConfig()
-	config.PopulationSize = 1
 	config.MaxGenerations = 2
 	config.SelectionStrategy = "tournament"
 	config.TournamentSize = 1
@@ -919,7 +916,6 @@ func runCompatFormatFailureScenario(t *testing.T, ctx context.Context) compatFee
 	}()
 
 	config := DefaultGEPAConfig()
-	config.PopulationSize = 1
 	config.MaxGenerations = 2
 	config.SelectionStrategy = "tournament"
 	config.TournamentSize = 1
@@ -974,7 +970,6 @@ func runCompatMinibatchScenario(t *testing.T, ctx context.Context, proposal, dat
 	}()
 
 	config := DefaultGEPAConfig()
-	config.PopulationSize = 1
 	config.MaxGenerations = 2
 	config.MutationRate = 1.0
 	config.SelectionStrategy = "tournament"
@@ -1037,7 +1032,6 @@ func runCompatEarlyStopScenario(t *testing.T, ctx context.Context, stoppedConfig
 
 	buildConfig := func() *GEPAConfig {
 		config := DefaultGEPAConfig()
-		config.PopulationSize = 1
 		config.MaxGenerations = 3
 		config.MutationRate = 1.0
 		config.SelectionStrategy = "tournament"
@@ -1138,7 +1132,6 @@ func runCompatResumeScenario(t *testing.T, ctx context.Context) compatResumeResu
 	buildConfig := func(runDir string) *GEPAConfig {
 		config := DefaultGEPAConfig()
 		config.RunDir = runDir
-		config.PopulationSize = 1
 		config.MaxGenerations = 3
 		config.MutationRate = 1.0
 		config.SelectionStrategy = "tournament"

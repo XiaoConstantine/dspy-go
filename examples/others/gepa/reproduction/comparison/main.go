@@ -190,8 +190,7 @@ func runGEPAExperiment(ctx context.Context, logger *logging.Logger, trainExample
 	// Get optimization state
 	state := gepa.GetOptimizationState()
 
-	// Calculate rollouts estimate
-	rollouts := state.CurrentGeneration * config.PopulationSize
+	rollouts := state.MetricCalls
 
 	// Evaluate on test set
 	testScore := evaluateProgram(ctx, optimizedProgram, testExamples, metricFunc, 50)

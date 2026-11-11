@@ -34,12 +34,10 @@ type ExperimentConfig struct {
 	MaxExamples    int     `json:"max_examples"`     // Dataset size limit for experiments
 
 	// GEPA configuration (matching paper parameters)
-	PopulationSize int `json:"population_size"` // Default: 20 (paper uses 20-30)
-	MaxGenerations int `json:"max_generations"` // Default: 15 (200-300 rollouts / pop_size)
+	MaxGenerations int `json:"max_generations"` // Default: 15 (safety cap on iterations)
 	Budget         int `json:"budget"`          // Default: 300 (total rollout budget from paper)
 
 	// Paper-specific parameters
-	ReflectionFreq  int     `json:"reflection_freq"`  // Default: 2 (every 2 generations)
 	Temperature     float64 `json:"temperature"`      // Default: 0.7 (paper generation temp)
 	EvalTemperature float64 `json:"eval_temperature"` // Default: 0.3 (paper evaluation temp)
 
@@ -122,10 +120,8 @@ func DefaultExperimentConfig() *ExperimentConfig {
 	return &ExperimentConfig{
 		TrainTestSplit:    0.5,  // 50/50 split from paper
 		MaxExamples:       500,  // Reasonable subset for experiments
-		PopulationSize:    20,   // Paper uses 20-30
-		MaxGenerations:    15,   // 300 rollouts / 20 pop = 15 generations
+		MaxGenerations:    15,   // Safety cap on iterations
 		Budget:            300,  // Paper's rollout budget
-		ReflectionFreq:    2,    // Every 2 generations
 		Temperature:       0.7,  // Paper generation temperature
 		EvalTemperature:   0.3,  // Paper evaluation temperature
 		EarlyStopPatience: 3,    // Paper uses 3 iterations patience
@@ -392,7 +388,7 @@ func (exp *HotpotQAReproductionExperiment) displayResults(gepa *optimizers.GEPA,
 	exp.logger.Info(exp.ctx, "⏱️ Efficiency Metrics:")
 	exp.logger.Info(exp.ctx, "   Total Duration: %v", duration)
 	exp.logger.Info(exp.ctx, "   Generations Completed: %d", state.CurrentGeneration)
-	exp.logger.Info(exp.ctx, "   Estimated Rollouts: ~%d", state.CurrentGeneration*exp.config.PopulationSize)
+	exp.logger.Info(exp.ctx, "   Metric Calls: %d", state.MetricCalls)
 	exp.logger.Info(exp.ctx, "")
 
 	if exp.cache != nil {
@@ -435,17 +431,9 @@ type ExperimentProgressReporter struct {
 }
 
 func (pr *ExperimentProgressReporter) Report(operation string, current, total int) {
-	// Calculate rollout estimates
-	estimatedRollouts := current * pr.exp.config.PopulationSize
-	budgetProgress := float64(estimatedRollouts) / float64(pr.exp.config.Budget) * 100
-
-	pr.logger.Info(pr.ctx, "🧬 %s: Gen %d/%d (%.1f%%) | ~%d rollouts | Budget: %.1f%%",
-		operation, current, total, float64(current)/float64(total)*100,
-		estimatedRollouts, budgetProgress)
-
-	if current%pr.exp.config.ReflectionFreq == 0 && current > 0 {
-		pr.logger.Info(pr.ctx, "🤔 LLM Reflection triggered at generation %d", current)
-	}
+	// GEPA reports metric calls against the metric-call budget.
+	pr.logger.Info(pr.ctx, "🧬 %s: %d/%d metric calls (%.1f%%)",
+		operation, current, total, float64(current)/float64(total)*100)
 }
 
 func RunHotpotQAReproduction(apiKey string) {

@@ -37,7 +37,6 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	var label string
 	var shuffleSeed int64
 	var useGEPA bool
-	var populationSize int
 	var generations int
 	var gepaSearchBatchSize int
 	var gepaEvalConcurrency int
@@ -113,7 +112,7 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 				return nil
 			}
 
-			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, populationSize, generations, gepaSearchBatchSize, gepaEvalConcurrency, gepaStagnationLimit, validationSplit, testSplit)
+			return runTBLiteGEPABenchmark(cmd, agentCfg, tasks, split, offset, limit, rootDir, outputPath, keepArtifacts, label, generations, gepaSearchBatchSize, gepaEvalConcurrency, gepaStagnationLimit, validationSplit, testSplit)
 		},
 	}
 
@@ -136,7 +135,6 @@ func newTBLiteBenchmarkCommand(factory func(*terminalTaskCommandConfig) (tblite.
 	cmd.Flags().StringVar(&label, "label", "", "Optional report label (e.g. baseline or tuned)")
 	cmd.Flags().Int64Var(&shuffleSeed, "shuffle-seed", 1, "Deterministic shuffle seed applied before splitting/evaluation")
 	cmd.Flags().BoolVar(&useGEPA, "gepa", false, "Optimize the tool-calling system prompt with GEPA before evaluating on a held-out test split")
-	cmd.Flags().IntVar(&populationSize, "population", 4, "GEPA population size for --gepa runs")
 	cmd.Flags().IntVar(&generations, "generations", 2, "GEPA generations for --gepa runs")
 	cmd.Flags().IntVar(&gepaSearchBatchSize, "gepa-search-batch-size", 4, "Training tasks scored per GEPA candidate evaluation during search")
 	cmd.Flags().IntVar(&gepaEvalConcurrency, "gepa-eval-concurrency", 4, "Concurrent GEPA candidate evaluations for --gepa runs")
@@ -256,7 +254,6 @@ func runTBLiteGEPABenchmark(
 	outputPath string,
 	keepArtifacts bool,
 	label string,
-	populationSize int,
 	generations int,
 	gepaSearchBatchSize int,
 	gepaEvalConcurrency int,
@@ -306,7 +303,6 @@ func runTBLiteGEPABenchmark(
 			UseTaskContainers: true,
 		}),
 		optimize.GEPAAdapterConfig{
-			PopulationSize:  populationSize,
 			MaxGenerations:  generations,
 			SearchBatchSize: gepaSearchBatchSize,
 			StagnationLimit: gepaStagnationLimit,

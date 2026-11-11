@@ -125,7 +125,6 @@ workflow, err := optimize.RunGEPAWorkflow(ctx, baseAgent, optimize.GEPAWorkflowR
     ApplyBest:          true,
     ArtifactPath:       "optimized_program.json",
     Config: optimize.GEPAAdapterConfig{
-        PopulationSize:             4,
         MaxGenerations:             2,
         MaxMetricCalls:             50,
         AddFormatFailureAsFeedback: true,
@@ -240,7 +239,6 @@ go run -mod=mod . benchmark tblite \
   --root-dir /tmp/tblite-gepa \
   --output /tmp/tblite-gepa.json \
   --gepa \
-  --population 4 \
   --generations 2 \
   --validation-split 0.2 \
   --test-split 0.2

@@ -48,7 +48,6 @@ go run main.go -api-key YOUR_KEY -verbose
 
 - `-api-key`: **Required** - Your Google Gemini API key
 - `-dataset`: Dataset to use (`gsm8k` or `hotpotqa`, default: `gsm8k`)
-- `-population`: Deprecated compatibility flag; ignored by `Compile`
 - `-generations`: Safety cap including seed validation (default: 8)
 - `-verbose`: Enable detailed logging of the evolutionary process
 
@@ -79,7 +78,7 @@ config.EvaluationBatchSize = 5
 config.RandomSeed = 42
 ```
 
-`PopulationSize` no longer controls `Compile`. The unused `ReflectionFreq`, `ValidationFrequency`, `CrossoverRate`, `ElitismRate`, `Temperature`, `MaxTokens`, and `SelfCritiqueTemp` fields were removed. Configure sampling on the supplied LM, not on GEPA. `SkipPerfectScore` defaults to true with `PerfectScore=1`; change that threshold or disable skipping for other metric scales.
+The unused `PopulationSize`, `ReflectionFreq`, `ValidationFrequency`, `CrossoverRate`, `ElitismRate`, `Temperature`, `MaxTokens`, and `SelfCritiqueTemp` fields were removed. Configure sampling on the supplied LM, not on GEPA. `SkipPerfectScore` defaults to true with `PerfectScore=1`; change that threshold or disable skipping for other metric scales.
 
 ## Performance Considerations
 
