@@ -24,6 +24,7 @@ type contextKey string
 const (
 	gepaStateKey   contextKey = "gepa_state"
 	candidateIDKey contextKey = "current_candidate_id"
+	caseTracesKey  contextKey = "current_case_traces"
 )
 
 const (
@@ -80,7 +81,7 @@ type GEPAConfig struct {
 	// (the last batch may be smaller). Validation uses the explicit examples or
 	// holdout below; with neither, it scores the full training set, not a batch.
 	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
-	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Default: 3
+	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Program executions run at once per evaluation; default: 3. Above 1 the program must be safe for concurrent use; metric and FeedbackEvaluator calls are serialized.
 	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (no holdout)
 	ValidationExamples         []core.Example        `json:"-"`
 	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
@@ -392,7 +393,8 @@ func NewGEPAState() *GEPAState {
 	}
 }
 
-// AddTrace adds an execution trace to the state.
+// AddTrace adds an execution trace to the state. It does not attribute the
+// trace to an example; use AddTraceContext for per-example reflection evidence.
 func (s *GEPAState) AddTrace(trace *ExecutionTrace) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -423,6 +425,16 @@ func (s *GEPAState) AddTrace(trace *ExecutionTrace) {
 	if trace.Error != nil {
 		errorType := trace.Error.Error()
 		metrics.ErrorCounts[errorType]++
+	}
+}
+
+// AddTraceContext adds an execution trace and attributes it to the example
+// being evaluated in ctx, so concurrently evaluated examples keep separate
+// reflection evidence. Adapters that record their own traces should use it.
+func (s *GEPAState) AddTraceContext(ctx context.Context, trace *ExecutionTrace) {
+	s.AddTrace(trace)
+	if traces, ok := ctx.Value(caseTracesKey).(*gepaCaseTraces); ok {
+		traces.add(trace)
 	}
 }
 
@@ -1774,7 +1786,7 @@ func (g *GEPA) gepaExecutionTracker(ctx context.Context, inputs map[string]any,
 		ContextData: make(map[string]any),
 	}
 
-	gepaState.AddTrace(trace)
+	gepaState.AddTraceContext(ctx, trace)
 	return outputs, err
 }
 

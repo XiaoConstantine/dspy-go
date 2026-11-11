@@ -255,12 +255,18 @@ func newTwoModuleCandidateEvaluationTestProgram(alphaInstruction, betaInstructio
 	})
 }
 
+// countingProgramMu guards the execution counters: GEPA runs a candidate's
+// examples concurrently.
+var countingProgramMu sync.Mutex
+
 func newCountingCandidateEvaluationProgram(instruction string, executions *int) core.Program {
 	return core.NewProgramWithForwardFactory(map[string]core.Module{
 		"alpha": newStaticCandidateTestModule(instruction),
 	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
 		return func(context.Context, map[string]any) (map[string]any, error) {
+			countingProgramMu.Lock()
 			*executions = *executions + 1
+			countingProgramMu.Unlock()
 			return map[string]any{
 				"output": modules["alpha"].GetSignature().Instruction,
 			}, nil
@@ -274,7 +280,9 @@ func newErrorCandidateEvaluationProgram(instruction string, executions *int, err
 	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
 		return func(context.Context, map[string]any) (map[string]any, error) {
 			if executions != nil {
+				countingProgramMu.Lock()
 				*executions = *executions + 1
+				countingProgramMu.Unlock()
 			}
 			return map[string]any{
 				"output": modules["alpha"].GetSignature().Instruction,
@@ -3672,4 +3680,68 @@ type MockProgressReporter struct{}
 
 func (m *MockProgressReporter) Report(operation string, current, total int) {
 	// Mock implementation
+}
+
+func TestEvaluateCandidateWithAdapterRunsExamplesConcurrently(t *testing.T) {
+	for _, level := range []int{1, 3} {
+		t.Run(fmt.Sprintf("level_%d", level), func(t *testing.T) {
+			gepa := &GEPA{config: DefaultGEPAConfig(), state: NewGEPAState()}
+			gepa.config.ConcurrencyLevel = level
+
+			var mu sync.Mutex
+			inFlight, peak := 0, 0
+			full := make(chan struct{})
+			program := core.NewProgramWithForwardFactory(map[string]core.Module{
+				"alpha": newStaticCandidateTestModule("alpha"),
+			}, func(map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+					mu.Lock()
+					inFlight++
+					if inFlight > peak {
+						peak = inFlight
+					}
+					if inFlight == level && peak == level {
+						select {
+						case <-full:
+						default:
+							close(full)
+						}
+					}
+					mu.Unlock()
+					// Hold every call until the configured number overlap.
+					select {
+					case <-full:
+					case <-time.After(5 * time.Second):
+					}
+					GetGEPAState(ctx).AddTraceContext(ctx, &ExecutionTrace{
+						CandidateID: CurrentCandidateID(ctx), ModuleName: "alpha", Inputs: inputs, Success: true,
+					})
+					mu.Lock()
+					inFlight--
+					mu.Unlock()
+					return map[string]any{"output": inputs["q"]}, nil
+				}
+			})
+			var examples []core.Example
+			for i := range 7 {
+				q := fmt.Sprintf("question-%d", i)
+				examples = append(examples, core.Example{Inputs: map[string]any{"q": q}, Outputs: map[string]any{"output": q}})
+			}
+			adapter := gepa.newEvaluationAdapterForExamples(program, examples, exactOutputMetric)
+			candidate := &GEPACandidate{ID: "candidate", ModuleName: "alpha", Instruction: "alpha"}
+
+			evaluation := gepa.evaluateCandidateWithAdapter(gepa.withGEPAState(context.Background()), candidate, adapter)
+
+			assert.Equal(t, level, peak, "ConcurrencyLevel must bound and reach the number of in-flight examples")
+			assert.Equal(t, 1.0, evaluation.AverageScore)
+			assert.Equal(t, len(examples), gepa.state.MetricCallCount())
+			require.Len(t, evaluation.Cases, len(examples))
+			for i, evalCase := range evaluation.Cases {
+				q := examples[i].Inputs["q"].(string)
+				assert.Equal(t, q, evalCase.Outputs["output"], "cases keep batch order")
+				require.Len(t, evalCase.TraceEvidence, 1, "each example keeps only its own traces")
+				assert.Contains(t, evalCase.TraceEvidence[0], q)
+			}
+		})
+	}
 }

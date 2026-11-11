@@ -273,7 +273,7 @@ func (a *artifactProgramAdapter) recordEvaluation(ctx context.Context, candidate
 	}
 
 	trace := buildGEPATrace(candidate, example, result, a.optimizer.config.PassThreshold)
-	state.AddTrace(&trace)
+	state.AddTraceContext(ctx, &trace)
 	state.RecordCandidateCaseObservation(candidate.ID, optimizersCandidateCaseObservation(result, a.optimizer.config.PassThreshold))
 }
 

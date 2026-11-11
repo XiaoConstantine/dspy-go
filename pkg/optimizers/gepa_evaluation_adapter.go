@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	"github.com/sourcegraph/conc/pool"
 )
 
 // gepaEvaluationCase captures one example-level evaluation. Future reflective
@@ -174,19 +177,23 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	}
 
 	candidateCtx := context.WithValue(ctx, candidateIDKey, candidate.ID)
-	totalScore := 0.0
-	scoredCases := 0
-	spentMetricCalls := 0
+	cases := make([]gepaEvaluationCase, len(adapter.batch))
+	ran := make([]bool, len(adapter.batch))
+	var spent atomic.Int64
 
-	for _, example := range adapter.batch {
-		if ctx.Err() != nil {
-			break
-		}
-		evalCase := gepaEvaluationCase{
-			Example: example,
-		}
-		cacheKey := evaluationCaseCacheKey(candidate, example)
-		if g != nil && g.state != nil {
+	// Program executions of one candidate run concurrently; results keep batch
+	// order, so scores and reflection evidence do not depend on completion order.
+	// Metric and feedback calls stay serialized: existing metrics are plain
+	// closures that were never required to be safe for concurrent use.
+	var scoring sync.Mutex
+	workers := pool.New().WithMaxGoroutines(max(g.config.ConcurrencyLevel, 1))
+	for i, example := range adapter.batch {
+		workers.Go(func() {
+			if ctx.Err() != nil {
+				return
+			}
+			evalCase := gepaEvaluationCase{Example: example}
+			cacheKey := evaluationCaseCacheKey(candidate, example)
 			if cached := g.state.GetEvaluationCaseCache(cacheKey); cached != nil {
 				evalCase.Outputs = cloneStringAnyMap(cached.Outputs)
 				evalCase.Err = cached.Err
@@ -198,16 +205,18 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 			} else {
 				// Capture only traces emitted by this example, including internal
 				// module calls whose inputs differ from the program's outer input.
-				offsets := g.state.traceOffsets(candidate.ID)
-				outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
+				traces := &gepaCaseTraces{}
+				outputs, err := modifiedProgram.Execute(context.WithValue(candidateCtx, caseTracesKey, traces), example.Inputs)
 				evalCase.Outputs = outputs
 				evalCase.Err = err
-				evalCase.TraceEvidence = g.state.traceEvidenceSince(offsets, candidate.ID)
+				evalCase.TraceEvidence = traces.evidence()
+				scoring.Lock()
 				if err == nil {
 					evalCase.Score = adapter.metric(example.Outputs, outputs)
 				}
 				g.populateEvaluationCaseFeedback(ctx, candidate, &evalCase)
-				spentMetricCalls++
+				scoring.Unlock()
+				spent.Add(1)
 				g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
 					Outputs:          outputs,
 					Score:            evalCase.Score,
@@ -218,23 +227,24 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 					TraceEvidence:    evalCase.TraceEvidence,
 				})
 			}
-		} else {
-			outputs, err := modifiedProgram.Execute(candidateCtx, example.Inputs)
-			evalCase.Outputs = outputs
-			evalCase.Err = err
-			if err == nil {
-				evalCase.Score = adapter.metric(example.Outputs, outputs)
-			}
-			g.populateEvaluationCaseFeedback(ctx, candidate, &evalCase)
-			spentMetricCalls++
+			cases[i], ran[i] = evalCase, true
+		})
+	}
+	workers.Wait()
+
+	totalScore := 0.0
+	scoredCases := 0
+	for i, evalCase := range cases {
+		if !ran[i] {
+			continue
 		}
 		if evalCase.Err == nil {
 			totalScore += evalCase.Score
 			scoredCases++
 		}
-
 		result.Cases = append(result.Cases, evalCase)
 	}
+	spentMetricCalls := int(spent.Load())
 
 	if scoredCases > 0 {
 		result.TotalScore = totalScore

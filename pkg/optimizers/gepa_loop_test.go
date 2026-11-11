@@ -63,7 +63,7 @@ func TestGEPACompileRetainsParentsAndValidatesOnlyAcceptedChildren(t *testing.T)
 			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
 				outputs := map[string]any{"output": modules["alpha"].GetSignature().Instruction}
 				if state := GetGEPAState(ctx); state != nil {
-					state.AddTrace(&ExecutionTrace{
+					state.AddTraceContext(ctx, &ExecutionTrace{
 						CandidateID: CurrentCandidateID(ctx), ModuleName: "alpha",
 						Inputs: map[string]any{"inner": inputs["case"]}, Outputs: outputs,
 					})

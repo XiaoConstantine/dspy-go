@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -185,31 +186,27 @@ func summarizeReflectionMap(values map[string]any) string {
 	return truncateEvidence(string(content), maxReflectionValueChars)
 }
 
-func (s *GEPAState) traceOffsets(candidateID string) map[string]int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	offsets := make(map[string]int)
-	for key, traces := range s.ExecutionTraces {
-		if strings.HasPrefix(key, candidateID+"-") {
-			offsets[key] = len(traces)
-		}
-	}
-	return offsets
+// gepaCaseTraces collects the traces one example emits during evaluation.
+type gepaCaseTraces struct {
+	mu     sync.Mutex
+	traces []ExecutionTrace
 }
 
-func (s *GEPAState) traceEvidenceSince(offsets map[string]int, candidateID string) []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (t *gepaCaseTraces) add(trace *ExecutionTrace) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.traces = append(t.traces, *trace)
+}
+
+func (t *gepaCaseTraces) evidence() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	var evidence []string
-	for key, traces := range s.ExecutionTraces {
-		if !strings.HasPrefix(key, candidateID+"-") {
-			continue
-		}
-		for _, trace := range traces[offsets[key]:] {
-			evidence = append(evidence, fmt.Sprintf("module=%s inputs=%s outputs=%s error=%v %s",
-				trace.ModuleName, summarizeReflectionMap(trace.Inputs), summarizeReflectionMap(trace.Outputs), trace.Error,
-				strings.Join(extractRichTraceEvidence(trace), "; ")))
-		}
+	for i := range t.traces {
+		trace := &t.traces[i]
+		evidence = append(evidence, fmt.Sprintf("module=%s inputs=%s outputs=%s error=%v %s",
+			trace.ModuleName, summarizeReflectionMap(trace.Inputs), summarizeReflectionMap(trace.Outputs), trace.Error,
+			strings.Join(extractRichTraceEvidence(*trace), "; ")))
 	}
 	sort.Strings(evidence)
 	return evidence
