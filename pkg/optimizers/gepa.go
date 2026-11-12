@@ -81,7 +81,7 @@ type GEPAConfig struct {
 	// (the last batch may be smaller). Validation uses the explicit examples or
 	// holdout below; with neither, it scores the full training set, not a batch.
 	EvaluationBatchSize        int                   `json:"evaluation_batch_size"` // Default: 5
-	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Program executions run at once per evaluation; default: 3. Above 1 the program must be safe for concurrent use; metric and FeedbackEvaluator calls are serialized.
+	ConcurrencyLevel           int                   `json:"concurrency_level"`     // Program executions run at once per evaluation; default: 3. Above 1 the program must be safe for concurrent use; Compile serializes metric and FeedbackEvaluator calls; CompileWithScorer runs them at this level too.
 	ValidationSplit            float64               `json:"validation_split"`      // Default: 0.0 (no holdout)
 	ValidationExamples         []core.Example        `json:"-"`
 	RandomSeed                 int64                 `json:"random_seed"`           // Default: 0 (time-based)
@@ -1248,8 +1248,21 @@ func (g *GEPA) GetOptimizationState() *GEPAState {
 	return g.state
 }
 
-// Compile implements the core.Optimizer interface for GEPA.
+// Compile implements the core.Optimizer interface for GEPA. Metric and
+// FeedbackEvaluator calls are serialized.
 func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
+	return g.compile(ctx, program, dataset, core.MetricScorer(metric), false)
+}
+
+// CompileWithScorer optimizes a program from materialized, read-only examples. It
+// calls scorer and FeedbackEvaluator from up to ConcurrencyLevel goroutines at
+// once, so both must be safe for concurrent use. An example the scorer cannot
+// score counts as zero.
+func (g *GEPA) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	return g.compile(ctx, program, newGEPAExampleDataset(examples), scorer, true)
+}
+
+func (g *GEPA) compile(ctx context.Context, program core.Program, dataset core.Dataset, scorer core.Scorer, concurrentScoring bool) (core.Program, error) {
 	ctx, span := core.StartSpan(ctx, "GEPA.Compile")
 	defer core.EndSpan(ctx)
 	_ = span // Suppress unused variable warning
@@ -1272,7 +1285,7 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 
 	// Install interceptors on the program
 	optimizedProgram := g.installInterceptors(program)
-	err = g.runIterativeOptimizationLoop(ctx, optimizedProgram, dataset, metric)
+	err = g.runIterativeOptimizationLoop(ctx, optimizedProgram, dataset, scorer, concurrentScoring)
 	if err != nil {
 		return program, err
 	}
@@ -1289,11 +1302,11 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 	return finalProgram, nil
 }
 
-func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) error {
+func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Program, dataset core.Dataset, scorer core.Scorer, concurrentScoring bool) error {
 	if g.config.MaxGenerations <= 0 && g.config.MaxMetricCalls <= 0 {
 		return fmt.Errorf("optimizers: a metric budget or iteration limit is required")
 	}
-	if metric == nil {
+	if scorer == nil {
 		return fmt.Errorf("optimizers: metric is required")
 	}
 
@@ -1324,7 +1337,7 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 		g.state.CurrentGeneration = 0
 	}
 
-	validationAdapter := g.newEvaluationAdapterForExamples(program, validationExamples, metric)
+	validationAdapter := newGEPAScorerAdapter(program, validationExamples, scorer, concurrentScoring)
 	// Fresh runs validate only the seed. Checkpoints omit transient evaluations,
 	// so resumed runs rehydrate each retained candidate once, charging the budget.
 	for _, candidate := range g.getCurrentPopulation().Candidates {
@@ -1348,7 +1361,7 @@ func (g *GEPA) runIterativeOptimizationLoop(ctx context.Context, program core.Pr
 			g.recordStopDecision(&GEPAStopDecision{Reason: "perfect_validation"})
 			return g.saveRunState()
 		}
-		adapter := g.newEvaluationAdapterForExamples(program, g.evaluationBatchForGeneration(trainExamples, generation-1), metric)
+		adapter := newGEPAScorerAdapter(program, g.evaluationBatchForGeneration(trainExamples, generation-1), scorer, concurrentScoring)
 		g.setLatestEvaluationAdapter(adapter)
 		g.state.CurrentGeneration = generation
 		if !g.runCandidateIteration(ctx, adapter, validationAdapter) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -52,7 +53,11 @@ type gepaCandidateEvaluation struct {
 type gepaEvaluationAdapter struct {
 	baseProgram core.Program
 	batch       []core.Example
-	metric      core.Metric
+	scorer      core.Scorer
+	// concurrentScoring lets scorer and FeedbackEvaluator calls overlap. It is
+	// false for a legacy core.Metric, which was never required to be safe for
+	// concurrent use.
+	concurrentScoring bool
 }
 
 func (a *gepaEvaluationAdapter) subset(caseIndexes []int) *gepaEvaluationAdapter {
@@ -75,9 +80,10 @@ func (a *gepaEvaluationAdapter) subset(caseIndexes []int) *gepaEvaluationAdapter
 	}
 
 	return &gepaEvaluationAdapter{
-		baseProgram: a.baseProgram,
-		batch:       batch,
-		metric:      a.metric,
+		baseProgram:       a.baseProgram,
+		batch:             batch,
+		scorer:            a.scorer,
+		concurrentScoring: a.concurrentScoring,
 	}
 }
 
@@ -85,15 +91,20 @@ func (g *GEPA) newEvaluationAdapter(program core.Program, dataset core.Dataset, 
 	return &gepaEvaluationAdapter{
 		baseProgram: program,
 		batch:       g.materializeEvaluationBatch(dataset),
-		metric:      metric,
+		scorer:      core.MetricScorer(metric),
 	}
 }
 
 func (g *GEPA) newEvaluationAdapterForExamples(program core.Program, examples []core.Example, metric core.Metric) *gepaEvaluationAdapter {
+	return newGEPAScorerAdapter(program, examples, core.MetricScorer(metric), false)
+}
+
+func newGEPAScorerAdapter(program core.Program, examples []core.Example, scorer core.Scorer, concurrentScoring bool) *gepaEvaluationAdapter {
 	return &gepaEvaluationAdapter{
-		baseProgram: program,
-		batch:       cloneEvaluationExamples(examples),
-		metric:      metric,
+		baseProgram:       program,
+		batch:             cloneEvaluationExamples(examples),
+		scorer:            scorer,
+		concurrentScoring: concurrentScoring,
 	}
 }
 
@@ -172,7 +183,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 		Cases:     make([]gepaEvaluationCase, 0, len(adapter.batch)),
 	}
 
-	if len(adapter.batch) == 0 || adapter.metric == nil {
+	if len(adapter.batch) == 0 || adapter.scorer == nil {
 		return result
 	}
 
@@ -183,8 +194,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 
 	// Program executions of one candidate run concurrently; results keep batch
 	// order, so scores and reflection evidence do not depend on completion order.
-	// Metric and feedback calls stay serialized: existing metrics are plain
-	// closures that were never required to be safe for concurrent use.
+	// Scoring and feedback calls overlap only when the adapter allows it.
 	var scoring sync.Mutex
 	workers := pool.New().WithMaxGoroutines(max(g.config.ConcurrencyLevel, 1))
 	for i, example := range adapter.batch {
@@ -210,17 +220,32 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				evalCase.Outputs = outputs
 				evalCase.Err = err
 				evalCase.TraceEvidence = traces.evidence()
-				scoring.Lock()
+				if !adapter.concurrentScoring {
+					scoring.Lock()
+				}
 				if err == nil {
-					evalCase.Score = adapter.metric(example.Outputs, outputs)
+					var scoreErr error
+					evalCase.Score, scoreErr = adapter.scorer.Score(ctx, example, outputs)
+					switch {
+					case scoreErr == nil:
+					case ctx.Err() != nil:
+						evalCase.Err = scoreErr
+					default:
+						// An unscorable example counts as zero, so it cannot
+						// raise the average the way a dropped case would.
+						logging.GetLogger().Warn(ctx, "GEPA: scorer failed: %v", scoreErr)
+						evalCase.Score = 0
+					}
 				}
 				g.populateEvaluationCaseFeedback(ctx, candidate, &evalCase)
-				scoring.Unlock()
+				if !adapter.concurrentScoring {
+					scoring.Unlock()
+				}
 				spent.Add(1)
 				g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
 					Outputs:          outputs,
 					Score:            evalCase.Score,
-					Err:              err,
+					Err:              evalCase.Err,
 					Feedback:         evalCase.Feedback,
 					FeedbackTarget:   evalCase.FeedbackTarget,
 					FeedbackMetadata: evalCase.FeedbackMetadata,

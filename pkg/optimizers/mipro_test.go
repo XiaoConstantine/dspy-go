@@ -325,7 +325,7 @@ func TestMIPRO(t *testing.T) {
 				dataset.Examples,
 				nil,
 				map[int][]string{0: {"negative candidate"}},
-				mipro.metric,
+				miproMetricScorer(mipro.metric),
 			)
 
 			require.NoError(t, err)
@@ -735,7 +735,7 @@ func TestMIPRORunOptimizationLoop_PropagatesUpdateResultsError(t *testing.T) {
 		dataset.Examples,
 		nil,
 		map[int][]string{0: {"candidate"}},
-		mipro.metric,
+		miproMetricScorer(mipro.metric),
 	)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, updateErr)

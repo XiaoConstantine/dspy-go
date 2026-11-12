@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -40,4 +41,31 @@ func scoreExamples(ctx context.Context, workers int, stopOnError bool, examples 
 	}
 	p.Wait()
 	return results
+}
+
+// serialScorer runs one Score call at a time. The legacy Compile entry points
+// use it where metric calls never overlapped, because a core.Metric was never
+// required to be safe for concurrent use.
+type serialScorer struct {
+	mu     sync.Mutex
+	scorer core.Scorer
+}
+
+func serialize(scorer core.Scorer) core.Scorer {
+	return &serialScorer{scorer: scorer}
+}
+
+// serializeMetric is core.MetricScorer for optimizers whose metric calls never
+// overlapped.
+func serializeMetric(metric core.Metric) core.Scorer {
+	if metric == nil {
+		return nil
+	}
+	return serialize(core.MetricScorer(metric))
+}
+
+func (s *serialScorer) Score(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scorer.Score(ctx, example, prediction)
 }

@@ -122,9 +122,15 @@ func intersection(a, b []string) []string {
 }
 
 // MetricFunc is a type alias for metric functions.
+//
+// Deprecated: use core.Metric, which has the same signature and is what the
+// optimizers accept, or implement core.Scorer.
 type MetricFunc func(expected, actual map[string]any) float64
 
 // Accuracy is a struct that can be used to create customizable accuracy metrics.
+//
+// Deprecated: Accuracy only forwards to its function. Pass the function to an
+// optimizer as a core.Metric, or implement core.Scorer.
 type Accuracy struct {
 	MetricFunc MetricFunc
 }

@@ -211,6 +211,7 @@ type SIMBA struct {
 var (
 	_ core.Optimizer        = (*SIMBA)(nil)
 	_ core.ExamplesCompiler = (*SIMBA)(nil)
+	_ core.ScorerCompiler   = (*SIMBA)(nil)
 )
 
 // SIMBAOption defines functional options for SIMBA configuration.
@@ -410,7 +411,8 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 	}
 	defer s.releaseCompile()
 
-	ctx, err := s.prepareCompile(ctx, metric)
+	scorer := core.MetricScorer(metric)
+	ctx, err := s.prepareCompile(ctx, scorer)
 	if err != nil {
 		return program, err
 	}
@@ -418,22 +420,29 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 	if err != nil {
 		return program, fmt.Errorf("failed to materialize dataset: %w", err)
 	}
-	return s.compileExamples(ctx, program, examples, metric)
+	return s.compileExamples(ctx, program, examples, scorer)
 }
 
 // CompileExamples optimizes a program from materialized, read-only examples.
 func (s *SIMBA) CompileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
+	return s.CompileWithScorer(ctx, program, examples, core.MetricScorer(metric))
+}
+
+// CompileWithScorer optimizes a program from materialized, read-only examples. It
+// calls scorer concurrently, bounded by LLMConcurrency. An example the scorer
+// cannot score rejects the candidate, like a failed execution.
+func (s *SIMBA) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	ctx = normalizeSIMBAContext(ctx)
 	if err := s.acquireCompile(ctx); err != nil {
 		return program, err
 	}
 	defer s.releaseCompile()
 
-	ctx, err := s.prepareCompile(ctx, metric)
+	ctx, err := s.prepareCompile(ctx, scorer)
 	if err != nil {
 		return program, err
 	}
-	return s.compileExamples(ctx, program, examples, metric)
+	return s.compileExamples(ctx, program, examples, scorer)
 }
 
 func normalizeSIMBAContext(ctx context.Context) context.Context {
@@ -456,11 +465,11 @@ func (s *SIMBA) releaseCompile() {
 	<-s.compileGate
 }
 
-func (s *SIMBA) prepareCompile(ctx context.Context, metric core.Metric) (context.Context, error) {
+func (s *SIMBA) prepareCompile(ctx context.Context, scorer core.Scorer) (context.Context, error) {
 	if err := ctx.Err(); err != nil {
 		return ctx, err
 	}
-	if metric == nil {
+	if scorer == nil {
 		return ctx, errors.New(errors.InvalidInput, "SIMBA requires a metric function")
 	}
 	if core.GetExecutionState(ctx) == nil {
@@ -470,7 +479,7 @@ func (s *SIMBA) prepareCompile(ctx context.Context, metric core.Metric) (context
 	return ctx, nil
 }
 
-func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
+func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	ctx, span := core.StartSpan(ctx, "SIMBA.Compile")
 	defer core.EndSpan(ctx)
 
@@ -494,7 +503,7 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 
 	// Initialize with current program as best candidate
 	bestProgram := program.Clone()
-	initialScore, err := s.evaluateProgramOnExamples(ctx, bestProgram, examples, metric)
+	initialScore, err := s.evaluateProgramOnExamples(ctx, bestProgram, examples, scorer)
 	if err != nil {
 		return program, err
 	}
@@ -506,7 +515,7 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 	// Choose optimization mode: pipeline processing or sequential processing
 	if s.config.UsePipelineProcessing {
 		s.logger.Info(ctx, "Using pipeline processing mode with buffer size %d", s.config.PipelineBufferSize)
-		return s.runPipelineProcessing(ctx, bestProgram, examples, metric)
+		return s.runPipelineProcessing(ctx, bestProgram, examples, scorer)
 	}
 
 	s.logger.Info(ctx, "Using sequential processing mode")
@@ -552,7 +561,7 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 
 		// generateCandidates includes the incumbent as its first candidate, so it
 		// is scored on the exact same sampled batch as every proposed replacement.
-		scores, err := s.evaluateCandidates(stepCtx, candidates, batch, metric)
+		scores, err := s.evaluateCandidates(stepCtx, candidates, batch, scorer)
 		if err != nil {
 			stepSpan.WithError(err)
 			core.EndSpan(stepCtx)
@@ -565,7 +574,7 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 
 		// Full-evaluate only the minibatch winner so globally returned programs are
 		// ranked using comparable full-dataset measurements.
-		selectedFullScore, err := s.evaluateProgramOnExamples(stepCtx, selectedProgram, examples, metric)
+		selectedFullScore, err := s.evaluateProgramOnExamples(stepCtx, selectedProgram, examples, scorer)
 		if err != nil {
 			stepSpan.WithError(err)
 			core.EndSpan(stepCtx)
@@ -664,20 +673,15 @@ func (s *SIMBA) resetState() {
 	s.ruleCacheMu.Unlock()
 }
 
-func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (float64, error) {
-	// Honor LLMConcurrency like batch scoring does. When it is unlimited, bound
-	// the pass by the burst one optimization step already issues, so scoring a
-	// large dataset does not open a call per example at once.
-	workers := s.config.LLMConcurrency
-	if workers <= 0 {
-		workers = max(s.config.BatchSize*s.config.NumCandidates, 1)
-	}
-	results := scoreExamples(ctx, workers, false, examples, func(example core.Example) (float64, error) {
+func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (float64, error) {
+	// Honor LLMConcurrency like batch scoring does. Without one the pass stays
+	// sequential, as it always was.
+	results := scoreExamples(ctx, s.config.LLMConcurrency, false, examples, func(example core.Example) (float64, error) {
 		prediction, err := program.Forward(ctx, example.Inputs)
 		if err != nil {
 			return 0, err
 		}
-		return metric(example.Outputs, prediction), nil
+		return scorer.Score(ctx, example, prediction)
 	})
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -1216,7 +1220,7 @@ func (s *SIMBA) sampleMiniBatchFromExamples(ctx context.Context, examples []core
 }
 
 // evaluateCandidates evaluates all candidate programs on the mini-batch.
-func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Program, batch []core.Example, metric core.Metric) ([]float64, error) {
+func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Program, batch []core.Example, scorer core.Scorer) ([]float64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1228,7 +1232,7 @@ func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Progra
 	for i, candidate := range candidates {
 		i, candidate := i, candidate
 		p.Go(func() {
-			scores[i], errs[i] = s.evaluateCandidateOnBatch(ctx, candidate, batch, metric)
+			scores[i], errs[i] = s.evaluateCandidateOnBatch(ctx, candidate, batch, scorer)
 		})
 	}
 	p.Wait()
@@ -1245,7 +1249,7 @@ func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Progra
 }
 
 // evaluateCandidateOnBatch evaluates a single candidate on the mini-batch with parallel processing.
-func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Program, batch []core.Example, metric core.Metric) (float64, error) {
+func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Program, batch []core.Example, scorer core.Scorer) (float64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -1281,6 +1285,10 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 			startTime := time.Now()
 			prediction, err := candidate.Forward(ctx, example.Inputs)
 			executionTime := time.Since(startTime)
+			var score float64
+			if err == nil {
+				score, err = scorer.Score(ctx, example, prediction)
+			}
 
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				resultMu.Lock()
@@ -1306,13 +1314,6 @@ func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Pro
 				return
 			}
 
-			score := metric(example.Outputs, prediction)
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				resultMu.Lock()
-				cancelErr = ctxErr
-				resultMu.Unlock()
-				return
-			}
 			scores[i] = score
 
 			// Create trajectory entry (skip if trajectory tracking is disabled)
@@ -2112,7 +2113,7 @@ func (s *SIMBA) safeSendStage(ctx context.Context, ch chan<- *PipelineStage, sta
 }
 
 // runPipelineProcessing executes the optimization using pipeline processing.
-func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
+func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	s.initializePipelineChannels()
 	// Don't use defer for channel closing since we manage it manually
 
@@ -2130,10 +2131,10 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 	wg.Go(func() { s.batchSamplingWorker(pipelineCtx, examples) })
 
 	// Start candidate evaluation worker
-	wg.Go(func() { s.candidateEvaluationWorker(pipelineCtx, metric) })
+	wg.Go(func() { s.candidateEvaluationWorker(pipelineCtx, scorer) })
 
 	// Start pipeline coordinator
-	return s.pipelineCoordinator(ctx, program, examples, metric, &wg, pipelineCancel)
+	return s.pipelineCoordinator(ctx, program, examples, scorer, &wg, pipelineCancel)
 }
 
 // candidateGenerationWorker generates candidates in parallel for multiple steps.
@@ -2273,7 +2274,7 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example
 
 // candidateEvaluationWorker evaluates candidates in parallel.
 // Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
-func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, metric core.Metric) {
+func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, scorer core.Scorer) {
 	defer close(s.pipelineChannels.CandidateEvaluation)
 
 	for {
@@ -2302,7 +2303,7 @@ func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, metric core.Metri
 			}
 
 			startTime := time.Now()
-			scores, err := s.evaluateCandidates(ctx, stage.Candidates, stage.Batch, metric)
+			scores, err := s.evaluateCandidates(ctx, stage.Candidates, stage.Batch, scorer)
 			if err != nil {
 				stage.Error = err
 				select {
@@ -2340,7 +2341,7 @@ func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, metric core.Metri
 }
 
 // pipelineCoordinator coordinates the pipeline and collects results.
-func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Program, examples []core.Example, metric core.Metric, wg *sync.WaitGroup, pipelineCancel context.CancelFunc) (core.Program, error) {
+func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Program, examples []core.Example, scorer core.Scorer, wg *sync.WaitGroup, pipelineCancel context.CancelFunc) (core.Program, error) {
 	bestProgram := initialProgram.Clone()
 	bestScore := s.state.BestScore
 	processedSteps := 0
@@ -2389,7 +2390,7 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 
 			// As in sequential mode, only compare full-dataset scores globally.
 			// Candidate/incumbent step selection above remains batch-local.
-			selectedFullScore, err := s.evaluateProgramOnExamples(ctx, selectedProgram, examples, metric)
+			selectedFullScore, err := s.evaluateProgramOnExamples(ctx, selectedProgram, examples, scorer)
 			if err != nil {
 				return bestProgram, err
 			}

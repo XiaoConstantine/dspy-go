@@ -807,7 +807,7 @@ func testSIMBAEdgeCases(t *testing.T) {
 			context.Background(),
 			failingProgram,
 			core.MaterializeDataset(dataset),
-			func(expected, actual map[string]any) float64 { return 1 },
+			core.MetricScorer(func(expected, actual map[string]any) float64 { return 1 }),
 		)
 
 		require.NoError(t, err)
@@ -828,8 +828,8 @@ func testSIMBAEdgeCases(t *testing.T) {
 			return nil, fmt.Errorf("generation failed")
 		})
 
-		validScore, validErr := simba.evaluateCandidateOnBatch(context.Background(), validProgram, batch, metric)
-		failedScore, failedErr := simba.evaluateCandidateOnBatch(context.Background(), failingProgram, batch, metric)
+		validScore, validErr := simba.evaluateCandidateOnBatch(context.Background(), validProgram, batch, core.MetricScorer(metric))
+		failedScore, failedErr := simba.evaluateCandidateOnBatch(context.Background(), failingProgram, batch, core.MetricScorer(metric))
 		require.NoError(t, validErr)
 		require.NoError(t, failedErr)
 		scores := []float64{validScore, failedScore}
@@ -1019,7 +1019,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		score, err := simba.evaluateCandidateOnBatch(ctx, program, batch, metric)
+		score, err := simba.evaluateCandidateOnBatch(ctx, program, batch, core.MetricScorer(metric))
 
 		require.NoError(t, err)
 		assert.True(t, score >= 0)
@@ -1056,7 +1056,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 
 		// Add more than 100 trajectories (sliding window limit)
 		for i := 0; i < 55; i++ {
-			_, err := simba.evaluateCandidateOnBatch(ctx, program, batch, metric)
+			_, err := simba.evaluateCandidateOnBatch(ctx, program, batch, core.MetricScorer(metric))
 			require.NoError(t, err)
 		}
 
@@ -1084,7 +1084,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		_, err := simba.evaluateCandidateOnBatch(ctx, program, batch, metric)
+		_, err := simba.evaluateCandidateOnBatch(ctx, program, batch, core.MetricScorer(metric))
 		require.NoError(t, err)
 
 		state := simba.GetState()
@@ -1120,7 +1120,7 @@ func testSIMBATrajectoryTracking(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		score, err := simba.evaluateCandidateOnBatch(ctx, failingProgram, batch, metric)
+		score, err := simba.evaluateCandidateOnBatch(ctx, failingProgram, batch, core.MetricScorer(metric))
 
 		require.NoError(t, err)
 		assert.True(t, math.IsInf(score, -1), "failed evaluation must rank below every finite metric score")
@@ -2432,7 +2432,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		}
 
 		workers.Go(func() {
-			simba.candidateEvaluationWorker(ctx, func(expected, actual map[string]any) float64 { return 0.5 })
+			simba.candidateEvaluationWorker(ctx, core.MetricScorer(func(expected, actual map[string]any) float64 { return 0.5 }))
 		})
 
 		type pipelineResult struct {
@@ -2441,7 +2441,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		}
 		resultCh := make(chan pipelineResult, 1)
 		go func() {
-			result, err := simba.pipelineCoordinator(ctx, program, examples, func(expected, actual map[string]any) float64 { return 0.5 }, &workers, cancel)
+			result, err := simba.pipelineCoordinator(ctx, program, examples, core.MetricScorer(func(expected, actual map[string]any) float64 { return 0.5 }), &workers, cancel)
 			resultCh <- pipelineResult{program: result, err: err}
 		}()
 
@@ -2477,7 +2477,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 				context.Background(),
 				program,
 				nil,
-				func(expected, actual map[string]any) float64 { return 0 },
+				core.MetricScorer(func(expected, actual map[string]any) float64 { return 0 }),
 				&workers,
 				func() {},
 			)

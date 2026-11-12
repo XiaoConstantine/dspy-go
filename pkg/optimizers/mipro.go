@@ -252,6 +252,7 @@ type MIPRO struct {
 var (
 	_ core.Optimizer        = (*MIPRO)(nil)
 	_ core.ExamplesCompiler = (*MIPRO)(nil)
+	_ core.ScorerCompiler   = (*MIPRO)(nil)
 )
 
 // MIPROOption defines a function type for configuring MIPRO.
@@ -342,6 +343,10 @@ func WithModels(promptModel, taskModel core.LLM) MIPROOption {
 }
 
 // NewMIPRO creates a new MIPRO optimizer instance.
+//
+// metric is the fallback used when a compile method receives no metric or
+// scorer; it may be nil. New code should pass nil and give CompileWithScorer a
+// core.Scorer, which takes ctx first and can report errors.
 func NewMIPRO(
 	metric func(example, prediction map[string]any, ctx context.Context) float64,
 	opts ...MIPROOption,
@@ -494,7 +499,7 @@ func (m *MIPRO) Compile(
 	dataset core.Dataset,
 	metric core.Metric,
 ) (core.Program, error) {
-	compileMetric, err := m.prepareCompile(ctx, metric)
+	scorer, err := m.prepareCompile(ctx, serializeMetric(metric))
 	if err != nil {
 		return program, err
 	}
@@ -502,7 +507,7 @@ func (m *MIPRO) Compile(
 	if err != nil {
 		return program, fmt.Errorf("failed to materialize dataset: %w", err)
 	}
-	return m.compileExamples(ctx, program, examples, compileMetric)
+	return m.compileExamples(ctx, program, examples, scorer)
 }
 
 // CompileExamples optimizes a program from materialized, read-only examples.
@@ -512,25 +517,47 @@ func (m *MIPRO) CompileExamples(
 	examples []core.Example,
 	metric core.Metric,
 ) (core.Program, error) {
-	compileMetric, err := m.prepareCompile(ctx, metric)
+	scorer, err := m.prepareCompile(ctx, serializeMetric(metric))
 	if err != nil {
 		return program, err
 	}
-	return m.compileExamples(ctx, program, examples, compileMetric)
+	return m.compileExamples(ctx, program, examples, scorer)
 }
 
-func (m *MIPRO) prepareCompile(ctx context.Context, metric core.Metric) (miproMetric, error) {
+// CompileWithScorer optimizes a program from materialized, read-only examples. It
+// calls scorer from up to core.GetConcurrencyLevel goroutines at once. An
+// example the scorer cannot score counts as zero in a minibatch and fails a
+// full evaluation.
+func (m *MIPRO) CompileWithScorer(
+	ctx context.Context,
+	program core.Program,
+	examples []core.Example,
+	scorer core.Scorer,
+) (core.Program, error) {
+	scorer, err := m.prepareCompile(ctx, scorer)
+	if err != nil {
+		return program, err
+	}
+	return m.compileExamples(ctx, program, examples, scorer)
+}
+
+// miproMetricScorer adapts a constructor metric, one call at a time.
+func miproMetricScorer(metric miproMetric) core.Scorer {
+	return serialize(core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		return metric(example.Outputs, prediction, ctx), nil
+	}))
+}
+
+// prepareCompile falls back to the constructor metric when scorer is nil.
+func (m *MIPRO) prepareCompile(ctx context.Context, scorer core.Scorer) (core.Scorer, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	compileMetric := m.metric
-	if metric != nil {
-		compileMetric = func(example, prediction map[string]any, _ context.Context) float64 {
-			return metric(example, prediction)
-		}
+	if scorer == nil && m.metric != nil {
+		scorer = miproMetricScorer(m.metric)
 	}
-	if compileMetric == nil {
+	if scorer == nil {
 		return nil, fmt.Errorf("MIPRO requires a metric function")
 	}
 
@@ -540,14 +567,14 @@ func (m *MIPRO) prepareCompile(ctx context.Context, metric core.Metric) (miproMe
 	}
 	m.logger.Info(ctx, "Starting MIPRO optimization with configuration: %+v", m.config)
 	m.teacherStudent.reset()
-	return compileMetric, nil
+	return scorer, nil
 }
 
 func (m *MIPRO) compileExamples(
 	ctx context.Context,
 	program core.Program,
 	examples []core.Example,
-	metric miproMetric,
+	scorer core.Scorer,
 ) (core.Program, error) {
 	originalForward := program.Forward
 
@@ -564,7 +591,7 @@ func (m *MIPRO) compileExamples(
 	}
 
 	// Step 3: Run main optimization loop.
-	bestProgram, err := m.runOptimizationLoop(ctx, program, examples, demos, instructions, metric)
+	bestProgram, err := m.runOptimizationLoop(ctx, program, examples, demos, instructions, scorer)
 	if err != nil {
 		return program, fmt.Errorf("optimization failed: %w", err)
 	}
@@ -583,7 +610,7 @@ func (m *MIPRO) compileExamples(
 	}
 
 	// Step 4: Finalize and validate best program.
-	return m.finalizeProgram(ctx, bestProgram, examples, metric)
+	return m.finalizeProgram(ctx, bestProgram, examples, scorer)
 }
 
 func (m *MIPRO) runOptimizationLoop(
@@ -592,7 +619,7 @@ func (m *MIPRO) runOptimizationLoop(
 	examples []core.Example,
 	demos []core.Example,
 	instructions map[int][]string,
-	metric miproMetric,
+	scorer core.Scorer,
 ) (core.Program, error) {
 	var bestProgram core.Program
 	// Start at -Inf so the first successful trial is always accepted, even
@@ -614,10 +641,10 @@ func (m *MIPRO) runOptimizationLoop(
 		var score float64
 		if m.config.MiniBatchSize > 0 && iteration < m.config.NumTrials-1 {
 			// Use minibatch for all but the last iteration
-			score, err = m.evaluateOnMinibatch(ctx, candidate, examples, m.config.MiniBatchSize, metric)
+			score, err = m.evaluateOnMinibatch(ctx, candidate, examples, m.config.MiniBatchSize, scorer)
 		} else {
 			// Use full evaluation for the final iteration or if minibatching is disabled
-			score, err = m.evaluateCandidate(ctx, candidate, examples, metric)
+			score, err = m.evaluateCandidate(ctx, candidate, examples, scorer)
 		}
 		if err != nil {
 			return program, fmt.Errorf("failed to evaluate candidate: %w", err)
@@ -651,7 +678,7 @@ func (m *MIPRO) runOptimizationLoop(
 		// We'll now handle nil values in the createCandidateProgram function,
 		// so we don't need to validate extensively here
 		finalCandidate := m.createCandidateProgram(program, bestParams, demos, instructions)
-		finalScore, err := m.evaluateCandidate(ctx, finalCandidate, examples, metric)
+		finalScore, err := m.evaluateCandidate(ctx, finalCandidate, examples, scorer)
 		if err != nil {
 			m.logger.Error(ctx, "Failed to evaluate final candidate: %v", err)
 		} else if finalScore > bestScore {
@@ -824,18 +851,22 @@ func (m *MIPRO) evaluateCandidate(
 	ctx context.Context,
 	program core.Program,
 	examples []core.Example,
-	metric miproMetric,
+	scorer core.Scorer,
 ) (float64, error) {
 	if len(examples) == 0 {
 		return 0, fmt.Errorf("no examples evaluated")
 	}
 
 	var totalScore float64
-	for _, result := range m.scoreExamples(ctx, program, examples, metric, true) {
+	for _, result := range m.scoreExamples(ctx, program, examples, scorer, true) {
 		if result.Err != nil {
-			return 0, fmt.Errorf("failed to execute program: %w", result.Err)
+			return 0, fmt.Errorf("failed to evaluate example: %w", result.Err)
 		}
 		totalScore += result.Score
+	}
+	// Examples skipped after cancellation carry no error of their own.
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 
 	return totalScore / float64(len(examples)), nil
@@ -846,7 +877,7 @@ func (m *MIPRO) finalizeProgram(
 	ctx context.Context,
 	program core.Program,
 	examples []core.Example,
-	metric miproMetric,
+	scorer core.Scorer,
 ) (core.Program, error) {
 	// Check if the program is nil or missing Forward function
 	if program.Forward == nil {
@@ -855,7 +886,7 @@ func (m *MIPRO) finalizeProgram(
 		return program, fmt.Errorf("program has nil Forward function")
 	}
 
-	score, err := m.evaluateCandidate(ctx, program, examples, metric)
+	score, err := m.evaluateCandidate(ctx, program, examples, scorer)
 	if err != nil {
 		return program, fmt.Errorf("final validation failed: %w", err)
 	}
@@ -880,7 +911,7 @@ func (m *MIPRO) evaluateOnMinibatch(
 	program core.Program,
 	examples []core.Example,
 	batchSize int,
-	metric miproMetric,
+	scorer core.Scorer,
 ) (float64, error) {
 	if batchSize <= 0 || len(examples) == 0 {
 		return 0, fmt.Errorf("no examples in minibatch")
@@ -889,10 +920,14 @@ func (m *MIPRO) evaluateOnMinibatch(
 	batch := examples[:batchSize]
 
 	// Evaluate on the minibatch
+	results := m.scoreExamples(ctx, program, batch, scorer, false)
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	var totalScore float64
-	for _, result := range m.scoreExamples(ctx, program, batch, metric, false) {
+	for _, result := range results {
 		if result.Err != nil {
-			m.logger.Warn(ctx, "Failed to execute program on example: %v", result.Err)
+			m.logger.Warn(ctx, "Failed to evaluate example: %v", result.Err)
 			continue
 		}
 		totalScore += result.Score
@@ -901,14 +936,14 @@ func (m *MIPRO) evaluateOnMinibatch(
 	return totalScore / float64(len(batch)), nil
 }
 
-// scoreExamples runs program and metric on each example, up to the package
+// scoreExamples runs program and scorer on each example, up to the package
 // concurrency level (core.SetConcurrencyOptions, default 1) at a time.
-func (m *MIPRO) scoreExamples(ctx context.Context, program core.Program, examples []core.Example, metric miproMetric, stopOnError bool) []exampleScore {
+func (m *MIPRO) scoreExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer, stopOnError bool) []exampleScore {
 	return scoreExamples(ctx, core.GetConcurrencyLevel(), stopOnError, examples, func(example core.Example) (float64, error) {
 		result, err := program.Execute(ctx, example.Inputs)
 		if err != nil {
 			return 0, err
 		}
-		return metric(example.Outputs, result, ctx), nil
+		return scorer.Score(ctx, example, result)
 	})
 }

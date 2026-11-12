@@ -32,6 +32,7 @@ type COPRO struct {
 var (
 	_ core.Optimizer        = (*COPRO)(nil)
 	_ core.ExamplesCompiler = (*COPRO)(nil)
+	_ core.ScorerCompiler   = (*COPRO)(nil)
 )
 
 // PromptCandidate represents a candidate prompt configuration.
@@ -125,7 +126,7 @@ func NewCOPRO(metric core.Metric, options ...COPROOption) *COPRO {
 // Compile implements the legacy cursor-based Optimizer API. It materializes
 // the dataset once before optimizing any predictors.
 func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
-	ctx, compileMetric, err := c.prepareCompile(ctx, metric)
+	ctx, scorer, err := c.prepareCompile(ctx, core.MetricScorer(metric))
 	if err != nil {
 		return program, err
 	}
@@ -133,45 +134,53 @@ func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.
 	// Preserve the legacy behavior of returning immediately when there is
 	// nothing to optimize without consuming the dataset.
 	if len(c.extractPredictors(program)) == 0 {
-		return c.compileExamples(ctx, program, nil, compileMetric)
+		return c.compileExamples(ctx, program, nil, scorer)
 	}
 
 	examples, err := core.MaterializeDatasetContext(ctx, dataset)
 	if err != nil {
 		return program, fmt.Errorf("failed to materialize dataset: %w", err)
 	}
-	return c.compileExamples(ctx, program, examples, compileMetric)
+	return c.compileExamples(ctx, program, examples, scorer)
 }
 
 // CompileExamples optimizes a program from materialized, read-only examples.
 func (c *COPRO) CompileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
-	ctx, compileMetric, err := c.prepareCompile(ctx, metric)
+	return c.CompileWithScorer(ctx, program, examples, core.MetricScorer(metric))
+}
+
+// CompileWithScorer optimizes a program from materialized, read-only examples. It
+// calls scorer concurrently. An example the scorer cannot score counts as
+// zero in a candidate's average.
+func (c *COPRO) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	ctx, scorer, err := c.prepareCompile(ctx, scorer)
 	if err != nil {
 		return program, err
 	}
-	return c.compileExamples(ctx, program, examples, compileMetric)
+	return c.compileExamples(ctx, program, examples, scorer)
 }
 
-func (c *COPRO) prepareCompile(ctx context.Context, metric core.Metric) (context.Context, core.Metric, error) {
+// prepareCompile falls back to the constructor metric when scorer is nil.
+func (c *COPRO) prepareCompile(ctx context.Context, scorer core.Scorer) (context.Context, core.Scorer, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return ctx, nil, err
 	}
-	if metric == nil {
-		metric = c.Metric
+	if scorer == nil {
+		scorer = core.MetricScorer(c.Metric)
 	}
-	if metric == nil {
+	if scorer == nil {
 		return ctx, nil, fmt.Errorf("COPRO requires a metric function")
 	}
 	if core.GetExecutionState(ctx) == nil {
 		ctx = core.WithExecutionState(ctx)
 	}
-	return ctx, metric, nil
+	return ctx, scorer, nil
 }
 
-func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
+func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	logger := logging.GetLogger()
 	ctx, span := core.StartSpan(ctx, "COPROCompilation")
 	defer core.EndSpan(ctx)
@@ -202,7 +211,7 @@ func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examp
 		predictor := predictors[moduleName]
 		moduleCtx, moduleSpan := core.StartSpan(ctx, fmt.Sprintf("OptimizePredictor_%s", moduleName))
 
-		err := c.optimizePredictor(moduleCtx, predictor, examples, metric)
+		err := c.optimizePredictor(moduleCtx, predictor, examples, scorer)
 		if err != nil {
 			moduleSpan.WithError(err)
 			core.EndSpan(moduleCtx)
@@ -230,7 +239,7 @@ func (c *COPRO) extractPredictors(program core.Program) map[string]*modules.Pred
 }
 
 // optimizePredictor optimizes prompts for a single Predict module.
-func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predict, examples []core.Example, metric core.Metric) error {
+func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predict, examples []core.Example, scorer core.Scorer) error {
 	ctx, span := core.StartSpan(ctx, "OptimizePredictorPrompts")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
@@ -269,7 +278,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 			Generation:  0,
 		}
 		var err error
-		baseline.Score, err = c.evaluateCandidate(ctx, predictor, baseline, trainExamples, metric)
+		baseline.Score, err = c.evaluateCandidate(ctx, predictor, baseline, trainExamples, scorer)
 		if err != nil {
 			return err
 		}
@@ -284,7 +293,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	}
 
 	// Evaluate initial candidates in parallel on training data
-	if err := c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, trainExamples, metric); err != nil {
+	if err := c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, trainExamples, scorer); err != nil {
 		return err
 	}
 
@@ -311,7 +320,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 		}
 
 		// Evaluate refined candidates in parallel on training data
-		if err := c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, trainExamples, metric); err != nil {
+		if err := c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, trainExamples, scorer); err != nil {
 			core.EndSpan(depthCtx)
 			return err
 		}
@@ -338,7 +347,7 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	logger.Info(ctx, "COPRO: Validating %d candidates on %d validation examples", len(candidates), len(validationExamples))
 	for i := range candidates {
 		var err error
-		candidates[i].ValidationScore, err = c.evaluateCandidate(ctx, predictor, candidates[i], validationExamples, metric)
+		candidates[i].ValidationScore, err = c.evaluateCandidate(ctx, predictor, candidates[i], validationExamples, scorer)
 		if err != nil {
 			return err
 		}
@@ -510,7 +519,7 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 }
 
 // evaluateCandidate evaluates a prompt candidate using the metric.
-func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predict, candidate PromptCandidate, examples []core.Example, metric core.Metric) (float64, error) {
+func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predict, candidate PromptCandidate, examples []core.Example, scorer core.Scorer) (float64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -566,8 +575,16 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 				return
 			}
 
-			// Evaluate using metric
-			score := metric(ex.Outputs, prediction)
+			score, err := scorer.Score(ctx, ex, prediction)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					recordError(ctxErr)
+					return
+				}
+				// An unscorable example counts as zero, so it cannot raise the average.
+				logging.GetLogger().Error(ctx, "COPRO: Error scoring candidate: %v", err)
+				score = 0
+			}
 			mu.Lock()
 			scores[idx] = score
 			valid[idx] = true
@@ -601,7 +618,7 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 }
 
 // evaluateCandidatesParallel evaluates multiple candidates in parallel for better performance.
-func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modules.Predict, candidates []PromptCandidate, examples []core.Example, metric core.Metric) error {
+func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modules.Predict, candidates []PromptCandidate, examples []core.Example, scorer core.Scorer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -622,7 +639,7 @@ func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modul
 				return
 			}
 
-			score, err := c.evaluateCandidate(ctx, predictor, candidates[i], examples, metric)
+			score, err := c.evaluateCandidate(ctx, predictor, candidates[i], examples, scorer)
 			if err != nil {
 				errOnce.Do(func() { evaluationErr = err })
 				return

@@ -165,7 +165,7 @@ func TestNewCOPRO(t *testing.T) {
 			assert.Equal(t, tt.expected.Depth, copro.Depth)
 			assert.Equal(t, tt.expected.InitTemperature, copro.InitTemperature)
 			assert.Equal(t, tt.expected.TrackStats, copro.TrackStats)
-			assert.NotNil(t, copro.Metric)
+			assert.NotNil(t, core.MetricScorer(copro.Metric))
 		})
 	}
 }
@@ -571,7 +571,7 @@ func TestEvaluateCandidate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, copro.Metric)
+	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, core.MetricScorer(copro.Metric))
 
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, score, 0.0)
@@ -602,7 +602,7 @@ func TestEvaluateCandidate_LLMError(t *testing.T) {
 	}}
 
 	ctx := context.Background()
-	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, copro.Metric)
+	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, core.MetricScorer(copro.Metric))
 
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, score) // Should return 0 when no valid evaluations
@@ -628,7 +628,7 @@ func TestEvaluateCandidate_ProviderTimeoutIsInvalidScore(t *testing.T) {
 		predictor,
 		PromptCandidate{Instruction: "Test"},
 		[]core.Example{{Inputs: map[string]any{"question": "test"}, Outputs: map[string]any{"answer": "test"}}},
-		copro.Metric,
+		core.MetricScorer(copro.Metric),
 	)
 
 	require.NoError(t, err)
@@ -665,7 +665,7 @@ func TestEvaluateCandidatesParallel(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	require.NoError(t, copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, copro.Metric))
+	require.NoError(t, copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, core.MetricScorer(copro.Metric)))
 
 	// All candidates should have been evaluated (score set)
 	for _, candidate := range candidates {
@@ -988,7 +988,7 @@ func BenchmarkCOPROConcurrency(b *testing.B) {
 				for j := range candidates {
 					candidates[j].Score = 0.0
 				}
-				if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, copro.Metric); err != nil {
+				if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, core.MetricScorer(copro.Metric)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -1082,7 +1082,7 @@ func TestOptimizePredictor_EmptyDataset(t *testing.T) {
 	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
-	err := copro.optimizePredictor(ctx, predictor, nil, copro.Metric)
+	err := copro.optimizePredictor(ctx, predictor, nil, core.MetricScorer(copro.Metric))
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no examples in dataset for optimization")
@@ -1108,7 +1108,7 @@ func TestOptimizePredictor_WithCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), copro.Metric)
+	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
 
 	assert.NoError(t, err)
 }
@@ -1133,7 +1133,7 @@ func TestOptimizePredictor_NoCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), copro.Metric)
+	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
 
 	assert.NoError(t, err)
 }
@@ -1178,7 +1178,7 @@ func BenchmarkEvaluateCandidatesParallel(b *testing.B) {
 		for j := range candidates {
 			candidates[j].Score = 0.0
 		}
-		if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, copro.Metric); err != nil {
+		if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, core.MetricScorer(copro.Metric)); err != nil {
 			b.Fatal(err)
 		}
 	}
