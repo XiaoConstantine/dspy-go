@@ -379,12 +379,12 @@ answer, err := ragProgram.Execute(ctx, map[string]interface{}{
 ```go
 // Create MIPRO optimizer
 optimizer := optimizers.NewMIPRO(
-    metricFunc,
+    nil, // the scorer is passed to CompileWithScorer
     optimizers.WithNumTrials(10),
 )
 
 // Optimize the entire program
-optimizedProgram, err := optimizer.Compile(ctx, ragProgram, dataset, nil)
+optimizedProgram, err := optimizer.CompileWithScorer(ctx, ragProgram, examples, scorer)
 
 // optimizedProgram now has improved prompts and parameters
 ```

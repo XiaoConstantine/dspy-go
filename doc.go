@@ -286,16 +286,17 @@
 //	        // Add more examples...
 //	    }
 //
-//	    // Define evaluation metric
-//	    metric := func(expected, actual map[string]interface{}) float64 {
-//	        if expected["answer"] == actual["answer"] {
-//	            return 1.0
+//	    // Define a scorer. GEPA calls it concurrently, so it must not share
+//	    // unsynchronized state.
+//	    scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]interface{}) (float64, error) {
+//	        if example.Outputs["answer"] == prediction["answer"] {
+//	            return 1.0, nil
 //	        }
-//	        return 0.0
-//	    }
+//	        return 0.0, nil
+//	    })
 //
 //	    // Optimize the program using GEPA's multi-objective evolutionary approach
-//	    optimizedProgram, err := gepa.Compile(context.Background(), program, dataset, metric)
+//	    optimizedProgram, err := gepa.CompileWithScorer(context.Background(), program, dataset, scorer)
 //	    if err != nil {
 //	        log.Fatalf("GEPA optimization failed: %v", err)
 //	    }

@@ -111,18 +111,19 @@ func main() {
             Outputs: map[string]any{"answer": example.Answer},
         }
     }
-    dataset := datasets.NewSimpleDataset(training)
 
-    // 4. Define metric
-    metricFunc := func(example, prediction map[string]any) float64 {
-        expected := example["answer"].(string)
-        actual := prediction["answer"].(string)
-
-        if expected == actual {
-            return 1.0
+    // 4. Define a scorer. GEPA calls it from several goroutines, so it must
+    // be safe for concurrent use; this one keeps no state.
+    scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+        actual, ok := prediction["answer"].(string)
+        if !ok {
+            return 0, fmt.Errorf("prediction has no string answer")
         }
-        return 0.0
-    }
+        if actual == example.Outputs["answer"] {
+            return 1, nil
+        }
+        return 0, nil
+    })
 
     // 5. Configure GEPA
     config := optimizers.DefaultGEPAConfig()
@@ -137,7 +138,7 @@ func main() {
 
     // 6. Optimize
     ctx := context.Background()
-    optimizedProgram, err := gepa.Compile(ctx, program, dataset, metricFunc)
+    optimizedProgram, err := gepa.CompileWithScorer(ctx, program, training, scorer)
     if err != nil {
         log.Fatal(err)
     }
@@ -320,7 +321,7 @@ func main() {
 
     // Create MIPRO optimizer
     mipro := optimizers.NewMIPRO(
-        metricFunc,
+        nil, // the scorer is passed to CompileWithScorer
         optimizers.WithMode(optimizers.LightMode),      // Fast optimization
         optimizers.WithNumTrials(10),                   // Number of trials
         optimizers.WithTPEGamma(0.25),                  // Exploration parameter
@@ -328,7 +329,7 @@ func main() {
     )
 
     // Optimize program
-    optimizedProgram, err := mipro.Compile(ctx, program, dataset, nil)
+    optimizedProgram, err := mipro.CompileWithScorer(ctx, program, examples, scorer)
     if err != nil {
         log.Fatal(err)
     }
@@ -407,7 +408,7 @@ func main() {
     )
 
     // Optimize
-    optimizedProgram, err := simba.Compile(ctx, program, dataset, metricFunc)
+    optimizedProgram, err := simba.CompileWithScorer(ctx, program, examples, scorer)
     if err != nil {
         log.Fatal(err)
     }
@@ -463,26 +464,21 @@ package main
 import (
     "context"
     "github.com/XiaoConstantine/dspy-go/pkg/optimizers"
-    "github.com/XiaoConstantine/dspy-go/pkg/metrics"
 )
 
 func main() {
-    // Create Bootstrap optimizer
-    bootstrap := optimizers.NewBootstrapFewShot(
-        dataset,
-        metrics.NewExactMatchMetric("answer"),
-        optimizers.WithMaxBootstrappedDemos(5),      // Max examples
-        optimizers.WithMaxLabeledDemos(3),           // Max labeled examples
-    )
+    // Create Bootstrap optimizer that keeps up to 5 demonstrations
+    bootstrap := optimizers.NewBootstrapFewShot(nil, 5)
 
-    // Optimize module
-    optimizedModule, err := bootstrap.Optimize(ctx, originalModule)
+    // A prediction becomes a demonstration when the scorer rates it above
+    // zero, or at least MetricThreshold when that is set.
+    optimizedProgram, err := bootstrap.CompileWithScorer(ctx, program, examples, scorer)
     if err != nil {
         log.Fatal(err)
     }
 
-    // Use optimized module
-    result, _ := optimizedModule.Process(ctx, inputs)
+    // Use optimized program
+    result, _ := optimizedProgram.Execute(ctx, inputs)
 }
 ```
 
@@ -508,18 +504,18 @@ package main
 import (
     "context"
     "github.com/XiaoConstantine/dspy-go/pkg/optimizers"
-    "github.com/XiaoConstantine/dspy-go/pkg/metrics"
 )
 
 func main() {
     // Create COPRO optimizer
-    copro := optimizers.NewCopro(
-        dataset,
-        metrics.NewRougeMetric("answer"),
+    copro := optimizers.NewCOPRO(
+        nil, // the scorer is passed to CompileWithScorer
+        optimizers.WithBreadth(5),
+        optimizers.WithDepth(2),
     )
 
-    // Optimize module (automatically handles multi-module systems)
-    optimizedModule, err := copro.Optimize(ctx, originalModule)
+    // Optimize program (automatically handles multi-module systems)
+    optimizedProgram, err := copro.CompileWithScorer(ctx, program, examples, scorer)
     if err != nil {
         log.Fatal(err)
     }
@@ -563,44 +559,65 @@ Use MIPRO (default choice)
 
 ## Metrics - Measuring Success
 
-Every optimizer needs a metric to optimize for:
+Every optimizer scores predictions with a `core.Scorer`, passed to
+`CompileWithScorer` together with a `[]core.Example`:
+
+```go
+type Scorer interface {
+    Score(ctx context.Context, example Example, prediction map[string]any) (float64, error)
+}
+```
+
+Optimizers call the scorer from several goroutines, so it must be safe for
+concurrent use. Return an error when a prediction cannot be scored, for
+example when an LLM judge fails; do not return zero for it.
+
+### Custom Scorers
+
+```go
+scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+    expected, _ := example.Outputs["answer"].(string)
+    actual, ok := prediction["answer"].(string)
+    if !ok {
+        return 0, fmt.Errorf("prediction has no string answer")
+    }
+    if expected == actual {
+        return 1, nil
+    }
+    // Partial credit for close answers
+    return calculateSimilarity(expected, actual), nil
+})
+```
 
 ### Built-in Metrics
+
+`pkg/metrics` provides `ExactMatch`, `AnyMatch`, and `F1Score`. They compare
+the example's outputs with the prediction and keep no state, so convert them
+with `core.MetricScorer`:
 
 ```go
 import "github.com/XiaoConstantine/dspy-go/pkg/metrics"
 
-// Exact match
-exactMatch := metrics.NewExactMatchMetric("answer")
-
-// ROUGE score (for summarization)
-rouge := metrics.NewRougeMetric("summary")
-
-// F1 score
-f1 := metrics.NewF1Metric("prediction", "label")
+scorer := core.MetricScorer(metrics.ExactMatch)
 ```
 
-### Custom Metrics
+### How Optimizers Treat a Scorer Error
 
-```go
-// Define custom metric function
-metricFunc := func(example, prediction map[string]interface{}, trace *core.Trace) (float64, map[string]interface{}) {
-    expected := example["answer"].(string)
-    actual := prediction["answer"].(string)
+| Optimizer | An example the scorer cannot score |
+|-----------|-------------------------------------|
+| GEPA | Counts as zero and is scored again the next time its candidate is evaluated |
+| COPRO | Counts as zero |
+| MIPRO | Counts as zero in a minibatch; a full evaluation returns the error |
+| SIMBA | The candidate is rejected |
+| BootstrapFewShot | The prediction is not kept as a demonstration |
 
-    // Simple exact match
-    if expected == actual {
-        return 1.0, map[string]interface{}{"correct": true}
-    }
+### Legacy Metrics
 
-    // Partial credit for close answers
-    similarity := calculateSimilarity(expected, actual)
-    return similarity, map[string]interface{}{
-        "correct": false,
-        "similarity": similarity,
-    }
-}
-```
+`Compile(ctx, program, dataset, metric)` with a `core.Metric` still works.
+GEPA and MIPRO call a legacy metric one call at a time, so it does not need to
+be safe for concurrent use, and it cannot report an error or observe
+cancellation. `core.MetricScorer(metric)` converts one for `CompileWithScorer`;
+use it only for metrics that are safe for concurrent use.
 
 ---
 

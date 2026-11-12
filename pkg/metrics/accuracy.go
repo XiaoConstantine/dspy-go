@@ -1,3 +1,10 @@
+// Package metrics provides ready-made metrics for optimizers.
+//
+// ExactMatch, AnyMatch, and F1Score compare an example's expected outputs with
+// a prediction. They keep no state, so they are safe for concurrent use and
+// convert to a core.Scorer with core.MetricScorer:
+//
+//	optimizer.CompileWithScorer(ctx, program, examples, core.MetricScorer(metrics.ExactMatch))
 package metrics
 
 import (
@@ -123,14 +130,14 @@ func intersection(a, b []string) []string {
 
 // MetricFunc is a type alias for metric functions.
 //
-// Deprecated: use core.Metric, which has the same signature and is what the
-// optimizers accept, or implement core.Scorer.
+// Deprecated: implement core.Scorer, or convert a function with this signature
+// using core.MetricScorer.
 type MetricFunc func(expected, actual map[string]any) float64
 
 // Accuracy is a struct that can be used to create customizable accuracy metrics.
 //
-// Deprecated: Accuracy only forwards to its function. Pass the function to an
-// optimizer as a core.Metric, or implement core.Scorer.
+// Deprecated: Accuracy only forwards to its function. Implement core.Scorer,
+// or convert the function with core.MetricScorer.
 type Accuracy struct {
 	MetricFunc MetricFunc
 }
