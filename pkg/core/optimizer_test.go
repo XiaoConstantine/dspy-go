@@ -205,3 +205,38 @@ func (m *MockDataset) Reset() {
 	m.resetCalls++
 	m.index = 0
 }
+
+func TestMetricScorerAndScorerFunc(t *testing.T) {
+	example := Example{
+		Inputs:  map[string]any{"question": "q"},
+		Outputs: map[string]any{"answer": "a"},
+	}
+
+	if scorer := MetricScorer(nil); scorer != nil {
+		t.Fatalf("MetricScorer(nil) = %v; want a nil Scorer so a missing metric stays detectable", scorer)
+	}
+	legacy := MetricScorer(func(expected, actual map[string]any) float64 {
+		if expected["answer"] == actual["answer"] {
+			return 0.75
+		}
+		return 0
+	})
+	score, err := legacy.Score(context.Background(), example, map[string]any{"answer": "a"})
+	if err != nil || score != 0.75 {
+		t.Fatalf("MetricScorer(...).Score = %v, %v; want 0.75 scored against the example's expected outputs", score, err)
+	}
+
+	unscorable := errors.New("judge unavailable")
+	var scorer Scorer = ScorerFunc(func(_ context.Context, got Example, _ map[string]any) (float64, error) {
+		if got.Inputs["question"] != "q" {
+			t.Errorf("ScorerFunc received example %v", got)
+		}
+		return 0, unscorable
+	})
+	if _, err := scorer.Score(context.Background(), example, nil); !errors.Is(err, unscorable) {
+		t.Fatalf("ScorerFunc.Score error = %v; want %v", err, unscorable)
+	}
+	if _, err := ScorerFunc(nil).Score(context.Background(), example, nil); err == nil {
+		t.Fatal("ScorerFunc(nil).Score returned no error; want it to report the prediction as unscorable")
+	}
+}

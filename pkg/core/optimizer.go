@@ -23,7 +23,57 @@ type ExamplesCompiler interface {
 }
 
 // Metric is a function type that evaluates the performance of a program.
+//
+// A Metric cannot observe cancellation or report a failure. New code that needs
+// either should implement Scorer and call a ScorerCompiler. MetricScorer adapts
+// an existing Metric.
 type Metric func(expected, actual map[string]any) float64
+
+// MetricScorer adapts metric to a Scorer that calls it with the example's
+// expected outputs and never returns an error. It returns nil for a nil metric.
+//
+// The conversion asserts that metric is safe for concurrent use, as Scorer
+// requires.
+func MetricScorer(metric Metric) Scorer {
+	if metric == nil {
+		return nil
+	}
+	return ScorerFunc(func(_ context.Context, example Example, prediction map[string]any) (float64, error) {
+		return metric(example.Outputs, prediction), nil
+	})
+}
+
+// Scorer scores one prediction against the example that produced it.
+//
+// Implementations must be safe for concurrent use: optimizers call Score from
+// several goroutines at once. A non-nil error means the prediction could not be
+// scored, such as a failed judge call. An unscorable example never raises a
+// candidate's score; each optimizer's CompileWithScorer documents whether it
+// counts as zero, rejects the candidate, or fails the run. Score should return
+// promptly once ctx is done.
+type Scorer interface {
+	Score(ctx context.Context, example Example, prediction map[string]any) (float64, error)
+}
+
+// ScorerFunc adapts a function to a Scorer.
+type ScorerFunc func(ctx context.Context, example Example, prediction map[string]any) (float64, error)
+
+// Score calls f. A nil ScorerFunc reports every prediction as unscorable.
+func (f ScorerFunc) Score(ctx context.Context, example Example, prediction map[string]any) (float64, error) {
+	if f == nil {
+		return 0, errors.New(errors.InvalidInput, "nil ScorerFunc")
+	}
+	return f(ctx, example, prediction)
+}
+
+// ScorerCompiler optimizes a program from materialized examples against a
+// Scorer. Implementations must treat the slice and its examples as read-only.
+//
+// Optimizers implement this interface alongside Optimizer. Unlike Compile, it
+// may call the scorer concurrently and it reports scorer errors.
+type ScorerCompiler interface {
+	CompileWithScorer(ctx context.Context, program Program, examples []Example, scorer Scorer) (Program, error)
+}
 
 // Dataset represents a collection of examples for training/evaluation.
 type Dataset interface {
