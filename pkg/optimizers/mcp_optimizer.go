@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/tools"
 )
@@ -183,8 +184,24 @@ func NewMCPOptimizerWithConfig(config *MCPOptimizerConfig, embeddingService Embe
 	}
 }
 
+var _ core.ScorerCompiler = (*MCPOptimizer)(nil)
+
 // Compile implements the core.Optimizer interface for MCP-specific optimization.
 func (m *MCPOptimizer) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
+	return m.compile(ctx, program, dataset, core.MetricScorer(metric))
+}
+
+// CompileWithScorer optimizes a program from materialized, read-only examples.
+// The scorer only measures the result: it is called sequentially on up to ten
+// examples, and one it cannot score counts as zero.
+func (m *MCPOptimizer) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	if scorer == nil {
+		return program, fmt.Errorf("MCP optimizer requires a scorer")
+	}
+	return m.compile(ctx, program, datasets.NewSimpleDataset(examples), scorer)
+}
+
+func (m *MCPOptimizer) compile(ctx context.Context, program core.Program, dataset core.Dataset, scorer core.Scorer) (core.Program, error) {
 	logger := logging.GetLogger()
 	logger.Info(ctx, "Starting MCP optimization compilation")
 
@@ -201,9 +218,14 @@ func (m *MCPOptimizer) Compile(ctx context.Context, program core.Program, datase
 	}
 
 	// Phase 3: Evaluate optimization effectiveness
-	if err := m.evaluateOptimization(ctx, program, optimizedProgram, dataset, metric); err != nil {
+	if err := m.evaluateOptimization(ctx, program, optimizedProgram, dataset, scorer); err != nil {
 		logger.Warn(ctx, "Failed to evaluate optimization: %v", err)
 		// Don't fail compilation if evaluation fails
+	}
+	// A cancelled compilation did not measure its result; say so instead of
+	// reporting success.
+	if err := ctx.Err(); err != nil {
+		return optimizedProgram, err
 	}
 
 	logger.Info(ctx, "MCP optimization compilation completed successfully")
@@ -308,17 +330,30 @@ func (m *MCPOptimizer) optimizeToolUsage(ctx context.Context, registry *tools.In
 }
 
 // evaluateOptimization evaluates the effectiveness of the optimization.
-func (m *MCPOptimizer) evaluateOptimization(ctx context.Context, original, optimized core.Program, dataset core.Dataset, metric core.Metric) error {
+func (m *MCPOptimizer) evaluateOptimization(ctx context.Context, original, optimized core.Program, dataset core.Dataset, scorer core.Scorer) error {
 	logger := logging.GetLogger()
 
 	// Run both programs on a subset of the dataset and compare performance
 	dataset.Reset()
 	var originalScores, optimizedScores []float64
+	score := func(example core.Example, result map[string]any) float64 {
+		value, err := scorer.Score(ctx, example, result)
+		if err != nil {
+			logger.Warn(ctx, "Failed to score example: %v", err)
+			return 0
+		}
+		return value
+	}
 
 	count := 0
 	maxEvalExamples := 10 // Limit evaluation to avoid long compile times
 
 	for count < maxEvalExamples {
+		// Cancellation is not an unscorable example: stop instead of counting
+		// the remaining examples as zero.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		example, hasNext := dataset.Next()
 		if !hasNext {
 			break
@@ -326,14 +361,16 @@ func (m *MCPOptimizer) evaluateOptimization(ctx context.Context, original, optim
 
 		// Test original program
 		if originalResult, err := original.Execute(ctx, example.Inputs); err == nil {
-			score := metric(example.Outputs, originalResult)
-			originalScores = append(originalScores, score)
+			originalScores = append(originalScores, score(example, originalResult))
+		}
+
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		// Test optimized program
 		if optimizedResult, err := optimized.Execute(ctx, example.Inputs); err == nil {
-			score := metric(example.Outputs, optimizedResult)
-			optimizedScores = append(optimizedScores, score)
+			optimizedScores = append(optimizedScores, score(example, optimizedResult))
 		}
 
 		count++

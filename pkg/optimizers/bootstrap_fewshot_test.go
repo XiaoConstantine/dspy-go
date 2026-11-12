@@ -191,6 +191,49 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 		optimized, _ := optimizer.Compile(ctx, createProgram(), trainDataset, dummyMetric)
 		assert.Equal(t, 0, len(optimized.Modules["predict"].(*modules.Predict).Demos))
 	})
+
+	t.Run("CompileWithScorer", func(t *testing.T) {
+		type callerKey struct{}
+		ctx := context.WithValue(context.Background(), callerKey{}, true)
+		// Q1 scores 1, Q2 scores 0.5, and Q3 cannot be scored.
+		scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, _ map[string]any) (float64, error) {
+			if ctx.Value(callerKey{}) == nil {
+				t.Error("scorer did not receive the caller's context")
+			}
+			if _, mixed := example.Inputs["answer"]; mixed || example.Outputs["answer"] == nil {
+				t.Errorf("scorer received example %v; want inputs and expected outputs kept apart", example)
+			}
+			switch example.Inputs["question"] {
+			case "Q1":
+				return 1, nil
+			case "Q2":
+				return 0.5, nil
+			}
+			return 0, fmt.Errorf("judge unavailable")
+		})
+		// The constructor metric would keep everything; the scorer decides.
+		keepAll := func(_, _ map[string]any, _ context.Context) bool { return true }
+		questions := func(optimized core.Program) []any {
+			var kept []any
+			for _, demo := range optimized.Modules["predict"].(*modules.Predict).Demos {
+				kept = append(kept, demo.Inputs["question"])
+			}
+			return kept
+		}
+
+		optimizer := NewBootstrapFewShot(keepAll, 100)
+		optimized, err := optimizer.CompileWithScorer(ctx, createProgram(), trainExamples, scorer)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []any{"Q1", "Q2"}, questions(optimized), "any score above zero is kept; an unscorable example is not")
+
+		optimizer.MetricThreshold = 1
+		optimized, err = optimizer.CompileWithScorer(ctx, createProgram(), trainExamples, scorer)
+		require.NoError(t, err)
+		assert.Equal(t, []any{"Q1"}, questions(optimized))
+
+		_, err = optimizer.CompileWithScorer(ctx, createProgram(), trainExamples, core.MetricScorer(nil))
+		assert.Error(t, err)
+	})
 }
 
 // Benchmark tests for BootstrapFewShot optimizer using shared benchmark utilities

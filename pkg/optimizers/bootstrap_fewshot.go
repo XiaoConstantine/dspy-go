@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 
@@ -16,7 +17,12 @@ import (
 type BootstrapFewShot struct {
 	Metric          func(example map[string]any, prediction map[string]any, ctx context.Context) bool
 	MaxBootstrapped int
+	// MetricThreshold is the score a prediction needs in CompileWithScorer to
+	// become a demonstration. Zero keeps every prediction that scores above zero.
+	MetricThreshold float64
 }
+
+var _ core.ScorerCompiler = (*BootstrapFewShot)(nil)
 
 func NewBootstrapFewShot(metric func(example map[string]any, prediction map[string]any, ctx context.Context) bool, maxBootstrapped int) *BootstrapFewShot {
 	return &BootstrapFewShot{
@@ -47,16 +53,54 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, da
 	}
 
 	// Use program as both student and teacher (self-improvement)
-	return b.compileInternal(ctx, program, program, trainset)
+	return b.compileInternal(ctx, program, program, trainset, b.metricKeeps(trainset))
+}
+
+// CompileWithScorer bootstraps demonstrations from materialized, read-only
+// examples, using program as its own teacher. A teacher prediction becomes a
+// demonstration when scorer scores it at MetricThreshold or above (above zero
+// when the threshold is unset); one the scorer cannot score is not kept. It
+// calls scorer from up to core.GetConcurrencyLevel goroutines at once and
+// ignores the constructor metric.
+func (b *BootstrapFewShot) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	if scorer == nil {
+		return program, errors.New(errors.InvalidInput, "BootstrapFewShot requires a scorer")
+	}
+	trainset := make([]map[string]any, len(examples))
+	for i, example := range examples {
+		trainset[i] = make(map[string]any, len(example.Inputs)+len(example.Outputs))
+		maps.Copy(trainset[i], example.Inputs)
+		maps.Copy(trainset[i], example.Outputs)
+	}
+	keep := func(ctx context.Context, index int, prediction map[string]any) bool {
+		score, err := scorer.Score(ctx, examples[index], prediction)
+		if err != nil {
+			logging.GetLogger().Warn(ctx, "BootstrapFewShot: scorer failed: %v", err)
+			return false
+		}
+		if b.MetricThreshold == 0 {
+			return score > 0
+		}
+		return score >= b.MetricThreshold
+	}
+	return b.compileInternal(ctx, program, program, trainset, keep)
 }
 
 // CompileLegacy provides backward compatibility for the old interface.
 func (b *BootstrapFewShot) CompileLegacy(ctx context.Context, student, teacher core.Program, trainset []map[string]any) (core.Program, error) {
-	return b.compileInternal(ctx, student, teacher, trainset)
+	return b.compileInternal(ctx, student, teacher, trainset, b.metricKeeps(trainset))
 }
 
-// compileInternal contains the original implementation logic.
-func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]any) (core.Program, error) {
+// metricKeeps decides with the constructor metric.
+func (b *BootstrapFewShot) metricKeeps(trainset []map[string]any) func(context.Context, int, map[string]any) bool {
+	return func(ctx context.Context, index int, prediction map[string]any) bool {
+		return b.Metric(trainset[index], prediction, ctx)
+	}
+}
+
+// compileInternal contains the original implementation logic. keep reports
+// whether the teacher's prediction for trainset[index] becomes a demonstration.
+func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]any, keep func(ctx context.Context, index int, prediction map[string]any) bool) (core.Program, error) {
 	compiledStudent := student.Clone()
 	teacherLLM := core.GetTeacherLLM()
 	if teacherLLM == nil {
@@ -111,7 +155,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 			}
 			exampleSpan.WithAnnotation("prediction", prediction)
 
-			if b.Metric(ex, prediction, exampleCtx) {
+			if keep(exampleCtx, i, prediction) {
 				resultsMu.Lock()
 				results = append(results, core.Example{
 					Inputs:  ex,

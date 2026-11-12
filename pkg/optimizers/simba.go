@@ -203,6 +203,10 @@ type SIMBA struct {
 	// Pipeline processing
 	pipelineChannels *PipelineChannels
 
+	// Set per compile, under compileGate: whether the full-dataset pass may
+	// run concurrently when LLMConcurrency is unset.
+	concurrentFullEvaluation bool
+
 	// Thread safety
 	compileGate chan struct{}
 	mu          sync.RWMutex
@@ -416,6 +420,7 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 	if err != nil {
 		return program, err
 	}
+	s.concurrentFullEvaluation = false
 	examples, err := core.MaterializeDatasetContext(ctx, dataset)
 	if err != nil {
 		return program, fmt.Errorf("failed to materialize dataset: %w", err)
@@ -425,13 +430,18 @@ func (s *SIMBA) Compile(ctx context.Context, program core.Program, dataset core.
 
 // CompileExamples optimizes a program from materialized, read-only examples.
 func (s *SIMBA) CompileExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (core.Program, error) {
-	return s.CompileWithScorer(ctx, program, examples, core.MetricScorer(metric))
+	return s.compileScored(ctx, program, examples, core.MetricScorer(metric), false)
 }
 
 // CompileWithScorer optimizes a program from materialized, read-only examples. It
-// calls scorer concurrently, bounded by LLMConcurrency. An example the scorer
-// cannot score rejects the candidate, like a failed execution.
+// calls scorer concurrently, bounded by LLMConcurrency. Unlike Compile, it also
+// scores the full dataset concurrently when LLMConcurrency is unset. An example
+// the scorer cannot score rejects the candidate, like a failed execution.
 func (s *SIMBA) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	return s.compileScored(ctx, program, examples, scorer, true)
+}
+
+func (s *SIMBA) compileScored(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer, concurrentFullEvaluation bool) (core.Program, error) {
 	ctx = normalizeSIMBAContext(ctx)
 	if err := s.acquireCompile(ctx); err != nil {
 		return program, err
@@ -442,6 +452,7 @@ func (s *SIMBA) CompileWithScorer(ctx context.Context, program core.Program, exa
 	if err != nil {
 		return program, err
 	}
+	s.concurrentFullEvaluation = concurrentFullEvaluation
 	return s.compileExamples(ctx, program, examples, scorer)
 }
 
@@ -675,8 +686,13 @@ func (s *SIMBA) resetState() {
 
 func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (float64, error) {
 	// Honor LLMConcurrency like batch scoring does. Without one the pass stays
-	// sequential, as it always was.
-	results := scoreExamples(ctx, s.config.LLMConcurrency, false, examples, func(example core.Example) (float64, error) {
+	// sequential, as it always was, unless the caller compiled with a Scorer;
+	// then it is bounded by the burst one optimization step already issues.
+	workers := s.config.LLMConcurrency
+	if workers <= 0 && s.concurrentFullEvaluation {
+		workers = s.config.BatchSize * s.config.NumCandidates
+	}
+	results := scoreExamples(ctx, workers, false, examples, func(example core.Example) (float64, error) {
 		prediction, err := program.Forward(ctx, example.Inputs)
 		if err != nil {
 			return 0, err

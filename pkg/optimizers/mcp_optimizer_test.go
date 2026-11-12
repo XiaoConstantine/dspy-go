@@ -593,6 +593,44 @@ func TestMCPOptimizerCompile(t *testing.T) {
 	assert.Greater(t, optimizer.PatternCollector.GetPatternCount(), 0)
 }
 
+func TestMCPOptimizerCompileWithScorer(t *testing.T) {
+	type callerKey struct{}
+	ctx := context.WithValue(context.Background(), callerKey{}, true)
+	examples := []core.Example{{
+		Inputs: map[string]any{"query": "show git log"},
+		Outputs: map[string]any{
+			"tool_calls": []any{map[string]any{"tool_name": "git_log", "parameters": map[string]any{"count": 5}}},
+			"result":     "git log output",
+		},
+	}}
+	program := core.NewProgram(map[string]core.Module{}, func(_ context.Context, inputs map[string]any) (map[string]any, error) {
+		return map[string]any{"result": "git log output"}, nil
+	})
+	calls := 0
+	scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		calls++
+		if ctx.Value(callerKey{}) == nil {
+			t.Error("scorer did not receive the caller's context")
+		}
+		if example.Inputs["query"] != "show git log" || prediction["result"] != "git log output" {
+			t.Errorf("scorer received example %v and prediction %v", example, prediction)
+		}
+		return 0, fmt.Errorf("judge unavailable")
+	})
+
+	optimizer := NewMCPOptimizer(NewSimpleEmbeddingService(10))
+	_, err := optimizer.CompileWithScorer(ctx, program, examples, scorer)
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls, "the original and the optimized program are each scored once")
+	assert.Greater(t, optimizer.PatternCollector.GetPatternCount(), 0)
+	latest := optimizer.MetricsEvaluator.GetLatestMetrics()
+	require.NotNil(t, latest)
+	assert.Zero(t, latest.ToolSelectionAccuracy, "an unscorable example counts as zero")
+
+	_, err = optimizer.CompileWithScorer(ctx, program, examples, core.MetricScorer(nil))
+	assert.Error(t, err)
+}
+
 func TestMCPOptimizerOptimizeInteraction(t *testing.T) {
 	embeddingService := NewSimpleEmbeddingService(10)
 	optimizer := NewMCPOptimizer(embeddingService)
@@ -691,4 +729,27 @@ func TestMCPOptimizerLearningDisabled(t *testing.T) {
 
 	// Pattern should not be added due to learning being disabled
 	assert.Equal(t, 0, optimizer.PatternCollector.GetPatternCount())
+}
+
+func TestMCPOptimizerCompileWithScorerReportsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	examples := []core.Example{
+		{Inputs: map[string]any{"query": "show git log"}, Outputs: map[string]any{"result": "git log output"}},
+		{Inputs: map[string]any{"query": "show git status"}, Outputs: map[string]any{"result": "git status output"}},
+	}
+	program := core.NewProgram(map[string]core.Module{}, func(context.Context, map[string]any) (map[string]any, error) {
+		return map[string]any{"result": "output"}, nil
+	})
+	calls := 0
+	scorer := core.ScorerFunc(func(ctx context.Context, _ core.Example, _ map[string]any) (float64, error) {
+		calls++
+		cancel()
+		return 0, ctx.Err()
+	})
+
+	_, err := NewMCPOptimizer(NewSimpleEmbeddingService(10)).CompileWithScorer(ctx, program, examples, scorer)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, calls, "scoring stops at the cancellation instead of counting the rest as zero")
 }

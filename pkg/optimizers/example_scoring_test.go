@@ -295,6 +295,43 @@ func TestSIMBAFullEvaluationIsSequentialByDefault(t *testing.T) {
 	assert.Equal(t, 1, scorer.peak)
 }
 
+// Only CompileWithScorer may score the full dataset concurrently when
+// LLMConcurrency is unset; a core.Metric never ran concurrently there.
+func TestSIMBAFullEvaluationIsConcurrentOnlyForScorers(t *testing.T) {
+	model := newOfflineLLM()
+	oldDefault, oldTeacher := core.GetDefaultLLM(), core.GetTeacherLLM()
+	core.SetDefaultLLM(model)
+	core.SetTeacherLLM(model)
+	t.Cleanup(func() {
+		core.SetDefaultLLM(oldDefault)
+		core.SetTeacherLLM(oldTeacher)
+	})
+	train := offlineExamples(1, 0)
+	ctx := context.Background()
+	fullEvaluationPeak := func(simba *SIMBA) int {
+		scorer := &wiringScorer{}
+		_, err := simba.evaluateProgramOnExamples(ctx, echoProgram(), overlapExamples(40), scorer)
+		require.NoError(t, err)
+		return scorer.peak
+	}
+
+	simba := NewSIMBA()
+	_, err := simba.CompileWithScorer(ctx, offlineProgram(model), train, core.MetricScorer(offlineMetric))
+	require.NoError(t, err)
+	assert.Greater(t, fullEvaluationPeak(simba), 1)
+
+	_, err = simba.CompileExamples(ctx, offlineProgram(model), train, offlineMetric)
+	require.NoError(t, err)
+	assert.Equal(t, 1, fullEvaluationPeak(simba))
+
+	simba = NewSIMBA()
+	_, err = simba.CompileWithScorer(ctx, offlineProgram(model), train, core.MetricScorer(offlineMetric))
+	require.NoError(t, err)
+	_, err = simba.Compile(ctx, offlineProgram(model), datasets.NewSimpleDataset(train), offlineMetric)
+	require.NoError(t, err)
+	assert.Equal(t, 1, fullEvaluationPeak(simba))
+}
+
 // wiringScorer scores like offlineMetric, or exact output match outside the
 // offline fixture, and records how its calls arrived.
 type wiringScorer struct {
