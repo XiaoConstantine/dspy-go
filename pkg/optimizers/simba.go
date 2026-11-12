@@ -665,40 +665,42 @@ func (s *SIMBA) resetState() {
 }
 
 func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Program, examples []core.Example, metric core.Metric) (float64, error) {
-	var totalScore float64
-	var count int
-	failed := false
-
-	for _, example := range examples {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
+	// Honor LLMConcurrency like batch scoring does. When it is unlimited, bound
+	// the pass by the burst one optimization step already issues, so scoring a
+	// large dataset does not open a call per example at once.
+	workers := s.config.LLMConcurrency
+	if workers <= 0 {
+		workers = max(s.config.BatchSize*s.config.NumCandidates, 1)
+	}
+	results := scoreExamples(ctx, workers, false, examples, func(example core.Example) (float64, error) {
 		prediction, err := program.Forward(ctx, example.Inputs)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return 0, ctxErr
-		}
 		if err != nil {
-			s.logger.Debug(ctx, "Program evaluation failed for example: %v", err)
-			failed = true
-			count++
-			continue
-		}
-
-		score := metric(example.Outputs, prediction)
-		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		totalScore += score
-		count++
+		return metric(example.Outputs, prediction), nil
+	})
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 
-	if count == 0 {
+	var totalScore float64
+	failed := false
+	for _, result := range results {
+		if result.Err != nil {
+			s.logger.Debug(ctx, "Program evaluation failed for example: %v", result.Err)
+			failed = true
+			continue
+		}
+		totalScore += result.Score
+	}
+
+	if len(results) == 0 {
 		return 0, nil
 	}
 	if failed {
 		return math.Inf(-1), nil
 	}
-	return totalScore / float64(count), nil
+	return totalScore / float64(len(results)), nil
 }
 
 // generateCandidates creates candidate programs for the current step.

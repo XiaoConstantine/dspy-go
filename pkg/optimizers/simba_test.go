@@ -704,7 +704,9 @@ func testSIMBAEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Cancellation during sequential evaluation stops the compile", func(t *testing.T) {
-		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(3))
+		// One worker makes full-dataset scoring sequential; above that, examples
+		// already in flight finish after cancellation.
+		simba := NewSIMBA(WithFastMode(true), WithSIMBAMaxSteps(3), WithLLMConcurrency(1))
 		examples := []core.Example{
 			{Inputs: map[string]any{"question": "one"}, Outputs: map[string]any{"answer": "one"}},
 			{Inputs: map[string]any{"question": "two"}, Outputs: map[string]any{"answer": "two"}},

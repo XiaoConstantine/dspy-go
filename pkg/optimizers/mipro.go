@@ -831,14 +831,11 @@ func (m *MIPRO) evaluateCandidate(
 	}
 
 	var totalScore float64
-	for _, example := range examples {
-		result, err := program.Execute(ctx, example.Inputs)
-		if err != nil {
-			return 0, fmt.Errorf("failed to execute program: %w", err)
+	for _, result := range m.scoreExamples(ctx, program, examples, metric, true) {
+		if result.Err != nil {
+			return 0, fmt.Errorf("failed to execute program: %w", result.Err)
 		}
-
-		score := metric(example.Outputs, result, ctx)
-		totalScore += score
+		totalScore += result.Score
 	}
 
 	return totalScore / float64(len(examples)), nil
@@ -893,16 +890,25 @@ func (m *MIPRO) evaluateOnMinibatch(
 
 	// Evaluate on the minibatch
 	var totalScore float64
-	for _, example := range batch {
-		result, err := program.Execute(ctx, example.Inputs)
-		if err != nil {
-			m.logger.Warn(ctx, "Failed to execute program on example: %v", err)
+	for _, result := range m.scoreExamples(ctx, program, batch, metric, false) {
+		if result.Err != nil {
+			m.logger.Warn(ctx, "Failed to execute program on example: %v", result.Err)
 			continue
 		}
-
-		score := metric(example.Outputs, result, ctx)
-		totalScore += score
+		totalScore += result.Score
 	}
 
 	return totalScore / float64(len(batch)), nil
+}
+
+// scoreExamples runs program and metric on each example, up to the package
+// concurrency level (core.SetConcurrencyOptions, default 1) at a time.
+func (m *MIPRO) scoreExamples(ctx context.Context, program core.Program, examples []core.Example, metric miproMetric, stopOnError bool) []exampleScore {
+	return scoreExamples(ctx, core.GetConcurrencyLevel(), stopOnError, examples, func(example core.Example) (float64, error) {
+		result, err := program.Execute(ctx, example.Inputs)
+		if err != nil {
+			return 0, err
+		}
+		return metric(example.Outputs, result, ctx), nil
+	})
 }
