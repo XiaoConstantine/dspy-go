@@ -13,7 +13,6 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/cache"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
@@ -149,6 +148,14 @@ func (oc *OptimizerComparison) CreateSampleDataset(size int) []core.Example {
 	return examples
 }
 
+// scorer adapts AccuracyMetric for CompileWithScorer. AccuracyMetric keeps no
+// state, so optimizers may call it concurrently.
+func (oc *OptimizerComparison) scorer() core.Scorer {
+	return core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]interface{}) (float64, error) {
+		return oc.AccuracyMetric(example.Outputs, prediction, ctx), nil
+	})
+}
+
 func (oc *OptimizerComparison) AccuracyMetric(example, prediction map[string]interface{}, ctx context.Context) float64 {
 	expected, ok := example["answer"].(string)
 	if !ok {
@@ -213,25 +220,12 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 		}
 	}
 
-	// Create optimizer
-	optimizer := optimizers.NewBootstrapFewShot(
-		func(example, prediction map[string]interface{}, ctx context.Context) bool {
-			return oc.AccuracyMetric(example, prediction, ctx) > 0.5
-		},
-		maxBootstrappedDemos,
-	)
-
-	// Create dataset interface for BootstrapFewShot
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
-	// Define metric function for BootstrapFewShot
-	metricFunc := func(expected, actual map[string]interface{}) float64 {
-		return oc.AccuracyMetric(expected, actual, ctx)
-	}
+	// Create optimizer; predictions the scorer rates above zero become demos.
+	optimizer := optimizers.NewBootstrapFewShot(nil, maxBootstrappedDemos)
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -301,20 +295,15 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 
 	// Create optimizer
 	optimizer := optimizers.NewMIPRO(
-		func(example, prediction map[string]interface{}, ctx context.Context) float64 {
-			return oc.AccuracyMetric(example, prediction, ctx)
-		},
+		nil, // the scorer is passed to CompileWithScorer
 		optimizers.WithMode(optimizers.LightMode),
 		optimizers.WithNumTrials(numTrials),
 		optimizers.WithMaxLabeledDemos(maxBootstrappedDemos),
 	)
 
-	// Create dataset interface for MIPRO
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, nil)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -383,17 +372,9 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 	trainExamples := dataset[:trainSize]
 	valset := dataset[trainSize:]
 
-	// Create dataset interface for COPRO
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
-	// Define metric function for COPRO
-	metricFunc := func(expected, actual map[string]interface{}) float64 {
-		return oc.AccuracyMetric(expected, actual, ctx)
-	}
-
 	// Create COPRO optimizer (prompt optimization algorithm)
 	coproOptimizer := optimizers.NewCOPRO(
-		metricFunc,
+		nil,                                 // the scorer is passed to CompileWithScorer
 		optimizers.WithBreadth(breadth),     // Number of prompt candidates
 		optimizers.WithDepth(depth),         // Refinement iterations
 		optimizers.WithInitTemperature(1.2), // Exploration randomness
@@ -402,7 +383,7 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := coproOptimizer.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := coproOptimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -480,17 +461,9 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 		optimizers.WithFastMode(true), // Enable fast mode for compatibility tests
 	)
 
-	// Create dataset interface for SIMBA
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
-	// Define metric function for SIMBA
-	metricFunc := func(example, prediction map[string]interface{}) float64 {
-		return oc.AccuracyMetric(example, prediction, ctx)
-	}
-
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -573,17 +546,9 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 		}
 	}
 
-	// Create dataset interface for GEPA
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
-	// Define metric function for GEPA
-	metricFunc := func(example, prediction map[string]interface{}) float64 {
-		return oc.AccuracyMetric(example, prediction, ctx)
-	}
-
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := gepaOptimizer.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := gepaOptimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {

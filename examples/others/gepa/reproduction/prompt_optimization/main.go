@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
@@ -230,9 +229,6 @@ func (exp *Figure2ReproductionExperiment) runFigure2Reproduction(apiKey string) 
 	// Set up evolution tracking
 	gepa.SetProgressReporter(&Figure2ProgressReporter{exp: exp})
 
-	// Create dataset
-	dataset := datasets.NewSimpleDataset(examples)
-
 	exp.logger.Info(exp.ctx, "🚀 Starting GEPA Evolution...")
 	exp.logger.Info(exp.ctx, "   Watching for the dramatic prompt evolution shown in Figure 2!")
 	exp.logger.Info(exp.ctx, "")
@@ -240,7 +236,7 @@ func (exp *Figure2ReproductionExperiment) runFigure2Reproduction(apiKey string) 
 	startTime := time.Now()
 
 	// Run GEPA optimization
-	optimizedProgram, err := gepa.Compile(exp.ctx, program, dataset, evaluateQueryQuality)
+	optimizedProgram, err := gepa.CompileWithScorer(exp.ctx, program, examples, core.MetricScorer(evaluateQueryQuality))
 	if err != nil {
 		return fmt.Errorf("GEPA optimization failed: %w", err)
 	}

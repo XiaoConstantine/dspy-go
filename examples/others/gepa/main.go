@@ -16,30 +16,6 @@ import (
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
 )
 
-// SimpleDataset implements core.Dataset for the example.
-type SimpleDataset struct {
-	examples []core.Example
-	index    int
-}
-
-func (d *SimpleDataset) Next() (core.Example, bool) {
-	if d.index >= len(d.examples) {
-		d.index = 0 // Reset for reuse
-		return core.Example{}, false
-	}
-	example := d.examples[d.index]
-	d.index++
-	return example, true
-}
-
-func (d *SimpleDataset) Reset() {
-	d.index = 0
-}
-
-func (d *SimpleDataset) Size() int {
-	return len(d.examples)
-}
-
 func main() {
 	apiKey := flag.String("api-key", "", "API Key for the Gemini LLM provider")
 	dataset := flag.String("dataset", "gsm8k", "Dataset to use (gsm8k or hotpotqa)")
@@ -134,11 +110,9 @@ func RunGEPAExample(apiKey, datasetName string, generations int, verbose bool) {
 
 	startTime := time.Now()
 
-	// Create dataset from examples
-	dataset := &SimpleDataset{examples: examples}
-
-	// Perform GEPA optimization
-	optimizedProgram, err := gepa.Compile(ctx, program, dataset, metricFunc)
+	// Perform GEPA optimization. The metric is a pure function, so GEPA may
+	// call it concurrently.
+	optimizedProgram, err := gepa.CompileWithScorer(ctx, program, examples, core.MetricScorer(metricFunc))
 	if err != nil {
 		logger.Fatalf(ctx, "GEPA optimization failed: %v", err)
 	}

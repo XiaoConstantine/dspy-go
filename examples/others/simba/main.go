@@ -54,7 +54,7 @@ func RunSIMBAExample(apiKey string) {
 	testExamples := examples[15:25] // Small test set for evaluation
 
 	// Convert to dspy-go Dataset format
-	trainDataset := createDataset(trainExamples)
+	trainSet := toExamples(trainExamples)
 
 	// Create a reasoning program optimized for mathematical problem solving
 	// This showcases how SIMBA can iteratively improve instruction quality
@@ -89,11 +89,11 @@ func RunSIMBAExample(apiKey string) {
 	)
 
 	// Define a metric function that evaluates both correctness and reasoning quality
-	metricFunc := func(expected, actual map[string]any) float64 {
-		expectedAnswer, ok1 := expected["completion"].(string)
-		actualAnswer, ok2 := actual["answer"].(string)
+	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		expectedAnswer, ok1 := example.Outputs["completion"].(string)
+		actualAnswer, ok2 := prediction["answer"].(string)
 		if !ok1 || !ok2 {
-			return 0.0
+			return 0, nil
 		}
 
 		// Extract numerical answers for comparison
@@ -102,19 +102,19 @@ func RunSIMBAExample(apiKey string) {
 
 		// Perfect match gets full score
 		if strings.TrimSpace(expectedNum) == strings.TrimSpace(actualNum) {
-			return 1.0
+			return 1, nil
 		}
 
 		// Partial credit for reasonable answers (within 10% for non-zero)
 		if expectedNum != "0" && actualNum != "" {
 			// Simple heuristic for partial credit - could be enhanced
 			if len(actualNum) > 0 && actualNum[0] == expectedNum[0] {
-				return 0.3
+				return 0.3, nil
 			}
 		}
 
-		return 0.0
-	}
+		return 0, nil
+	})
 
 	// Create SIMBA optimizer with configuration optimized for demonstration
 	// This showcases SIMBA's key features and introspective capabilities
@@ -143,7 +143,7 @@ func RunSIMBAExample(apiKey string) {
 	logger.Info(ctx, "")
 
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainSet, scorer)
 	optimizationTime := time.Since(startTime)
 
 	if err != nil {
@@ -187,8 +187,8 @@ func RunSIMBAExample(apiKey string) {
 	logger.Info(ctx, "Optimization completed in %v", optimizationTime)
 }
 
-// Helper function to create a Dataset from examples.
-func createDataset(examples []datasets.GSM8KExample) core.Dataset {
+// toExamples converts GSM8K records into optimizer examples.
+func toExamples(examples []datasets.GSM8KExample) []core.Example {
 	data := make([]core.Example, len(examples))
 	for i, ex := range examples {
 		data[i] = core.Example{
@@ -200,26 +200,7 @@ func createDataset(examples []datasets.GSM8KExample) core.Dataset {
 			},
 		}
 	}
-	return &exampleDataset{examples: data}
-}
-
-// Custom Dataset implementation.
-type exampleDataset struct {
-	examples []core.Example
-	position int
-}
-
-func (d *exampleDataset) Next() (core.Example, bool) {
-	if d.position >= len(d.examples) {
-		return core.Example{}, false
-	}
-	example := d.examples[d.position]
-	d.position++
-	return example, true
-}
-
-func (d *exampleDataset) Reset() {
-	d.position = 0
+	return data
 }
 
 // Enhanced answer extraction for GSM8K format.

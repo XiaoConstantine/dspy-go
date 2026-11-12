@@ -152,9 +152,7 @@ func RunGSM8KExample(configPath string, apiKey string) {
 	})
 
 	// Create optimizer
-	optimizer := optimizers.NewBootstrapFewShot(func(example, prediction map[string]any, ctx context.Context) bool {
-		return example["answer"] == prediction["answer"]
-	}, 5)
+	optimizer := optimizers.NewBootstrapFewShot(nil, 5)
 
 	// Prepare training set as core.Examples
 	trainExamples := make([]core.Example, len(examples[:10]))
@@ -169,19 +167,16 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		}
 	}
 
-	// Create dataset
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
-	// Define metric function
-	metricFunc := func(expected, actual map[string]any) float64 {
-		if expected["answer"] == actual["answer"] {
-			return 1.0
+	// A prediction becomes a demonstration when its answer matches.
+	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		if example.Outputs["answer"] == prediction["answer"] {
+			return 1, nil
 		}
-		return 0.0
-	}
+		return 0, nil
+	})
 
 	// Compile the program
-	compiledProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
+	compiledProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, scorer)
 	if err != nil {
 		logger.Fatalf(ctx, "Failed to compile program: %v", err)
 	}

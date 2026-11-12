@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
-	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
@@ -234,32 +233,21 @@ Use proper HTML structure with html, head, and body tags.`)
 		return 0.1
 	}
 
-	// Create a bool-returning metric for the BootstrapFewShot constructor
-	optimizerMetric := func(example, prediction map[string]any, ctx context.Context) bool {
-		score := metric(example, prediction, ctx) // Use the float64 metric internally
-		return score >= 0.7                       // Threshold for pass/fail
-	}
-
-	// Create optimizer (BootstrapFewShot)
+	// Create optimizer (BootstrapFewShot). Predictions scoring at least 0.7
+	// become demonstrations.
 	maxDemos := 3
-	optimizer := optimizers.NewBootstrapFewShot(optimizerMetric, maxDemos)
+	optimizer := optimizers.NewBootstrapFewShot(nil, maxDemos)
+	optimizer.MetricThreshold = 0.7
 
 	// Compile the program
 	logger.Info(ctx, "Compiling HTML extraction program...")
 
-	// Create dataset from training examples
-	trainDataset := datasets.NewSimpleDataset(trainingExamples)
+	// The metric reads the document from the example's inputs.
+	scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		return metric(example.Inputs, prediction, ctx), nil
+	})
 
-	// Define metric function for optimizer compile
-	compileMetric := func(expected, actual map[string]any) float64 {
-		// Simple exact match for demonstration
-		if expected["title"] == actual["title"] {
-			return 1.0
-		}
-		return 0.0
-	}
-
-	compiled_program, err := optimizer.Compile(ctx, html_program, trainDataset, compileMetric)
+	compiled_program, err := optimizer.CompileWithScorer(ctx, html_program, trainingExamples, scorer)
 	if err != nil {
 		logger.Fatalf(ctx, "Compilation failed: %v", err)
 	}

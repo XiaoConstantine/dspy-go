@@ -192,11 +192,9 @@ func RunHotPotQAExample(apiKey string) {
 		return cot.Process(ctx, inputs)
 	})
 
-	metric := func(example, prediction map[string]any, ctx context.Context) bool {
-		return computeF1(prediction["answer"].(string), example["answer"].(string)) > 0.5
-	}
-
-	optimizer := optimizers.NewBootstrapFewShot(metric, 5)
+	// Keep predictions whose F1 against the reference answer is at least 0.5.
+	optimizer := optimizers.NewBootstrapFewShot(nil, 5)
+	optimizer.MetricThreshold = 0.5
 
 	// Convert to core.Examples
 	trainCoreExamples := make([]core.Example, len(trainExamples))
@@ -211,15 +209,21 @@ func RunHotPotQAExample(apiKey string) {
 		}
 	}
 
-	// Create dataset
-	trainDataset := datasets.NewSimpleDataset(trainCoreExamples)
+	// A prediction without a string answer cannot be scored, which the
+	// optimizer treats as a prediction it does not keep.
+	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		predicted, ok := prediction["answer"].(string)
+		if !ok {
+			return 0, fmt.Errorf("prediction has no string answer")
+		}
+		expected, ok := example.Outputs["answer"].(string)
+		if !ok {
+			return 0, fmt.Errorf("example has no string answer")
+		}
+		return computeF1(predicted, expected), nil
+	})
 
-	// Define metric function
-	metricFunc := func(expected, actual map[string]any) float64 {
-		return computeF1(actual["answer"].(string), expected["answer"].(string))
-	}
-
-	compiledProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
+	compiledProgram, err := optimizer.CompileWithScorer(ctx, program, trainCoreExamples, scorer)
 	if err != nil {
 		logger.Fatalf(ctx, "Failed to compile program: %v", err)
 	}

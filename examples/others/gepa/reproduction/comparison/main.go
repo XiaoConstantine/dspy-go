@@ -177,10 +177,8 @@ func runGEPAExperiment(ctx context.Context, logger *logging.Logger, trainExample
 		return nil, fmt.Errorf("failed to create GEPA optimizer: %w", err)
 	}
 
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
 	startTime := time.Now()
-	optimizedProgram, err := gepa.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := gepa.CompileWithScorer(ctx, program, trainExamples, core.MetricScorer(metricFunc))
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -224,16 +222,15 @@ func runMIPROExperiment(ctx context.Context, logger *logging.Logger, trainExampl
 
 	program, _, _ := createHotpotQAProgram()
 
-	// MIPRO metric function (different interface than GEPA)
-	miproMetricFunc := func(example, prediction map[string]any, ctx context.Context) float64 {
-		expectedAnswer := fmt.Sprintf("%v", example["answer"])
+	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		expectedAnswer := fmt.Sprintf("%v", example.Outputs["answer"])
 		actualAnswer := fmt.Sprintf("%v", prediction["answer"])
-		return computeF1Score(actualAnswer, expectedAnswer)
-	}
+		return computeF1Score(actualAnswer, expectedAnswer), nil
+	})
 
 	// Create MIPRO optimizer with light mode for comparison
 	optimizer := optimizers.NewMIPRO(
-		miproMetricFunc,
+		nil, // the scorer is passed to CompileWithScorer
 		optimizers.WithMode(optimizers.LightMode),
 		optimizers.WithNumTrials(10),    // More trials for better comparison
 		optimizers.WithMiniBatchSize(5), // Larger batch size
@@ -243,11 +240,8 @@ func runMIPROExperiment(ctx context.Context, logger *logging.Logger, trainExampl
 		optimizers.WithNumCandidates(8),   // More candidates
 	)
 
-	// Convert to MIPRO dataset format
-	miproDataset := &MIPRODataset{examples: trainExamples}
-
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.Compile(ctx, program, miproDataset, nil)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, scorer)
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -279,25 +273,6 @@ func runMIPROExperiment(ctx context.Context, logger *logging.Logger, trainExampl
 
 	logger.Info(ctx, "✅ MIPRO completed: F1=%.4f, Est. Rollouts=%d, Duration=%v", testScore, estimatedRollouts, duration)
 	return results, nil
-}
-
-// Custom dataset for MIPRO.
-type MIPRODataset struct {
-	examples []core.Example
-	position int
-}
-
-func (d *MIPRODataset) Next() (core.Example, bool) {
-	if d.position >= len(d.examples) {
-		return core.Example{}, false
-	}
-	example := d.examples[d.position]
-	d.position++
-	return example, true
-}
-
-func (d *MIPRODataset) Reset() {
-	d.position = 0
 }
 
 func evaluateMIPROProgram(ctx context.Context, program core.Program, examples []core.Example, maxEval int) float64 {

@@ -52,7 +52,7 @@ func RunMIPROExample(apiKey string) {
 	valExamples := examples[:10]
 
 	// Convert to dspy-go Dataset format
-	valDataset := createDataset(valExamples)
+	valSet := toExamples(valExamples)
 
 	// Create modules for our program
 	// 1. Chain of Thought for reasoning
@@ -95,24 +95,20 @@ func RunMIPROExample(apiKey string) {
 		},
 	)
 
-	// Define a metric function for evaluation
-	metricFunc := func(example, prediction map[string]any, ctx context.Context) float64 {
-		// Simple exact match metric
-		expectedAnswer, ok1 := example["completion"].(string)
+	// Score with a simple exact match. The scorer keeps no state, so MIPRO
+	// may call it concurrently.
+	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		expectedAnswer, ok1 := example.Outputs["completion"].(string)
 		predictedAnswer, ok2 := prediction["completion"].(string)
-		if !ok1 || !ok2 {
-			return 0.0
+		if ok1 && ok2 && predictedAnswer == expectedAnswer {
+			return 1, nil
 		}
-
-		if predictedAnswer == expectedAnswer {
-			return 1.0
-		}
-		return 0.0
-	}
+		return 0, nil
+	})
 
 	// Create MIPRO optimizer with simplified configuration for the demo
 	optimizer := optimizers.NewMIPRO(
-		metricFunc,
+		nil, // the scorer is passed to CompileWithScorer
 		// Use light mode for faster demo
 		optimizers.WithMode(optimizers.LightMode),
 		// Set number of trials to a small number for the demo
@@ -131,7 +127,7 @@ func RunMIPROExample(apiKey string) {
 
 	// Compile the program with MIPRO
 	logger.Info(ctx, "Starting MIPRO optimization...")
-	optimizedProgram, err := optimizer.Compile(ctx, program, valDataset, nil)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, valSet, scorer)
 	if err != nil {
 		logger.Fatalf(ctx, "Optimization failed: %v", err)
 	}
@@ -188,8 +184,8 @@ func RunMIPROExample(apiKey string) {
 	runEvaluation(ctx, finalProgram, valExamples, logger)
 }
 
-// Helper function to create a Dataset from examples.
-func createDataset(examples []datasets.GSM8KExample) core.Dataset {
+// toExamples converts GSM8K records into optimizer examples.
+func toExamples(examples []datasets.GSM8KExample) []core.Example {
 	// Create a slice of core.Example
 	data := make([]core.Example, len(examples))
 	for i, ex := range examples {
@@ -202,28 +198,7 @@ func createDataset(examples []datasets.GSM8KExample) core.Dataset {
 			},
 		}
 	}
-
-	// Return a new dataset implementation
-	return &exampleDataset{examples: data}
-}
-
-// Custom implementation of Dataset interface.
-type exampleDataset struct {
-	examples []core.Example
-	position int
-}
-
-func (d *exampleDataset) Next() (core.Example, bool) {
-	if d.position >= len(d.examples) {
-		return core.Example{}, false
-	}
-	example := d.examples[d.position]
-	d.position++
-	return example, true
-}
-
-func (d *exampleDataset) Reset() {
-	d.position = 0
+	return data
 }
 
 func extractFinalAnswer(answerString string, isActualAnswer bool) string {

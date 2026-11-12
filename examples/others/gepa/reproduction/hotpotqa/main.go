@@ -311,11 +311,8 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 	exp.logger.Info(exp.ctx, "   • Early stopping with patience")
 	exp.logger.Info(exp.ctx, "")
 
-	// Create dataset
-	trainDataset := datasets.NewSimpleDataset(trainExamples)
-
 	// Run optimization
-	optimizedProgram, err := gepa.Compile(exp.ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := gepa.CompileWithScorer(exp.ctx, program, trainExamples, core.MetricScorer(metricFunc))
 	if err != nil {
 		return fmt.Errorf("GEPA optimization failed: %w", err)
 	}
