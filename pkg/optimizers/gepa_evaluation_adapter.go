@@ -223,6 +223,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				if !adapter.concurrentScoring {
 					scoring.Lock()
 				}
+				cacheable := true
 				if err == nil {
 					var scoreErr error
 					evalCase.Score, scoreErr = adapter.scorer.Score(ctx, example, outputs)
@@ -232,9 +233,11 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 						evalCase.Err = scoreErr
 					default:
 						// An unscorable example counts as zero, so it cannot
-						// raise the average the way a dropped case would.
+						// raise the average the way a dropped case would. It is
+						// not cached: the scorer may succeed on a later attempt.
 						logging.GetLogger().Warn(ctx, "GEPA: scorer failed: %v", scoreErr)
 						evalCase.Score = 0
+						cacheable = false
 					}
 				}
 				g.populateEvaluationCaseFeedback(ctx, candidate, &evalCase)
@@ -242,38 +245,38 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 					scoring.Unlock()
 				}
 				spent.Add(1)
-				g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
-					Outputs:          outputs,
-					Score:            evalCase.Score,
-					Err:              evalCase.Err,
-					Feedback:         evalCase.Feedback,
-					FeedbackTarget:   evalCase.FeedbackTarget,
-					FeedbackMetadata: evalCase.FeedbackMetadata,
-					TraceEvidence:    evalCase.TraceEvidence,
-				})
+				if cacheable {
+					g.state.UpsertEvaluationCaseCache(cacheKey, &gepaCachedEvaluationCase{
+						Outputs:          outputs,
+						Score:            evalCase.Score,
+						Err:              evalCase.Err,
+						Feedback:         evalCase.Feedback,
+						FeedbackTarget:   evalCase.FeedbackTarget,
+						FeedbackMetadata: evalCase.FeedbackMetadata,
+						TraceEvidence:    evalCase.TraceEvidence,
+					})
+				}
 			}
 			cases[i], ran[i] = evalCase, true
 		})
 	}
 	workers.Wait()
 
-	totalScore := 0.0
-	scoredCases := 0
 	for i, evalCase := range cases {
 		if !ran[i] {
 			continue
 		}
 		if evalCase.Err == nil {
-			totalScore += evalCase.Score
-			scoredCases++
+			result.TotalScore += evalCase.Score
 		}
 		result.Cases = append(result.Cases, evalCase)
 	}
 	spentMetricCalls := int(spent.Load())
 
-	if scoredCases > 0 {
-		result.TotalScore = totalScore
-		result.AverageScore = totalScore / float64(scoredCases)
+	// A failed case counts as zero in the average; dropping it would let a
+	// candidate that fails most examples outscore one that answers them all.
+	if len(result.Cases) > 0 {
+		result.AverageScore = result.TotalScore / float64(len(result.Cases))
 	}
 	if spentMetricCalls > 0 && g != nil && g.state != nil {
 		g.state.AddMetricCalls(spentMetricCalls)

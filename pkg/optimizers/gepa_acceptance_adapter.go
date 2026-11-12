@@ -53,7 +53,9 @@ func (g *GEPA) acceptCandidateProposalWithAdapter(ctx context.Context, baseline,
 
 	g.ensureCandidateMetrics(proposed.ID)
 	proposedEvaluation := g.evaluateCandidateWithAdapter(ctx, proposed, adapter)
-	if proposedEvaluation == nil {
+	// A cancelled evaluation covers only part of the batch, so its total cannot
+	// be compared with the baseline's.
+	if proposedEvaluation == nil || ctx.Err() != nil {
 		return baseline
 	}
 

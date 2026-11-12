@@ -18,7 +18,9 @@ type BootstrapFewShot struct {
 	Metric          func(example map[string]any, prediction map[string]any, ctx context.Context) bool
 	MaxBootstrapped int
 	// MetricThreshold is the score a prediction needs in CompileWithScorer to
-	// become a demonstration. Zero keeps every prediction that scores above zero.
+	// become a demonstration. Zero means unset and keeps every prediction that
+	// scores above zero, so a threshold of exactly zero cannot be expressed; a
+	// negative threshold also keeps predictions that score zero.
 	MetricThreshold float64
 }
 
@@ -175,6 +177,12 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		span.WithError(err)
 		return compiledStudent, fmt.Errorf("error during compilation: %w", err)
 	default:
+	}
+	// A cancelled run has scored only part of the trainset; report it instead
+	// of returning the demonstrations that happened to finish.
+	if err := ctx.Err(); err != nil {
+		span.WithError(err)
+		return compiledStudent, fmt.Errorf("error during compilation: %w", err)
 	}
 
 	for _, result := range results {

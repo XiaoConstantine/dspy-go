@@ -233,6 +233,32 @@ func TestBootstrapFewShotEdgeCases(t *testing.T) {
 
 		_, err = optimizer.CompileWithScorer(ctx, createProgram(), trainExamples, core.MetricScorer(nil))
 		assert.Error(t, err)
+
+		// A score of exactly zero is kept only by a negative threshold.
+		zero := core.ScorerFunc(func(context.Context, core.Example, map[string]any) (float64, error) { return 0, nil })
+		optimizer.MetricThreshold = 0
+		optimized, err = optimizer.CompileWithScorer(ctx, createProgram(), trainExamples, zero)
+		require.NoError(t, err)
+		assert.Empty(t, questions(optimized))
+		optimizer.MetricThreshold = -1
+		optimized, err = optimizer.CompileWithScorer(ctx, createProgram(), trainExamples, zero)
+		require.NoError(t, err)
+		assert.Len(t, questions(optimized), len(trainExamples))
+	})
+
+	t.Run("CompileWithScorer reports cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// The scorer keeps Q1, then the run is cancelled while scoring.
+		scorer := core.ScorerFunc(func(ctx context.Context, example core.Example, _ map[string]any) (float64, error) {
+			if example.Inputs["question"] == "Q1" {
+				return 1, nil
+			}
+			cancel()
+			return 0, ctx.Err()
+		})
+		_, err := NewBootstrapFewShot(nil, 100).CompileWithScorer(ctx, createProgram(), trainExamples, scorer)
+		assert.ErrorIs(t, err, context.Canceled)
 	})
 }
 

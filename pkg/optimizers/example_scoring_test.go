@@ -445,3 +445,104 @@ func TestCompileEntryPointsScoreAsDocumented(t *testing.T) {
 		})
 	}
 }
+
+// instructionProgram answers correctly only once its module's instruction is
+// "better", so a baseline and a proposal score differently on the same batch.
+func instructionProgram() core.Program {
+	return core.NewProgramWithForwardFactory(map[string]core.Module{
+		"alpha": newStaticCandidateTestModule("alpha"),
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(_ context.Context, inputs map[string]any) (map[string]any, error) {
+			switch {
+			case inputs["q"] == "fail":
+				return nil, errors.New("boom")
+			case modules["alpha"].GetSignature().Instruction == "better":
+				return map[string]any{"output": inputs["q"]}, nil
+			}
+			return map[string]any{"output": "wrong"}, nil
+		}
+	})
+}
+
+func TestGEPAEvaluationFailures(t *testing.T) {
+	examples := overlapExamples(4)
+	better := func() *GEPACandidate {
+		return &GEPACandidate{ID: "better", ModuleName: "alpha", Instruction: "better"}
+	}
+	newGEPA := func() *GEPA {
+		config := DefaultGEPAConfig()
+		config.ConcurrencyLevel = 1
+		return &GEPA{config: config, state: NewGEPAState()}
+	}
+
+	t.Run("a scorer error counts as zero and is retried", func(t *testing.T) {
+		gepa := newGEPA()
+		var mu sync.Mutex
+		calls := 0
+		// The judge is down for the first evaluation. A score returned with
+		// an error must be ignored.
+		judge := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			if calls <= len(examples) {
+				return 1, errUnscorable
+			}
+			return exactOutputMetric(example.Outputs, prediction), nil
+		})
+		adapter := newGEPAScorerAdapter(instructionProgram(), examples, judge, true)
+		ctx := gepa.withGEPAState(context.Background())
+
+		first := gepa.evaluateCandidateWithAdapter(ctx, better(), adapter)
+		require.Len(t, first.Cases, len(examples))
+		assert.Zero(t, first.TotalScore)
+		assert.Zero(t, first.AverageScore)
+
+		second := gepa.evaluateCandidateWithAdapter(ctx, better(), adapter)
+		assert.Equal(t, 1.0, second.AverageScore, "the failed scores were not cached")
+		assert.Equal(t, 2*len(examples), calls)
+	})
+
+	t.Run("a failed execution counts as zero in the average", func(t *testing.T) {
+		gepa := newGEPA()
+		batch := append(overlapExamples(1), core.Example{Inputs: map[string]any{"q": "fail"}}, core.Example{Inputs: map[string]any{"q": "fail"}})
+		adapter := newGEPAScorerAdapter(instructionProgram(), batch, core.MetricScorer(exactOutputMetric), true)
+		evaluation := gepa.evaluateCandidateWithAdapter(gepa.withGEPAState(context.Background()), better(), adapter)
+		assert.Equal(t, 1.0, evaluation.TotalScore)
+		assert.InDelta(t, 1.0/3, evaluation.AverageScore, 1e-12)
+	})
+
+	// cancelOn returns a scorer that cancels the run while scoring question.
+	cancelOn := func(question string, cancel context.CancelFunc) core.Scorer {
+		return core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]any) (float64, error) {
+			if example.Inputs["q"] == question && prediction["output"] == question {
+				cancel()
+				return 0, ctx.Err()
+			}
+			return exactOutputMetric(example.Outputs, prediction), nil
+		})
+	}
+
+	t.Run("a cancelled score stays an error", func(t *testing.T) {
+		gepa := newGEPA()
+		ctx, cancel := context.WithCancel(gepa.withGEPAState(context.Background()))
+		defer cancel()
+		adapter := newGEPAScorerAdapter(instructionProgram(), examples, cancelOn("question-2", cancel), true)
+		evaluation := gepa.evaluateCandidateWithAdapter(ctx, better(), adapter)
+		require.Len(t, evaluation.Cases, 3, "examples after the cancellation do not run")
+		assert.ErrorIs(t, evaluation.Cases[2].Err, context.Canceled)
+		assert.False(t, gepa.evaluationIsPerfect(evaluation))
+	})
+
+	t.Run("a proposal evaluated only in part is rejected", func(t *testing.T) {
+		gepa := newGEPA()
+		ctx, cancel := context.WithCancel(gepa.withGEPAState(context.Background()))
+		defer cancel()
+		adapter := newGEPAScorerAdapter(instructionProgram(), examples, cancelOn("question-2", cancel), true)
+		baseline := &GEPACandidate{ID: "baseline", ModuleName: "alpha", Instruction: "alpha"}
+		// The proposal scores 2 on the two examples it finished; the baseline
+		// scores 0 on all four.
+		accepted := gepa.acceptCandidateProposalWithAdapter(ctx, baseline, better(), adapter, nil)
+		assert.Same(t, baseline, accepted)
+	})
+}

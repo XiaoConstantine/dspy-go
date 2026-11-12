@@ -629,6 +629,11 @@ func TestMCPOptimizerCompileWithScorer(t *testing.T) {
 
 	_, err = optimizer.CompileWithScorer(ctx, program, examples, core.MetricScorer(nil))
 	assert.Error(t, err)
+
+	partial := core.ScorerFunc(func(context.Context, core.Example, map[string]any) (float64, error) { return 0.75, nil })
+	_, err = optimizer.CompileWithScorer(ctx, program, examples, partial)
+	require.NoError(t, err)
+	assert.Equal(t, 0.75, optimizer.MetricsEvaluator.GetLatestMetrics().ToolSelectionAccuracy, "the scorer's score is the reported accuracy")
 }
 
 func TestMCPOptimizerOptimizeInteraction(t *testing.T) {

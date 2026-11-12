@@ -435,7 +435,8 @@ func (s *SIMBA) CompileExamples(ctx context.Context, program core.Program, examp
 
 // CompileWithScorer optimizes a program from materialized, read-only examples. It
 // calls scorer concurrently, bounded by LLMConcurrency. Unlike Compile, it also
-// scores the full dataset concurrently when LLMConcurrency is unset. An example
+// scores the full dataset concurrently when LLMConcurrency is unset, with up to
+// BatchSize*NumCandidates program calls in flight (192 with the defaults). An example
 // the scorer cannot score rejects the candidate, like a failed execution.
 func (s *SIMBA) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	return s.compileScored(ctx, program, examples, scorer, true)

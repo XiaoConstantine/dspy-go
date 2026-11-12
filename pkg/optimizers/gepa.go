@@ -1257,7 +1257,8 @@ func (g *GEPA) Compile(ctx context.Context, program core.Program, dataset core.D
 // CompileWithScorer optimizes a program from materialized, read-only examples. It
 // calls scorer and FeedbackEvaluator from up to ConcurrencyLevel goroutines at
 // once, so both must be safe for concurrent use. An example the scorer cannot
-// score counts as zero.
+// score counts as zero and is scored again the next time its candidate is
+// evaluated.
 func (g *GEPA) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	return g.compile(ctx, program, newGEPAExampleDataset(examples), scorer, true)
 }

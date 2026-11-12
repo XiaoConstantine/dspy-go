@@ -1962,7 +1962,7 @@ func TestMutateSkipsAcceptanceForNoOpFallbackMutation(t *testing.T) {
 	assert.Equal(t, 0, executeCalls)
 }
 
-func TestMutateAcceptsProposalUsingTotalScoreWhenAverageWouldReject(t *testing.T) {
+func TestMutateAcceptsProposalUsingTotalScore(t *testing.T) {
 	gepa := &GEPA{
 		config: &GEPAConfig{
 			EvaluationBatchSize: 2,
@@ -2021,7 +2021,7 @@ func TestMutateAcceptsProposalUsingTotalScoreWhenAverageWouldReject(t *testing.T
 	assert.Equal(t, 1.6, accepted.Metadata["proposal_candidate_total"])
 	assert.Equal(t, 1.0, accepted.Metadata["proposal_baseline_total"])
 	assert.Equal(t, 0.8, accepted.Metadata["proposal_candidate_average"])
-	assert.Equal(t, 1.0, accepted.Metadata["proposal_baseline_average"])
+	assert.Equal(t, 0.5, accepted.Metadata["proposal_baseline_average"], "the failed execution counts as zero, not dropped")
 }
 
 func TestMaterializeEvaluationBatchUsesSingleExampleForNonPositiveBatchSize(t *testing.T) {
