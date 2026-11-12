@@ -48,7 +48,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 
 	engineConfig := o.buildEngineConfig(req.SeedArtifacts, len(trainExamples))
 	if len(validationExamples) > 0 {
-		engineConfig.ValidationExamples = core.DatasetToSlice(o.buildOptimizationDataset(validationExamples))
+		engineConfig.ValidationExamples = o.buildOptimizationExamples(validationExamples)
 	}
 
 	engine, err := optimizers.NewGEPA(engineConfig)
@@ -66,8 +66,7 @@ func (o *GEPAAgentOptimizer) Optimize(ctx context.Context, req GEPAOptimizeReque
 		return nil, err
 	}
 
-	dataset := o.buildOptimizationDataset(trainExamples)
-	optimizedProgram, err := engine.Compile(ctx, program, dataset, o.buildOptimizationMetric())
+	optimizedProgram, err := engine.CompileWithScorer(ctx, program, o.buildOptimizationExamples(trainExamples), optimizationScorer())
 	if err != nil {
 		return nil, err
 	}

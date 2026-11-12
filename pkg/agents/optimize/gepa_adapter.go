@@ -42,11 +42,14 @@ type IntMutationConfig struct {
 
 // GEPAAdapterConfig configures the agent-to-GEPA bridge layer.
 type GEPAAdapterConfig struct {
-	MaxGenerations             int
-	SearchBatchSize            int
-	StagnationLimit            int
-	ValidationSplit            float64
-	ArtifactKeys               []ArtifactKey
+	MaxGenerations  int
+	SearchBatchSize int
+	StagnationLimit int
+	ValidationSplit float64
+	ArtifactKeys    []ArtifactKey
+	// EvalConcurrency is how many examples of one candidate are evaluated at
+	// once. Above 1, the agent evaluator and FeedbackEvaluator are called from
+	// that many goroutines and must be safe for concurrent use.
 	EvalConcurrency            int
 	PassThreshold              float64
 	PrimaryArtifact            ArtifactKey

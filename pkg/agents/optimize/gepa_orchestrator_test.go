@@ -3,7 +3,9 @@ package optimize
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -610,4 +612,74 @@ func setupAgentMultiArtifactGEPAMockLLM(t *testing.T) {
 		core.SetDefaultLLM(originalDefault)
 		core.GlobalConfig.TeacherLLM = originalTeacher
 	})
+}
+
+// At EvalConcurrency above 1 the optimizer scores through GEPA's concurrent
+// entry point, so feedback calls for one candidate overlap.
+func TestGEPAAgentOptimizer_Optimize_CallsFeedbackEvaluatorConcurrently(t *testing.T) {
+	setupAgentGEPAMockLLM(t)
+
+	for _, tc := range []struct {
+		concurrency int
+		overlap     bool
+	}{{1, false}, {2, true}} {
+		var mu sync.Mutex
+		active, peak := 0, 0
+		arrived := make(chan struct{}, 16)
+		feedback := optimizers.GEPAFeedbackEvaluatorFunc(func(context.Context, map[string]any, map[string]any, *optimizers.GEPAFeedbackContext) *optimizers.GEPAFeedback {
+			mu.Lock()
+			active++
+			peak = max(peak, active)
+			overlapping := active > 1
+			mu.Unlock()
+			if overlapping {
+				arrived <- struct{}{}
+			} else {
+				// Give a second call the chance to overlap with this one.
+				select {
+				case <-arrived:
+				case <-time.After(200 * time.Millisecond):
+				}
+			}
+			mu.Lock()
+			active--
+			mu.Unlock()
+			return &optimizers.GEPAFeedback{Feedback: "ok"}
+		})
+
+		optimizer := NewGEPAAgentOptimizer(
+			newMockOptimizableAgent(),
+			agentEvaluatorFunc(func(context.Context, OptimizableAgent, AgentExample) (*EvalResult, error) {
+				return &EvalResult{Score: 1.0}, nil
+			}),
+			GEPAAdapterConfig{
+				MaxGenerations:    1,
+				EvalConcurrency:   tc.concurrency,
+				PassThreshold:     0.5,
+				PrimaryArtifact:   ArtifactSkillPack,
+				FeedbackEvaluator: feedback,
+			},
+		)
+		_, err := optimizer.Optimize(context.Background(), GEPAOptimizeRequest{
+			SeedArtifacts:    AgentArtifacts{Text: map[ArtifactKey]string{ArtifactSkillPack: "Use the guide."}},
+			TrainingExamples: []AgentExample{{ID: "train-1"}, {ID: "train-2"}},
+		})
+		require.NoError(t, err)
+
+		mu.Lock()
+		got := peak
+		mu.Unlock()
+		assert.Equal(t, tc.overlap, got > 1, "EvalConcurrency %d: peak %d", tc.concurrency, got)
+	}
+}
+
+func TestOptimizationScorerReportsUnreadableScore(t *testing.T) {
+	score, err := optimizationScorer().Score(context.Background(), core.Example{}, map[string]any{gepaProgramOutputScoreKey: 0.75})
+	require.NoError(t, err)
+	assert.Equal(t, 0.75, score)
+
+	_, err = optimizationScorer().Score(context.Background(), core.Example{}, map[string]any{gepaProgramOutputScoreKey: "high"})
+	require.Error(t, err)
+	_, err = optimizationScorer().Score(context.Background(), core.Example{}, nil)
+	require.Error(t, err)
 }

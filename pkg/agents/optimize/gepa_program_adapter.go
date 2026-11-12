@@ -41,11 +41,6 @@ type artifactProgramAdapter struct {
 	examples      map[string]AgentExample
 }
 
-type artifactProgramDataset struct {
-	examples []core.Example
-	index    int
-}
-
 type gepaArtifactModule struct {
 	core.BaseModule
 }
@@ -100,7 +95,7 @@ func (o *GEPAAgentOptimizer) buildOptimizationProgram(seed AgentArtifacts, examp
 	return core.NewProgramWithForwardFactory(modules, adapter.forwardFactory()), nil
 }
 
-func (o *GEPAAgentOptimizer) buildOptimizationDataset(examples []AgentExample) core.Dataset {
+func (o *GEPAAgentOptimizer) buildOptimizationExamples(examples []AgentExample) []core.Example {
 	coreExamples := make([]core.Example, 0, len(examples))
 	for idx, example := range examples {
 		exampleID := strings.TrimSpace(example.ID)
@@ -120,20 +115,19 @@ func (o *GEPAAgentOptimizer) buildOptimizationDataset(examples []AgentExample) c
 		})
 	}
 
-	return &artifactProgramDataset{examples: coreExamples}
+	return coreExamples
 }
 
-func (o *GEPAAgentOptimizer) buildOptimizationMetric() core.Metric {
-	return func(expected, actual map[string]any) float64 {
-		if actual == nil {
-			return 0
-		}
-		score, err := metricScoreValue(actual[gepaProgramOutputScoreKey])
+// optimizationScorer reads the score the artifact program reports for an
+// example. It keeps no state, so GEPA may call it concurrently.
+func optimizationScorer() core.Scorer {
+	return core.ScorerFunc(func(_ context.Context, _ core.Example, prediction map[string]any) (float64, error) {
+		score, err := metricScoreValue(prediction[gepaProgramOutputScoreKey])
 		if err != nil {
-			return 0
+			return 0, fmt.Errorf("optimize: read agent score: %w", err)
 		}
-		return score
-	}
+		return score, nil
+	})
 }
 
 func (o *GEPAAgentOptimizer) buildArtifactProgramSpecs(seed AgentArtifacts) ([]artifactProgramSpec, error) {
@@ -494,20 +488,4 @@ func metricScoreValue(raw any) (float64, error) {
 	default:
 		return 0, fmt.Errorf("unsupported score type %T", raw)
 	}
-}
-
-func (d *artifactProgramDataset) Next() (core.Example, bool) {
-	if d == nil || d.index >= len(d.examples) {
-		return core.Example{}, false
-	}
-	example := d.examples[d.index]
-	d.index++
-	return example, true
-}
-
-func (d *artifactProgramDataset) Reset() {
-	if d == nil {
-		return
-	}
-	d.index = 0
 }
