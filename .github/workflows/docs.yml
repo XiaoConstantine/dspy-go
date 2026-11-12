@@ -25,7 +25,17 @@ jobs:
           extended: true
 
       - name: Install Dart Sass
-        run: sudo snap install dart-sass
+        env:
+          DART_SASS_VERSION: "1.108.2"
+          DART_SASS_SHA256: "32d2eb5b83cbc180fce9657ff3c57401a9006c59eccfe0bfdde0aa755a66d42f"
+        run: |
+          archive="$RUNNER_TEMP/dart-sass.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$archive" \
+            "https://github.com/sass/dart-sass/releases/download/${DART_SASS_VERSION}/dart-sass-${DART_SASS_VERSION}-linux-x64.tar.gz"
+          echo "${DART_SASS_SHA256}  ${archive}" | sha256sum --check
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/dart-sass" >> "$GITHUB_PATH"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
