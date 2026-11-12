@@ -164,18 +164,18 @@ func RunOptimizer(config OptimizerConfig) (*RunResult, error) {
 	// Split data for training/validation
 	trainExamples, valExamples := splitDataset(examples)
 
-	// Create datasets
-	trainDataset := createDataset(trainExamples)
-
-	// Create metric function
-	metricFunc := createMetric()
+	// Score the field the program predicts.
+	scorer := exactMatchScorer("answer")
+	if config.OptimizerName == "mipro" {
+		scorer = exactMatchScorer("completion")
+	}
 
 	// Run optimization
 	logger := logging.GetLogger()
 	logger.Info(ctx, "Starting %s optimization with %d training examples...",
 		config.OptimizerName, len(trainExamples))
 
-	optimizedProgram, err := optimizer.Compile(ctx, program, trainDataset, metricFunc)
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, scorer)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("optimization failed: %v", err)
 		return result, err
@@ -293,29 +293,13 @@ func createSignatureForMIPRO() core.Signature {
 	).WithInstruction("Think step by step to answer this question.")
 }
 
-func createOptimizer(name string) (core.Optimizer, error) {
+func createOptimizer(name string) (core.ScorerCompiler, error) {
 	switch name {
 	case "bootstrap":
-		metricFunc := func(example, prediction map[string]any, ctx context.Context) bool {
-			expected, ok1 := example["answer"].(string)
-			predicted, ok2 := prediction["answer"].(string)
-			return ok1 && ok2 && predicted == expected
-		}
-		return optimizers.NewBootstrapFewShot(metricFunc, 3), nil
+		return optimizers.NewBootstrapFewShot(nil, 3), nil
 	case "mipro":
-		metricFunc := func(example, prediction map[string]any, ctx context.Context) float64 {
-			expected, ok1 := example["completion"].(string)
-			predicted, ok2 := prediction["completion"].(string)
-			if !ok1 || !ok2 {
-				return 0.0
-			}
-			if predicted == expected {
-				return 1.0
-			}
-			return 0.0
-		}
 		return optimizers.NewMIPRO(
-			metricFunc,
+			nil,
 			optimizers.WithMode(optimizers.LightMode),
 			optimizers.WithNumTrials(3),
 			optimizers.WithMiniBatchSize(2),
@@ -334,35 +318,24 @@ func createOptimizer(name string) (core.Optimizer, error) {
 		config.MaxGenerations = 2
 		return optimizers.NewGEPA(config)
 	case "copro":
-		metricFunc := func(expected, actual map[string]any) float64 {
-			expectedAnswer, ok1 := expected["answer"].(string)
-			actualAnswer, ok2 := actual["answer"].(string)
-			if !ok1 || !ok2 {
-				return 0.0
-			}
-			if actualAnswer == expectedAnswer {
-				return 1.0
-			}
-			return 0.0
-		}
-		return optimizers.NewCOPRO(metricFunc), nil
+		return optimizers.NewCOPRO(nil), nil
 	default:
 		return nil, fmt.Errorf("optimizer '%s' not yet implemented in CLI", name)
 	}
 }
 
-func createMetric() core.Metric {
-	return func(expected, actual map[string]any) float64 {
-		expectedAnswer, ok1 := expected["answer"].(string)
-		actualAnswer, ok2 := actual["answer"].(string)
-		if !ok1 || !ok2 {
-			return 0.0
+// exactMatchScorer scores 1 when the prediction's field equals the example's
+// expected string, and 0 otherwise. It keeps no state, so optimizers may call
+// it concurrently.
+func exactMatchScorer(field string) core.Scorer {
+	return core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
+		expected, ok1 := example.Outputs[field].(string)
+		predicted, ok2 := prediction[field].(string)
+		if ok1 && ok2 && predicted == expected {
+			return 1, nil
 		}
-		if actualAnswer == expectedAnswer {
-			return 1.0
-		}
-		return 0.0
-	}
+		return 0, nil
+	})
 }
 
 func splitDataset(examples []core.Example) ([]core.Example, []core.Example) {
@@ -377,29 +350,6 @@ func splitDataset(examples []core.Example) ([]core.Example, []core.Example) {
 	}
 
 	return examples[:splitPoint], examples[splitPoint:]
-}
-
-func createDataset(examples []core.Example) core.Dataset {
-	return &exampleDataset{examples: examples}
-}
-
-// Custom implementation of Dataset interface
-type exampleDataset struct {
-	examples []core.Example
-	position int
-}
-
-func (d *exampleDataset) Next() (core.Example, bool) {
-	if d.position >= len(d.examples) {
-		return core.Example{}, false
-	}
-	example := d.examples[d.position]
-	d.position++
-	return example, true
-}
-
-func (d *exampleDataset) Reset() {
-	d.position = 0
 }
 
 func evaluateModule(ctx context.Context, module core.Module, examples []core.Example) float64 {
