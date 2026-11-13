@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -669,14 +671,14 @@ func testSIMBAOptimizationWorkflow(t *testing.T) {
 		assert.NoError(t, err)
 
 		state := simba.GetState()
-		// Should have performed introspection at steps 2 and 4
+		// Step 2 feeds the following proposals; the final step needs no advice.
 		introspectionCount := 0
 		for _, step := range state.PerformanceLog {
 			if step.Introspection != "" {
 				introspectionCount++
 			}
 		}
-		assert.True(t, introspectionCount >= 1, "Should perform introspection")
+		assert.Equal(t, 1, introspectionCount, "only generate advice when another step can use it")
 	})
 }
 
@@ -852,46 +854,8 @@ func testSIMBAEdgeCases(t *testing.T) {
 	})
 }
 
-// testSIMBAConvergence tests convergence detection and performance.
+// testSIMBAConvergence tests performance; stopping behavior is covered through Compile.
 func testSIMBAConvergence(t *testing.T) {
-	t.Run("Detects convergence with minimal improvements", func(t *testing.T) {
-		simba := NewSIMBA()
-
-		// Simulate convergence with very small improvements
-		simba.state.PerformanceLog = []StepResult{
-			{Step: 0, Improvement: 0.0005},
-			{Step: 1, Improvement: 0.0003},
-			{Step: 2, Improvement: 0.0002},
-		}
-
-		converged := simba.hasConverged()
-		assert.True(t, converged, "Should detect convergence with small improvements")
-	})
-
-	t.Run("Does not converge with significant improvements", func(t *testing.T) {
-		simba := NewSIMBA()
-
-		// Simulate ongoing improvements
-		simba.state.PerformanceLog = []StepResult{
-			{Step: 0, Improvement: 0.1},
-			{Step: 1, Improvement: 0.05},
-			{Step: 2, Improvement: 0.02},
-		}
-
-		converged := simba.hasConverged()
-		assert.False(t, converged, "Should not converge with significant improvements")
-	})
-
-	t.Run("Handles insufficient data for convergence", func(t *testing.T) {
-		simba := NewSIMBA()
-
-		// Empty performance log
-		simba.state.PerformanceLog = []StepResult{}
-
-		converged := simba.hasConverged()
-		assert.False(t, converged, "Should not converge without data")
-	})
-
 	t.Run("Completes optimization within reasonable time", func(t *testing.T) {
 		metric := func(expected, actual map[string]any) float64 { return 0.9 }
 		simba := NewSIMBA(WithSIMBAMaxSteps(3)) // Small number for fast test
@@ -1230,7 +1194,9 @@ func testSIMBARuleGeneration(t *testing.T) {
 		program := createSIMBATestProgram()
 		ctx := context.Background()
 
-		candidate, err := simba.generateRuleBasedCandidate(ctx, program)
+		rules, err := simba.extractRulesFromTrajectories(ctx)
+		require.NoError(t, err)
+		candidate, err := simba.generateRuleBasedCandidate(ctx, program, rules)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, candidate)
@@ -2325,7 +2291,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		assert.Equal(t, 1, dataset.ResetCount())
 		assert.NotEmpty(t, simba.state.PerformanceLog)
 		for _, step := range simba.state.PerformanceLog {
-			assert.Len(t, step.CandidateScores, 1, "the incumbent should appear exactly once")
+			assert.Len(t, step.CandidateScores, 2, "fast mode evaluates the incumbent and one proposal")
 		}
 	})
 
@@ -2391,7 +2357,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		assert.NotNil(t, optimizedProgram)
 	})
 
-	t.Run("Pipeline worker termination propagates before coordinator cancellation", func(t *testing.T) {
+	t.Run("Pipeline backpressure preserves stages until a consumer is ready", func(t *testing.T) {
 		program := createSIMBATestProgram()
 		examples := []core.Example{{
 			Inputs:  map[string]any{"question": "one"},
@@ -2405,9 +2371,8 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		)
 		simba.initializePipelineChannels()
 
-		// Force the batch worker's downstream send to fail. The worker must
-		// propagate its termination to the evaluator without waiting for the
-		// coordinator to cancel the pipeline after Wait returns.
+		// Hold the batch worker at an unbuffered send, then start its consumer.
+		// Backpressure is not successful completion and must not discard the step.
 		simba.pipelineChannels.BatchSampling = make(chan *PipelineStage)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -2425,10 +2390,11 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 			Timestamp:  time.Now(),
 		}
 
+		close(simba.pipelineChannels.CandidateGeneration)
 		select {
 		case <-batchDone:
-		case <-time.After(time.Second):
-			t.Fatal("batch worker did not reach its terminal path")
+			t.Fatal("batch worker dropped the stage instead of waiting for its consumer")
+		case <-time.After(150 * time.Millisecond):
 		}
 
 		workers.Go(func() {
@@ -2510,8 +2476,14 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		started := make(chan struct{})
 		release := make(chan struct{})
-		var once sync.Once
+		var baseline, once sync.Once
 		program := core.NewProgram(map[string]core.Module{}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			initial := false
+			baseline.Do(func() { initial = true })
+			if initial {
+				// Finish baseline scoring so cancellation exercises the pipeline workers.
+				return map[string]any{"answer": "ok"}, nil
+			}
 			once.Do(func() { close(started) })
 			select {
 			case <-release:
@@ -2522,7 +2494,7 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		})
 		simba := NewSIMBA(
 			WithSIMBAMaxSteps(5),
-			WithSIMBANumCandidates(1),
+			WithSIMBANumCandidates(2),
 			WithPipelineProcessing(true),
 			WithPipelineBufferSize(2),
 		)
@@ -2800,6 +2772,332 @@ func BenchmarkSIMBAFastMode(b *testing.B) {
 	}
 }
 
+// simbaScriptModel serializes a scripted proposer without serializing the optimizer.
+// Inference in these tests is either a real Predict or a clone-bound score table.
+type simbaScriptModel struct {
+	*offlineLLM
+	mu      sync.Mutex
+	respond func(string) string
+}
+
+func (m *simbaScriptModel) Generate(ctx context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return &core.LLMResponse{Content: m.respond(prompt)}, nil
+}
+
+func newSIMBAScript(respond func(string) string, opts ...SIMBAOption) *SIMBA {
+	s := NewSIMBA(opts...)
+	s.rng = rand.New(rand.NewSource(1))
+	model := &simbaScriptModel{offlineLLM: newOfflineLLM(), respond: respond}
+	s.primaryModel, s.analyzerModel = model, model
+	return s
+}
+
+func simbaScoreProgram(score func(string, int) float64) core.Program {
+	sig := core.NewSignature([]core.InputField{{Name: "id"}}, []core.OutputField{{Name: "answer"}}).WithInstruction("BASE")
+	return core.NewProgramWithForwardFactory(map[string]core.Module{"predict": modules.NewPredict(sig)},
+		func(ms map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(_ context.Context, inputs map[string]any) (map[string]any, error) {
+				instruction := ms["predict"].GetSignature().Instruction
+				return map[string]any{"answer": instruction, "score": score(instruction, inputs["id"].(int))}, nil
+			}
+		})
+}
+
+func simbaExamples(n int) []core.Example {
+	examples := make([]core.Example, n)
+	for i := range examples {
+		examples[i] = core.Example{Inputs: map[string]any{"id": i}, Outputs: map[string]any{"answer": "target"}}
+	}
+	return examples
+}
+
+func simbaTableMetric(_, prediction map[string]any) float64 { return prediction["score"].(float64) }
+
+func TestSIMBAFastModeImproves(t *testing.T) {
+	s := newSIMBAScript(func(string) string { return "GOOD" }, WithFastMode(true))
+	base := simbaScoreProgram(func(instruction string, _ int) float64 {
+		if instruction == "GOOD" {
+			return 1
+		}
+		return 0
+	})
+	_, err := s.CompileWithScorer(context.Background(), base, simbaExamples(4), core.MetricScorer(simbaTableMetric))
+	require.NoError(t, err)
+	assert.Equal(t, 1.0, s.GetState().BestScore)
+	assert.Equal(t, "BASE", base.Modules["predict"].GetSignature().Instruction)
+}
+
+func TestSIMBALateImprovementAndOptInStopping(t *testing.T) {
+	for _, pipeline := range []bool{false, true} {
+		for _, patience := range []int{0, 1} {
+			t.Run(fmt.Sprintf("pipeline=%t/patience=%d", pipeline, patience), func(t *testing.T) {
+				proposals := 0
+				s := newSIMBAScript(func(prompt string) string {
+					if strings.HasPrefix(prompt, "Generate a variation") {
+						proposals++
+						if proposals >= 16 {
+							return "GOOD"
+						}
+					}
+					return "FLAT"
+				}, WithSIMBAStrategyMode("instruction_only"), WithSamplingTemperature(0), WithPipelineProcessing(pipeline))
+				s.config.EarlyStoppingPatience = patience
+				base := simbaScoreProgram(func(instruction string, _ int) float64 {
+					if instruction == "GOOD" {
+						return 1
+					}
+					return 0.5
+				})
+				_, err := s.CompileWithScorer(context.Background(), base, simbaExamples(4), core.MetricScorer(simbaTableMetric))
+				require.NoError(t, err)
+				state := s.GetState()
+				if patience == 0 {
+					assert.Len(t, state.PerformanceLog, 8)
+					assert.Equal(t, 1.0, state.BestScore)
+				} else {
+					assert.Len(t, state.PerformanceLog, 2)
+					assert.Equal(t, 0.5, state.BestScore)
+				}
+			})
+		}
+	}
+}
+
+func TestSIMBAOptimizesChainOfThought(t *testing.T) {
+	for _, strategy := range []string{"instruction_only", "rule_only"} {
+		t.Run(strategy, func(t *testing.T) {
+			s := newSIMBAScript(func(prompt string) string {
+				switch {
+				case strings.HasPrefix(prompt, "Given the fields "):
+					if strings.Contains(prompt, "GOOD") {
+						return "rationale: checked\nanswer: yes"
+					}
+					return "rationale: guessed\nanswer: no"
+				case strings.HasPrefix(prompt, "Analyze the following successful"):
+					return "RULE: Check the answer."
+				case strings.HasPrefix(prompt, "Given the following instruction and rule"):
+					return "GOOD"
+				default:
+					if strategy == "rule_only" {
+						return "PARTIAL" // Only rule application can reach GOOD.
+					}
+					return "GOOD"
+				}
+			}, WithSIMBAStrategyMode(strategy), WithSIMBAMaxSteps(2), WithSamplingTemperature(0), WithLLMConcurrency(1))
+			cot := modules.NewChainOfThought(core.NewSignature(
+				[]core.InputField{{Name: "id"}}, []core.OutputField{{Name: "answer", Prefix: "answer:"}},
+			).WithInstruction("BASE"))
+			cot.Predict.WithTextOutput()
+			cot.SetLLM(s.primaryModel.(core.LLM))
+			base := core.NewProgramWithForwardFactory(map[string]core.Module{"cot": cot},
+				func(ms map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+					return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+						return ms["cot"].Process(ctx, inputs)
+					}
+				})
+			metric := func(_, got map[string]any) float64 {
+				if got["answer"] == "yes" {
+					return 1
+				}
+				return 0.6 // Allows success-pattern rule analysis after the first step.
+			}
+			optimized, err := s.CompileWithScorer(context.Background(), base, simbaExamples(4), core.MetricScorer(metric))
+			require.NoError(t, err)
+			got, err := optimized.Execute(context.Background(), map[string]any{"id": 99})
+			require.NoError(t, err)
+			assert.Equal(t, "yes", got["answer"])
+			assert.Len(t, optimized.Modules["cot"].GetSignature().Outputs, 2, "do not add another rationale field")
+			assert.Equal(t, "BASE", cot.GetSignature().Instruction)
+		})
+	}
+}
+
+func TestSIMBAPipelineProcessesEveryStep(t *testing.T) {
+	var slowOnce sync.Once
+	s := newSIMBAScript(func(prompt string) string {
+		if !strings.HasPrefix(prompt, "Generate a variation") {
+			return "Continue improving."
+		}
+		_, parent, _ := strings.Cut(prompt, "Original: ")
+		var level int
+		_, _ = fmt.Sscanf(parent, "LEVEL-%d", &level)
+		return fmt.Sprintf("LEVEL-%d", level+1)
+	}, WithPipelineProcessing(true), WithPipelineBufferSize(1), WithSIMBANumCandidates(2),
+		WithSIMBAStrategyMode("instruction_only"), WithSamplingTemperature(0))
+	base := simbaScoreProgram(func(instruction string, _ int) float64 {
+		var level int
+		_, _ = fmt.Sscanf(instruction, "LEVEL-%d", &level)
+		if level == 1 {
+			// A slow consumer must not make an upstream stage abandon its send.
+			slowOnce.Do(func() { time.Sleep(150 * time.Millisecond) })
+		}
+		return float64(level) / 8
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := s.CompileWithScorer(ctx, base, simbaExamples(1), core.MetricScorer(simbaTableMetric))
+	require.NoError(t, err)
+	assert.Len(t, s.GetState().PerformanceLog, 8)
+	assert.Equal(t, 1.0, s.GetState().BestScore, "later steps must refine the accepted parent")
+}
+
+func TestSIMBAKeepsBestFullScoreParent(t *testing.T) {
+	for _, pipeline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pipeline=%t", pipeline), func(t *testing.T) {
+			var parents []string
+			s := newSIMBAScript(func(prompt string) string {
+				if strings.HasPrefix(prompt, "Generate a variation") {
+					parents = append(parents, prompt)
+				}
+				return "ALT"
+			}, WithSIMBABatchSize(1), WithSIMBANumCandidates(2), WithSIMBAStrategyMode("instruction_only"),
+				WithSamplingTemperature(0), WithPipelineProcessing(pipeline))
+			base := simbaScoreProgram(func(instruction string, id int) float64 {
+				if instruction == "BASE" {
+					return 0.6
+				}
+				if id >= 6 {
+					return 1
+				}
+				return 0
+			})
+			_, err := s.CompileWithScorer(context.Background(), base, simbaExamples(10), core.MetricScorer(simbaTableMetric))
+			require.NoError(t, err)
+			rejected := false
+			for _, step := range s.GetState().PerformanceLog {
+				rejected = rejected || step.Improvement < 0
+			}
+			require.True(t, rejected, "exercise a minibatch winner that loses on the full set")
+			assert.NotContains(t, strings.Join(parents, "\n"), "Original: ALT")
+			assert.InDelta(t, 0.6, s.GetState().BestScore, 1e-12)
+		})
+	}
+}
+
+func TestSIMBARulesUseRecentEvidenceAndLabels(t *testing.T) {
+	for _, successOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("successOnly=%t", successOnly), func(t *testing.T) {
+			s := newSIMBAScript(func(prompt string) string {
+				switch {
+				case strings.HasPrefix(prompt, "Generate a variation"):
+					return "STEP-1"
+				case strings.HasPrefix(prompt, "Analyze the following successful"):
+					if !strings.Contains(prompt, "Expected output: map[answer:target]") {
+						return "No labels available."
+					}
+					if strings.Contains(prompt, "answer:STEP-2") {
+						return "RULE: advance to STEP-3"
+					}
+					return "RULE: advance to STEP-2"
+				case strings.HasPrefix(prompt, "Given the following instruction and rule"):
+					if strings.Contains(prompt, "Rule to incorporate: advance to STEP-3") {
+						return "STEP-3"
+					}
+					return "STEP-2"
+				}
+				return "Continue."
+			}, WithSIMBAStrategyMode("rule_only"), WithSIMBAMaxSteps(4), WithSIMBANumCandidates(2),
+				WithSamplingTemperature(0), WithLLMConcurrency(1))
+			base := simbaScoreProgram(func(instruction string, id int) float64 {
+				if instruction == "STEP-3" {
+					return 1
+				}
+				if successOnly {
+					if instruction == "BASE" {
+						return 0.55
+					}
+					if instruction == "STEP-2" {
+						return 0.601 // Still rounds to the old cache key's 0.60.
+					}
+					return 0.6
+				}
+				if id == 0 || (instruction != "BASE" && id < 3) || (instruction == "STEP-2" && id == 3) {
+					return 1
+				}
+				return 0
+			})
+			_, err := s.CompileWithScorer(context.Background(), base, simbaExamples(5), core.MetricScorer(simbaTableMetric))
+			require.NoError(t, err)
+			assert.Equal(t, 1.0, s.GetState().BestScore)
+		})
+	}
+}
+
+func TestSIMBAMinibatchSamplesWithoutReplacement(t *testing.T) {
+	for _, size := range []int{16, 32, 64} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			var mu sync.Mutex
+			var ids []int
+			s := newSIMBAScript(func(string) string { return "BATCH" }, WithSIMBAMaxSteps(1),
+				WithSIMBANumCandidates(2), WithSIMBAStrategyMode("instruction_only"), WithSamplingTemperature(0))
+			base := simbaScoreProgram(func(instruction string, id int) float64 {
+				if instruction == "BATCH" {
+					mu.Lock()
+					ids = append(ids, id)
+					mu.Unlock()
+					return 0 // Not selected for the full evaluation.
+				}
+				return 1
+			})
+			_, err := s.CompileWithScorer(context.Background(), base, simbaExamples(size), core.MetricScorer(simbaTableMetric))
+			require.NoError(t, err)
+			require.Len(t, ids, min(size, 32))
+			seen := make(map[int]bool)
+			for _, id := range ids {
+				assert.False(t, seen[id], "example %d appears twice in a minibatch", id)
+				seen[id] = true
+			}
+		})
+	}
+}
+
+func TestSIMBARejectsTooFewCandidates(t *testing.T) {
+	for _, count := range []int{-1, 0, 1} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			s := newSIMBAScript(func(string) string { return "unused" }, WithSIMBANumCandidates(count))
+			require.NotPanics(t, func() {
+				_, err := s.CompileWithScorer(context.Background(), simbaScoreProgram(func(string, int) float64 { return 1 }),
+					simbaExamples(1), core.MetricScorer(simbaTableMetric))
+				require.ErrorContains(t, err, "at least 2")
+			})
+		})
+	}
+}
+
+func TestSIMBAIntrospectionGuidesCandidates(t *testing.T) {
+	for _, strategy := range []string{"instruction_only", "rule_only"} {
+		t.Run(strategy, func(t *testing.T) {
+			s := newSIMBAScript(func(prompt string) string {
+				switch {
+				case strings.HasPrefix(prompt, "Analyze the following optimization progress"):
+					return "Use the secret handshake."
+				case strings.HasPrefix(prompt, "Analyze the following successful"):
+					return "RULE: Check your work."
+				default:
+					if strings.Contains(prompt, "Use the secret handshake.") {
+						return "GOOD"
+					}
+					return "FLAT"
+				}
+			}, WithSIMBAMaxSteps(4), WithSIMBAStrategyMode(strategy), WithSamplingTemperature(0))
+			base := simbaScoreProgram(func(instruction string, _ int) float64 {
+				if instruction == "GOOD" {
+					return 1
+				}
+				return 0.6
+			})
+			_, err := s.CompileWithScorer(context.Background(), base, simbaExamples(4), core.MetricScorer(simbaTableMetric))
+			require.NoError(t, err)
+			assert.Equal(t, 1.0, s.GetState().BestScore)
+		})
+	}
+}
+
 // setupLLMMockForBenchmark configures mock LLM for benchmark tests.
 func setupLLMMockForBenchmark(mockLLM *testutil.MockLLM) {
 	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "test response"}, nil)
@@ -2807,4 +3105,18 @@ func setupLLMMockForBenchmark(mockLLM *testutil.MockLLM) {
 	mockLLM.On("Capabilities").Return([]core.Capability{core.CapabilityCompletion})
 	mockLLM.On("ProviderName").Return("benchmark")
 	mockLLM.On("ModelID").Return("benchmark-model-id")
+}
+
+func TestSIMBAGetStateReturnsIndependentSnapshot(t *testing.T) {
+	s := newSIMBAScript(func(string) string { return "ALT" }, WithSIMBAMaxSteps(2), WithSIMBANumCandidates(2))
+	_, err := s.CompileWithScorer(context.Background(), simbaScoreProgram(func(string, int) float64 { return 0.5 }),
+		simbaExamples(4), core.MetricScorer(simbaTableMetric))
+	require.NoError(t, err)
+
+	snapshot := s.GetState()
+	require.NotEmpty(t, snapshot.PerformanceLog)
+	snapshot.PerformanceLog[0].Introspection = "changed by the caller"
+
+	assert.NotEqual(t, "changed by the caller", s.GetState().PerformanceLog[0].Introspection,
+		"a snapshot shares no step entries with the optimizer, which rewrites them while compiling")
 }
