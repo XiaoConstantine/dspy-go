@@ -95,12 +95,13 @@ func RunMIPROExample(apiKey string) {
 		},
 	)
 
-	// Score with a simple exact match. The scorer keeps no state, so MIPRO
-	// may call it concurrently.
+	// Score by comparing final numbers: the reference is a worked solution
+	// ending in "#### <number>", so comparing the full texts never matches.
+	// The scorer keeps no state, so MIPRO may call it concurrently.
 	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
 		expectedAnswer, ok1 := example.Outputs["completion"].(string)
 		predictedAnswer, ok2 := prediction["completion"].(string)
-		if ok1 && ok2 && predictedAnswer == expectedAnswer {
+		if ok1 && ok2 && extractFinalAnswer(predictedAnswer, false) == extractFinalAnswer(expectedAnswer, true) {
 			return 1, nil
 		}
 		return 0, nil

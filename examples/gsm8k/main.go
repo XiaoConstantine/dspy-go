@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/config"
@@ -132,23 +135,26 @@ func RunGSM8KExample(configPath string, apiKey string) {
 	logger.Info(ctx, "Successfully configured %d total interceptors for ChainOfThought module (including structured output interceptor)", len(allInterceptors))
 
 	// Create program with generation options from configuration
-	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-		temperature := 0.7
-		maxTokens := 8192
+	// The forward function is built from the program's own modules, so the
+	// compiled program runs the module that holds the bootstrapped demos.
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{"cot": cot}, func(mods map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		cot := mods["cot"].(*modules.ChainOfThought)
+		return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			// Generation options come only from an explicit config file. Without
+			// one the model's defaults apply, because some providers (such as
+			// openai-codex) reject an explicit temperature.
+			var opts []core.Option
+			if cfg != nil {
+				opts = append(opts, core.WithGenerateOptions(
+					core.WithTemperature(cfg.LLM.Default.Generation.Temperature),
+					core.WithMaxTokens(cfg.LLM.Default.Generation.MaxTokens),
+				))
+			}
 
-		// Use config values if available
-		if cfg != nil {
-			// The config manager handles defaults, so we can use the values directly.
-			temperature = cfg.LLM.Default.Generation.Temperature
-			maxTokens = cfg.LLM.Default.Generation.MaxTokens
+			// Use ProcessWithInterceptors with the configured interceptors
+			// ChainOfThought implements InterceptableModule interface
+			return cot.ProcessWithInterceptors(ctx, inputs, nil, opts...)
 		}
-
-		// Use ProcessWithInterceptors with the configured interceptors
-		// ChainOfThought implements InterceptableModule interface
-		return cot.ProcessWithInterceptors(ctx, inputs, nil, core.WithGenerateOptions(
-			core.WithTemperature(temperature),
-			core.WithMaxTokens(maxTokens),
-		))
 	})
 
 	// Create optimizer
@@ -167,9 +173,11 @@ func RunGSM8KExample(configPath string, apiKey string) {
 		}
 	}
 
-	// A prediction becomes a demonstration when its answer matches.
+	// A prediction becomes a demonstration when its final number matches the
+	// reference, which GSM8K writes after "####" at the end of its solution.
 	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, prediction map[string]any) (float64, error) {
-		if example.Outputs["answer"] == prediction["answer"] {
+		expected := finalNumber(fmt.Sprint(example.Outputs["answer"]))
+		if expected != "" && expected == finalNumber(fmt.Sprint(prediction["answer"])) {
 			return 1, nil
 		}
 		return 0, nil
@@ -229,6 +237,18 @@ func RunGSM8KExample(configPath string, apiKey string) {
 	} else {
 		logger.Warn(ctx, "⚠️  Cache may not be working - results differ")
 	}
+}
+
+var numberPattern = regexp.MustCompile(`-?\d+(\.\d+)?`)
+
+// finalNumber returns the last number in text with separators removed, or ""
+// when there is none.
+func finalNumber(text string) string {
+	numbers := numberPattern.FindAllString(strings.ReplaceAll(text, ",", ""), -1)
+	if len(numbers) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(numbers[len(numbers)-1], ".00"), ".0")
 }
 
 func main() {

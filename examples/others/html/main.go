@@ -29,10 +29,14 @@ func createHTMLParsingProgram() core.Program {
 	extract := modules.NewChainOfThought(extractSignature).WithStructuredOutput()
 
 	// Create the program
-	program := core.NewProgram(
+	// The forward function is built from the program's own modules, so the
+	// compiled program runs the module that holds the bootstrapped demos.
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{"extract_metadata": extract},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return extract.Process(ctx, inputs)
+		func(mods map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return mods["extract_metadata"].Process(ctx, inputs)
+			}
 		},
 	)
 	return program

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
@@ -21,9 +23,20 @@ import (
 
 var goroutineMonitor *GoroutineMonitor
 
+// answerTokens lowercases an answer and drops punctuation and symbols before
+// splitting it into words, so "Yes." and "yes" compare equal.
+func answerTokens(s string) []string {
+	return strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, s))
+}
+
 func computeF1(prediction, ground_truth string) float64 {
-	pred_tokens := strings.Fields(strings.ToLower(prediction))
-	truth_tokens := strings.Fields(strings.ToLower(ground_truth))
+	pred_tokens := answerTokens(prediction)
+	truth_tokens := answerTokens(ground_truth)
 
 	common := make(map[string]bool)
 	for _, token := range pred_tokens {
@@ -114,7 +127,7 @@ func evaluateModel(ctx context.Context, program core.Program, examples []dataset
 
 			f1 := computeF1(fmt.Sprintf("%v", predictedAnswer), example.Answer)
 			exactMatch := 0.0
-			if predictedAnswer == example.Answer {
+			if slices.Equal(answerTokens(predictedAnswer), answerTokens(example.Answer)) {
 				exactMatch = 1.0
 			}
 			results <- struct {
@@ -144,7 +157,10 @@ func evaluateModel(ctx context.Context, program core.Program, examples []dataset
 	return avgF1, exactMatchAccuracy
 }
 
-func RunHotPotQAExample(apiKey string) {
+// RunHotPotQAExample optimizes and evaluates a question-answering program on
+// HotpotQA. A positive maxExamples limits the run to that many questions; the
+// full validation split has 7,405, and each one costs a model call.
+func RunHotPotQAExample(apiKey string, maxExamples int) {
 	output := logging.NewConsoleOutput(true, logging.WithColor(true))
 
 	logger := logging.NewLogger(logging.Config{
@@ -172,6 +188,9 @@ func RunHotPotQAExample(apiKey string) {
 	}
 
 	rand.Shuffle(len(examples), func(i, j int) { examples[i], examples[j] = examples[j], examples[i] })
+	if maxExamples > 0 && len(examples) > maxExamples {
+		examples = examples[:maxExamples]
+	}
 
 	trainSize := int(0.025 * float64(len(examples)))
 	valSize := int(0.1 * float64(len(examples)))
@@ -187,9 +206,12 @@ func RunHotPotQAExample(apiKey string) {
 	// Use native JSON structured output for more reliable parsing
 	cot := modules.NewChainOfThought(signature).WithStructuredOutput()
 
-	program := core.NewProgram(map[string]core.Module{"cot": cot}, func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-		// Process() now automatically uses interceptors when XML mode is enabled
-		return cot.Process(ctx, inputs)
+	// The forward function is built from the program's own modules, so the
+	// compiled program runs the module that holds the bootstrapped demos.
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{"cot": cot}, func(mods map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			return mods["cot"].Process(ctx, inputs)
+		}
 	})
 
 	// Keep predictions whose F1 against the reference answer is at least 0.5.
@@ -250,7 +272,8 @@ func RunHotPotQAExample(apiKey string) {
 
 func main() {
 	apiKey := flag.String("api-key", "", "Anthropic API Key")
+	maxExamples := flag.Int("max-examples", 0, "Limit the run to this many questions (0 uses the whole dataset)")
 	flag.Parse()
 
-	RunHotPotQAExample(*apiKey)
+	RunHotPotQAExample(*apiKey, *maxExamples)
 }

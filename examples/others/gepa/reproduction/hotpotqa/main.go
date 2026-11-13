@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
@@ -132,10 +133,21 @@ func DefaultExperimentConfig() *ExperimentConfig {
 	}
 }
 
+// answerTokens lowercases an answer and drops punctuation and symbols before
+// splitting it into words, so "Yes." and "yes" compare equal.
+func answerTokens(s string) []string {
+	return strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, s))
+}
+
 func computePaperF1Score(prediction, groundTruth string) float64 {
 	// Implement F1 score computation as in the paper
-	predTokens := strings.Fields(strings.ToLower(strings.TrimSpace(prediction)))
-	truthTokens := strings.Fields(strings.ToLower(strings.TrimSpace(groundTruth)))
+	predTokens := answerTokens(prediction)
+	truthTokens := answerTokens(groundTruth)
 
 	if len(predTokens) == 0 && len(truthTokens) == 0 {
 		return 1.0
