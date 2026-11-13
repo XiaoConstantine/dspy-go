@@ -162,13 +162,16 @@ func (p *Predict) WithTextOutput() *Predict {
 	return p
 }
 
-func (p *Predict) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+func (p *Predict) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (outputs map[string]any, err error) {
+	// Observe XML after the interceptor has parsed it, exactly once.
+	if p.enableXMLMode && p.structuredOutputConfig == nil {
+		return p.ProcessWithInterceptors(ctx, inputs, nil, opts...)
+	}
+	if record := predictionRecorder(ctx, p, inputs); record != nil {
+		defer func() { record(outputs, err) }()
+	}
 	if p.structuredOutputConfig != nil {
 		return p.executeStructuredGeneration(ctx, inputs, opts...)
-	}
-	// If XML mode is enabled, automatically use ProcessWithInterceptors for proper XML handling
-	if p.enableXMLMode {
-		return p.ProcessWithInterceptors(ctx, inputs, nil, opts...)
 	}
 
 	// Use the shared core implementation with non-XML output formatting
@@ -232,7 +235,10 @@ func llmSupportsJSON(llm core.LLM) bool {
 }
 
 // ProcessWithInterceptors executes the Predict module's logic with interceptor support.
-func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
+func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (outputs map[string]any, err error) {
+	if record := predictionRecorder(ctx, p, inputs); record != nil {
+		defer func() { record(outputs, err) }()
+	}
 	if interceptors == nil {
 		interceptors = p.GetInterceptors()
 	}

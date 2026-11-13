@@ -165,7 +165,12 @@ func (c *ChainOfThought) processCore(ctx context.Context, inputs map[string]any,
 }
 
 // ProcessWithInterceptors executes the module's logic with interceptor support.
-func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
+func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (outputs map[string]any, err error) {
+	// Structured-output interceptors can return without calling Predict.Process.
+	if record := predictionRecorder(ctx, c.Predict, inputs); record != nil {
+		ctx = withoutPredictionTrace(ctx, c.Predict)
+		defer func() { record(outputs, err) }()
+	}
 	// Use provided interceptors, or fall back to Predict's interceptors if none provided
 	if interceptors == nil {
 		interceptors = c.Predict.GetInterceptors()
