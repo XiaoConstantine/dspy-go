@@ -584,3 +584,31 @@ func TestBootstrapFewShotBootstrapsChainOfThought(t *testing.T) {
 	mockLLM.AssertNumberOfCalls(t, "Generate", 2)
 	assert.Empty(t, cot.Predict.GetDemos(), "the student program must not be modified")
 }
+
+func TestBootstrapFewShotKeepsLookingPastRejectedExamples(t *testing.T) {
+	mockLLM := setupTestMockLLM(t)
+	var train []core.Example
+	for i := range 6 {
+		train = append(train, core.Example{
+			Inputs:  map[string]any{"question": fmt.Sprintf("q%d", i)},
+			Outputs: map[string]any{"answer": "Paris"},
+		})
+	}
+	// The first two examples fail the metric; the next two pass.
+	scorer := core.ScorerFunc(func(_ context.Context, example core.Example, _ map[string]any) (float64, error) {
+		if question := example.Inputs["question"]; question == "q0" || question == "q1" {
+			return 0, nil
+		}
+		return 1, nil
+	})
+
+	compiled, err := NewBootstrapFewShot(nil, 2).CompileWithScorer(
+		core.WithExecutionState(context.Background()), createProgram(), train, scorer)
+	require.NoError(t, err)
+
+	demos := compiled.Modules["predict"].(*modules.Predict).GetDemos()
+	require.Len(t, demos, 2)
+	assert.Equal(t, "q2", demos[0].Inputs["question"])
+	assert.Equal(t, "q3", demos[1].Inputs["question"])
+	mockLLM.AssertNumberOfCalls(t, "Generate", 4)
+}

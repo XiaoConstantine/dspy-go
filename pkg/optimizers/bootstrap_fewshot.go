@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"sync"
-	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -120,69 +118,62 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 
 	defer core.EndSpan(ctx)
 
-	var (
-		resultsMu sync.Mutex
-		results   []core.Example
-		processed atomic.Int32
-		errCh     = make(chan error, 1)
-	)
-	examplesNeeded := b.MaxBootstrapped
-	if examplesNeeded > len(trainset) {
-		examplesNeeded = len(trainset)
-	}
-
-	p := pool.New().WithMaxGoroutines(core.GetConcurrencyLevel())
-
-	for i := 0; i < examplesNeeded; i++ {
+	// Walk the trainset in order, one batch of concurrent teacher calls at a
+	// time, until enough predictions are kept. Stopping at the first
+	// MaxBootstrapped examples would return too few demonstrations whenever
+	// some of them fail the metric.
+	var results []core.Example
+	batchSize := max(core.GetConcurrencyLevel(), 1)
+	for start := 0; start < len(trainset) && len(results) < b.MaxBootstrapped; start += batchSize {
 		if b.enoughBootstrappedDemos(compiledStudent) {
-			logger := logging.GetLogger()
-			logger.Info(ctx, "Enough bootstrapped demos, breaking loop")
+			logging.GetLogger().Info(ctx, "Enough bootstrapped demos, breaking loop")
 			break
 		}
+		batch := trainset[start:min(start+batchSize, len(trainset))]
+		kept := make([]*core.Example, len(batch))
+		errCh := make(chan error, 1)
+		p := pool.New().WithMaxGoroutines(batchSize)
+		for i, ex := range batch {
+			p.Go(func() {
+				exampleCtx, exampleSpan := core.StartSpan(ctx, "Example")
+				defer core.EndSpan(exampleCtx)
 
-		ex := trainset[i]
-		p.Go(func() {
-			exampleCtx, exampleSpan := core.StartSpan(ctx, "Example")
-			defer core.EndSpan(exampleCtx)
-
-			exampleSpan.WithAnnotation("Example", ex)
-			prediction, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
-			if err != nil {
-				exampleSpan.WithError(err)
-				select {
-				case errCh <- err:
-				default:
+				exampleSpan.WithAnnotation("Example", ex)
+				prediction, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
+				if err != nil {
+					exampleSpan.WithError(err)
+					select {
+					case errCh <- err:
+					default:
+					}
+					return
 				}
-				return
+				exampleSpan.WithAnnotation("prediction", prediction)
+
+				if keep(exampleCtx, start+i, prediction) {
+					kept[i] = &core.Example{Inputs: ex, Outputs: prediction}
+				}
+			})
+		}
+		p.Wait()
+
+		select {
+		case err := <-errCh:
+			span.WithError(err)
+			return compiledStudent, fmt.Errorf("error during compilation: %w", err)
+		default:
+		}
+		// A cancelled run has scored only part of the trainset; report it instead
+		// of returning the demonstrations that happened to finish.
+		if err := ctx.Err(); err != nil {
+			span.WithError(err)
+			return compiledStudent, fmt.Errorf("error during compilation: %w", err)
+		}
+		for _, example := range kept {
+			if example != nil && len(results) < b.MaxBootstrapped {
+				results = append(results, *example)
 			}
-			exampleSpan.WithAnnotation("prediction", prediction)
-
-			if keep(exampleCtx, i, prediction) {
-				resultsMu.Lock()
-				results = append(results, core.Example{
-					Inputs:  ex,
-					Outputs: prediction,
-				})
-				resultsMu.Unlock()
-			}
-
-			processed.Add(1)
-		})
-	}
-
-	p.Wait()
-
-	select {
-	case err := <-errCh:
-		span.WithError(err)
-		return compiledStudent, fmt.Errorf("error during compilation: %w", err)
-	default:
-	}
-	// A cancelled run has scored only part of the trainset; report it instead
-	// of returning the demonstrations that happened to finish.
-	if err := ctx.Err(); err != nil {
-		span.WithError(err)
-		return compiledStudent, fmt.Errorf("error during compilation: %w", err)
+		}
 	}
 
 	for _, result := range results {
