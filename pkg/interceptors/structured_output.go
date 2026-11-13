@@ -3,6 +3,7 @@ package interceptors
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -273,7 +274,7 @@ func ChainOfThoughtStructuredInterceptor(config ChainOfThoughtStructuredConfig) 
 		}
 
 		// Build enhanced prompt with explicit reasoning request
-		prompt := buildCoTStructuredPrompt(inputs, signature, reasoningField, config)
+		prompt := buildCoTStructuredPrompt(inputs, signature, info.Demos, reasoningField, config)
 
 		logger.Debug(ctx, "Using structured JSON output for ChainOfThought with reasoning field '%s'", reasoningField)
 
@@ -301,7 +302,7 @@ func ChainOfThoughtStructuredInterceptor(config ChainOfThoughtStructuredConfig) 
 }
 
 // buildCoTStructuredPrompt builds a prompt specifically for ChainOfThought with reasoning.
-func buildCoTStructuredPrompt(inputs map[string]any, signature core.Signature, reasoningField string, config ChainOfThoughtStructuredConfig) string {
+func buildCoTStructuredPrompt(inputs map[string]any, signature core.Signature, demos []core.Example, reasoningField string, config ChainOfThoughtStructuredConfig) string {
 	var sb strings.Builder
 
 	// Add custom instructions
@@ -314,6 +315,30 @@ func buildCoTStructuredPrompt(inputs map[string]any, signature core.Signature, r
 	if signature.Instruction != "" {
 		sb.WriteString(signature.Instruction)
 		sb.WriteString("\n\n")
+	}
+
+	// Add demonstrations as worked examples in the output format.
+	for i, demo := range demos {
+		sb.WriteString(fmt.Sprintf("## Example %d\n", i+1))
+		for _, inputField := range signature.Inputs {
+			if value, ok := demo.Inputs[inputField.Name]; ok {
+				sb.WriteString(fmt.Sprintf("**%s**: %v\n", inputField.Name, value))
+			}
+		}
+		outputs := map[string]any{}
+		if reasoning, ok := demo.Outputs[reasoningField]; ok {
+			outputs[reasoningField] = reasoning
+		}
+		for _, outputField := range signature.Outputs {
+			if value, ok := demo.Outputs[outputField.Name]; ok {
+				outputs[outputField.Name] = value
+			}
+		}
+		if encoded, err := json.Marshal(outputs); err == nil {
+			sb.WriteString(string(encoded))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
 	}
 
 	// Add input fields

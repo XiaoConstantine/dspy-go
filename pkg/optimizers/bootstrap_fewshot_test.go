@@ -546,3 +546,41 @@ func setupBootstrapBenchmarkLLM() *MockLLM {
 	mockLLM.On("ModelID").Return("benchmark-model-id")
 	return mockLLM
 }
+
+// TestBootstrapFewShotBootstrapsChainOfThought checks that demonstrations
+// reach the Predict module inside a composite. Before the fix the optimizer
+// saw no module with demonstrations and returned without calling the teacher.
+func TestBootstrapFewShotBootstrapsChainOfThought(t *testing.T) {
+	mockLLM := setupTestMockLLM(t)
+	cot := modules.NewChainOfThought(core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	))
+	student := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"cot": cot},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return modules["cot"].Process(ctx, inputs)
+			}
+		},
+	)
+	train := []core.Example{
+		{Inputs: map[string]any{"question": "Capital of France?"}, Outputs: map[string]any{"answer": "Paris"}},
+		{Inputs: map[string]any{"question": "Capital of Germany?"}, Outputs: map[string]any{"answer": "Berlin"}},
+		{Inputs: map[string]any{"question": "Capital of Italy?"}, Outputs: map[string]any{"answer": "Rome"}},
+	}
+
+	optimizer := NewBootstrapFewShot(nil, 2)
+	compiled, err := optimizer.CompileWithScorer(core.WithExecutionState(context.Background()), student, train,
+		core.ScorerFunc(func(context.Context, core.Example, map[string]any) (float64, error) { return 1, nil }))
+	require.NoError(t, err)
+
+	compiledCoT, ok := compiled.Modules["cot"].(*modules.ChainOfThought)
+	require.True(t, ok)
+	demos := compiledCoT.Predict.GetDemos()
+	require.Len(t, demos, 2)
+	assert.Equal(t, "Capital of France?", demos[0].Inputs["question"])
+	assert.Equal(t, "Capital of Germany?", demos[1].Inputs["question"])
+	mockLLM.AssertNumberOfCalls(t, "Generate", 2)
+	assert.Empty(t, cot.Predict.GetDemos(), "the student program must not be modified")
+}

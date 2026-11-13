@@ -47,6 +47,10 @@ type ModuleInfo struct {
 	// invocation options before an interceptor calls the LLM.
 	DefaultOptions *ModuleOptions
 
+	// Demos are the module's demonstrations. Interceptors that build their
+	// own prompt include them so that optimized programs keep their examples.
+	Demos []Example
+
 	// Version is the module version for compatibility tracking
 	Version string
 
@@ -348,6 +352,14 @@ func (mi *ModuleInfo) WithMetadata(key string, value any) *ModuleInfo {
 func (mi *ModuleInfo) WithLLM(llm LLM) *ModuleInfo {
 	if mi != nil {
 		mi.LLM = llm
+	}
+	return mi
+}
+
+// WithDemos records the module's demonstrations for interceptors.
+func (mi *ModuleInfo) WithDemos(demos []Example) *ModuleInfo {
+	if mi != nil {
+		mi.Demos = demos
 	}
 	return mi
 }

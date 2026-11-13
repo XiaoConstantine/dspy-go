@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	testutil "github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -374,4 +375,58 @@ func TestChainOfThought_GetSetSubModules(t *testing.T) {
 
 	// Verify the submodule was set
 	assert.Same(t, newPredict, cot.Predict, "Predict module should be updated")
+}
+
+// TestChainOfThought_StructuredOutputFallsBackToParsedText covers a model
+// without JSON support. Before the fix Process skipped the interceptor and
+// Predict stayed in XML mode, so the answer field was missing.
+func TestChainOfThought_StructuredOutputFallsBackToParsedText(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	mockLLM := new(testutil.MockLLM)
+	mockLLM.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+		Return(&core.LLMResponse{Content: "rationale: France's capital.\n\nanswer: Paris"}, nil).Once()
+
+	cot := NewChainOfThought(signature).WithStructuredOutput()
+	cot.SetLLM(mockLLM)
+
+	outputs, err := cot.Process(context.Background(), map[string]any{"question": "Capital?"})
+	require.NoError(t, err)
+	assert.Equal(t, "Paris", outputs["answer"])
+	mockLLM.AssertExpectations(t)
+	mockLLM.AssertNotCalled(t, "GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestChainOfThought_StructuredOutputPromptIncludesDemos checks that an
+// optimized program keeps its demonstrations when structured output builds
+// the prompt, and that a clone keeps structured output.
+func TestChainOfThought_StructuredOutputPromptIncludesDemos(t *testing.T) {
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)
+	mockBase := new(testutil.MockLLM)
+	var prompt string
+	mockBase.On("GenerateWithJSON", mock.Anything, mock.MatchedBy(func(p string) bool {
+		prompt = p
+		return true
+	}), mock.Anything).Return(map[string]any{"reasoning": "r", "answer": "Rome"}, nil).Once()
+
+	original := NewChainOfThought(signature).WithStructuredOutput()
+	cot := original.Clone().(*ChainOfThought)
+	cot.SetLLM(&jsonCapablePredictLLM{MockLLM: mockBase})
+	cot.Predict.SetDemos([]core.Example{{
+		Inputs:  map[string]any{"question": "Capital of France?"},
+		Outputs: map[string]any{"answer": "Paris"},
+	}})
+
+	outputs, err := cot.Process(context.Background(), map[string]any{"question": "Capital of Italy?"})
+	require.NoError(t, err)
+	assert.Equal(t, "Rome", outputs["answer"])
+	assert.Contains(t, prompt, "Capital of France?")
+	assert.Contains(t, prompt, `{"answer":"Paris"}`)
+	assert.Less(t, strings.Index(prompt, "Capital of France?"), strings.Index(prompt, "Capital of Italy?"))
+	mockBase.AssertExpectations(t)
 }

@@ -10,6 +10,10 @@ import (
 
 type ChainOfThought struct {
 	Predict *Predict
+
+	// structuredOutput is set by WithStructuredOutput. Process then runs the
+	// module's interceptors itself, because Predict no longer does.
+	structuredOutput bool
 }
 
 var (
@@ -64,13 +68,24 @@ func (c *ChainOfThought) SetLLM(llm core.LLM) {
 // Clone creates a deep copy of the ChainOfThought module.
 func (c *ChainOfThought) Clone() core.Module {
 	return &ChainOfThought{
-		Predict: c.Predict.Clone().(*Predict),
+		Predict:          c.Predict.Clone().(*Predict),
+		structuredOutput: c.structuredOutput,
 	}
 }
 
 // Compose creates a new module that chains this module with the next module.
 func (c *ChainOfThought) Compose(next core.Module) core.Module {
 	return core.NewModuleChain(c, next)
+}
+
+// GetDemos returns the demonstrations of the underlying Predict module.
+func (c *ChainOfThought) GetDemos() []core.Example {
+	return c.Predict.GetDemos()
+}
+
+// SetDemos sets the demonstrations of the underlying Predict module.
+func (c *ChainOfThought) SetDemos(demos []core.Example) {
+	c.Predict.SetDemos(demos)
 }
 
 // GetSubModules returns the sub-modules of this ChainOfThought.
@@ -104,20 +119,30 @@ func (c *ChainOfThought) WithDefaultOptions(opts ...core.Option) *ChainOfThought
 //
 //	cot := modules.NewChainOfThought(signature).WithStructuredOutput()
 func (c *ChainOfThought) WithStructuredOutput() *ChainOfThought {
-	config := interceptors.DefaultChainOfThoughtStructuredConfig()
-	interceptor := interceptors.ChainOfThoughtStructuredInterceptor(config)
-	c.SetInterceptors([]core.ModuleInterceptor{interceptor})
-	return c
+	return c.WithStructuredOutputConfig(interceptors.DefaultChainOfThoughtStructuredConfig())
 }
 
 // WithStructuredOutputConfig enables structured output with custom CoT configuration.
 func (c *ChainOfThought) WithStructuredOutputConfig(config interceptors.ChainOfThoughtStructuredConfig) *ChainOfThought {
 	interceptor := interceptors.ChainOfThoughtStructuredInterceptor(config)
+	// The interceptor replaces Predict's XML interceptor, so a model without
+	// JSON support must fall back to text parsing, not to unparsed XML mode.
+	c.Predict.enableXMLMode = false
+	c.Predict.xmlConfig = nil
+	c.structuredOutput = true
 	c.SetInterceptors([]core.ModuleInterceptor{interceptor})
 	return c
 }
 
 func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	if c.structuredOutput {
+		return c.ProcessWithInterceptors(ctx, inputs, nil, opts...)
+	}
+	return c.processCore(ctx, inputs, opts...)
+}
+
+// processCore runs the prediction without the module's interceptors.
+func (c *ChainOfThought) processCore(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	// Use ChainOfThought's own display name
 	displayName := c.GetDisplayName()
 
@@ -149,16 +174,12 @@ func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map
 	// Create correct ModuleInfo for ChainOfThought (not Predict)
 	info := core.NewModuleInfo(c.GetDisplayName(), c.GetModuleType(), c.GetSignature()).
 		WithLLM(c.Predict.LLM).
-		WithDefaultOptions(c.Predict.defaultOptions)
-
-	// Create handler that calls our own Process method
-	handler := func(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
-		return c.Process(ctx, inputs, opts...)
-	}
+		WithDefaultOptions(c.Predict.defaultOptions).
+		WithDemos(c.Predict.Demos)
 
 	// Chain interceptors and execute
 	chainedInterceptor := core.ChainModuleInterceptors(interceptors...)
-	return chainedInterceptor(ctx, inputs, info, handler, opts...)
+	return chainedInterceptor(ctx, inputs, info, c.processCore, opts...)
 }
 
 // SetInterceptors sets the default interceptors for this module instance.

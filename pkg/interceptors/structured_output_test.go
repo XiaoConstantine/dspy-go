@@ -415,7 +415,7 @@ func TestBuildCoTStructuredPrompt(t *testing.T) {
 	}
 
 	config := DefaultChainOfThoughtStructuredConfig()
-	prompt := buildCoTStructuredPrompt(inputs, signature, "reasoning", config)
+	prompt := buildCoTStructuredPrompt(inputs, signature, nil, "reasoning", config)
 
 	// Verify prompt contains CoT-specific elements
 	assert.Contains(t, prompt, "Think step by step")

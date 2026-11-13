@@ -227,9 +227,26 @@ func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.
 
 }
 
+// demoPredictors returns the Predict modules that hold module's demonstrations,
+// looking inside composites such as ChainOfThought.
+func demoPredictors(module core.Module) []*modules.Predict {
+	if predictor, ok := module.(*modules.Predict); ok {
+		return []*modules.Predict{predictor}
+	}
+	composite, ok := module.(interface{ GetSubModules() []core.Module })
+	if !ok {
+		return nil
+	}
+	var predictors []*modules.Predict
+	for _, sub := range composite.GetSubModules() {
+		predictors = append(predictors, demoPredictors(sub)...)
+	}
+	return predictors
+}
+
 func (b *BootstrapFewShot) enoughBootstrappedDemos(program core.Program) bool {
 	for _, module := range program.Modules {
-		if predictor, ok := module.(interface{ GetDemos() []core.Example }); ok {
+		for _, predictor := range demoPredictors(module) {
 			if len(predictor.GetDemos()) < b.MaxBootstrapped {
 				return false
 			}
@@ -248,30 +265,24 @@ func (b *BootstrapFewShot) addDemonstrations(program core.Program, demo core.Exa
 	span.WithAnnotation("demo_inputs", demo.Inputs)
 	span.WithAnnotation("demo_outputs", demo.Outputs)
 	for moduleName, module := range program.Modules {
-		predictor, ok := module.(*modules.Predict)
-		if !ok {
-			continue
-		}
-
-		currentDemos := predictor.GetDemos()
-
-		if len(currentDemos) < b.MaxBootstrapped {
-
+		for _, predictor := range demoPredictors(module) {
+			currentDemos := predictor.GetDemos()
+			if len(currentDemos) >= b.MaxBootstrapped {
+				span.WithAnnotation("skipped_module", moduleName)
+				span.WithAnnotation("reason", "max_demos_reached")
+				return errors.WithFields(
+					errors.New(errors.ResourceExhausted, fmt.Sprintf("max demonstrations reached for module %s", moduleName)),
+					errors.Fields{
+						"module":        moduleName,
+						"max_demos":     b.MaxBootstrapped,
+						"current_demos": len(currentDemos),
+					})
+			}
 			newDemos := append(currentDemos, demo)
 			predictor.SetDemos(newDemos)
 			span.WithAnnotation("added_to_module", moduleName)
 			span.WithAnnotation("total_demos", len(newDemos))
 			return nil
-		} else {
-			span.WithAnnotation("skipped_module", moduleName)
-			span.WithAnnotation("reason", "max_demos_reached")
-			return errors.WithFields(
-				errors.New(errors.ResourceExhausted, fmt.Sprintf("max demonstrations reached for module %s", moduleName)),
-				errors.Fields{
-					"module":        moduleName,
-					"max_demos":     b.MaxBootstrapped,
-					"current_demos": len(currentDemos),
-				})
 		}
 	}
 	return errors.New(errors.ResourceNotFound, "no suitable module found for adding demonstrations")
