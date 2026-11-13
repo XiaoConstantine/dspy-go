@@ -750,6 +750,7 @@ func (s *SIMBA) generateCandidates(ctx context.Context, baseProgram core.Program
 		parent core.Program
 		mode   string
 		bucket *simbaBucket
+		rng    *rand.Rand
 	}
 	plans := make([]proposal, len(results))
 	for i := range plans {
@@ -773,12 +774,15 @@ func (s *SIMBA) generateCandidates(ctx context.Context, baseProgram core.Program
 		if s.search != nil && len(s.search.buckets) > 0 {
 			bucket = &s.search.buckets[i%len(s.search.buckets)]
 		}
-		plans[i] = proposal{parent: parent, mode: mode, bucket: bucket}
+		s.mu.Lock()
+		seed := s.rng.Int63()
+		s.mu.Unlock()
+		plans[i] = proposal{parent: parent, mode: mode, bucket: bucket, rng: rand.New(rand.NewSource(seed))}
 	}
 	p := s.createLLMPool()
 	for i, plan := range plans {
 		p.Go(func() {
-			candidate, err := s.proposeFromBucket(ctx, plan.parent, plan.mode, plan.bucket)
+			candidate, err := s.proposeFromBucket(context.WithValue(ctx, simbaProposalRNGKey{}, plan.rng), plan.parent, plan.mode, plan.bucket)
 			if err != nil {
 				s.logger.Debug(ctx, "Failed to generate candidate %d: %v", i, err)
 				return
@@ -797,6 +801,21 @@ func (s *SIMBA) generateCandidates(ctx context.Context, baseProgram core.Program
 		}
 	}
 	return candidates, nil
+}
+
+type simbaProposalRNGKey struct{}
+
+// proposalIntn draws the random choices of one proposal. Proposals of a step
+// are generated concurrently, so each draws from its own generator, seeded in
+// candidate order; sharing s.rng would make a seeded run depend on goroutine
+// scheduling. Outside candidate generation it falls back to s.rng.
+func (s *SIMBA) proposalIntn(ctx context.Context, n int) int {
+	if rng, ok := ctx.Value(simbaProposalRNGKey{}).(*rand.Rand); ok {
+		return rng.Intn(n)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rng.Intn(n)
 }
 
 func (s *SIMBA) proposeFromBucket(ctx context.Context, parent core.Program, mode string, bucket *simbaBucket) (core.Program, error) {
@@ -856,9 +875,7 @@ func (s *SIMBA) perturbProgram(ctx context.Context, baseProgram core.Program) (c
 		return variant, nil
 	}
 
-	s.mu.Lock()
-	module := modules[s.rng.Intn(len(modules))]
-	s.mu.Unlock()
+	module := modules[s.proposalIntn(ctx, len(modules))]
 	signature := module.GetSignature()
 	instruction, err := s.generateInstructionVariation(ctx, signature.Instruction)
 	if err != nil {
@@ -906,9 +923,7 @@ func (s *SIMBA) generateRuleBasedCandidate(ctx context.Context, baseProgram core
 		return variant, nil
 	}
 
-	s.mu.Lock()
-	module := modules[s.rng.Intn(len(modules))]
-	s.mu.Unlock()
+	module := modules[s.proposalIntn(ctx, len(modules))]
 	signature := module.GetSignature()
 	instruction, err := s.appendRuleToInstruction(ctx, signature.Instruction, rules)
 	if err != nil {
@@ -1113,9 +1128,7 @@ func (s *SIMBA) appendRuleToInstruction(ctx context.Context, originalInstruction
 	}
 
 	// Select a random rule to append (thread-safe)
-	s.mu.Lock()
-	selectedRule := rules[s.rng.Intn(len(rules))]
-	s.mu.Unlock()
+	selectedRule := rules[s.proposalIntn(ctx, len(rules))]
 
 	prompt := fmt.Sprintf(`Given the following instruction and rule, create an enhanced instruction that incorporates the rule naturally:
 

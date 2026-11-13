@@ -291,9 +291,7 @@ func (s *SIMBA) generateBucketRuleCandidate(ctx context.Context, parent core.Pro
 	if len(targets) == 0 {
 		return variant, nil
 	}
-	s.mu.Lock()
-	target := targets[s.rng.Intn(len(targets))]
-	s.mu.Unlock()
+	target := targets[s.proposalIntn(ctx, len(targets))]
 	name := target.GetModuleType()
 	for path, predictor := range simbaPredictors(variant) {
 		if target == predictor {
