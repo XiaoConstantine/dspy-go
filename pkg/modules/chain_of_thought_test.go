@@ -2,6 +2,7 @@ package modules
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,6 +13,49 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChainOfThoughtSignatureUpdatesPreserveRationale(t *testing.T) {
+	for _, structured := range []bool{false, true} {
+		for _, existing := range []bool{false, true} {
+			name := fmt.Sprintf("structured=%t/existing=%t", structured, existing)
+			t.Run(name, func(t *testing.T) {
+				outputs := []core.OutputField{{Field: core.NewField("answer")}}
+				if existing {
+					outputs = append(outputs, core.OutputField{Field: core.NewField("rationale", core.WithDescription("Keep my reasoning description"))})
+				}
+				cot := NewChainOfThought(core.NewSignature(
+					[]core.InputField{{Field: core.NewField("question")}}, outputs,
+				))
+				wantOutputs := []core.OutputField{{Field: core.NewField("rationale", core.WithDescription("Step-by-step reasoning process"))}, outputs[0]}
+				if existing {
+					wantOutputs = outputs // Preserve the caller's order and field metadata.
+				}
+				mockBase := new(testutil.MockLLM)
+				if structured {
+					cot.WithStructuredOutput()
+					cot.SetLLM(&jsonCapablePredictLLM{MockLLM: mockBase})
+					mockBase.On("GenerateWithJSON", mock.Anything, mock.Anything, mock.Anything).
+						Return(map[string]any{"reasoning": "because", "rationale": "because", "answer": "42"}, nil).Once()
+				} else {
+					cot.Predict.WithTextOutput()
+					cot.SetLLM(mockBase)
+					mockBase.On("Generate", mock.Anything, mock.Anything, mock.Anything).
+						Return(&core.LLMResponse{Content: "rationale: because\nanswer: 42"}, nil).Once()
+				}
+				for range 3 {
+					cot.SetSignature(cot.GetSignature().WithInstruction("Answer precisely."))
+					cot = cot.Clone().(*ChainOfThought)
+				}
+				require.Equal(t, wantOutputs, cot.GetSignature().Outputs)
+				result, err := cot.Process(context.Background(), map[string]any{"question": "What is the answer?"})
+				require.NoError(t, err)
+				require.Equal(t, "42", result["answer"])
+				require.Equal(t, "because", result["rationale"])
+				mockBase.AssertExpectations(t)
+			})
+		}
+	}
+}
 
 func TestChainOfThought(t *testing.T) {
 	// Create a mock LLM

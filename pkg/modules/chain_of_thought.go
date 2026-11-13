@@ -213,6 +213,11 @@ func NewTypedChainOfThought[TInput, TOutput any]() *ChainOfThought {
 }
 
 func appendRationaleField(signature core.Signature) core.Signature {
+	for _, output := range signature.Outputs {
+		if output.Name == "rationale" {
+			return signature
+		}
+	}
 	newSignature := signature
 	rationaleField := core.OutputField{
 		Field: core.NewField("rationale",
