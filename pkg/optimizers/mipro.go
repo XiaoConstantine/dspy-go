@@ -77,6 +77,11 @@ func (t *TeacherStudentOptimizer) GenerateDemonstration(ctx context.Context, inp
 	}
 	promptValue, ok := input.Inputs["prompt"]
 	if !ok || promptValue == nil {
+		// The bare teacher model can only complete a single prompt. A program
+		// with other inputs uses its labeled example as the demonstration.
+		if len(input.Outputs) > 0 {
+			return input, nil
+		}
 		return core.Example{}, fmt.Errorf("teacher generation failed, missing prompt")
 	}
 	prompt, ok := promptValue.(string)

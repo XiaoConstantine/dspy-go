@@ -1084,3 +1084,23 @@ func setupMIPROBenchmarkLLM() *MockLLM {
 	mockLLM.On("ModelID").Return("benchmark-model-id")
 	return mockLLM
 }
+
+// TestGenerateDemonstrationUsesLabeledExampleWithoutPrompt covers programs
+// whose input is not named "prompt". Before the fix they failed with
+// "teacher generation failed, missing prompt".
+func TestGenerateDemonstrationUsesLabeledExampleWithoutPrompt(t *testing.T) {
+	teacher := new(testutil.MockLLM)
+	optimizer := &TeacherStudentOptimizer{Teacher: teacher}
+	labeled := core.Example{
+		Inputs:  map[string]any{"question": "2+2?"},
+		Outputs: map[string]any{"answer": "4"},
+	}
+
+	demo, err := optimizer.GenerateDemonstration(context.Background(), labeled)
+	require.NoError(t, err)
+	assert.Equal(t, labeled, demo)
+	teacher.AssertNotCalled(t, "Generate", mock.Anything, mock.Anything, mock.Anything)
+
+	_, err = optimizer.GenerateDemonstration(context.Background(), core.Example{Inputs: map[string]any{"question": "2+2?"}})
+	require.ErrorContains(t, err, "missing prompt")
+}
