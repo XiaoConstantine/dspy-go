@@ -713,7 +713,64 @@ func TestBootstrapFewShotRecompileReplacesExistingDemos(t *testing.T) {
 	assert.Equal(t, stale, predictor.GetDemos(), "the student program must not be modified")
 }
 
-func TestBootstrapFewShotRejectsMultiplePredictors(t *testing.T) {
+func TestBootstrapFewShotGivesEachPredictorItsOwnDemos(t *testing.T) {
+	llm := &scriptLLM{behave: func(_, prompt string) (string, error) {
+		if question := promptInput(prompt, "question"); question != "" {
+			return "<response><rationale>why-" + question + "</rationale><query>search-" + question + "</query></response>", nil
+		}
+		return "answer: gold-" + strings.TrimPrefix(promptInput(prompt, "query"), "search-"), nil
+	}}
+	useScriptLLM(t, llm)
+	// The first stage is a ChainOfThought, so its predictor is nested.
+	rewrite := modules.NewChainOfThought(core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.Field{Name: "query", Prefix: "query:"}}},
+	))
+	answer := modules.NewPredict(core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.OutputField{{Field: core.Field{Name: "answer", Prefix: "answer:"}}},
+	))
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{"a_rewrite": rewrite, "b_answer": answer},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				rewritten, err := modules["a_rewrite"].Process(ctx, inputs)
+				if err != nil {
+					return nil, err
+				}
+				// The second stage also receives a key its signature lacks.
+				return modules["b_answer"].Process(ctx, map[string]any{"query": rewritten["query"], "question": ""})
+			}
+		})
+	// The metric rejects q1, so neither predictor learns from that run.
+	keep := func(example, _ map[string]any, _ context.Context) bool { return example["question"] != "q1" }
+
+	compiled, err := NewBootstrapFewShot(keep, 2).CompileLegacy(context.Background(), program, program, bootstrapTrainset(4))
+
+	require.NoError(t, err)
+	assert.Equal(t, []core.Example{
+		{Inputs: map[string]any{"question": "q0"}, Outputs: map[string]any{"rationale": "why-q0", "query": "search-q0"}},
+		{Inputs: map[string]any{"question": "q2"}, Outputs: map[string]any{"rationale": "why-q2", "query": "search-q2"}},
+	}, compiled.Modules["a_rewrite"].(*modules.ChainOfThought).Predict.GetDemos())
+	assert.Equal(t, []core.Example{
+		{Inputs: map[string]any{"query": "search-q0"}, Outputs: map[string]any{"answer": "gold-q0"}},
+		{Inputs: map[string]any{"query": "search-q2"}, Outputs: map[string]any{"answer": "gold-q2"}},
+	}, compiled.Modules["b_answer"].(*modules.Predict).GetDemos())
+	assert.Empty(t, rewrite.Predict.GetDemos(), "the student program must not be modified")
+
+	llm.prompts = nil
+	result, err := compiled.Execute(context.Background(), map[string]any{"question": "new"})
+	require.NoError(t, err)
+	assert.Equal(t, "gold-new", result["answer"])
+	prompts := llm.sent("")
+	require.Len(t, prompts, 2)
+	for _, prompt := range prompts {
+		assert.NotContains(t, prompt, "<nil>", "every demonstration field is filled")
+	}
+	assert.Contains(t, prompts[0], "question: q0\nrationale: why-q0\nquery: search-q0\n")
+	assert.Contains(t, prompts[1], "query: search-q0\nanswer: gold-q0\n")
+}
+
+func TestBootstrapFewShotRequiresMatchingTeacherPredictors(t *testing.T) {
 	llm := &scriptLLM{behave: func(_, prompt string) (string, error) {
 		if question := promptInput(prompt, "question"); question != "" {
 			return "query: search-" + question, nil
@@ -721,10 +778,30 @@ func TestBootstrapFewShotRejectsMultiplePredictors(t *testing.T) {
 		return "answer: gold-" + strings.TrimPrefix(promptInput(prompt, "query"), "search-"), nil
 	}}
 	useScriptLLM(t, llm)
-	program := scriptTwoStageProgram(llm)
+	student := scriptTwoStageProgram(llm)
+	optimizer := NewBootstrapFewShot(keepEverything, 2)
 
-	_, err := NewBootstrapFewShot(keepEverything, 2).CompileLegacy(context.Background(), program, program, bootstrapTrainset(4))
+	t.Run("a teacher with other predictors is rejected", func(t *testing.T) {
+		teacher := coproSinglePredictorProgram(modules.NewPredict(scriptQASignature("base")))
+		_, err := optimizer.CompileLegacy(context.Background(), student, teacher, bootstrapTrainset(4))
+		assert.ErrorContains(t, err, "must have the same names")
+		assert.Empty(t, llm.sent(""), "the mismatch is rejected before any teacher call")
+	})
 
-	assert.ErrorContains(t, err, "one predictor")
-	assert.Empty(t, llm.sent(""), "the unsupported program is rejected before any teacher call")
+	t.Run("single predictors pair up under different names", func(t *testing.T) {
+		single := modules.NewPredict(scriptQASignature("base"))
+		single.SetLLM(&scriptLLM{behave: func(_, prompt string) (string, error) {
+			return "answer: gold-" + promptInput(prompt, "question"), nil
+		}})
+		teacher := core.NewProgramWithForwardFactory(map[string]core.Module{"teacher": single},
+			func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+					return modules["teacher"].Process(ctx, inputs)
+				}
+			})
+		compiled, err := optimizer.CompileLegacy(context.Background(),
+			coproSinglePredictorProgram(modules.NewPredict(scriptQASignature("base"))), teacher, bootstrapTrainset(4))
+		require.NoError(t, err)
+		assert.Equal(t, []any{"q0", "q1"}, bootstrapQuestions(t, compiled))
+	})
 }

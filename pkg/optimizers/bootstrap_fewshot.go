@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
+	"sync"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -61,8 +63,9 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, da
 // demonstration when scorer scores it at MetricThreshold or above (above zero
 // when the threshold is unset); one the scorer cannot score is not kept. An
 // example the teacher fails on is skipped, and compiling fails only when
-// every teacher call fails. The program must have exactly one predictor, whose
-// existing demonstrations are replaced. It
+// every teacher call fails. Each predictor of the program, including one
+// nested in a module such as ChainOfThought, gets demonstrations of its own
+// inputs and outputs in the kept runs; they replace its existing ones. It
 // calls scorer from up to core.GetConcurrencyLevel goroutines at once and
 // ignores the constructor metric.
 func (b *BootstrapFewShot) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
@@ -101,8 +104,18 @@ func (b *BootstrapFewShot) metricKeeps(trainset []map[string]any) func(context.C
 	}
 }
 
-// compileInternal contains the original implementation logic. keep reports
-// whether the teacher's prediction for trainset[index] becomes a demonstration.
+// bootstrapRun is one teacher run the metric kept: the example, the program's
+// prediction, and the last call of each teacher predictor by name.
+type bootstrapRun struct {
+	example    map[string]any
+	prediction map[string]any
+	calls      map[string]core.Example
+}
+
+// compileInternal bootstraps demonstrations for student from teacher runs.
+// keep reports whether the teacher's run on trainset[index] is kept. Each
+// student predictor gets one demonstration per kept run, built from what the
+// teacher predictor of the same name received and returned in that run.
 func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]any, keep func(ctx context.Context, index int, prediction map[string]any) bool) (core.Program, error) {
 	for _, program := range []core.Program{student, teacher} {
 		if err := requireRebindableProgram(program); err != nil {
@@ -111,18 +124,19 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 	}
 	compiledStudent := student.Clone()
 	// Start from a student without demonstrations, so compiling an already
-	// compiled program bootstraps again instead of counting its old demos. A
-	// program-level demonstration fits only one predictor's fields, so more
-	// than one predictor is rejected rather than given another's demos.
-	predictorCount := 0
-	for _, module := range compiledStudent.Modules {
-		for _, predictor := range demoPredictors(module) {
-			predictor.SetDemos(nil)
-			predictorCount++
-		}
+	// compiled program bootstraps again instead of counting its old demos.
+	names, predictors := namedPredictors(compiledStudent)
+	for _, predictor := range predictors {
+		predictor.SetDemos(nil)
 	}
-	if predictorCount > 1 {
-		return student, errors.New(errors.InvalidInput, fmt.Sprintf("BootstrapFewShot supports programs with one predictor, got %d: a demonstration of the whole program does not match each predictor's fields", predictorCount))
+	// A student predictor learns from the teacher predictor of the same name.
+	// Two single-predictor programs pair up whatever their module names.
+	teacherNames, _ := namedPredictors(teacher)
+	teacherName := func(name string) string { return name }
+	if len(names) == 1 && len(teacherNames) == 1 {
+		teacherName = func(string) string { return teacherNames[0] }
+	} else if len(names) > 0 && !slices.Equal(names, teacherNames) {
+		return student, errors.New(errors.InvalidInput, fmt.Sprintf("BootstrapFewShot: student predictors %v and teacher predictors %v must have the same names", names, teacherNames))
 	}
 	// Modules keep their own LLMs unless a teacher LLM is configured.
 	teacherLLM := core.GetTeacherLLM()
@@ -139,20 +153,16 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 	defer core.EndSpan(ctx)
 
 	// Walk the trainset in order, one batch of concurrent teacher calls at a
-	// time, until enough predictions are kept. Stopping at the first
+	// time, until enough runs are kept. Stopping at the first
 	// MaxBootstrapped examples would return too few demonstrations whenever
 	// some of them fail the metric.
-	var results []core.Example
+	var runs []bootstrapRun
 	var teacherErr error
 	teacherSucceeded := false
 	batchSize := max(core.GetConcurrencyLevel(), 1)
-	for start := 0; start < len(trainset) && len(results) < b.MaxBootstrapped; start += batchSize {
-		if b.enoughBootstrappedDemos(compiledStudent) {
-			logging.GetLogger().Info(ctx, "Enough bootstrapped demos, breaking loop")
-			break
-		}
+	for start := 0; start < len(trainset) && len(runs) < b.MaxBootstrapped; start += batchSize {
 		batch := trainset[start:min(start+batchSize, len(trainset))]
-		kept := make([]*core.Example, len(batch))
+		kept := make([]*bootstrapRun, len(batch))
 		errs := make([]error, len(batch))
 		p := pool.New().WithMaxGoroutines(batchSize)
 		for i, ex := range batch {
@@ -161,7 +171,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				defer core.EndSpan(exampleCtx)
 
 				exampleSpan.WithAnnotation("Example", ex)
-				prediction, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
+				prediction, calls, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
 				if err != nil {
 					exampleSpan.WithError(err)
 					errs[i] = err
@@ -170,7 +180,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				exampleSpan.WithAnnotation("prediction", prediction)
 
 				if keep(exampleCtx, start+i, prediction) {
-					kept[i] = &core.Example{Inputs: ex, Outputs: prediction}
+					kept[i] = &bootstrapRun{example: ex, prediction: prediction, calls: calls}
 				}
 			})
 		}
@@ -193,9 +203,9 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				teacherErr = err
 			}
 		}
-		for _, example := range kept {
-			if example != nil && len(results) < b.MaxBootstrapped {
-				results = append(results, *example)
+		for _, run := range kept {
+			if run != nil && len(runs) < b.MaxBootstrapped {
+				runs = append(runs, *run)
 			}
 		}
 	}
@@ -204,22 +214,54 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		span.WithError(teacherErr)
 		return compiledStudent, fmt.Errorf("error during compilation: every teacher call failed: %w", teacherErr)
 	}
+	if len(runs) > 0 && len(names) == 0 {
+		err := errors.New(errors.ResourceNotFound, "no suitable module found for adding demonstrations")
+		span.WithError(err)
+		return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
+	}
 
-	for _, result := range results {
-		if err := b.addDemonstrations(compiledStudent, result, ctx); err != nil {
-			span.WithError(err)
-			return compiledStudent, fmt.Errorf("error adding demonstrations: %w", err)
+	for _, run := range runs {
+		demoCtx, demoSpan := core.StartSpan(ctx, "AddDemonstrations")
+		demoSpan.WithAnnotation("demo_inputs", run.example)
+		demoSpan.WithAnnotation("demo_outputs", run.prediction)
+		for _, name := range names {
+			predictor := predictors[name]
+			call, ok := run.calls[teacherName(name)]
+			if !ok && len(names) == 1 {
+				// The only predictor could not be traced, as when a module
+				// answers without calling it; the program's run stands in.
+				call, ok = core.Example{Inputs: run.example, Outputs: run.prediction}, true
+			}
+			if !ok {
+				// The run did not call this predictor.
+				continue
+			}
+			// A demonstration holds only the predictor's own fields.
+			signature := predictor.GetSignature()
+			demo := core.Example{Inputs: map[string]any{}, Outputs: map[string]any{}}
+			for _, field := range signature.Inputs {
+				if value, ok := call.Inputs[field.Name]; ok {
+					demo.Inputs[field.Name] = value
+				}
+			}
+			for _, field := range signature.Outputs {
+				if value, ok := call.Outputs[field.Name]; ok {
+					demo.Outputs[field.Name] = value
+				}
+			}
+			predictor.SetDemos(append(predictor.GetDemos(), demo))
+			demoSpan.WithAnnotation("added_to_module", name)
 		}
-		if b.enoughBootstrappedDemos(compiledStudent) {
-			break
-		}
+		core.EndSpan(demoCtx)
 	}
 
 	span.WithAnnotation("compiledStudent", compiledStudent)
 	return compiledStudent, nil
 }
 
-func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]any) (map[string]any, error) {
+// predictWithTeacher runs a clone of teacher on example. It returns the
+// program's prediction and the last successful call of each predictor by name.
+func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]any) (map[string]any, map[string]core.Example, error) {
 	// Clone the teacher program; a configured teacher LLM replaces its modules' LLMs.
 	teacherClone := teacher.Clone()
 	if teacherLLM != nil {
@@ -237,16 +279,34 @@ func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.
 	ctx, span := core.StartSpan(ctx, "TeacherPrediction")
 	defer core.EndSpan(ctx)
 
+	_, predictors := namedPredictors(teacherClone)
+	nameOf := make(map[*modules.Predict]string, len(predictors))
+	for name, predictor := range predictors {
+		nameOf[predictor] = name
+	}
+	var mu sync.Mutex
+	calls := make(map[string]core.Example)
+	ctx = modules.WithPredictionObserver(ctx, func(predictor *modules.Predict, inputs, outputs map[string]any) {
+		name, ok := nameOf[predictor]
+		if !ok {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		calls[name] = core.Example{Inputs: maps.Clone(inputs), Outputs: maps.Clone(outputs)}
+	})
+
 	span.WithAnnotation("Example", example)
 	outputs, err := teacherClone.Execute(ctx, example)
 	if err != nil {
 		span.WithError(err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	span.WithAnnotation("outputs", outputs)
-	return outputs, nil
-
+	mu.Lock()
+	defer mu.Unlock()
+	return outputs, maps.Clone(calls), nil
 }
 
 // demoPredictors returns the Predict modules that hold module's demonstrations,
@@ -266,46 +326,19 @@ func demoPredictors(module core.Module) []*modules.Predict {
 	return predictors
 }
 
-func (b *BootstrapFewShot) enoughBootstrappedDemos(program core.Program) bool {
-	for _, module := range program.Modules {
-		for _, predictor := range demoPredictors(module) {
-			if len(predictor.GetDemos()) < b.MaxBootstrapped {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func (b *BootstrapFewShot) addDemonstrations(program core.Program, demo core.Example, ctx context.Context) error {
-	if ctx == nil {
-		return errors.New(errors.InvalidInput, "cannot add demonstrations: context is nil")
-	}
-
-	ctx, span := core.StartSpan(ctx, "AddDemonstrations")
-	defer core.EndSpan(ctx)
-	span.WithAnnotation("demo_inputs", demo.Inputs)
-	span.WithAnnotation("demo_outputs", demo.Outputs)
+// namedPredictors returns program's predictors by name, and the names sorted.
+// A module's first predictor is named after the module and any further ones
+// "name[i]".
+func namedPredictors(program core.Program) ([]string, map[string]*modules.Predict) {
+	predictors := make(map[string]*modules.Predict)
 	for moduleName, module := range program.Modules {
-		for _, predictor := range demoPredictors(module) {
-			currentDemos := predictor.GetDemos()
-			if len(currentDemos) >= b.MaxBootstrapped {
-				span.WithAnnotation("skipped_module", moduleName)
-				span.WithAnnotation("reason", "max_demos_reached")
-				return errors.WithFields(
-					errors.New(errors.ResourceExhausted, fmt.Sprintf("max demonstrations reached for module %s", moduleName)),
-					errors.Fields{
-						"module":        moduleName,
-						"max_demos":     b.MaxBootstrapped,
-						"current_demos": len(currentDemos),
-					})
+		for i, predictor := range demoPredictors(module) {
+			name := moduleName
+			if i > 0 {
+				name = fmt.Sprintf("%s[%d]", moduleName, i)
 			}
-			newDemos := append(currentDemos, demo)
-			predictor.SetDemos(newDemos)
-			span.WithAnnotation("added_to_module", moduleName)
-			span.WithAnnotation("total_demos", len(newDemos))
-			return nil
+			predictors[name] = predictor
 		}
 	}
-	return errors.New(errors.ResourceNotFound, "no suitable module found for adding demonstrations")
+	return slices.Sorted(maps.Keys(predictors)), predictors
 }
