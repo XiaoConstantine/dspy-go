@@ -879,7 +879,7 @@ func testSIMBADualStrategy(t *testing.T) {
 		simba := NewSIMBA(
 			WithSIMBAStrategyMode("both"),
 			WithSIMBAStrategyRatio(0.5),
-			WithSIMBANumCandidates(7), // 1 base + 6 new (3 instruction + 3 rule)
+			WithSIMBANumCandidates(7), // 1 incumbent + 6 demo/rule proposals
 		)
 
 		program := createSIMBATestProgram()
@@ -932,8 +932,8 @@ func testSIMBADualStrategy(t *testing.T) {
 	t.Run("Strategy ratio controls candidate distribution", func(t *testing.T) {
 		simba := NewSIMBA(
 			WithSIMBAStrategyMode("both"),
-			WithSIMBAStrategyRatio(0.8), // 80% instruction, 20% rule
-			WithSIMBANumCandidates(6),   // 1 base + 5 new (4 instruction + 1 rule)
+			WithSIMBAStrategyRatio(0.8), // 80% demo probability, 20% rule
+			WithSIMBANumCandidates(6),   // 1 incumbent + 5 proposals
 		)
 
 		program := createSIMBATestProgram()
@@ -2371,6 +2371,8 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		)
 		simba.initializePipelineChannels()
 
+		simba.search = &simbaSearch{pool: []simbaPoolEntry{{program: program, scores: []float64{0.5}}}}
+
 		// Hold the batch worker at an unbuffered send, then start its consumer.
 		// Backpressure is not successful completion and must not discard the step.
 		simba.pipelineChannels.BatchSampling = make(chan *PipelineStage)
@@ -2382,21 +2384,15 @@ func testSIMBAPipelineProcessing(t *testing.T) {
 		batchDone := make(chan struct{})
 		workers.Go(func() {
 			defer close(batchDone)
-			simba.batchSamplingWorker(ctx, examples)
+			simba.batchSamplingWorker(ctx, program, examples, core.MetricScorer(func(_, _ map[string]any) float64 { return 0.5 }))
 		})
-		simba.pipelineChannels.CandidateGeneration <- &PipelineStage{
-			StepIndex:  0,
-			Candidates: []core.Program{program},
-			Timestamp:  time.Now(),
-		}
-
-		close(simba.pipelineChannels.CandidateGeneration)
 		select {
 		case <-batchDone:
 			t.Fatal("batch worker dropped the stage instead of waiting for its consumer")
 		case <-time.After(150 * time.Millisecond):
 		}
 
+		workers.Go(func() { simba.candidateGenerationWorker(ctx) })
 		workers.Go(func() {
 			simba.candidateEvaluationWorker(ctx, core.MetricScorer(func(expected, actual map[string]any) float64 { return 0.5 }))
 		})

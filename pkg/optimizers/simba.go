@@ -48,8 +48,10 @@ type SIMBAConfig struct {
 	LLMConcurrency int `json:"llm_concurrency"` // Default: 0 (unlimited for LLM calls)
 
 	// Strategy configuration
-	StrategyMode  string  `json:"strategy_mode"`  // Default: "both" (both, instruction_only, rule_only)
-	StrategyRatio float64 `json:"strategy_ratio"` // Default: 0.5 (percentage of instruction perturbation when using both)
+	StrategyMode       string  `json:"strategy_mode"`        // Default: "both" (both, instruction_only, rule_only, demo_only)
+	StrategyRatio      float64 `json:"strategy_ratio"`       // Default: 0.5 (probability of a demo proposal in both mode)
+	MaxDemos           int     `json:"max_demos"`            // Default: 4 per predictor; zero disables demo proposals
+	DemoScoreThreshold float64 `json:"demo_score_threshold"` // Default: 1; minimum successful program score for demos
 
 	// Bucket sorting configuration
 	UseBucketSorting      bool      `json:"use_bucket_sorting"`      // Default: false
@@ -73,12 +75,13 @@ type SIMBAConfig struct {
 
 // Trajectory represents an execution trajectory for rule extraction.
 type Trajectory struct {
-	Example       core.Example
-	Prediction    map[string]any
-	Score         float64
-	Success       bool
-	ProgramID     string // To track which program generated this
-	ExecutionTime time.Duration
+	Example         core.Example
+	Prediction      map[string]any
+	Score           float64
+	Success         bool
+	ProgramID       string // To track which program generated this
+	ExecutionTime   time.Duration
+	PredictorTraces []SIMBAPredictorTrace // Predictor-local inputs and parsed outputs, in execution order.
 }
 
 // SIMBAState tracks optimization progress and history.
@@ -182,7 +185,12 @@ type PipelineResult struct {
 	StageTimings   map[string]time.Duration
 }
 
-// SIMBA implements Stochastic Introspective Mini-Batch Ascent optimizer.
+// SIMBA implements Stochastic Introspective Mini-Batch Ascent. It retains scored
+// proposals, softmax-samples parents from the top programs plus the baseline,
+// and builds demos or predictor-specific rules from current, same-example traces.
+// Each evidence-enabled step runs up to NumCandidates additional programs on the
+// minibatch. Only the step winner is validated on the full dataset; Compile
+// returns the best full-dataset result, never merely the best minibatch estimate.
 type SIMBA struct {
 	// Core configuration
 	config SIMBAConfig
@@ -195,6 +203,7 @@ type SIMBA struct {
 	state  *SIMBAState
 	logger *logging.Logger
 	rng    *rand.Rand
+	search *simbaSearch // Owned by the current compile; pipeline stages exchange ownership.
 
 	// Pipeline processing
 	pipelineChannels *PipelineChannels
@@ -239,21 +248,38 @@ func WithSIMBANumCandidates(num int) SIMBAOption {
 	}
 }
 
-// WithSamplingTemperature sets the sampling temperature.
+// WithSamplingTemperature sets the decaying softmax temperature for source
+// programs and exploratory step-winner selection. Zero chooses the highest score.
 func WithSamplingTemperature(temperature float64) SIMBAOption {
 	return func(s *SIMBA) {
 		s.config.SamplingTemperature = temperature
 	}
 }
 
-// WithSIMBAStrategyMode sets the strategy mode (both, instruction_only, rule_only).
+// WithSIMBAStrategyMode selects both (demos and rules), instruction_only,
+// rule_only, or demo_only. Missing usable evidence falls back to instruction
+// perturbation, except in demo_only mode, which leaves that proposal unchanged.
 func WithSIMBAStrategyMode(mode string) SIMBAOption {
 	return func(s *SIMBA) {
 		s.config.StrategyMode = mode
 	}
 }
 
-// WithSIMBAStrategyRatio sets the ratio of instruction perturbation vs rule generation.
+// WithSIMBADemoScoreThreshold sets the minimum program score that certifies a
+// successful demonstration. The default is 1 for accuracy metrics; set this for
+// metrics with another scale. Failed executions never supply demonstrations.
+func WithSIMBADemoScoreThreshold(score float64) SIMBAOption {
+	return func(s *SIMBA) { s.config.DemoScoreThreshold = score }
+}
+
+// WithSIMBAMaxDemos sets the hard cap on demonstrations per predictor in new
+// proposals. Zero disables appending demos; the input program is never modified.
+func WithSIMBAMaxDemos(count int) SIMBAOption {
+	return func(s *SIMBA) { s.config.MaxDemos = max(0, count) }
+}
+
+// WithSIMBAStrategyRatio sets the probability of trying a demo rather than a rule
+// in both mode. Previously it allocated instruction-perturbation proposals.
 func WithSIMBAStrategyRatio(ratio float64) SIMBAOption {
 	return func(s *SIMBA) {
 		// Ensure ratio is between 0 and 1
@@ -266,7 +292,8 @@ func WithSIMBAStrategyRatio(ratio float64) SIMBAOption {
 	}
 }
 
-// WithBucketSorting enables or disables bucket sorting candidate selection.
+// WithBucketSorting controls the legacy weighted step-winner selection. It does
+// not disable the same-example evidence buckets, which always use DSPy's ordering.
 func WithBucketSorting(enabled bool) SIMBAOption {
 	return func(s *SIMBA) {
 		s.config.UseBucketSorting = enabled
@@ -375,6 +402,8 @@ func NewSIMBA(opts ...SIMBAOption) *SIMBA {
 			LLMConcurrency:         0, // 0 = unlimited for LLM calls
 			StrategyMode:           "both",
 			StrategyRatio:          0.5,
+			MaxDemos:               4,
+			DemoScoreThreshold:     1,
 			UseBucketSorting:       false,
 			BucketSortingCriteria:  []string{"max_to_min_gap", "max_score", "max_to_avg_gap"},
 			BucketSortingWeights:   []float64{0.4, 0.4, 0.2},
@@ -526,6 +555,7 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 	}
 	s.state.BestScore = initialScore
 	s.state.BestProgram = bestProgram
+	s.search = &simbaSearch{pool: []simbaPoolEntry{{program: bestProgram, fullScore: &initialScore}}}
 
 	s.logger.Info(ctx, "Initial program score: %.4f", initialScore)
 
@@ -554,25 +584,20 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 		s.state.CurrentStep = step
 		s.mu.Unlock()
 
-		// Generate candidate programs
+		// Evidence and proposals use the same examples in this step.
+		batch, err := s.prepareStep(stepCtx, examples, scorer)
+		if err != nil {
+			stepSpan.WithError(err)
+			core.EndSpan(stepCtx)
+			return program, err
+		}
 		candidates, err := s.generateCandidates(stepCtx, incumbentProgram)
 		if err != nil {
 			stepSpan.WithError(err)
 			core.EndSpan(stepCtx)
 			return program, errors.WithFields(
-				errors.New(errors.ValidationFailed, "failed to generate candidates"),
+				errors.Wrap(err, errors.ValidationFailed, "failed to generate candidates"),
 				errors.Fields{"step": step, "error": err.Error()},
-			)
-		}
-
-		// Process mini-batch and evaluate candidates
-		batch, err := s.sampleMiniBatchFromExamples(stepCtx, examples)
-		if err != nil {
-			stepSpan.WithError(err)
-			core.EndSpan(stepCtx)
-			return program, errors.WithFields(
-				errors.Wrap(err, errors.ValidationFailed, "failed to sample mini-batch"),
-				errors.Fields{"step": step},
 			)
 		}
 
@@ -597,6 +622,7 @@ func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examp
 			core.EndSpan(stepCtx)
 			return program, err
 		}
+		s.rememberCandidates(candidates, scores, selectedProgram, selectedFullScore)
 		improvement := selectedFullScore - s.state.BestScore
 		if selectedFullScore > s.state.BestScore {
 			s.mu.Lock()
@@ -666,6 +692,7 @@ func (s *SIMBA) resetState() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.search = nil
 	s.state.CurrentStep = 0
 	s.state.BestScore = 0.0
 	s.state.BestProgram = core.Program{}
@@ -717,107 +744,90 @@ func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Prog
 
 // generateCandidates creates candidate programs for the current step.
 func (s *SIMBA) generateCandidates(ctx context.Context, baseProgram core.Program) ([]core.Program, error) {
-	candidates := make([]core.Program, 0, s.config.NumCandidates)
-
-	// Include the base program as first candidate
-	candidates = append(candidates, baseProgram.Clone())
-
-	// Determine strategy allocation based on configuration
-	numInstructionCandidates := s.config.NumCandidates - 1
-	numRuleCandidates := 0
-
-	// Honor explicit strategy disabling; fast mode keeps instruction proposals.
-	if s.config.DisableInstructionPerturbation {
-		// No instruction-based strategies are available.
-		numInstructionCandidates = 0
-		numRuleCandidates = 0
-	} else if s.config.DisableRuleGeneration {
-		// Only instruction perturbation, no rule generation
-		numInstructionCandidates = s.config.NumCandidates - 1
-		numRuleCandidates = 0
-	} else {
-		// Full strategy mode logic
-		switch s.config.StrategyMode {
-		case "instruction_only":
-			// All candidates use instruction perturbation
-			numRuleCandidates = 0
-		case "rule_only":
-			// All candidates use rule generation
-			numInstructionCandidates = 0
-			numRuleCandidates = s.config.NumCandidates - 1
-		case "both":
-			// Split based on strategy ratio
-			totalNewCandidates := s.config.NumCandidates - 1
-			numInstructionCandidates = int(float64(totalNewCandidates) * s.config.StrategyRatio)
-			numRuleCandidates = totalNewCandidates - numInstructionCandidates
-		}
+	candidates := []core.Program{baseProgram.Clone()}
+	results := make([]core.Program, s.config.NumCandidates-1)
+	type proposal struct {
+		parent core.Program
+		mode   string
+		bucket *simbaBucket
 	}
-
-	s.logger.Debug(ctx, "Generating candidates: %d instruction perturbation, %d rule-based",
-		numInstructionCandidates, numRuleCandidates)
-
-	// Analyze the preceding step once, sharing its rules only within this step.
-	// Equal scores do not imply equal inputs, predictions, or expected outputs.
-	var rules []string
-	if numRuleCandidates > 0 {
-		var err error
-		rules, err = s.extractRulesFromTrajectories(ctx)
-		if err != nil {
-			s.logger.Debug(ctx, "Failed to extract rules from trajectories: %v", err)
+	plans := make([]proposal, len(results))
+	for i := range plans {
+		// Sample parents and strategies in candidate order, not goroutine order.
+		parent := s.sampleSource(baseProgram)
+		mode := s.config.StrategyMode
+		if mode == "both" {
+			s.mu.Lock()
+			demo := s.config.MaxDemos > 0 && s.rng.Float64() < s.config.StrategyRatio
+			s.mu.Unlock()
+			mode = "rule_only"
+			if demo {
+				mode = "demo"
+			}
 		}
+		if (s.config.DisableRuleGeneration && mode == "rule_only") ||
+			(s.config.DisableTrajectoryTracking && mode != "demo_only") {
+			mode = "instruction_only"
+		}
+		var bucket *simbaBucket
+		if s.search != nil && len(s.search.buckets) > 0 {
+			bucket = &s.search.buckets[i%len(s.search.buckets)]
+		}
+		plans[i] = proposal{parent: parent, mode: mode, bucket: bucket}
 	}
-
-	// Generate candidates using both strategies in parallel with unlimited concurrency
-	candidateResults := make([]core.Program, s.config.NumCandidates-1)
 	p := s.createLLMPool()
-
-	candidateIdx := 0
-
-	// Generate instruction perturbation candidates
-	for i := 0; i < numInstructionCandidates; i++ {
-		idx := candidateIdx
-		candidateIdx++
+	for i, plan := range plans {
 		p.Go(func() {
-			candidate, err := s.perturbProgram(ctx, baseProgram)
+			candidate, err := s.proposeFromBucket(ctx, plan.parent, plan.mode, plan.bucket)
 			if err != nil {
-				s.logger.Debug(ctx, "Failed to generate instruction candidate %d: %v", idx, err)
+				s.logger.Debug(ctx, "Failed to generate candidate %d: %v", i, err)
 				return
 			}
-			s.mu.Lock()
-			candidateResults[idx] = candidate
-			s.mu.Unlock()
+			results[i] = candidate
 		})
 	}
-
-	// Generate rule-based candidates
-	for i := 0; i < numRuleCandidates; i++ {
-		idx := candidateIdx
-		candidateIdx++
-		p.Go(func() {
-			candidate, err := s.generateRuleBasedCandidate(ctx, baseProgram, rules)
-			if err != nil {
-				s.logger.Debug(ctx, "Failed to generate rule candidate %d: %v", idx, err)
-				return
-			}
-			s.mu.Lock()
-			candidateResults[idx] = candidate
-			s.mu.Unlock()
-		})
+	p.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	// Wait for all candidates to be generated, then collect non-zero results
-	p.Wait() // Ensure all goroutines finish before reading candidateResults
-	for _, candidate := range candidateResults {
+	for _, candidate := range results {
 		if candidate.Modules != nil {
+			s.limitProposalDemos(candidate)
 			candidates = append(candidates, candidate)
 		}
 	}
-
-	if len(candidates) == 0 {
-		return nil, errors.New(errors.ValidationFailed, "failed to generate any candidates")
-	}
-
 	return candidates, nil
+}
+
+func (s *SIMBA) proposeFromBucket(ctx context.Context, parent core.Program, mode string, bucket *simbaBucket) (core.Program, error) {
+	if mode == "demo" || mode == "demo_only" {
+		if bucket != nil {
+			if candidate, ok := s.appendDemo(parent, *bucket); ok {
+				return candidate, nil
+			}
+		}
+		if mode == "demo_only" {
+			return parent.Clone(), nil
+		}
+	}
+	if s.config.DisableInstructionPerturbation {
+		return parent.Clone(), nil
+	}
+	if mode == "rule_only" {
+		var rules []string
+		var err error
+		if bucket != nil {
+			return s.generateBucketRuleCandidate(ctx, parent, *bucket)
+		} else if s.search == nil {
+			// Direct helper use outside Compile, without a current minibatch.
+			rules, err = s.extractRulesFromTrajectories(ctx)
+		}
+		if err != nil {
+			s.logger.Debug(ctx, "Rule analysis failed: %v", err)
+		}
+		return s.generateRuleBasedCandidate(ctx, parent, rules)
+	}
+	return s.perturbProgram(ctx, parent)
 }
 
 // simbaInstructionModules finds nested predictors without setting signatures on their
@@ -964,6 +974,7 @@ SUCCESSFUL TRAJECTORIES:
 		prompt += fmt.Sprintf("Output: %v\n", t.Prediction)
 		prompt += fmt.Sprintf("Expected output: %v\n", t.Example.Outputs)
 		prompt += fmt.Sprintf("Score: %.3f\n", t.Score)
+		prompt += simbaFormatPredictorTraces(t.PredictorTraces)
 	}
 
 	prompt += `
@@ -980,6 +991,7 @@ FAILED TRAJECTORIES:
 		prompt += fmt.Sprintf("Output: %v\n", t.Prediction)
 		prompt += fmt.Sprintf("Expected output: %v\n", t.Example.Outputs)
 		prompt += fmt.Sprintf("Score: %.3f\n", t.Score)
+		prompt += simbaFormatPredictorTraces(t.PredictorTraces)
 	}
 
 	prompt += `
@@ -1077,6 +1089,7 @@ SUCCESSFUL TRAJECTORIES:
 		prompt += fmt.Sprintf("Output: %v\n", t.Prediction)
 		prompt += fmt.Sprintf("Expected output: %v\n", t.Example.Outputs)
 		prompt += fmt.Sprintf("Score: %.3f\n", t.Score)
+		prompt += simbaFormatPredictorTraces(t.PredictorTraces)
 	}
 
 	prompt += `
@@ -1165,8 +1178,8 @@ func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Progra
 		return nil, err
 	}
 
-	// Keep only this step's evidence for the next generation, not the first
-	// successes of an ever-growing window. Generation has finished reading it.
+	// Keep a bounded diagnostic window of this step's candidate evaluations.
+	// Generation already consumed the separate, complete current-batch buckets.
 	s.mu.Lock()
 	s.state.Trajectories = nil
 	s.mu.Unlock()
@@ -1178,7 +1191,14 @@ func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Progra
 	for i, candidate := range candidates {
 		i, candidate := i, candidate
 		p.Go(func() {
-			scores[i], errs[i] = s.evaluateCandidateOnBatch(ctx, candidate, batch, scorer)
+			var trajectories []Trajectory
+			scores[i], trajectories, errs[i] = s.evaluateBatch(ctx, candidate, batch, scorer)
+			if errs[i] == nil {
+				for j := range trajectories {
+					trajectories[j].ProgramID = fmt.Sprintf("step_%d_candidate_%d", s.state.CurrentStep, i)
+				}
+				s.storeTrajectories(trajectories)
+			}
 		})
 	}
 	p.Wait()
@@ -1196,119 +1216,87 @@ func (s *SIMBA) evaluateCandidates(ctx context.Context, candidates []core.Progra
 
 // evaluateCandidateOnBatch evaluates a single candidate on the mini-batch with parallel processing.
 func (s *SIMBA) evaluateCandidateOnBatch(ctx context.Context, candidate core.Program, batch []core.Example, scorer core.Scorer) (float64, error) {
+	score, trajectories, err := s.evaluateBatch(ctx, candidate, batch, scorer)
+	if err == nil {
+		s.storeTrajectories(trajectories)
+	}
+	return score, err
+}
+
+func (s *SIMBA) storeTrajectories(trajectories []Trajectory) {
+	if len(trajectories) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.Trajectories = append(s.state.Trajectories, trajectories...)
+	if len(s.state.Trajectories) > 100 {
+		s.state.Trajectories = s.state.Trajectories[len(s.state.Trajectories)-100:]
+	}
+}
+
+// evaluateBatch returns evidence in example order, independently of completion
+// order. Callers decide whether it belongs in the search buckets or diagnostics.
+func (s *SIMBA) evaluateBatch(ctx context.Context, candidate core.Program, batch []core.Example, scorer core.Scorer) (float64, []Trajectory, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if len(batch) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
-
 	scores := make([]float64, len(batch))
+	errs := make([]error, len(batch))
 	var trajectories []Trajectory
-	var programID string
 	if !s.config.DisableTrajectoryTracking {
 		trajectories = make([]Trajectory, len(batch))
-		// Generate a unique program ID for trajectory tracking (thread-safe)
-		s.mu.Lock()
-		programID = fmt.Sprintf("prog_%d_%d", s.state.CurrentStep, s.rng.Int63())
-		s.mu.Unlock()
 	}
-	var resultMu sync.Mutex
-	failed := false
-	var cancelErr error
-
 	p := s.createLLMPool()
-
 	for i, example := range batch {
-		i, example := i, example // capture loop variables
 		p.Go(func() {
 			if err := ctx.Err(); err != nil {
-				resultMu.Lock()
-				cancelErr = err
-				resultMu.Unlock()
+				errs[i] = err
 				return
 			}
 			startTime := time.Now()
-			prediction, err := candidate.Forward(ctx, example.Inputs)
-			executionTime := time.Since(startTime)
-			var score float64
+			var prediction map[string]any
+			var trace []SIMBAPredictorTrace
+			var err error
+			if s.config.DisableTrajectoryTracking {
+				prediction, err = candidate.Forward(ctx, example.Inputs)
+			} else {
+				prediction, trace, err = simbaTraceForward(ctx, candidate, example.Inputs)
+			}
 			if err == nil {
-				score, err = scorer.Score(ctx, example, prediction)
+				scores[i], err = scorer.Score(ctx, example, prediction)
 			}
-
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				resultMu.Lock()
-				cancelErr = ctxErr
-				resultMu.Unlock()
-				return
-			}
+			errs[i] = err
 			if err != nil {
 				s.logger.Debug(ctx, "Candidate evaluation failed for example: %v", err)
-				resultMu.Lock()
-				failed = true
-				resultMu.Unlock()
-				if !s.config.DisableTrajectoryTracking {
-					trajectories[i] = Trajectory{
-						Example:       example,
-						Prediction:    nil,
-						Score:         0.0,
-						Success:       false,
-						ProgramID:     programID,
-						ExecutionTime: executionTime,
-					}
-				}
-				return
+				prediction, trace = nil, nil
+				scores[i] = 0
 			}
-
-			scores[i] = score
-
-			// Create trajectory entry (skip if trajectory tracking is disabled)
-			if !s.config.DisableTrajectoryTracking {
+			if trajectories != nil {
 				trajectories[i] = Trajectory{
-					Example:       example,
-					Prediction:    prediction,
-					Score:         score,
-					Success:       score > 0.5, // Consider scores > 0.5 as successful
-					ProgramID:     programID,
-					ExecutionTime: executionTime,
+					Example: example, Prediction: prediction, Score: scores[i],
+					Success:       err == nil && scores[i] > 0.5,
+					ProgramID:     fmt.Sprintf("prog_%d", s.state.CurrentStep),
+					ExecutionTime: time.Since(startTime), PredictorTraces: trace,
 				}
 			}
-
 		})
 	}
-
-	// Wait for all goroutines to complete before processing trajectories
 	p.Wait()
-
-	if cancelErr != nil {
-		return 0, cancelErr
-	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-
-	// Store trajectories for rule extraction (skip if trajectory tracking is disabled)
-	if !s.config.DisableTrajectoryTracking {
-		s.mu.Lock()
-		// Keep a sliding window of recent trajectories (max 100)
-		s.state.Trajectories = append(s.state.Trajectories, trajectories...)
-		if len(s.state.Trajectories) > 100 {
-			// Keep only the most recent 100 trajectories
-			s.state.Trajectories = s.state.Trajectories[len(s.state.Trajectories)-100:]
+	var total float64
+	for i, err := range errs {
+		if err != nil {
+			return math.Inf(-1), trajectories, nil
 		}
-		s.mu.Unlock()
+		total += scores[i]
 	}
-
-	if failed {
-		return math.Inf(-1), nil
-	}
-
-	// Calculate average score
-	var totalScore float64
-	for _, score := range scores {
-		totalScore += score
-	}
-	return totalScore / float64(len(batch)), nil
+	return total / float64(len(batch)), trajectories, nil
 }
 
 // selectBestCandidate uses bucket sorting or temperature-controlled sampling to select program.
@@ -2077,11 +2065,9 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 	// Start pipeline workers using Go 1.25's WaitGroup.Go() for cleaner goroutine management
 	var wg sync.WaitGroup
 
-	// Start candidate generation worker
-	wg.Go(func() { s.candidateGenerationWorker(pipelineCtx, program) })
-
-	// Start batch sampling worker
-	wg.Go(func() { s.batchSamplingWorker(pipelineCtx, examples) })
+	// Evidence must precede candidate generation, which precedes evaluation.
+	wg.Go(func() { s.batchSamplingWorker(pipelineCtx, program, examples, scorer) })
+	wg.Go(func() { s.candidateGenerationWorker(pipelineCtx) })
 
 	// Start candidate evaluation worker
 	wg.Go(func() { s.candidateEvaluationWorker(pipelineCtx, scorer) })
@@ -2090,10 +2076,10 @@ func (s *SIMBA) runPipelineProcessing(ctx context.Context, program core.Program,
 	return s.pipelineCoordinator(ctx, program, examples, scorer, &wg, pipelineCancel)
 }
 
-// candidateGenerationWorker waits for full-set acceptance before generating the
-// next step, so proposals use the accepted parent and the preceding step's evidence.
-func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.Program) {
-	defer close(s.pipelineChannels.CandidateGeneration)
+// batchSamplingWorker waits for full-set acceptance before collecting evidence
+// for the next step. No worker reads a pool that another stage is still updating.
+func (s *SIMBA) batchSamplingWorker(ctx context.Context, baseProgram core.Program, examples []core.Example, scorer core.Scorer) {
+	defer close(s.pipelineChannels.BatchSampling)
 	currentProgram := baseProgram
 	for step := 0; step < s.config.MaxSteps; step++ {
 		if ctx.Err() != nil {
@@ -2103,9 +2089,9 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 		s.state.CurrentStep = step
 		s.mu.Unlock()
 		startTime := time.Now()
-		candidates, err := s.generateCandidates(ctx, currentProgram)
-		stage := &PipelineStage{StepIndex: step, Candidates: candidates, Timestamp: startTime, Error: err}
-		if !s.safeSendStage(ctx, s.pipelineChannels.CandidateGeneration, stage) {
+		batch, err := s.prepareStep(ctx, examples, scorer)
+		stage := &PipelineStage{StepIndex: step, Candidates: []core.Program{currentProgram}, Batch: batch, Timestamp: startTime, Error: err}
+		if !s.safeSendStage(ctx, s.pipelineChannels.BatchSampling, stage) {
 			return
 		}
 		if step+1 == s.config.MaxSteps {
@@ -2122,10 +2108,9 @@ func (s *SIMBA) candidateGenerationWorker(ctx context.Context, baseProgram core.
 	}
 }
 
-// batchSamplingWorker samples mini-batches in parallel.
-// Note: This worker is launched via WaitGroup.Go() which handles Done() automatically.
-func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example) {
-	defer close(s.pipelineChannels.BatchSampling)
+// candidateGenerationWorker builds proposals from the current minibatch evidence.
+func (s *SIMBA) candidateGenerationWorker(ctx context.Context) {
+	defer close(s.pipelineChannels.CandidateGeneration)
 
 	for {
 		select {
@@ -2133,7 +2118,7 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example
 			return
 		case <-s.pipelineChannels.Done:
 			return
-		case stage, ok := <-s.pipelineChannels.CandidateGeneration:
+		case stage, ok := <-s.pipelineChannels.BatchSampling:
 			if !ok {
 				return
 			}
@@ -2150,8 +2135,8 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example
 			}
 
 			startTime := time.Now()
-			batch, err := s.sampleMiniBatchFromExamples(ctx, examples)
-			stage.Batch = batch
+			candidates, err := s.generateCandidates(ctx, stage.Candidates[0])
+			stage.Candidates = candidates
 			stage.Error = err
 
 			if err != nil {
@@ -2165,11 +2150,11 @@ func (s *SIMBA) batchSamplingWorker(ctx context.Context, examples []core.Example
 				continue
 			}
 
-			s.logger.Debug(ctx, "Pipeline: Batch sampled for step %d in %v",
+			s.logger.Debug(ctx, "Pipeline: Candidates generated for step %d in %v",
 				stage.StepIndex, time.Since(startTime))
 
 			select {
-			case s.pipelineChannels.BatchSampling <- stage:
+			case s.pipelineChannels.CandidateGeneration <- stage:
 			case <-ctx.Done():
 				return
 			case <-s.pipelineChannels.Done:
@@ -2190,7 +2175,7 @@ func (s *SIMBA) candidateEvaluationWorker(ctx context.Context, scorer core.Score
 			return
 		case <-s.pipelineChannels.Done:
 			return
-		case stage, ok := <-s.pipelineChannels.BatchSampling:
+		case stage, ok := <-s.pipelineChannels.CandidateGeneration:
 			if !ok {
 				return
 			}
@@ -2287,6 +2272,7 @@ func (s *SIMBA) pipelineCoordinator(ctx context.Context, initialProgram core.Pro
 			if err != nil {
 				return bestProgram, err
 			}
+			s.rememberCandidates(stage.Candidates, stage.Scores, selectedProgram, selectedFullScore)
 			improvement := selectedFullScore - bestScore
 			if selectedFullScore > bestScore {
 				s.mu.Lock()
