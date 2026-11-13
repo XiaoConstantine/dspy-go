@@ -66,7 +66,7 @@ type GEPAConfig struct {
 	MutationRate   float64 `json:"mutation_rate"`   // Per-selected-component proposal probability; default: 1.0
 
 	// Reflection parameters
-	ReflectionDepth int `json:"reflection_depth"` // Default: 3
+	ReflectionDepth int `json:"reflection_depth"` // No effect on Compile, which makes one reflection call per proposal. Default: 3
 
 	// Selection parameters
 	TournamentSize     int    `json:"tournament_size"`     // Default: 3
@@ -74,7 +74,7 @@ type GEPAConfig struct {
 	ComponentSelection string `json:"component_selection"` // Default: "round_robin" | "random" | "all"
 
 	// Convergence parameters
-	ConvergenceThreshold float64 `json:"convergence_threshold"` // Default: 0.01
+	ConvergenceThreshold float64 `json:"convergence_threshold"` // No effect on Compile: any gain in best validation score resets stagnation. Default: 0.01
 	StagnationLimit      int     `json:"stagnation_limit"`      // Optional attempted updates without improvement; default: 0 (disabled).
 
 	// Performance parameters. Compile uses epoch-shuffled training minibatches
@@ -1280,9 +1280,17 @@ func (g *GEPA) compile(ctx context.Context, program core.Program, dataset core.D
 		return program, err
 	}
 	if !resumed {
-		g.state.ResetRunControls(time.Now())
+		// Only an explicit checkpoint resumes a run. A reused optimizer must
+		// not apply the previous program's population to a new compilation.
+		g.state = NewGEPAState()
+		// A seed describes one compilation, as in upstream gepa: compiling
+		// again with the same inputs repeats the same run.
+		if g.config.RandomSeed != 0 {
+			g.rng = rand.New(rand.NewSource(g.config.RandomSeed))
+		}
 	}
 	g.state.ResetEvaluationCaseCache()
+	g.setLatestEvaluationAdapter(nil)
 
 	// Initialize GEPA state in context
 	ctx = g.withGEPAState(ctx)
@@ -1297,8 +1305,8 @@ func (g *GEPA) compile(ctx context.Context, program core.Program, dataset core.D
 		return program, err
 	}
 
-	// Apply best candidate to program
-	finalProgram := g.applyBestCandidate(optimizedProgram)
+	// Keep the caller's interceptors, not the temporary GEPA trackers.
+	finalProgram := g.applyBestCandidate(program)
 
 	// Log optimization results
 	g.logOptimizationResults(ctx)
@@ -1764,7 +1772,9 @@ func (g *GEPA) installInterceptors(program core.Program) core.Program {
 	// Apply interceptors to all modules that support them
 	for name, module := range clonedProgram.Modules {
 		if interceptable, ok := module.(core.InterceptableModule); ok {
-			interceptable.SetInterceptors(chain.GetModuleInterceptors())
+			// Track the caller's full pipeline, including interceptors that
+			// short-circuit execution (such as structured-output handlers).
+			interceptable.SetInterceptors(append(chain.GetModuleInterceptors(), interceptable.GetInterceptors()...))
 		} else {
 			// Log warning if module doesn't support interceptors
 			logging.GetLogger().Warn(context.Background(),
@@ -3427,14 +3437,6 @@ func (g *GEPA) hasConverged() bool {
 		return false
 	}
 	if g.state.ConvergenceStatus.IsConverged {
-		return true
-	}
-
-	// Check stagnation
-	timeSinceImprovement := time.Since(g.state.LastImprovement)
-	if timeSinceImprovement > time.Duration(g.config.StagnationLimit)*time.Minute {
-		g.state.ConvergenceStatus.IsConverged = true
-		g.state.ConvergenceStatus.StagnationCount = g.config.StagnationLimit
 		return true
 	}
 

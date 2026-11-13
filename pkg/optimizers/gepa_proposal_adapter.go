@@ -225,28 +225,18 @@ func (g *GEPA) extractInstructionCandidate(content string) string {
 
 func unwrapInstructionCodeFence(content string) string {
 	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "```") {
+	start, end := strings.Index(content, "```"), strings.LastIndex(content, "```")
+	if start < 0 || end <= start {
 		return content
 	}
 
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSpace(content)
-	if strings.HasSuffix(content, "```") {
-		content = strings.TrimSuffix(content, "```")
-		content = strings.TrimSpace(content)
+	// Reflection models often surround the fenced proposal with chat prose.
+	// Keep everything between the outer fences, including multiline steps.
+	content = content[start+3 : end]
+	if language, body, ok := strings.Cut(content, "\n"); ok && isInstructionFenceLanguage(strings.TrimSpace(language)) {
+		content = body
 	}
-
-	lines := strings.Split(content, "\n")
-	if len(lines) <= 1 {
-		return content
-	}
-
-	firstLine := strings.TrimSpace(lines[0])
-	if isInstructionFenceLanguage(firstLine) {
-		return strings.TrimSpace(strings.Join(lines[1:], "\n"))
-	}
-
-	return content
+	return strings.TrimSpace(content)
 }
 
 func isInstructionFenceLanguage(line string) bool {

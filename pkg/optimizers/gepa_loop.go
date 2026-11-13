@@ -119,8 +119,15 @@ func (g *GEPA) runCandidateIteration(ctx context.Context, adapter, validationAda
 		child = g.proposeFromMinibatch(ctx, parent, selection.modules, parentEvaluation)
 	}
 	if child == nil {
-		g.state.ConvergenceStatus.StagnationCount++
 		return true
+	}
+	childKey := candidateComponentCacheKey(child)
+	for _, retained := range next.Candidates {
+		if candidateComponentCacheKey(retained) == childKey {
+			// A repeated proposal adds neither a new candidate nor evidence
+			// of stagnation, regardless of which parent proposed it.
+			return true
+		}
 	}
 	childEvaluation := g.evaluateWithinBudget(ctx, child, adapter)
 	if childEvaluation == nil {
@@ -140,7 +147,7 @@ func (g *GEPA) runCandidateIteration(ctx context.Context, adapter, validationAda
 	}
 	g.state.UpsertCandidateEvaluation(child.ID, childEvaluation)
 	next.Candidates = append(next.Candidates, child)
-	if g.state.BestValidationFitness-previousBest >= g.config.ConvergenceThreshold {
+	if g.state.BestValidationFitness > previousBest {
 		g.state.ConvergenceStatus.StagnationCount = 0
 	} else {
 		g.state.ConvergenceStatus.StagnationCount++
@@ -179,29 +186,42 @@ func (g *GEPA) proposeFromMinibatch(ctx context.Context, parent *GEPACandidate, 
 	if len(moduleNames) == 1 {
 		// Preserve multiline instructions; the old variation parser kept only
 		// the first nonempty line and silently discarded the rest of a proposal.
-		instruction := strings.TrimSpace(unwrapInstructionCodeFence(response.Content))
-		for _, prefix := range []string{"REWRITTEN INSTRUCTION:", "IMPROVED INSTRUCTION:", "INSTRUCTION:"} {
-			if strings.HasPrefix(strings.ToUpper(instruction), prefix) {
-				instruction = strings.TrimSpace(instruction[len(prefix):])
-				break
+		instruction := unwrapInstructionCodeFence(response.Content)
+		if label, body, ok := strings.Cut(instruction, ":"); ok {
+			switch strings.ToUpper(strings.Trim(strings.TrimSpace(label), "*")) {
+			case "REWRITTEN INSTRUCTION", "IMPROVED INSTRUCTION", "INSTRUCTION":
+				instruction = strings.TrimSpace(strings.TrimPrefix(body, "**"))
 			}
 		}
-		instruction = strings.Trim(stripLeadingNumberedMarker(instruction), "\"'")
+		// Keep legacy single-item proposal normalization (also used for
+		// numeric artifacts), but preserve the steps of multiline instructions.
+		if !strings.Contains(instruction, "\n") {
+			instruction = stripLeadingNumberedMarker(instruction)
+		}
+		// Remove only matching enclosing quotes, not a quoted final word.
+		if len(instruction) >= 2 && (instruction[0] == '"' || instruction[0] == '\'') && instruction[len(instruction)-1] == instruction[0] {
+			instruction = strings.TrimSpace(instruction[1 : len(instruction)-1])
+		}
 		if instruction == "" {
 			return nil
 		}
 		texts[moduleNames[0]] = instruction
 	} else {
-		var proposed map[string]string
-		if json.Unmarshal([]byte(unwrapInstructionCodeFence(response.Content)), &proposed) != nil || len(proposed) != len(moduleNames) {
+		content := unwrapInstructionCodeFence(response.Content)
+		start, end := strings.Index(content, "{"), strings.LastIndex(content, "}")
+		if start < 0 || end <= start {
+			return nil
+		}
+		var proposed map[string]json.RawMessage
+		if json.Unmarshal([]byte(content[start:end+1]), &proposed) != nil {
 			return nil
 		}
 		for _, name := range moduleNames {
-			instruction := strings.TrimSpace(proposed[name])
-			if instruction == "" {
+			var instruction string
+			if json.Unmarshal(proposed[name], &instruction) != nil || strings.TrimSpace(instruction) == "" {
 				return nil
 			}
-			texts[name] = instruction
+			texts[name] = strings.TrimSpace(instruction)
 		}
 	}
 	child := g.candidateFromSeed(parent, texts[moduleNames[0]], g.state.CurrentGeneration, []string{parent.ID}, map[string]any{

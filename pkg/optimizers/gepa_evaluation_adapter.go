@@ -223,7 +223,9 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 				if !adapter.concurrentScoring {
 					scoring.Lock()
 				}
-				cacheable := true
+				// Execution failures may be transient; retry them on the next
+				// evaluation rather than permanently penalizing this candidate.
+				cacheable := err == nil
 				if err == nil {
 					var scoreErr error
 					evalCase.Score, scoreErr = adapter.scorer.Score(ctx, example, outputs)
@@ -231,6 +233,7 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 					case scoreErr == nil:
 					case ctx.Err() != nil:
 						evalCase.Err = scoreErr
+						cacheable = false
 					default:
 						// An unscorable example counts as zero, so it cannot
 						// raise the average the way a dropped case would. It is

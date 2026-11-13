@@ -345,18 +345,17 @@ func TestGEPASelectionUsesPerExampleMetric(t *testing.T) {
 				if validation {
 					config.ValidationExamples = []core.Example{{Outputs: map[string]any{"validation": true}}}
 				}
-				if resume {
-					config.RunDir = t.TempDir()
-				}
+				config.RunDir = t.TempDir()
 				gepa, err := NewGEPA(config)
 				require.NoError(t, err)
-				// Selection is independent of proposal generation. Supply an already
-				// retained pool; Compile no longer paraphrases a seed into this pool.
+				// Selection is independent of proposal generation. Supply a retained
+				// pool through an explicit checkpoint; fresh Compile clears state.
 				gepa.state.PopulationHistory = []*Population{{Candidates: []*GEPACandidate{
 					{ID: "compromise", ModuleName: "alpha", Instruction: "elegant metaphor"},
 					{ID: "first", ModuleName: "alpha", Instruction: "first specialist"},
 					{ID: "last", ModuleName: "alpha", Instruction: "error specialist"},
 				}}}
+				require.NoError(t, gepa.saveRunState())
 
 				program := newCandidateEvaluationTestProgram("elegant metaphor")
 				if mode != "plain" {
@@ -2506,8 +2505,7 @@ func TestConvergenceDetection(t *testing.T) {
 	// Test initial state (should not be converged)
 	assert.False(t, gepa.hasConverged())
 
-	// Simulate stagnation by setting last improvement time in the past
-	gepa.state.LastImprovement = time.Now().Add(-5 * time.Minute)
+	// Simulate unsuccessful proposals; elapsed time is controlled by MaxRuntime.
 	gepa.state.ConvergenceStatus.StagnationCount = config.StagnationLimit
 
 	// Should now be converged due to stagnation
