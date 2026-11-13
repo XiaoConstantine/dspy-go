@@ -37,7 +37,7 @@ func offlineCases() []offlineCase {
 				return offlineMetric(want, got) == 1
 			}, 4)
 		}},
-		{name: "MIPRO", quarantine: "default NumTrials is zero; fallback selects the first instruction without metric comparison", new: func(seed int64) core.Optimizer {
+		{name: "MIPRO", new: func(seed int64) core.Optimizer {
 			return NewMIPRO(nil, WithRandomSeed(seed))
 		}},
 		{name: "COPRO", new: func(int64) core.Optimizer {

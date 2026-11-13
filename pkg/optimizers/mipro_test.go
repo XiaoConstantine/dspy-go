@@ -32,7 +32,7 @@ func newInstructionModule(name, instruction string) *instructionModule {
 }
 
 func (m *instructionModule) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
-	return map[string]any{"output": "ok"}, nil
+	return map[string]any{"output": "ok", "instruction": m.GetSignature().Instruction}, nil
 }
 
 func (m *instructionModule) Clone() core.Module {
@@ -162,8 +162,6 @@ func TestMIPRO(t *testing.T) {
 			mockStrategy.On("SuggestParams", mock.Anything).Return(map[string]any{"module_0_instruction": float64(0)}, nil).Once()
 
 			mockStrategy.On("UpdateResults", mock.Anything, mock.AnythingOfType("float64")).Return(nil).Once()
-			mockStrategy.On("GetBestParams").Return(
-				map[string]any{"module_0_instruction": float64(0)}, 0.8).Once()
 			mockModule.On("Clone").Return(mockModule).Maybe()
 			mockModule.On("SetSignature", mock.Anything).Return().Maybe()
 			mockModule.On("SetLLM", mock.Anything).Return().Maybe()
@@ -197,6 +195,8 @@ func TestMIPRO(t *testing.T) {
 			mipro.searchStrategy = mockStrategy
 
 			program := createTestProgram()
+			program.Modules["test"].(*MockModule).On("Process", mock.Anything, mock.Anything).Return(
+				map[string]any{"output": "test"}, nil).Maybe()
 			dataset := createTestDataset()
 
 			// Cast to mock dataset to set expectations
@@ -242,7 +242,7 @@ func TestMIPRO(t *testing.T) {
 			mockStrategy.AssertExpectations(t)
 		})
 
-		t.Run("Converges early with good solution", func(t *testing.T) {
+		t.Run("Completes a single-trial run", func(t *testing.T) {
 			ctx := context.Background()
 			mipro := createTestMIPRO(t)
 			mockStrategy := new(MockSearchStrategy)
@@ -267,7 +267,6 @@ func TestMIPRO(t *testing.T) {
 			mockStrategy.On("SuggestParams", ctx).Return(map[string]any{"module_0_instruction": float64(0)}, nil).Once()
 
 			mockStrategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Maybe()
-			mockStrategy.On("GetBestParams").Return(map[string]any{"module_0_instruction": float64(0)}, 0.8).Once()
 
 			mockMod.On("Clone").Return(mockMod).Maybe()
 			mockMod.On("Clone").Return(mockMod).Maybe()
@@ -295,6 +294,9 @@ func TestMIPRO(t *testing.T) {
 		t.Run("Tracks and returns the best negative-scoring candidate", func(t *testing.T) {
 			mipro := createTestMIPRO(t)
 			mipro.metric = func(example, prediction map[string]any, ctx context.Context) float64 {
+				if prediction["instruction"] == "original" {
+					return -1
+				}
 				return -0.5
 			}
 
@@ -302,7 +304,6 @@ func TestMIPRO(t *testing.T) {
 			strategy.On("SuggestParams", mock.Anything).Return(
 				map[string]any{"module_0_instruction": float64(0)}, nil).Once()
 			strategy.On("UpdateResults", mock.Anything, -0.5).Return(nil).Once()
-			strategy.On("GetBestParams").Return(map[string]any(nil), math.Inf(-1)).Once()
 			mipro.searchStrategy = strategy
 
 			module := newInstructionModule("test", "original")
@@ -527,7 +528,6 @@ func TestMIPROCompileResetsStateAndMaterializesLegacyDatasetOnce(t *testing.T) {
 	strategy.On("Initialize", mock.Anything).Return(nil).Twice()
 	strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Twice()
 	strategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Twice()
-	strategy.On("GetBestParams").Return(map[string]any{}, 0.8).Twice()
 
 	model := new(testutil.MockLLM)
 	mipro := NewMIPRO(
@@ -571,7 +571,6 @@ func TestMIPROCompileExamples(t *testing.T) {
 	strategy.On("Initialize", mock.Anything).Return(nil).Once()
 	strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Once()
 	strategy.On("UpdateResults", mock.Anything, 0.8).Return(nil).Once()
-	strategy.On("GetBestParams").Return(map[string]any{}, 0.8).Once()
 
 	model := new(testutil.MockLLM)
 	mipro := NewMIPRO(
@@ -623,7 +622,6 @@ func TestMIPROCompileExamplesUsesInvocationMetric(t *testing.T) {
 			strategy.On("Initialize", mock.Anything).Return(nil).Once()
 			strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Once()
 			strategy.On("UpdateResults", mock.Anything, 0.25).Return(nil).Once()
-			strategy.On("GetBestParams").Return(map[string]any{}, 0.25).Once()
 
 			model := new(testutil.MockLLM)
 			mipro := NewMIPRO(
@@ -1103,4 +1101,38 @@ func TestGenerateDemonstrationUsesLabeledExampleWithoutPrompt(t *testing.T) {
 
 	_, err = optimizer.GenerateDemonstration(context.Background(), core.Example{Inputs: map[string]any{"question": "2+2?"}})
 	require.ErrorContains(t, err, "missing prompt")
+}
+
+// TestMIPRORunsModeTrialsWithoutNumTrials covers a run configured without
+// WithNumTrials. Before the fix it ran zero trials and returned a program no
+// metric had compared.
+func TestMIPRORunsModeTrialsWithoutNumTrials(t *testing.T) {
+	trials := AutoRunSettings[LightMode].NumTrials
+	strategy := new(MockSearchStrategy)
+	strategy.On("Initialize", mock.Anything).Return(nil).Once()
+	strategy.On("SuggestParams", mock.Anything).Return(map[string]any{}, nil).Times(trials)
+	strategy.On("UpdateResults", mock.Anything, 0.25).Return(nil).Times(trials)
+
+	model := new(testutil.MockLLM)
+	mipro := NewMIPRO(nil, WithMode(LightMode), WithSearchStrategy(strategy), WithModels(model, model))
+	mipro.maxBootstrappedDemos = 0
+	mipro.instructionGenerator.MaxCandidates = 0
+
+	program := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"test": newInstructionModule("test", "base")},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return modules["test"].Process(ctx, inputs)
+			}
+		},
+	)
+	examples := []core.Example{{
+		Inputs:  map[string]any{"input": "sample"},
+		Outputs: map[string]any{"output": "ok"},
+	}}
+
+	_, err := mipro.CompileExamples(context.Background(), program, examples,
+		func(expected, actual map[string]any) float64 { return 0.25 })
+	require.NoError(t, err)
+	strategy.AssertExpectations(t)
 }
