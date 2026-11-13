@@ -3,6 +3,7 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -611,4 +612,119 @@ func TestBootstrapFewShotKeepsLookingPastRejectedExamples(t *testing.T) {
 	assert.Equal(t, "q2", demos[0].Inputs["question"])
 	assert.Equal(t, "q3", demos[1].Inputs["question"])
 	mockLLM.AssertNumberOfCalls(t, "Generate", 4)
+}
+
+// bootstrapQuestions returns the questions of the demos on the compiled
+// single-predictor program.
+func bootstrapQuestions(t *testing.T, compiled core.Program) []any {
+	t.Helper()
+	var questions []any
+	for _, demo := range compiled.Modules["predictor"].(*modules.Predict).GetDemos() {
+		questions = append(questions, demo.Inputs["question"])
+	}
+	return questions
+}
+
+func keepEverything(_, _ map[string]any, _ context.Context) bool { return true }
+
+// bootstrapTrainset returns n legacy train examples asking q<i>.
+func bootstrapTrainset(n int) []map[string]any {
+	trainset := make([]map[string]any, n)
+	for i, example := range scriptQAExamples(n) {
+		trainset[i] = map[string]any{"question": example.Inputs["question"], "answer": example.Outputs["answer"]}
+	}
+	return trainset
+}
+
+func TestBootstrapFewShotKeepsModuleLLMWithoutTeacherLLM(t *testing.T) {
+	answering := func(answer string) *scriptLLM {
+		return &scriptLLM{behave: func(_, _ string) (string, error) { return "answer: " + answer, nil }}
+	}
+	moduleLLM, defaultLLM, teacherLLM := answering("from-module"), answering("from-default"), answering("from-teacher")
+	newProgram := func() core.Program {
+		predictor := modules.NewPredict(scriptQASignature("base"))
+		predictor.SetLLM(moduleLLM)
+		return coproSinglePredictorProgram(predictor)
+	}
+	compile := func(t *testing.T) any {
+		program := newProgram()
+		compiled, err := NewBootstrapFewShot(keepEverything, 2).CompileLegacy(context.Background(), program, program, bootstrapTrainset(3))
+		require.NoError(t, err)
+		demos := compiled.Modules["predictor"].(*modules.Predict).GetDemos()
+		require.Len(t, demos, 2)
+		return demos[0].Outputs["answer"]
+	}
+
+	useScriptLLM(t, defaultLLM)
+	assert.Equal(t, "from-module", compile(t), "the default LLM does not replace a module's own LLM")
+	assert.Empty(t, defaultLLM.sent(""))
+
+	core.GlobalConfig.DefaultLLM = nil
+	assert.Equal(t, "from-module", compile(t), "no default LLM is needed when modules have their own")
+
+	core.GlobalConfig.TeacherLLM = teacherLLM
+	assert.Equal(t, "from-teacher", compile(t), "a configured teacher LLM is used")
+}
+
+func TestBootstrapFewShotSkipsFailedTeacherCalls(t *testing.T) {
+	compile := func(t *testing.T, fails func(question string) bool) (core.Program, error) {
+		llm := &scriptLLM{behave: func(_, prompt string) (string, error) {
+			question := promptInput(prompt, "question")
+			if fails(question) {
+				return "", fmt.Errorf("transient provider error")
+			}
+			return "answer: gold-" + question, nil
+		}}
+		useScriptLLM(t, llm)
+		program := coproSinglePredictorProgram(modules.NewPredict(scriptQASignature("base")))
+		return NewBootstrapFewShot(keepEverything, 4).CompileLegacy(context.Background(), program, program, bootstrapTrainset(10))
+	}
+
+	t.Run("one failure is skipped", func(t *testing.T) {
+		compiled, err := compile(t, func(question string) bool { return question == "q1" })
+		require.NoError(t, err)
+		assert.Equal(t, []any{"q0", "q2", "q3", "q4"}, bootstrapQuestions(t, compiled))
+	})
+
+	t.Run("a teacher that always fails is an error", func(t *testing.T) {
+		_, err := compile(t, func(string) bool { return true })
+		assert.ErrorContains(t, err, "every teacher call failed")
+		assert.ErrorContains(t, err, "transient provider error")
+	})
+}
+
+func TestBootstrapFewShotRecompileReplacesExistingDemos(t *testing.T) {
+	llm := &scriptLLM{behave: func(_, prompt string) (string, error) {
+		return "answer: gold-" + promptInput(prompt, "question"), nil
+	}}
+	useScriptLLM(t, llm)
+	predictor := modules.NewPredict(scriptQASignature("base"))
+	stale := []core.Example{
+		{Inputs: map[string]any{"question": "old1"}, Outputs: map[string]any{"answer": "stale1"}},
+		{Inputs: map[string]any{"question": "old2"}, Outputs: map[string]any{"answer": "stale2"}},
+	}
+	predictor.SetDemos(stale)
+	program := coproSinglePredictorProgram(predictor)
+
+	compiled, err := NewBootstrapFewShot(keepEverything, 2).CompileLegacy(context.Background(), program, program, bootstrapTrainset(10))
+
+	require.NoError(t, err)
+	assert.Equal(t, []any{"q0", "q1"}, bootstrapQuestions(t, compiled))
+	assert.Equal(t, stale, predictor.GetDemos(), "the student program must not be modified")
+}
+
+func TestBootstrapFewShotRejectsMultiplePredictors(t *testing.T) {
+	llm := &scriptLLM{behave: func(_, prompt string) (string, error) {
+		if question := promptInput(prompt, "question"); question != "" {
+			return "query: search-" + question, nil
+		}
+		return "answer: gold-" + strings.TrimPrefix(promptInput(prompt, "query"), "search-"), nil
+	}}
+	useScriptLLM(t, llm)
+	program := scriptTwoStageProgram(llm)
+
+	_, err := NewBootstrapFewShot(keepEverything, 2).CompileLegacy(context.Background(), program, program, bootstrapTrainset(4))
+
+	assert.ErrorContains(t, err, "one predictor")
+	assert.Empty(t, llm.sent(""), "the unsupported program is rejected before any teacher call")
 }

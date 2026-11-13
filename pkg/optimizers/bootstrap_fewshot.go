@@ -59,7 +59,10 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, da
 // CompileWithScorer bootstraps demonstrations from materialized, read-only
 // examples, using program as its own teacher. A teacher prediction becomes a
 // demonstration when scorer scores it at MetricThreshold or above (above zero
-// when the threshold is unset); one the scorer cannot score is not kept. It
+// when the threshold is unset); one the scorer cannot score is not kept. An
+// example the teacher fails on is skipped, and compiling fails only when
+// every teacher call fails. The program must have exactly one predictor, whose
+// existing demonstrations are replaced. It
 // calls scorer from up to core.GetConcurrencyLevel goroutines at once and
 // ignores the constructor metric.
 func (b *BootstrapFewShot) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
@@ -107,10 +110,22 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		}
 	}
 	compiledStudent := student.Clone()
-	teacherLLM := core.GetTeacherLLM()
-	if teacherLLM == nil {
-		teacherLLM = core.GetDefaultLLM()
+	// Start from a student without demonstrations, so compiling an already
+	// compiled program bootstraps again instead of counting its old demos. A
+	// program-level demonstration fits only one predictor's fields, so more
+	// than one predictor is rejected rather than given another's demos.
+	predictorCount := 0
+	for _, module := range compiledStudent.Modules {
+		for _, predictor := range demoPredictors(module) {
+			predictor.SetDemos(nil)
+			predictorCount++
+		}
 	}
+	if predictorCount > 1 {
+		return student, errors.New(errors.InvalidInput, fmt.Sprintf("BootstrapFewShot supports programs with one predictor, got %d: a demonstration of the whole program does not match each predictor's fields", predictorCount))
+	}
+	// Modules keep their own LLMs unless a teacher LLM is configured.
+	teacherLLM := core.GetTeacherLLM()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -128,6 +143,8 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 	// MaxBootstrapped examples would return too few demonstrations whenever
 	// some of them fail the metric.
 	var results []core.Example
+	var teacherErr error
+	teacherSucceeded := false
 	batchSize := max(core.GetConcurrencyLevel(), 1)
 	for start := 0; start < len(trainset) && len(results) < b.MaxBootstrapped; start += batchSize {
 		if b.enoughBootstrappedDemos(compiledStudent) {
@@ -136,7 +153,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		}
 		batch := trainset[start:min(start+batchSize, len(trainset))]
 		kept := make([]*core.Example, len(batch))
-		errCh := make(chan error, 1)
+		errs := make([]error, len(batch))
 		p := pool.New().WithMaxGoroutines(batchSize)
 		for i, ex := range batch {
 			p.Go(func() {
@@ -147,10 +164,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				prediction, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
 				if err != nil {
 					exampleSpan.WithError(err)
-					select {
-					case errCh <- err:
-					default:
-					}
+					errs[i] = err
 					return
 				}
 				exampleSpan.WithAnnotation("prediction", prediction)
@@ -162,23 +176,33 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		}
 		p.Wait()
 
-		select {
-		case err := <-errCh:
-			span.WithError(err)
-			return compiledStudent, fmt.Errorf("error during compilation: %w", err)
-		default:
-		}
 		// A cancelled run has scored only part of the trainset; report it instead
 		// of returning the demonstrations that happened to finish.
 		if err := ctx.Err(); err != nil {
 			span.WithError(err)
 			return compiledStudent, fmt.Errorf("error during compilation: %w", err)
 		}
+		// A failed teacher call yields no demonstration; the walk continues.
+		for i, err := range errs {
+			if err == nil {
+				teacherSucceeded = true
+				continue
+			}
+			logging.GetLogger().Warn(ctx, "BootstrapFewShot: teacher failed on example %d: %v", start+i, err)
+			if teacherErr == nil {
+				teacherErr = err
+			}
+		}
 		for _, example := range kept {
 			if example != nil && len(results) < b.MaxBootstrapped {
 				results = append(results, *example)
 			}
 		}
+	}
+	// A teacher that never works is a broken setup, not a hard example.
+	if teacherErr != nil && !teacherSucceeded {
+		span.WithError(teacherErr)
+		return compiledStudent, fmt.Errorf("error during compilation: every teacher call failed: %w", teacherErr)
 	}
 
 	for _, result := range results {
@@ -196,11 +220,13 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 }
 
 func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]any) (map[string]any, error) {
-	// Clone the teacher program and set its LLM to the teacher LLM
+	// Clone the teacher program; a configured teacher LLM replaces its modules' LLMs.
 	teacherClone := teacher.Clone()
-	for _, module := range teacherClone.Modules {
-		if predictor, ok := module.(interface{ SetLLM(core.LLM) }); ok {
-			predictor.SetLLM(teacherLLM)
+	if teacherLLM != nil {
+		for _, module := range teacherClone.Modules {
+			if predictor, ok := module.(interface{ SetLLM(core.LLM) }); ok {
+				predictor.SetLLM(teacherLLM)
+			}
 		}
 	}
 	if ctx == nil {
