@@ -3,7 +3,9 @@ package optimizers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -201,8 +203,11 @@ func createCOPROTestProgram() core.Program {
 		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
 		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
 	)
-	predictor := modules.NewPredict(signature)
+	return coproSinglePredictorProgram(modules.NewPredict(signature))
+}
 
+// coproSinglePredictorProgram wraps predictor as the module "predictor".
+func coproSinglePredictorProgram(predictor core.Module) core.Program {
 	return core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
@@ -293,8 +298,7 @@ func TestCOPROCompile_NoPredictModules(t *testing.T) {
 
 	optimizedProgram, err := copro.Compile(ctx, program, dataset, metric)
 
-	assert.NoError(t, err)
-	assert.NotNil(t, optimizedProgram)
+	require.ErrorContains(t, err, "no Predict module")
 	assert.Equal(t, 0, len(optimizedProgram.Modules))
 	dataset.AssertNotCalled(t, "Reset")
 	dataset.AssertNotCalled(t, "Next")
@@ -337,10 +341,14 @@ func TestCOPROCompileExamples_PropagatesCancellationAndStopsPredictors(t *testin
 	first.SetLLM(firstLLM)
 	second := modules.NewPredict(signature)
 	second.SetLLM(secondLLM)
-	program := core.NewProgram(map[string]core.Module{
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{
 		"a_first":  first,
 		"b_second": second,
-	}, nil)
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			return modules["a_first"].Process(ctx, inputs)
+		}
+	})
 
 	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1 }, WithBreadth(1), WithDepth(0))
 	_, err := copro.CompileExamples(ctx, program, []core.Example{{
@@ -398,10 +406,23 @@ func TestCOPROCompile_MaterializesLegacyDatasetOnce(t *testing.T) {
 	first.SetLLM(firstLLM)
 	second := modules.NewPredict(secondSignature)
 	second.SetLLM(secondLLM)
-	program := core.NewProgram(map[string]core.Module{
+	program := core.NewProgramWithForwardFactory(map[string]core.Module{
 		"first":  first,
 		"second": second,
-	}, nil)
+	}, func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+		return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			outputs, err := modules["first"].Process(ctx, inputs)
+			if err != nil {
+				return nil, err
+			}
+			secondOutputs, err := modules["second"].Process(ctx, inputs)
+			if err != nil {
+				return nil, err
+			}
+			maps.Copy(outputs, secondOutputs)
+			return outputs, nil
+		}
+	})
 
 	examples := []core.Example{
 		{
@@ -571,7 +592,7 @@ func TestEvaluateCandidate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, core.MetricScorer(copro.Metric))
+	score, err := copro.evaluateCandidate(ctx, coproSinglePredictorProgram(predictor), "predictor", candidate, examples, core.MetricScorer(copro.Metric))
 
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, score, 0.0)
@@ -602,7 +623,7 @@ func TestEvaluateCandidate_LLMError(t *testing.T) {
 	}}
 
 	ctx := context.Background()
-	score, err := copro.evaluateCandidate(ctx, predictor, candidate, examples, core.MetricScorer(copro.Metric))
+	score, err := copro.evaluateCandidate(ctx, coproSinglePredictorProgram(predictor), "predictor", candidate, examples, core.MetricScorer(copro.Metric))
 
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, score) // Should return 0 when no valid evaluations
@@ -625,7 +646,8 @@ func TestEvaluateCandidate_ProviderTimeoutIsInvalidScore(t *testing.T) {
 
 	score, err := copro.evaluateCandidate(
 		context.Background(),
-		predictor,
+		coproSinglePredictorProgram(predictor),
+		"predictor",
 		PromptCandidate{Instruction: "Test"},
 		[]core.Example{{Inputs: map[string]any{"question": "test"}, Outputs: map[string]any{"answer": "test"}}},
 		core.MetricScorer(copro.Metric),
@@ -665,7 +687,7 @@ func TestEvaluateCandidatesParallel(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	require.NoError(t, copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, core.MetricScorer(copro.Metric)))
+	require.NoError(t, copro.evaluateCandidatesParallel(ctx, coproSinglePredictorProgram(predictor), "predictor", candidates, examples, core.MetricScorer(copro.Metric)))
 
 	// All candidates should have been evaluated (score set)
 	for _, candidate := range candidates {
@@ -988,7 +1010,7 @@ func BenchmarkCOPROConcurrency(b *testing.B) {
 				for j := range candidates {
 					candidates[j].Score = 0.0
 				}
-				if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, core.MetricScorer(copro.Metric)); err != nil {
+				if err := copro.evaluateCandidatesParallel(ctx, coproSinglePredictorProgram(predictor), "predictor", candidates, examples, core.MetricScorer(copro.Metric)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -1082,7 +1104,7 @@ func TestOptimizePredictor_EmptyDataset(t *testing.T) {
 	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
-	err := copro.optimizePredictor(ctx, predictor, nil, core.MetricScorer(copro.Metric))
+	err := copro.optimizePredictor(ctx, coproSinglePredictorProgram(predictor), "predictor", nil, core.MetricScorer(copro.Metric))
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no examples in dataset for optimization")
@@ -1108,7 +1130,7 @@ func TestOptimizePredictor_WithCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
+	err := copro.optimizePredictor(ctx, coproSinglePredictorProgram(predictor), "predictor", core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
 
 	assert.NoError(t, err)
 }
@@ -1133,7 +1155,7 @@ func TestOptimizePredictor_NoCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, predictor, core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
+	err := copro.optimizePredictor(ctx, coproSinglePredictorProgram(predictor), "predictor", core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
 
 	assert.NoError(t, err)
 }
@@ -1178,8 +1200,385 @@ func BenchmarkEvaluateCandidatesParallel(b *testing.B) {
 		for j := range candidates {
 			candidates[j].Score = 0.0
 		}
-		if err := copro.evaluateCandidatesParallel(ctx, predictor, candidates, examples, core.MetricScorer(copro.Metric)); err != nil {
+		if err := copro.evaluateCandidatesParallel(ctx, coproSinglePredictorProgram(predictor), "predictor", candidates, examples, core.MetricScorer(copro.Metric)); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// scriptLLM answers prompt-generation prompts with initial and refine,
+// and task prompts with behave(instruction block, prompt).
+type scriptLLM struct {
+	core.LLM
+	mu      sync.Mutex
+	prompts []string
+	initial string
+	refine  string
+	behave  func(head, prompt string) (string, error)
+}
+
+const (
+	coproInitialPrompt = "You are an expert prompt engineer specializing"
+	coproRefinePrompt  = "You are an expert prompt engineer analyzing previous instruction attempts"
+)
+
+func (m *scriptLLM) ModelID() string      { return "script" }
+func (m *scriptLLM) ProviderName() string { return "test" }
+func (m *scriptLLM) Capabilities() []core.Capability {
+	return []core.Capability{core.CapabilityCompletion}
+}
+
+func (m *scriptLLM) Generate(_ context.Context, prompt string, _ ...core.GenerateOption) (*core.LLMResponse, error) {
+	m.mu.Lock()
+	m.prompts = append(m.prompts, prompt)
+	m.mu.Unlock()
+	switch {
+	case strings.HasPrefix(prompt, coproInitialPrompt):
+		return &core.LLMResponse{Content: m.initial}, nil
+	case strings.HasPrefix(prompt, coproRefinePrompt):
+		return &core.LLMResponse{Content: m.refine}, nil
+	}
+	out, err := m.behave(strings.Split(prompt, "---\n\n")[0], prompt)
+	if err != nil {
+		return nil, err
+	}
+	return &core.LLMResponse{Content: out}, nil
+}
+
+// sent returns the prompts that start with prefix.
+func (m *scriptLLM) sent(prefix string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var matched []string
+	for _, prompt := range m.prompts {
+		if strings.HasPrefix(prompt, prefix) {
+			matched = append(matched, prompt)
+		}
+	}
+	return matched
+}
+
+// promptInput returns the value of field in the prompt's final block, the one
+// after any demonstrations.
+func promptInput(prompt, field string) string {
+	blocks := strings.Split(prompt, "---\n\n")
+	for _, line := range strings.Split(blocks[len(blocks)-1], "\n") {
+		if value, ok := strings.CutPrefix(line, field+": "); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// useScriptLLM makes llm the default LLM, with no teacher LLM, for one test.
+func useScriptLLM(t *testing.T, llm core.LLM) {
+	t.Helper()
+	oldDefault, oldTeacher := core.GlobalConfig.DefaultLLM, core.GlobalConfig.TeacherLLM
+	t.Cleanup(func() {
+		core.GlobalConfig.DefaultLLM, core.GlobalConfig.TeacherLLM = oldDefault, oldTeacher
+	})
+	core.GlobalConfig.DefaultLLM, core.GlobalConfig.TeacherLLM = llm, nil
+}
+
+func scriptQASignature(instruction string) core.Signature {
+	return core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.Field{Name: "answer", Prefix: "answer:"}}},
+	).WithInstruction(instruction)
+}
+
+// scriptQAExamples returns n examples asking q<i> and expecting gold-q<i>.
+func scriptQAExamples(n int) []core.Example {
+	examples := make([]core.Example, n)
+	for i := range examples {
+		question := fmt.Sprintf("q%d", i)
+		examples[i] = core.Example{
+			Inputs:  map[string]any{"question": question},
+			Outputs: map[string]any{"answer": "gold-" + question},
+		}
+	}
+	return examples
+}
+
+func scriptExactMatch(expected, actual map[string]any) float64 {
+	if strings.TrimSpace(fmt.Sprint(actual["answer"])) == expected["answer"] {
+		return 1
+	}
+	return 0
+}
+
+// scriptTwoStageProgram rewrites a question into a query and answers the query.
+func scriptTwoStageProgram(llm core.LLM) core.Program {
+	rewrite := modules.NewPredict(core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "question"}}},
+		[]core.OutputField{{Field: core.Field{Name: "query", Prefix: "query:"}}},
+	).WithInstruction("Rewrite the question into a search query TAG-REWRITE."))
+	answer := modules.NewPredict(core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "query"}}},
+		[]core.OutputField{{Field: core.Field{Name: "answer", Prefix: "answer:"}}},
+	).WithInstruction("Answer the search query in one word TAG-ANSWER."))
+	rewrite.SetLLM(llm)
+	answer.SetLLM(llm)
+	return core.NewProgramWithForwardFactory(map[string]core.Module{"a_rewrite": rewrite, "b_answer": answer},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				rewritten, err := modules["a_rewrite"].Process(ctx, inputs)
+				if err != nil {
+					return nil, err
+				}
+				return modules["b_answer"].Process(ctx, map[string]any{"query": rewritten["query"]})
+			}
+		})
+}
+
+// goldWhen answers a question correctly when right(instruction block, question).
+func goldWhen(right func(head, question string) bool) func(head, prompt string) (string, error) {
+	return func(head, prompt string) (string, error) {
+		question := promptInput(prompt, "question")
+		if right(head, question) {
+			return "answer: gold-" + question, nil
+		}
+		return "answer: wrong", nil
+	}
+}
+
+func TestCOPROCompile_OptimizesChainOfThoughtPredictor(t *testing.T) {
+	llm := &scriptLLM{
+		initial: "Candidate instruction TAG-GOOD one.\nCandidate instruction TAG-BAD two.",
+		behave: func(head, prompt string) (string, error) {
+			answer := "wrong"
+			if strings.Contains(head, "TAG-GOOD") {
+				answer = "gold-" + promptInput(prompt, "question")
+			}
+			return "<response><rationale>because</rationale><answer>" + answer + "</answer></response>", nil
+		},
+	}
+	useScriptLLM(t, llm)
+	cot := modules.NewChainOfThought(scriptQASignature("Base instruction TAG-BASE here."))
+	cot.SetLLM(llm)
+
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(0)).
+		CompileExamples(context.Background(), coproSinglePredictorProgram(cot), scriptQAExamples(4), nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Candidate instruction TAG-GOOD one.", out.Modules["predictor"].GetSignature().Instruction)
+	result, err := out.Execute(context.Background(), map[string]any{"question": "new"})
+	require.NoError(t, err)
+	assert.Equal(t, "gold-new", result["answer"])
+	assert.Contains(t, result, "rationale", "the optimized module is still a ChainOfThought")
+}
+
+func TestCOPROCompile_ScoresWholeMultiPredictorProgram(t *testing.T) {
+	llm := &scriptLLM{
+		initial: "Candidate instruction TAG-GOOD one.\nCandidate instruction TAG-BAD two.",
+		behave: func(head, prompt string) (string, error) {
+			if question := promptInput(prompt, "question"); question != "" {
+				// Only the original rewrite instruction produces a usable query.
+				if strings.Contains(head, "TAG-REWRITE") {
+					return "query: search-" + question, nil
+				}
+				return "query: broken", nil
+			}
+			question, ok := strings.CutPrefix(promptInput(prompt, "query"), "search-")
+			if ok && strings.Contains(head, "TAG-GOOD") {
+				return "answer: gold-" + question, nil
+			}
+			return "answer: wrong", nil
+		},
+	}
+	useScriptLLM(t, llm)
+
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(0)).
+		CompileExamples(context.Background(), scriptTwoStageProgram(llm), scriptQAExamples(4), nil)
+
+	require.NoError(t, err)
+	assert.Contains(t, out.Modules["a_rewrite"].GetSignature().Instruction, "TAG-REWRITE", "no candidate beats the original rewrite instruction")
+	assert.Equal(t, "Candidate instruction TAG-GOOD one.", out.Modules["b_answer"].GetSignature().Instruction)
+	result, err := out.Execute(context.Background(), map[string]any{"question": "new"})
+	require.NoError(t, err)
+	assert.Equal(t, "gold-new", result["answer"])
+}
+
+func TestCOPROCompile_KeepsDemosAndPredictorSettings(t *testing.T) {
+	var fewestDemoBlocks atomic.Int64
+	fewestDemoBlocks.Store(-1)
+	llm := &scriptLLM{
+		initial: "Candidate instruction TAG-GOOD one.\nCandidate instruction TAG-BAD two.",
+		behave: func(head, prompt string) (string, error) {
+			blocks := int64(len(strings.Split(prompt, "---\n\n")) - 2)
+			if fewest := fewestDemoBlocks.Load(); fewest < 0 || blocks < fewest {
+				fewestDemoBlocks.Store(blocks)
+			}
+			if strings.Contains(head, "TAG-GOOD") {
+				return "answer: gold-" + promptInput(prompt, "question"), nil
+			}
+			return "answer: wrong", nil
+		},
+	}
+	useScriptLLM(t, llm)
+	demos := []core.Example{
+		{Inputs: map[string]any{"question": "d1"}, Outputs: map[string]any{"answer": "gold-d1"}},
+		{Inputs: map[string]any{"question": "d2"}, Outputs: map[string]any{"answer": "gold-d2"}},
+	}
+	predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-BASE here.")).
+		WithName("router").
+		WithDefaultOptions(core.WithGenerateOptions(core.WithTemperature(0)))
+	predictor.SetLLM(llm)
+	predictor.SetDemos(demos)
+	// Predict refuses to export instruction artifacts while it has default options.
+	_, _, optionsErr := predictor.InstructionArtifacts()
+	require.Error(t, optionsErr)
+
+	// One compile at a time, so the atomic above need not be a strict minimum.
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(0)).
+		CompileExamples(context.Background(), coproSinglePredictorProgram(predictor), scriptQAExamples(4), nil)
+
+	require.NoError(t, err)
+	optimized := out.Modules["predictor"].(*modules.Predict)
+	assert.Equal(t, "Candidate instruction TAG-GOOD one.", optimized.GetSignature().Instruction)
+	assert.Equal(t, demos, optimized.GetDemos())
+	assert.Equal(t, "router", optimized.GetDisplayName())
+	_, _, optionsErr = optimized.InstructionArtifacts()
+	assert.Error(t, optionsErr, "default options are kept")
+	assert.Equal(t, int64(2), fewestDemoBlocks.Load(), "every candidate is evaluated with the predictor's demos")
+}
+
+func TestCOPROCompile_FailedPredictionsCountAsZero(t *testing.T) {
+	llm := &scriptLLM{
+		initial: "Candidate instruction TAG-FLAKY one.",
+		behave: func(head, prompt string) (string, error) {
+			question := promptInput(prompt, "question")
+			if strings.Contains(head, "TAG-FLAKY") {
+				// Fails on nine of ten examples and is right on the last.
+				if question != "q9" {
+					return "", fmt.Errorf("provider rejected prompt")
+				}
+				return "answer: gold-q9", nil
+			}
+			// The original instruction is right on nine of ten.
+			if question == "q9" {
+				return "answer: wrong", nil
+			}
+			return "answer: gold-" + question, nil
+		},
+	}
+	useScriptLLM(t, llm)
+	predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-SOLID here."))
+	predictor.SetLLM(llm)
+
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(1), WithDepth(0)).
+		CompileExamples(context.Background(), coproSinglePredictorProgram(predictor), scriptQAExamples(10), nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Base instruction TAG-SOLID here.", out.Modules["predictor"].GetSignature().Instruction)
+}
+
+func TestCOPROCompile_SelectsOnAllExamples(t *testing.T) {
+	compile := func(t *testing.T, initial string, right func(head, question string) bool) string {
+		llm := &scriptLLM{initial: initial, behave: goldWhen(right)}
+		useScriptLLM(t, llm)
+		predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-BASE here."))
+		predictor.SetLLM(llm)
+		out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(0)).
+			CompileExamples(context.Background(), coproSinglePredictorProgram(predictor), scriptQAExamples(9), nil)
+		require.NoError(t, err)
+		return out.Modules["predictor"].GetSignature().Instruction
+	}
+
+	t.Run("best over all examples beats best on the last third", func(t *testing.T) {
+		selected := compile(t, "Candidate instruction TAG-MOST one.\nCandidate instruction TAG-TAIL two.", func(head, question string) bool {
+			switch {
+			case strings.Contains(head, "TAG-MOST"): // 8 of 9: all but q8
+				return question != "q8"
+			case strings.Contains(head, "TAG-TAIL"): // 3 of 9: only the last third
+				return question >= "q6"
+			}
+			return question <= "q3" // the original: 4 of 9
+		})
+		assert.Equal(t, "Candidate instruction TAG-MOST one.", selected)
+	})
+
+	t.Run("original instruction wins a tie", func(t *testing.T) {
+		selected := compile(t, "Candidate instruction TAG-SAME one.\nCandidate instruction TAG-SAME two.", func(_, question string) bool {
+			return question <= "q3"
+		})
+		assert.Equal(t, "Base instruction TAG-BASE here.", selected)
+	})
+}
+
+func TestCOPROCompile_RefinesWithLLMAtEveryDepth(t *testing.T) {
+	llm := &scriptLLM{
+		initial: "Candidate instruction TAG-I1 one.\nCandidate instruction TAG-I2 two.\nCandidate instruction TAG-I3 three.\nCandidate instruction TAG-I4 four.\nCandidate instruction TAG-I5 five.",
+		refine:  "Refined instruction TAG-R1 one.\nRefined instruction TAG-R2 two.",
+		// Each instruction answers a different number of questions correctly.
+		behave: goldWhen(func(head, question string) bool {
+			for i, tag := range []string{"TAG-BASE", "TAG-I1", "TAG-I2", "TAG-I3", "TAG-I4", "TAG-I5"} {
+				if strings.Contains(head, tag) {
+					return question < fmt.Sprintf("q%d", i)
+				}
+			}
+			return false
+		}),
+	}
+	useScriptLLM(t, llm)
+	predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-BASE here."))
+	predictor.SetLLM(llm)
+
+	_, err := NewCOPRO(scriptExactMatch, WithBreadth(5), WithDepth(2)).
+		CompileExamples(context.Background(), coproSinglePredictorProgram(predictor), scriptQAExamples(6), nil)
+	require.NoError(t, err)
+
+	refinements := llm.sent(coproRefinePrompt)
+	require.Len(t, refinements, 2, "one refinement call per depth")
+	for _, prompt := range llm.sent("Given the fields") {
+		for _, suffix := range coproRefinements() {
+			assert.NotContains(t, strings.Split(prompt, "---\n\n")[0], suffix, "no fixed-suffix candidate is evaluated while the LLM proposes")
+		}
+	}
+
+	// The first refinement sees every evaluated instruction's score, each
+	// listed once, with the best and worst in different sections.
+	_, feedback, _ := strings.Cut(refinements[0], "HIGH-PERFORMING INSTRUCTIONS:")
+	feedback, _, _ = strings.Cut(feedback, "\n\nAnalyze")
+	high, low, found := strings.Cut(feedback, "LOW-PERFORMING INSTRUCTIONS:")
+	require.True(t, found)
+	for _, tag := range []string{"TAG-I5", "TAG-I4", "TAG-I3"} {
+		assert.Contains(t, high, tag)
+		assert.NotContains(t, low, tag)
+	}
+	for _, tag := range []string{"TAG-I2", "TAG-I1", "TAG-BASE"} {
+		assert.Contains(t, low, tag)
+		assert.NotContains(t, high, tag)
+	}
+	assert.Contains(t, high, "TAG-I5 five. (score: 0.833)")
+	assert.Contains(t, low, "TAG-BASE here. (score: 0.000)")
+}
+
+func TestCOPROCompile_ParsesNumberedAndQuotedProposals(t *testing.T) {
+	llm := &scriptLLM{
+		initial: "Here are 2 instructions:\n\n1. \"Answer using only TAG-GOOD facts from the question.\"\n2) 'Reason step by step TAG-BAD before answering.'",
+		refine:  "Here are the improved instructions:\n- **Give the shortest TAG-BAD answer possible.**",
+		behave: goldWhen(func(head, _ string) bool {
+			return strings.Contains(head, "TAG-GOOD")
+		}),
+	}
+	useScriptLLM(t, llm)
+	predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-BASE here."))
+	predictor.SetLLM(llm)
+
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(1)).
+		CompileExamples(context.Background(), coproSinglePredictorProgram(predictor), scriptQAExamples(4), nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Answer using only TAG-GOOD facts from the question.", out.Modules["predictor"].GetSignature().Instruction)
+	evaluated := map[string]bool{}
+	for _, prompt := range llm.sent("Given the fields") {
+		evaluated[strings.Split(prompt, "---\n\n")[0]] = true
+	}
+	assert.Len(t, evaluated, 4, "the original and three proposals; no preamble line is a candidate")
+	for head := range evaluated {
+		assert.NotContains(t, head, "Here are")
+		assert.NotContains(t, head, "**")
+		assert.NotContains(t, head, "2)")
 	}
 }

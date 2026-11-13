@@ -224,7 +224,6 @@ func TestUnscorableExampleNeverRaisesScore(t *testing.T) {
 
 	t.Run("COPRO", func(t *testing.T) {
 		model := newOfflineLLM()
-		predictor := offlineProgram(model).Modules["route"].(*modules.Predict)
 		train := offlineExamples(1, 0)
 		// A judge that fails on all but one example must not report that one
 		// score as the candidate's average.
@@ -234,7 +233,7 @@ func TestUnscorableExampleNeverRaisesScore(t *testing.T) {
 			}
 			return 1, nil
 		})
-		score, err := NewCOPRO(nil).evaluateCandidate(context.Background(), predictor, PromptCandidate{Instruction: offlineBaseline}, train, judge)
+		score, err := NewCOPRO(nil).evaluateCandidate(context.Background(), offlineProgram(model), "route", PromptCandidate{Instruction: offlineBaseline}, train, judge)
 		require.NoError(t, err)
 		assert.InDelta(t, 1.0/float64(len(train)), score, 1e-12)
 	})

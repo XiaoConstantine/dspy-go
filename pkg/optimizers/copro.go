@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -39,8 +40,8 @@ var (
 type PromptCandidate struct {
 	Instruction     string
 	Prefix          string
-	Score           float64 // Training score
-	ValidationScore float64 // Validation score to prevent overfitting
+	Score           float64 // Average score over all examples
+	ValidationScore float64 // Unused: candidates are selected on Score
 	Generation      int     // Which depth iteration this was generated in
 	Diversity       float64 // Semantic diversity score
 	Rank            int     // Performance ranking
@@ -131,8 +132,8 @@ func (c *COPRO) Compile(ctx context.Context, program core.Program, dataset core.
 		return program, err
 	}
 
-	// Preserve the legacy behavior of returning immediately when there is
-	// nothing to optimize without consuming the dataset.
+	// A program with nothing to optimize is rejected without consuming the
+	// dataset.
 	if len(c.extractPredictors(program)) == 0 {
 		return c.compileExamples(ctx, program, nil, scorer)
 	}
@@ -150,8 +151,8 @@ func (c *COPRO) CompileExamples(ctx context.Context, program core.Program, examp
 }
 
 // CompileWithScorer optimizes a program from materialized, read-only examples. It
-// calls scorer concurrently. An example the scorer cannot score counts as
-// zero in a candidate's average.
+// calls scorer concurrently. An example the program fails on or the scorer
+// cannot score counts as zero in a candidate's average.
 func (c *COPRO) CompileWithScorer(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
 	ctx, scorer, err := c.prepareCompile(ctx, scorer)
 	if err != nil {
@@ -194,31 +195,33 @@ func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examp
 	// Extract all Predict modules that need optimization
 	predictors := c.extractPredictors(optimizedProgram)
 	if len(predictors) == 0 {
-		logger.Info(ctx, "COPRO: No Predict modules found to optimize")
-		return optimizedProgram, nil
+		return program, fmt.Errorf("COPRO: program has no Predict module to optimize")
+	}
+	if program.Forward == nil {
+		return program, fmt.Errorf("COPRO: program has no forward function, so its candidates cannot be scored")
 	}
 
 	logger.Info(ctx, "COPRO: Found %d Predict modules to optimize", len(predictors))
 
-	moduleNames := make([]string, 0, len(predictors))
-	for moduleName := range predictors {
-		moduleNames = append(moduleNames, moduleName)
+	predictorNames := make([]string, 0, len(predictors))
+	for name := range predictors {
+		predictorNames = append(predictorNames, name)
 	}
-	sort.Strings(moduleNames)
+	sort.Strings(predictorNames)
 
-	// Optimize each predictor's prompts in deterministic order.
-	for _, moduleName := range moduleNames {
+	// Optimize each predictor's prompts in deterministic order. Later
+	// predictors are optimized with the earlier winners already installed.
+	for _, name := range predictorNames {
 		if err := ctx.Err(); err != nil {
 			return optimizedProgram, err
 		}
-		predictor := predictors[moduleName]
-		moduleCtx, moduleSpan := core.StartSpan(ctx, fmt.Sprintf("OptimizePredictor_%s", moduleName))
+		moduleCtx, moduleSpan := core.StartSpan(ctx, fmt.Sprintf("OptimizePredictor_%s", name))
 
-		err := c.optimizePredictor(moduleCtx, predictor, examples, scorer)
+		err := c.optimizePredictor(moduleCtx, optimizedProgram, name, examples, scorer)
 		if err != nil {
 			moduleSpan.WithError(err)
 			core.EndSpan(moduleCtx)
-			return optimizedProgram, fmt.Errorf("error optimizing predictor %s: %w", moduleName, err)
+			return optimizedProgram, fmt.Errorf("error optimizing predictor %s: %w", name, err)
 		}
 
 		core.EndSpan(moduleCtx)
@@ -228,21 +231,29 @@ func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examp
 	return optimizedProgram, nil
 }
 
-// extractPredictors finds all Predict modules in the program.
+// extractPredictors finds all Predict modules in the program, including those
+// nested in composites such as ChainOfThought. A module's first predictor is
+// keyed by the module name and any further ones by "name[i]".
 func (c *COPRO) extractPredictors(program core.Program) map[string]*modules.Predict {
 	predictors := make(map[string]*modules.Predict)
 
 	for moduleName, module := range program.Modules {
-		if predictor, ok := module.(*modules.Predict); ok {
-			predictors[moduleName] = predictor
+		for i, predictor := range demoPredictors(module) {
+			name := moduleName
+			if i > 0 {
+				name = fmt.Sprintf("%s[%d]", moduleName, i)
+			}
+			predictors[name] = predictor
 		}
 	}
 
 	return predictors
 }
 
-// optimizePredictor optimizes prompts for a single Predict module.
-func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predict, examples []core.Example, scorer core.Scorer) error {
+// optimizePredictor optimizes the instruction of the predictor called name
+// (see extractPredictors) and installs the winner in program. Candidates are
+// scored by running the whole program on all examples.
+func (c *COPRO) optimizePredictor(ctx context.Context, program core.Program, name string, examples []core.Example, scorer core.Scorer) error {
 	ctx, span := core.StartSpan(ctx, "OptimizePredictorPrompts")
 	defer core.EndSpan(ctx)
 	logger := logging.GetLogger()
@@ -253,135 +264,93 @@ func (c *COPRO) optimizePredictor(ctx context.Context, predictor *modules.Predic
 	if len(examples) == 0 {
 		return fmt.Errorf("no examples in dataset for optimization")
 	}
-
-	// Split examples into train/validation to prevent overfitting
-	trainSize := len(examples) * 2 / 3 // Use 2/3 for training
-	if trainSize < 1 {
-		trainSize = 1
+	predictor, ok := c.extractPredictors(program)[name]
+	if !ok {
+		return fmt.Errorf("predictor %s not found in program", name)
 	}
-	trainExamples := examples[:trainSize]
-	validationExamples := examples[trainSize:]
-	logger.Info(ctx, "COPRO: Using %d examples for training, %d for validation", len(trainExamples), len(validationExamples))
 
 	promptState := c.newPromptState(ctx, predictor)
+	currentInstruction := predictor.GetSignature().Instruction
 
-	// Get current instruction and prefix as baseline
-	signature := predictor.GetSignature()
-	currentInstruction := signature.Instruction
-	currentPrefix := "" // Extract from signature if available
+	// The current instruction is always the first candidate, so it wins ties
+	// and optimization never returns a lower-scoring program.
+	baseline := PromptCandidate{Instruction: currentInstruction}
+	var err error
+	baseline.Score, err = c.evaluateCandidate(ctx, program, name, baseline, examples, scorer)
+	if err != nil {
+		return err
+	}
+	logger.Info(ctx, "COPRO: Baseline score: %.3f", baseline.Score)
 
-	// Initialize candidates with current configuration
-	var candidates []PromptCandidate
-
-	// Add current configuration as baseline
-	if currentInstruction != "" {
-		baseline := PromptCandidate{
-			Instruction: currentInstruction,
-			Prefix:      currentPrefix,
-			Generation:  0,
+	// candidates holds every evaluated candidate once, in evaluation order.
+	candidates := []PromptCandidate{baseline}
+	seen := map[string]bool{currentInstruction: true}
+	evaluate := func(ctx context.Context, proposals []PromptCandidate) error {
+		var fresh []PromptCandidate
+		for _, proposal := range proposals {
+			if !seen[proposal.Instruction] {
+				seen[proposal.Instruction] = true
+				fresh = append(fresh, proposal)
+			}
 		}
-		var err error
-		baseline.Score, err = c.evaluateCandidate(ctx, predictor, baseline, trainExamples, scorer)
-		if err != nil {
+		if err := c.evaluateCandidatesParallel(ctx, program, name, fresh, examples, scorer); err != nil {
 			return err
 		}
-		candidates = append(candidates, baseline)
-		logger.Info(ctx, "COPRO: Baseline score: %.3f", baseline.Score)
+		candidates = append(candidates, fresh...)
+		return nil
 	}
 
-	// Generate initial candidates
+	// Generate and evaluate initial candidates
 	initialCandidates := c.generateInitialCandidates(ctx, predictor, currentInstruction, promptState)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-
-	// Evaluate initial candidates in parallel on training data
-	if err := c.evaluateCandidatesParallel(ctx, predictor, initialCandidates, trainExamples, scorer); err != nil {
+	if err := evaluate(ctx, initialCandidates); err != nil {
 		return err
 	}
-
-	candidates = append(candidates, initialCandidates...)
 
 	// Iterative refinement across depth levels
 	for depth := 1; depth <= c.Depth; depth++ {
 		depthCtx, depthSpan := core.StartSpan(ctx, fmt.Sprintf("Depth_%d", depth))
 
-		// Select top candidates from previous iteration
-		sort.Slice(candidates, func(i, j int) bool {
-			return candidates[i].Score > candidates[j].Score
-		})
-
-		// Keep top candidates for refinement
-		topK := min(c.Breadth/2, len(candidates))
-		topCandidates := candidates[:topK]
-
-		// Generate refined candidates
-		refinedCandidates := c.refineCandidates(depthCtx, predictor, topCandidates, depth, promptState)
+		// Propose new candidates from everything evaluated so far
+		refinedCandidates := c.refineCandidates(depthCtx, predictor, candidates, depth, promptState)
 		if err := depthCtx.Err(); err != nil {
 			core.EndSpan(depthCtx)
 			return err
 		}
-
-		// Evaluate refined candidates in parallel on training data
-		if err := c.evaluateCandidatesParallel(depthCtx, predictor, refinedCandidates, trainExamples, scorer); err != nil {
+		if err := evaluate(depthCtx, refinedCandidates); err != nil {
 			core.EndSpan(depthCtx)
 			return err
 		}
 
-		// Add refined candidates to pool
-		candidates = append(candidates, refinedCandidates...)
-
-		// Log progress
-		bestScore := candidates[0].Score
-		if len(refinedCandidates) > 0 {
-			sort.Slice(refinedCandidates, func(i, j int) bool {
-				return refinedCandidates[i].Score > refinedCandidates[j].Score
-			})
-			logger.Info(depthCtx, "COPRO: Depth %d - Best refined score: %.3f (overall best: %.3f)",
-				depth, refinedCandidates[0].Score, bestScore)
-		}
-
+		bestScore := bestPromptCandidate(candidates).Score
+		logger.Info(depthCtx, "COPRO: Depth %d - %d candidates evaluated, best score: %.3f", depth, len(candidates), bestScore)
 		depthSpan.WithAnnotation("refined_candidates", len(refinedCandidates))
 		depthSpan.WithAnnotation("best_score", bestScore)
 		core.EndSpan(depthCtx)
 	}
 
-	// Validate all candidates on validation set to prevent overfitting
-	logger.Info(ctx, "COPRO: Validating %d candidates on %d validation examples", len(candidates), len(validationExamples))
-	for i := range candidates {
-		var err error
-		candidates[i].ValidationScore, err = c.evaluateCandidate(ctx, predictor, candidates[i], validationExamples, scorer)
-		if err != nil {
-			return err
-		}
-	}
+	bestCandidate := bestPromptCandidate(candidates)
+	logger.Info(ctx, "COPRO: Selected best candidate - Score: %.3f, Instruction: %s",
+		bestCandidate.Score, c.truncateString(bestCandidate.Instruction, 100))
+	c.applyPromptToPredictor(predictor, bestCandidate)
 
-	// Select candidate with best validation score (not training score)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].ValidationScore > candidates[j].ValidationScore
-	})
-
-	if len(candidates) > 0 {
-		bestCandidate := candidates[0]
-		logger.Info(ctx, "COPRO: Selected best candidate - Training: %.3f, Validation: %.3f, Instruction: %s",
-			bestCandidate.Score, bestCandidate.ValidationScore, c.truncateString(bestCandidate.Instruction, 100))
-
-		// Log overfitting warning if training score much higher than validation
-		overfitGap := bestCandidate.Score - bestCandidate.ValidationScore
-		if overfitGap > 0.2 {
-			logger.Warn(ctx, "COPRO: Potential overfitting detected - gap: %.3f (training: %.3f vs validation: %.3f)",
-				overfitGap, bestCandidate.Score, bestCandidate.ValidationScore)
-		}
-
-		// Apply the best prompt to the predictor
-		c.applyPromptToPredictor(predictor, bestCandidate)
-
-		span.WithAnnotation("best_training_score", bestCandidate.Score)
-		span.WithAnnotation("best_validation_score", bestCandidate.ValidationScore)
-		span.WithAnnotation("total_candidates", len(candidates))
-	}
-
+	span.WithAnnotation("best_score", bestCandidate.Score)
+	span.WithAnnotation("total_candidates", len(candidates))
 	return nil
+}
+
+// bestPromptCandidate returns the highest-scoring candidate; the earliest one
+// wins a tie. candidates must not be empty.
+func bestPromptCandidate(candidates []PromptCandidate) PromptCandidate {
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if candidate.Score > best.Score {
+			best = candidate
+		}
+	}
+	return best
 }
 
 // generateInitialCandidates generates sophisticated initial prompt candidates using LLM assistance.
@@ -460,38 +429,61 @@ func (c *COPRO) newPromptState(ctx context.Context, predictor *modules.Predict) 
 	return state
 }
 
-// refineCandidates generates sophisticated refined candidates using performance feedback.
-func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict, topCandidates []PromptCandidate, depth int, state *coproPromptState) []PromptCandidate {
-	// Add current candidates to this predictor's history for learning.
-	state.history = append(state.history, topCandidates...)
+// refineCandidates proposes new candidates from every candidate evaluated so
+// far. It asks the prompt model at every depth and falls back to fixed
+// refinements of the best candidates only when the model proposes nothing.
+func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict, evaluated []PromptCandidate, depth int, state *coproPromptState) []PromptCandidate {
+	if len(evaluated) == 0 {
+		return nil
+	}
 
-	// Try LLM-assisted refinement first
-	if state.generator != nil && len(state.history) >= 3 {
+	// The history lists each instruction once: seeded attempts, then evaluated ones.
+	var history []PromptCandidate
+	seen := make(map[string]bool)
+	for _, candidate := range append(append([]PromptCandidate(nil), state.history...), evaluated...) {
+		if !seen[candidate.Instruction] {
+			seen[candidate.Instruction] = true
+			history = append(history, candidate)
+		}
+	}
+
+	if state.generator != nil {
 		// Use LLM to generate refined instructions based on performance history
-		refinedInstructions, err := state.generator.generateRefinedInstructions(ctx, state.history, c.Breadth, c.InitTemperature*math.Pow(0.8, float64(depth)))
-		if err == nil && len(refinedInstructions) > 0 {
-			var refined []PromptCandidate
-			for i, instruction := range refinedInstructions {
-				if i >= c.Breadth {
-					break
-				}
-
-				refinedCandidate := PromptCandidate{
-					Instruction: instruction,
-					Prefix:      "",
-					Generation:  depth + 1,
-					AttemptID:   fmt.Sprintf("refined_%d_%d", depth, i),
-				}
-				refined = append(refined, refinedCandidate)
+		refinedInstructions, err := state.generator.generateRefinedInstructions(ctx, history, c.Breadth, c.InitTemperature*math.Pow(0.8, float64(depth)))
+		if err != nil {
+			logging.GetLogger().Error(ctx, "COPRO: Failed to generate refined instructions: %v", err)
+		}
+		var refined []PromptCandidate
+		for i, instruction := range refinedInstructions {
+			if len(refined) >= c.Breadth {
+				break
 			}
-
-			// Calculate diversity for refined candidates
+			if seen[instruction] {
+				continue
+			}
+			seen[instruction] = true
+			refined = append(refined, PromptCandidate{
+				Instruction: instruction,
+				Prefix:      "",
+				Generation:  depth + 1,
+				AttemptID:   fmt.Sprintf("refined_%d_%d", depth, i),
+			})
+		}
+		// Proposals that only repeat evaluated instructions add no candidates;
+		// the fixed refinements below are for a model that proposes nothing.
+		if len(refinedInstructions) > 0 {
 			c.calculatePromptDiversity(refined)
 			return refined
 		}
 	}
 
-	// Fallback to enhanced refinement strategy
+	// Fall back to fixed refinements of the best candidates.
+	topCandidates := append([]PromptCandidate(nil), evaluated...)
+	sort.SliceStable(topCandidates, func(i, j int) bool {
+		return topCandidates[i].Score > topCandidates[j].Score
+	})
+	topCandidates = topCandidates[:max(1, min(c.Breadth/2, len(topCandidates)))]
+
 	var refined []PromptCandidate
 	for _, candidate := range topCandidates {
 		numRefinements := max(1, c.Breadth/len(topCandidates))
@@ -521,25 +513,29 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 	return refined
 }
 
-// evaluateCandidate evaluates a prompt candidate using the metric.
-func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predict, candidate PromptCandidate, examples []core.Example, scorer core.Scorer) (float64, error) {
+// evaluateCandidate scores program with candidate's instruction installed on
+// the predictor called name. It runs a clone of the whole program, so the
+// other modules, the forward logic, and the predictor's demos and options all
+// take part. The score is the average over all examples; an example whose
+// prediction fails or cannot be scored counts as zero.
+func (c *COPRO) evaluateCandidate(ctx context.Context, program core.Program, name string, candidate PromptCandidate, examples []core.Example, scorer core.Scorer) (float64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	if len(examples) == 0 {
+		return 0, nil
+	}
 
-	// Temporarily apply the candidate prompt
-	originalSignature := predictor.GetSignature()
-	tempSignature := originalSignature.WithInstruction(candidate.Instruction)
-
-	// Create a temporary predictor with the candidate prompt
-	tempPredictor := modules.NewPredict(tempSignature)
-	tempPredictor.SetLLM(predictor.LLM)
+	candidateProgram := program.Clone()
+	predictor, ok := c.extractPredictors(candidateProgram)[name]
+	if !ok {
+		return 0, fmt.Errorf("predictor %s not found in program", name)
+	}
+	c.applyPromptToPredictor(predictor, candidate)
 
 	// Evaluate all examples in parallel for better performance
 	scores := make([]float64, len(examples))
-	valid := make([]bool, len(examples))
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 	var errOnce sync.Once
 	var evaluationErr error
 	recordError := func(err error) {
@@ -563,14 +559,14 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 			}
 
 			// Get prediction with candidate prompt
-			prediction, err := tempPredictor.Process(ctx, ex.Inputs)
+			prediction, err := candidateProgram.Execute(ctx, ex.Inputs)
 			if err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					recordError(ctxErr)
 					return
 				}
-				logger := logging.GetLogger()
-				logger.Error(ctx, "COPRO: Error evaluating candidate: %v", err)
+				// A failed prediction counts as zero, so it cannot raise the average.
+				logging.GetLogger().Error(ctx, "COPRO: Error evaluating candidate: %v", err)
 				return
 			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -588,10 +584,7 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 				logging.GetLogger().Error(ctx, "COPRO: Error scoring candidate: %v", err)
 				score = 0
 			}
-			mu.Lock()
 			scores[idx] = score
-			valid[idx] = true
-			mu.Unlock()
 		})
 	}
 
@@ -603,25 +596,16 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, predictor *modules.Predic
 		return 0, err
 	}
 
-	// Calculate average score
+	// Average over all examples, including the failed ones.
 	var totalScore float64
-	validEvaluations := 0
-	for i, score := range scores {
-		if valid[i] {
-			totalScore += score
-			validEvaluations++
-		}
+	for _, score := range scores {
+		totalScore += score
 	}
-
-	if validEvaluations == 0 {
-		return 0, nil
-	}
-
-	return totalScore / float64(validEvaluations), nil
+	return totalScore / float64(len(examples)), nil
 }
 
 // evaluateCandidatesParallel evaluates multiple candidates in parallel for better performance.
-func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modules.Predict, candidates []PromptCandidate, examples []core.Example, scorer core.Scorer) error {
+func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, program core.Program, name string, candidates []PromptCandidate, examples []core.Example, scorer core.Scorer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -642,7 +626,7 @@ func (c *COPRO) evaluateCandidatesParallel(ctx context.Context, predictor *modul
 				return
 			}
 
-			score, err := c.evaluateCandidate(ctx, predictor, candidates[i], examples, scorer)
+			score, err := c.evaluateCandidate(ctx, program, name, candidates[i], examples, scorer)
 			if err != nil {
 				errOnce.Do(func() { evaluationErr = err })
 				return
@@ -729,19 +713,7 @@ Return EXACTLY %d instructions, one per line, no numbering:`,
 		return nil, fmt.Errorf("failed to generate instructions: %w", err)
 	}
 
-	// Parse the generated instructions
-	response := output.Content
-
-	instructions := strings.Split(strings.TrimSpace(response), "\n")
-
-	// Clean and validate instructions
-	var validInstructions []string
-	for _, inst := range instructions {
-		cleaned := strings.TrimSpace(inst)
-		if len(cleaned) > 10 && !strings.HasPrefix(cleaned, "#") {
-			validInstructions = append(validInstructions, cleaned)
-		}
-	}
+	validInstructions := parseInstructionLines(output.Content)
 
 	// If we didn't get enough valid instructions, add some fallbacks
 	if len(validInstructions) < breadth {
@@ -760,21 +732,26 @@ func (lpg *LLMPromptGenerator) generateRefinedInstructions(ctx context.Context, 
 		return nil, fmt.Errorf("no history available for refinement")
 	}
 
-	// Sort history by score to get best and worst performers
-	sort.Slice(history, func(i, j int) bool {
+	// Sort a copy by score, keeping evaluation order among equals, to list the
+	// best performers and, separately, the worst.
+	history = append([]PromptCandidate(nil), history...)
+	sort.SliceStable(history, func(i, j int) bool {
 		return history[i].Score > history[j].Score
 	})
 
-	// Create refinement prompt with performance feedback
+	bestCount := min(3, len(history))
 	bestInstructions := ""
 	worstInstructions := ""
 
-	for i := 0; i < min(3, len(history)); i++ {
-		bestInstructions += fmt.Sprintf("- %s (score: %.3f)\n", history[i].Instruction, history[i].Score)
+	for _, candidate := range history[:bestCount] {
+		bestInstructions += fmt.Sprintf("- %s (score: %.3f)\n", candidate.Instruction, candidate.Score)
 	}
 
-	for i := max(0, len(history)-3); i < len(history); i++ {
-		worstInstructions += fmt.Sprintf("- %s (score: %.3f)\n", history[i].Instruction, history[i].Score)
+	for _, candidate := range history[max(bestCount, len(history)-3):] {
+		worstInstructions += fmt.Sprintf("- %s (score: %.3f)\n", candidate.Instruction, candidate.Score)
+	}
+	if worstInstructions == "" {
+		worstInstructions = "- (none yet)\n"
 	}
 
 	refinementPrompt := fmt.Sprintf(`You are an expert prompt engineer analyzing previous instruction attempts. Based on the performance data below, generate %d improved instruction variations.
@@ -805,18 +782,28 @@ Return ONLY the improved instructions, one per line.`,
 		return nil, fmt.Errorf("failed to generate refined instructions: %w", err)
 	}
 
-	response := output.Content
-
-	instructions := strings.Split(strings.TrimSpace(response), "\n")
-	var validInstructions []string
-	for _, inst := range instructions {
-		cleaned := strings.TrimSpace(inst)
-		if len(cleaned) > 10 {
-			validInstructions = append(validInstructions, cleaned)
-		}
-	}
-
+	validInstructions := parseInstructionLines(output.Content)
 	return validInstructions[:min(len(validInstructions), breadth)], nil
+}
+
+var coproListMarker = regexp.MustCompile(`^(?:\d+[.):]|[-*•])\s+`)
+
+// parseInstructionLines reads one instruction per line from a proposal
+// response. It strips list numbering, bullets, and surrounding quotes, and
+// skips headings, preamble lines, and fragments too short to be instructions.
+func parseInstructionLines(response string) []string {
+	var instructions []string
+	for _, line := range strings.Split(response, "\n") {
+		cleaned := coproListMarker.ReplaceAllString(strings.TrimSpace(line), "")
+		cleaned = strings.Trim(cleaned, "\"'`“”* ")
+		lower := strings.ToLower(cleaned)
+		if len(cleaned) <= 10 || strings.HasPrefix(cleaned, "#") || strings.HasSuffix(cleaned, ":") ||
+			strings.HasPrefix(lower, "here are ") || strings.HasPrefix(lower, "here is ") {
+			continue
+		}
+		instructions = append(instructions, cleaned)
+	}
+	return instructions
 }
 
 // getFallbackInstructions provides sophisticated fallback instructions.
@@ -937,15 +924,10 @@ func applyInstructionRefinement(instruction, refinement string) string {
 	return instruction + " " + refinement + "."
 }
 
+// applyPromptToPredictor changes only the instruction; the predictor keeps
+// its demos, options, name, and LLM.
 func (c *COPRO) applyPromptToPredictor(predictor *modules.Predict, candidate PromptCandidate) {
-	originalSignature := predictor.GetSignature()
-	newSignature := originalSignature.WithInstruction(candidate.Instruction)
-	// Update the predictor with the new signature
-	// Note: This may require recreating the predictor since signatures are immutable
-	newPredictor := modules.NewPredict(newSignature)
-	newPredictor.SetLLM(predictor.LLM)
-	// Copy the new predictor's state back (this is a limitation of the current API)
-	*predictor = *newPredictor
+	predictor.SetSignature(predictor.GetSignature().WithInstruction(candidate.Instruction))
 }
 
 func (c *COPRO) truncateString(s string, maxLen int) string {
