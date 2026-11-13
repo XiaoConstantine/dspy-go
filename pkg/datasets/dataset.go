@@ -16,7 +16,7 @@ import (
 
 var (
 	gsm8kDatasetURL    = "https://huggingface.co/datasets/openai/gsm8k/resolve/main/main/test-00000-of-00001.parquet"
-	hotPotQADatasetURL = "http://curtis.ml.cmu.edu/datasets/hotpot/hotpot_dev_fullwiki_v1.json"
+	hotPotQADatasetURL = "https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/main/fullwiki/validation-00000-of-00001.parquet"
 )
 
 // For testing purposes.
@@ -35,7 +35,7 @@ func EnsureDataset(datasetName string) (string, error) {
 	case "gsm8k":
 		suffix = ".parquet"
 	case "hotpotqa":
-		suffix = ".json"
+		suffix = ".parquet"
 	default:
 		suffix = ".parquet"
 	}

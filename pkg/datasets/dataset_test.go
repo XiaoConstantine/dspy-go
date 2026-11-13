@@ -38,7 +38,7 @@ func TestEnsureDataset(t *testing.T) {
 		{
 			name:           "HotPotQA dataset - not existing",
 			datasetName:    "hotpotqa",
-			expectedSuffix: ".json",
+			expectedSuffix: ".parquet",
 			setupFunc: func() {
 				os.RemoveAll(datasetDir)
 			},
