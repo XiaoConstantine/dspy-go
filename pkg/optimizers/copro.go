@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +23,8 @@ type COPRO struct {
 	Breadth         int     // Number of prompt candidates to generate
 	Depth           int     // Iterations of prompt refinement
 	InitTemperature float64 // Randomness in prompt generation
-	TrackStats      bool    // Optional performance tracking
+	// Deprecated: TrackStats has no effect. COPRO records no statistics.
+	TrackStats bool
 
 	// LLM-assisted prompt generation seeds. Each predictor receives independent
 	// operation-local state derived from these values.
@@ -38,7 +40,11 @@ var (
 
 // PromptCandidate represents a candidate prompt configuration.
 type PromptCandidate struct {
-	Instruction     string
+	Instruction string
+	// Prefix replaces the prefix of the signature's last output field. An
+	// empty Prefix keeps the predictor's current one, unless COPRO created
+	// the candidate: its candidates always record the prefix they were scored
+	// with, so a candidate means the same prompt whatever is installed later.
 	Prefix          string
 	Score           float64 // Average score over all examples
 	ValidationScore float64 // Unused: candidates are selected on Score
@@ -46,6 +52,9 @@ type PromptCandidate struct {
 	Diversity       float64 // Semantic diversity score
 	Rank            int     // Performance ranking
 	AttemptID       string  // Unique identifier for tracking
+
+	// prefixSet marks Prefix as the candidate's concrete prefix, even when empty.
+	prefixSet bool
 }
 
 type coproPromptState struct {
@@ -59,7 +68,8 @@ type COPROOptions struct {
 	Breadth         int
 	Depth           int
 	InitTemperature float64
-	TrackStats      bool
+	// Deprecated: TrackStats has no effect. COPRO records no statistics.
+	TrackStats bool
 }
 
 // COPROOption is a functional option for configuring COPRO.
@@ -93,7 +103,9 @@ func WithInitTemperature(temp float64) COPROOption {
 	}
 }
 
-// WithTrackStats enables performance tracking.
+// WithTrackStats does nothing.
+//
+// Deprecated: COPRO records no statistics, so this option has no effect.
 func WithTrackStats(track bool) COPROOption {
 	return func(opts *COPROOptions) {
 		opts.TrackStats = track
@@ -209,22 +221,9 @@ func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examp
 	}
 	sort.Strings(predictorNames)
 
-	// Optimize each predictor's prompts in deterministic order. Later
-	// predictors are optimized with the earlier winners already installed.
-	for _, name := range predictorNames {
-		if err := ctx.Err(); err != nil {
-			return optimizedProgram, err
-		}
-		moduleCtx, moduleSpan := core.StartSpan(ctx, fmt.Sprintf("OptimizePredictor_%s", name))
-
-		err := c.optimizePredictor(moduleCtx, optimizedProgram, name, examples, scorer)
-		if err != nil {
-			moduleSpan.WithError(err)
-			core.EndSpan(moduleCtx)
-			return optimizedProgram, fmt.Errorf("error optimizing predictor %s: %w", name, err)
-		}
-
-		core.EndSpan(moduleCtx)
+	if err := c.optimizePredictors(ctx, optimizedProgram, predictorNames, examples, scorer); err != nil {
+		span.WithError(err)
+		return optimizedProgram, err
 	}
 
 	span.WithAnnotation("optimized_predictors", len(predictors))
@@ -250,13 +249,37 @@ func (c *COPRO) extractPredictors(program core.Program) map[string]*modules.Pred
 	return predictors
 }
 
-// optimizePredictor optimizes the instruction of the predictor called name
-// (see extractPredictors) and installs the winner in program. Candidates are
-// scored by running the whole program on all examples.
-func (c *COPRO) optimizePredictor(ctx context.Context, program core.Program, name string, examples []core.Example, scorer core.Scorer) error {
-	ctx, span := core.StartSpan(ctx, "OptimizePredictorPrompts")
+// coproSearch is the search state of one predictor.
+type coproSearch struct {
+	name      string
+	predictor *modules.Predict
+	state     *coproPromptState
+	// candidates holds every candidate once, in the order first evaluated,
+	// starting with the predictor's original prompt.
+	candidates []PromptCandidate
+	seen       map[string]bool
+	// stale reports that another predictor's prompt changed after candidates
+	// were scored, so their scores describe a program that no longer exists.
+	stale bool
+}
+
+// promptCandidateKey identifies a candidate's prompt.
+func promptCandidateKey(candidate PromptCandidate) string {
+	return candidate.Instruction + "\x00" + candidate.Prefix
+}
+
+// optimizePredictors optimizes the instruction and output prefix of the
+// predictors called names (see extractPredictors) and installs the winners in
+// program. Candidates are scored by running the whole program on all examples.
+//
+// As in DSPy, the predictors take turns within each depth: a predictor's
+// candidates are scored with the other predictors' current winners installed,
+// and are scored again after one of those winners changes. A good prompt for
+// one predictor is therefore still found when it only pays off together with
+// a better prompt for another.
+func (c *COPRO) optimizePredictors(ctx context.Context, program core.Program, names []string, examples []core.Example, scorer core.Scorer) error {
+	ctx, _ = core.StartSpan(ctx, "OptimizePredictorPrompts")
 	defer core.EndSpan(ctx)
-	logger := logging.GetLogger()
 
 	if err := ctx.Err(); err != nil {
 		return err
@@ -264,81 +287,95 @@ func (c *COPRO) optimizePredictor(ctx context.Context, program core.Program, nam
 	if len(examples) == 0 {
 		return fmt.Errorf("no examples in dataset for optimization")
 	}
-	predictor, ok := c.extractPredictors(program)[name]
-	if !ok {
-		return fmt.Errorf("predictor %s not found in program", name)
+
+	predictors := c.extractPredictors(program)
+	searches := make([]*coproSearch, len(names))
+	for i, name := range names {
+		predictor, ok := predictors[name]
+		if !ok {
+			return fmt.Errorf("predictor %s not found in program", name)
+		}
+		// The current prompt is always the first candidate, so it wins ties
+		// and optimization never returns a lower-scoring program.
+		original := PromptCandidate{Instruction: predictor.GetSignature().Instruction}
+		original.Prefix, original.prefixSet = lastOutputPrefix(predictor.GetSignature()), true
+		searches[i] = &coproSearch{
+			name:       name,
+			predictor:  predictor,
+			state:      c.newPromptState(ctx, predictor),
+			candidates: []PromptCandidate{original},
+			seen:       map[string]bool{promptCandidateKey(original): true},
+		}
 	}
 
-	promptState := c.newPromptState(ctx, predictor)
-	currentInstruction := predictor.GetSignature().Instruction
-
-	// The current instruction is always the first candidate, so it wins ties
-	// and optimization never returns a lower-scoring program.
-	baseline := PromptCandidate{Instruction: currentInstruction}
-	var err error
-	baseline.Score, err = c.evaluateCandidate(ctx, program, name, baseline, examples, scorer)
-	if err != nil {
-		return err
-	}
-	logger.Info(ctx, "COPRO: Baseline score: %.3f", baseline.Score)
-
-	// candidates holds every evaluated candidate once, in evaluation order.
-	candidates := []PromptCandidate{baseline}
-	seen := map[string]bool{currentInstruction: true}
-	evaluate := func(ctx context.Context, proposals []PromptCandidate) error {
-		var fresh []PromptCandidate
-		for _, proposal := range proposals {
-			if !seen[proposal.Instruction] {
-				seen[proposal.Instruction] = true
-				fresh = append(fresh, proposal)
+	// Depth 0 evaluates the original and the initial proposals; every later
+	// depth evaluates proposals refined from everything evaluated so far.
+	for depth := 0; depth <= c.Depth; depth++ {
+		depthCtx, depthSpan := core.StartSpan(ctx, fmt.Sprintf("Depth_%d", depth))
+		for _, search := range searches {
+			changed, err := c.searchStep(depthCtx, program, search, depth, examples, scorer)
+			if err != nil {
+				depthSpan.WithError(err)
+				core.EndSpan(depthCtx)
+				return fmt.Errorf("error optimizing predictor %s: %w", search.name, err)
+			}
+			if changed {
+				for _, other := range searches {
+					other.stale = other != search
+				}
 			}
 		}
-		if err := c.evaluateCandidatesParallel(ctx, program, name, fresh, examples, scorer); err != nil {
-			return err
-		}
-		candidates = append(candidates, fresh...)
-		return nil
-	}
-
-	// Generate and evaluate initial candidates
-	initialCandidates := c.generateInitialCandidates(ctx, predictor, currentInstruction, promptState)
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := evaluate(ctx, initialCandidates); err != nil {
-		return err
-	}
-
-	// Iterative refinement across depth levels
-	for depth := 1; depth <= c.Depth; depth++ {
-		depthCtx, depthSpan := core.StartSpan(ctx, fmt.Sprintf("Depth_%d", depth))
-
-		// Propose new candidates from everything evaluated so far
-		refinedCandidates := c.refineCandidates(depthCtx, predictor, candidates, depth, promptState)
-		if err := depthCtx.Err(); err != nil {
-			core.EndSpan(depthCtx)
-			return err
-		}
-		if err := evaluate(depthCtx, refinedCandidates); err != nil {
-			core.EndSpan(depthCtx)
-			return err
-		}
-
-		bestScore := bestPromptCandidate(candidates).Score
-		logger.Info(depthCtx, "COPRO: Depth %d - %d candidates evaluated, best score: %.3f", depth, len(candidates), bestScore)
-		depthSpan.WithAnnotation("refined_candidates", len(refinedCandidates))
-		depthSpan.WithAnnotation("best_score", bestScore)
 		core.EndSpan(depthCtx)
 	}
 
-	bestCandidate := bestPromptCandidate(candidates)
-	logger.Info(ctx, "COPRO: Selected best candidate - Score: %.3f, Instruction: %s",
-		bestCandidate.Score, c.truncateString(bestCandidate.Instruction, 100))
-	c.applyPromptToPredictor(predictor, bestCandidate)
-
-	span.WithAnnotation("best_score", bestCandidate.Score)
-	span.WithAnnotation("total_candidates", len(candidates))
 	return nil
+}
+
+// searchStep proposes and evaluates one depth of candidates for search's
+// predictor and installs the best candidate so far. It reports whether that
+// changed the predictor's prompt.
+func (c *COPRO) searchStep(ctx context.Context, program core.Program, search *coproSearch, depth int, examples []core.Example, scorer core.Scorer) (bool, error) {
+	logger := logging.GetLogger()
+	installed := search.predictor.GetSignature()
+
+	var proposals []PromptCandidate
+	if depth == 0 {
+		proposals = c.generateInitialCandidates(ctx, search.predictor, installed.Instruction, search.state)
+	} else {
+		proposals = c.refineCandidates(ctx, search.predictor, search.candidates, depth, search.state)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	// Score the new candidates, and the earlier ones again when their scores
+	// are out of date or, at depth 0, not yet taken.
+	unscored := len(search.candidates)
+	if depth == 0 || search.stale {
+		unscored = 0
+	}
+	for _, proposal := range proposals {
+		if key := promptCandidateKey(proposal); !search.seen[key] {
+			search.seen[key] = true
+			search.candidates = append(search.candidates, proposal)
+		}
+	}
+	if err := c.evaluateCandidatesParallel(ctx, program, search.name, search.candidates[unscored:], examples, scorer); err != nil {
+		return false, err
+	}
+	search.stale = false
+
+	best := bestPromptCandidate(search.candidates)
+	logger.Info(ctx, "COPRO: %s depth %d - %d candidates, best score: %.3f, instruction: %s",
+		search.name, depth, len(search.candidates), best.Score, c.truncateString(best.Instruction, 100))
+	c.applyPromptToPredictor(search.predictor, best)
+
+	now := search.predictor.GetSignature()
+	changed := now.Instruction != installed.Instruction
+	if n := len(now.Outputs); n > 0 && now.Outputs[n-1].Prefix != installed.Outputs[n-1].Prefix {
+		changed = true
+	}
+	return changed, nil
 }
 
 // bestPromptCandidate returns the highest-scoring candidate; the earliest one
@@ -380,14 +417,16 @@ func (c *COPRO) generateInitialCandidates(ctx context.Context, predictor *module
 
 	// Create candidates with diversity scoring
 	var candidates []PromptCandidate
-	for i, instruction := range instructions {
+	for i, proposal := range instructions {
 		if i >= c.Breadth {
 			break
 		}
 
+		instruction, prefix := splitProposal(proposal, signature)
 		candidate := PromptCandidate{
 			Instruction: instruction,
-			Prefix:      "",
+			Prefix:      prefix,
+			prefixSet:   true,
 			Generation:  1,
 			AttemptID:   fmt.Sprintf("init_%d", i),
 			Rank:        i,
@@ -437,12 +476,12 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 		return nil
 	}
 
-	// The history lists each instruction once: seeded attempts, then evaluated ones.
+	// The history lists each prompt once: seeded attempts, then evaluated ones.
 	var history []PromptCandidate
 	seen := make(map[string]bool)
 	for _, candidate := range append(append([]PromptCandidate(nil), state.history...), evaluated...) {
-		if !seen[candidate.Instruction] {
-			seen[candidate.Instruction] = true
+		if key := promptCandidateKey(candidate); !seen[key] {
+			seen[key] = true
 			history = append(history, candidate)
 		}
 	}
@@ -454,20 +493,22 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 			logging.GetLogger().Error(ctx, "COPRO: Failed to generate refined instructions: %v", err)
 		}
 		var refined []PromptCandidate
-		for i, instruction := range refinedInstructions {
+		for i, proposal := range refinedInstructions {
 			if len(refined) >= c.Breadth {
 				break
 			}
-			if seen[instruction] {
-				continue
-			}
-			seen[instruction] = true
-			refined = append(refined, PromptCandidate{
+			instruction, prefix := splitProposal(proposal, predictor.GetSignature())
+			candidate := PromptCandidate{
 				Instruction: instruction,
-				Prefix:      "",
+				Prefix:      prefix,
+				prefixSet:   true,
 				Generation:  depth + 1,
 				AttemptID:   fmt.Sprintf("refined_%d_%d", depth, i),
-			})
+			}
+			if key := promptCandidateKey(candidate); !seen[key] {
+				seen[key] = true
+				refined = append(refined, candidate)
+			}
 		}
 		// Proposals that only repeat evaluated instructions add no candidates;
 		// the fixed refinements below are for a model that proposes nothing.
@@ -501,6 +542,7 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 			refinedCandidate := PromptCandidate{
 				Instruction: refinedInstruction,
 				Prefix:      candidate.Prefix,
+				prefixSet:   candidate.prefixSet,
 				Generation:  depth + 1,
 				AttemptID:   fmt.Sprintf("basic_refined_%d_%d", depth, i),
 			}
@@ -513,7 +555,7 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 	return refined
 }
 
-// evaluateCandidate scores program with candidate's instruction installed on
+// evaluateCandidate scores program with candidate's prompt installed on
 // the predictor called name. It runs a clone of the whole program, so the
 // other modules, the forward logic, and the predictor's demos and options all
 // take part. The score is the average over all examples; an example whose
@@ -660,12 +702,15 @@ func NewLLMPromptGenerator(llm core.PromptModel, signature core.Signature) *LLMP
 	}
 }
 
-// generateBasicInstructionsWithRetry creates initial high-quality instruction candidates using LLM with retry logic.
+// generateBasicInstructionsWithRetry asks again when the model fails or proposes nothing.
 func (lpg *LLMPromptGenerator) generateBasicInstructionsWithRetry(ctx context.Context, taskDescription string, breadth int, temperature float64) ([]string, error) {
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		instructions, err := lpg.generateBasicInstructions(ctx, taskDescription, breadth, temperature)
-		if err == nil && len(instructions) >= breadth/2 { // Accept if we get at least half the requested instructions
+		if err == nil && len(instructions) > 0 { // Accept whatever the model proposed, however few
 			return instructions, nil
 		}
 		// Increase temperature for retry to get more diverse results
@@ -674,7 +719,8 @@ func (lpg *LLMPromptGenerator) generateBasicInstructionsWithRetry(ctx context.Co
 	return nil, fmt.Errorf("failed to generate instructions after %d retries", maxRetries)
 }
 
-// generateBasicInstructions creates initial high-quality instruction candidates using LLM.
+// generateBasicInstructions asks the model for up to breadth proposals and
+// returns only what it proposed, one proposal per element (see splitProposal).
 func (lpg *LLMPromptGenerator) generateBasicInstructions(ctx context.Context, taskDescription string, breadth int, temperature float64) ([]string, error) {
 	// Create a sophisticated prompt for LLM-assisted instruction generation
 	inputFields := strings.Join(getFieldNames(lpg.signature.Inputs), ", ")
@@ -700,9 +746,9 @@ Requirements for each instruction:
 3. Must guide the model to produce accurate answers
 4. Should NOT be generic or vague
 5. Each must be clearly distinct from the others
-
+%s
 Return EXACTLY %d instructions, one per line, no numbering:`,
-		breadth, inputFields, outputFields, taskDescription, breadth, breadth)
+		breadth, inputFields, outputFields, taskDescription, breadth, outputPrefixRequest(lpg.signature), breadth)
 
 	// Use LLM to generate sophisticated instructions
 	core.RecordModelCall(ctx, lpg.llm)
@@ -714,15 +760,6 @@ Return EXACTLY %d instructions, one per line, no numbering:`,
 	}
 
 	validInstructions := parseInstructionLines(output.Content)
-
-	// If we didn't get enough valid instructions, add some fallbacks
-	if len(validInstructions) < breadth {
-		fallbacks := lpg.getFallbackInstructions()
-		for i := len(validInstructions); i < breadth && i < len(fallbacks); i++ {
-			validInstructions = append(validInstructions, fallbacks[i])
-		}
-	}
-
 	return validInstructions[:min(len(validInstructions), breadth)], nil
 }
 
@@ -743,12 +780,19 @@ func (lpg *LLMPromptGenerator) generateRefinedInstructions(ctx context.Context, 
 	bestInstructions := ""
 	worstInstructions := ""
 
+	attempt := func(candidate PromptCandidate) string {
+		line := fmt.Sprintf("- %s (score: %.3f)", candidate.Instruction, candidate.Score)
+		if candidate.Prefix != "" {
+			line += fmt.Sprintf(" [output prefix: %s]", candidate.Prefix)
+		}
+		return line + "\n"
+	}
 	for _, candidate := range history[:bestCount] {
-		bestInstructions += fmt.Sprintf("- %s (score: %.3f)\n", candidate.Instruction, candidate.Score)
+		bestInstructions += attempt(candidate)
 	}
 
 	for _, candidate := range history[max(bestCount, len(history)-3):] {
-		worstInstructions += fmt.Sprintf("- %s (score: %.3f)\n", candidate.Instruction, candidate.Score)
+		worstInstructions += attempt(candidate)
 	}
 	if worstInstructions == "" {
 		worstInstructions = "- (none yet)\n"
@@ -769,10 +813,10 @@ Analyze what made the high-performing instructions successful and what made the 
 3. Introduce new effective approaches
 4. Are diverse and semantically distinct
 5. Provide clear, actionable guidance
-
+%s
 Return ONLY the improved instructions, one per line.`,
 		breadth, lpg.getTaskDescription(),
-		bestInstructions, worstInstructions, breadth)
+		bestInstructions, worstInstructions, breadth, outputPrefixRequest(lpg.signature))
 
 	core.RecordModelCall(ctx, lpg.llm)
 	output, err := lpg.llm.Generate(ctx, refinementPrompt,
@@ -797,7 +841,9 @@ func parseInstructionLines(response string) []string {
 		cleaned := coproListMarker.ReplaceAllString(strings.TrimSpace(line), "")
 		cleaned = strings.Trim(cleaned, "\"'`“”* ")
 		lower := strings.ToLower(cleaned)
-		if len(cleaned) <= 10 || strings.HasPrefix(cleaned, "#") || strings.HasSuffix(cleaned, ":") ||
+		// A line ending in a colon is a preamble unless the colon ends a proposed prefix.
+		preamble := strings.HasSuffix(cleaned, ":") && !strings.Contains(cleaned, coproPrefixSeparator)
+		if len(cleaned) <= 10 || strings.HasPrefix(cleaned, "#") || preamble ||
 			strings.HasPrefix(lower, "here are ") || strings.HasPrefix(lower, "here is ") {
 			continue
 		}
@@ -806,20 +852,44 @@ func parseInstructionLines(response string) []string {
 	return instructions
 }
 
-// getFallbackInstructions provides sophisticated fallback instructions.
-func (lpg *LLMPromptGenerator) getFallbackInstructions() []string {
-	return []string{
-		"Answer the question directly with accurate, factual information.",
-		"Provide a clear, concise response based on the given question.",
-		"Think carefully about the question and give a precise answer.",
-		"Analyze the question and respond with relevant, correct information.",
-		"Give a straightforward answer to the specific question asked.",
-		"Consider the question carefully and provide an accurate response.",
-		"Respond to the question with clear, factual information.",
-		"Answer the question using your knowledge to provide correct information.",
-		"Read the question carefully and give an appropriate, accurate answer.",
-		"Provide a helpful, correct answer to the question presented.",
+// coproPrefixSeparator separates an instruction from the output prefix
+// proposed with it.
+const coproPrefixSeparator = "||"
+
+// outputPrefixRequest tells the prompt model how to propose, with an
+// instruction, a prefix for the signature's last output field, as DSPy's
+// COPRO does. It is empty for a signature without outputs.
+func outputPrefixRequest(signature core.Signature) string {
+	if len(signature.Outputs) == 0 {
+		return ""
 	}
+	field := signature.Outputs[len(signature.Outputs)-1]
+	return fmt.Sprintf(`
+Optionally, an instruction may also propose the short string that the %q output field must start with (currently %q). To propose one, end the line with %s and the new prefix, for example: Reply with a single word. %s Final answer:
+`, field.Name, field.Prefix, coproPrefixSeparator, coproPrefixSeparator)
+}
+
+// splitProposal splits a proposal line into its instruction and the output
+// prefix proposed with it. A line that proposes none gets the prefix the
+// signature's last output field has now, so every candidate names a concrete
+// prefix.
+func splitProposal(proposal string, signature core.Signature) (instruction, prefix string) {
+	instruction, prefix, _ = strings.Cut(proposal, coproPrefixSeparator)
+	const quotes = "\"'`“” "
+	instruction, prefix = strings.Trim(instruction, quotes), strings.Trim(prefix, quotes)
+	if len(signature.Outputs) == 0 || prefix == "" {
+		prefix = lastOutputPrefix(signature)
+	}
+	return instruction, prefix
+}
+
+// lastOutputPrefix returns the prefix of the signature's last output field,
+// the one COPRO optimizes.
+func lastOutputPrefix(signature core.Signature) string {
+	if n := len(signature.Outputs); n > 0 {
+		return signature.Outputs[n-1].Prefix
+	}
+	return ""
 }
 
 // getTaskDescription creates a description of the current task.
@@ -924,10 +994,17 @@ func applyInstructionRefinement(instruction, refinement string) string {
 	return instruction + " " + refinement + "."
 }
 
-// applyPromptToPredictor changes only the instruction; the predictor keeps
-// its demos, options, name, and LLM.
+// applyPromptToPredictor changes only the instruction and the prefix of the
+// last output field; the predictor keeps its demos, options, name, and LLM.
+// A candidate COPRO did not create keeps the current prefix when its own is
+// empty.
 func (c *COPRO) applyPromptToPredictor(predictor *modules.Predict, candidate PromptCandidate) {
-	predictor.SetSignature(predictor.GetSignature().WithInstruction(candidate.Instruction))
+	signature := predictor.GetSignature().WithInstruction(candidate.Instruction)
+	if n := len(signature.Outputs); n > 0 && (candidate.prefixSet || candidate.Prefix != "") {
+		signature.Outputs = slices.Clone(signature.Outputs)
+		signature.Outputs[n-1].Prefix = candidate.Prefix
+	}
+	predictor.SetSignature(signature)
 }
 
 func (c *COPRO) truncateString(s string, maxLen int) string {

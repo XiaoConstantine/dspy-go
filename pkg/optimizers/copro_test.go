@@ -1104,7 +1104,7 @@ func TestOptimizePredictor_EmptyDataset(t *testing.T) {
 	copro := NewCOPRO(func(expected, actual map[string]any) float64 { return 1.0 })
 	predictor := modules.NewPredict(core.Signature{})
 	ctx := context.Background()
-	err := copro.optimizePredictor(ctx, coproSinglePredictorProgram(predictor), "predictor", nil, core.MetricScorer(copro.Metric))
+	err := copro.optimizePredictors(ctx, coproSinglePredictorProgram(predictor), []string{"predictor"}, nil, core.MetricScorer(copro.Metric))
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no examples in dataset for optimization")
@@ -1130,7 +1130,7 @@ func TestOptimizePredictor_WithCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, coproSinglePredictorProgram(predictor), "predictor", core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
+	err := copro.optimizePredictors(ctx, coproSinglePredictorProgram(predictor), []string{"predictor"}, core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
 
 	assert.NoError(t, err)
 }
@@ -1155,7 +1155,7 @@ func TestOptimizePredictor_NoCurrentInstruction(t *testing.T) {
 	dataset := createCOPROTestDataset()
 	ctx := context.Background()
 
-	err := copro.optimizePredictor(ctx, coproSinglePredictorProgram(predictor), "predictor", core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
+	err := copro.optimizePredictors(ctx, coproSinglePredictorProgram(predictor), []string{"predictor"}, core.MaterializeDataset(dataset), core.MetricScorer(copro.Metric))
 
 	assert.NoError(t, err)
 }
@@ -1581,4 +1581,177 @@ func TestCOPROCompile_ParsesNumberedAndQuotedProposals(t *testing.T) {
 		assert.NotContains(t, head, "**")
 		assert.NotContains(t, head, "2)")
 	}
+}
+
+func TestCOPROCompile_EvaluatesOnlyProposedInstructions(t *testing.T) {
+	for _, proposals := range [][]string{
+		{"Candidate instruction TAG-P1 one."},
+		{"Candidate instruction TAG-P1 one.", "Candidate instruction TAG-P2 two.", "Candidate instruction TAG-P3 three."},
+	} {
+		t.Run(fmt.Sprintf("%d of 5 proposed", len(proposals)), func(t *testing.T) {
+			llm := &scriptLLM{
+				initial: strings.Join(proposals, "\n"),
+				behave:  goldWhen(func(string, string) bool { return false }),
+			}
+			useScriptLLM(t, llm)
+			predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-BASE here."))
+			predictor.SetLLM(llm)
+
+			_, err := NewCOPRO(scriptExactMatch, WithBreadth(5), WithDepth(0)).
+				CompileExamples(context.Background(), coproSinglePredictorProgram(predictor), scriptQAExamples(2), nil)
+
+			require.NoError(t, err)
+			assert.Len(t, llm.sent(coproInitialPrompt), 1, "a short proposal list is accepted, not asked for again")
+			evaluated := map[string]bool{}
+			for _, prompt := range llm.sent("Given the fields") {
+				paragraphs := strings.Split(strings.TrimSpace(strings.Split(prompt, "---\n\n")[0]), "\n\n")
+				evaluated[paragraphs[len(paragraphs)-1]] = true
+			}
+			want := map[string]bool{"Base instruction TAG-BASE here.": true}
+			for _, proposal := range proposals {
+				want[proposal] = true
+			}
+			assert.Equal(t, want, evaluated, "only the original and the model's proposals are evaluated")
+		})
+	}
+}
+
+func TestCOPROCompile_ProposesAndAppliesOutputPrefix(t *testing.T) {
+	llm := &scriptLLM{
+		// The same instruction twice; only the second proposes a prefix.
+		initial: "Reply to the question TAG-SAME tersely.\n\"Reply to the question TAG-SAME tersely.\" || \"Final answer:\"",
+		refine:  "Refined instruction TAG-R1 one.",
+		behave: func(head, prompt string) (string, error) {
+			if strings.Contains(head, "TAG-SAME") && strings.Contains(head, "should start with 'Final answer:'") {
+				return "Final answer: gold-" + promptInput(prompt, "question"), nil
+			}
+			return "answer: wrong", nil
+		},
+	}
+	useScriptLLM(t, llm)
+	predictor := modules.NewPredict(scriptQASignature("Base instruction TAG-BASE here."))
+	predictor.SetLLM(llm)
+	program := coproSinglePredictorProgram(predictor)
+
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(1)).
+		CompileExamples(context.Background(), program, scriptQAExamples(4), nil)
+
+	require.NoError(t, err)
+	optimized := out.Modules["predictor"].GetSignature()
+	assert.Equal(t, "Reply to the question TAG-SAME tersely.", optimized.Instruction)
+	assert.Equal(t, "Final answer:", optimized.Outputs[0].Prefix)
+	assert.Equal(t, "answer:", program.Modules["predictor"].GetSignature().Outputs[0].Prefix, "the input program is untouched")
+	result, err := out.Execute(context.Background(), map[string]any{"question": "new"})
+	require.NoError(t, err)
+	assert.Equal(t, "gold-new", result["answer"])
+
+	initial := llm.sent(coproInitialPrompt)
+	require.Len(t, initial, 1)
+	assert.Contains(t, initial[0], `"answer" output field must start with (currently "answer:")`)
+	refinements := llm.sent(coproRefinePrompt)
+	require.Len(t, refinements, 1)
+	assert.Contains(t, refinements[0], "- Reply to the question TAG-SAME tersely. (score: 1.000) [output prefix: Final answer:]\n")
+	assert.Contains(t, refinements[0], "- Reply to the question TAG-SAME tersely. (score: 0.000) [output prefix: answer:]\n", "the same instruction with the original prefix is a separate attempt")
+}
+
+func TestCOPROCompile_RescoresPredictorAfterAnotherImproves(t *testing.T) {
+	llm := &scriptLLM{
+		initial: "Candidate instruction TAG-GOOD one.\nCandidate instruction TAG-BAD two.",
+		refine:  "Refined instruction TAG-R1 one.",
+		behave: func(head, prompt string) (string, error) {
+			if question := promptInput(prompt, "question"); question != "" {
+				if strings.Contains(head, "TAG-GOOD") {
+					return "query: search-" + question, nil
+				}
+				return "query: vague-" + question, nil
+			}
+			// The original answer instruction is always wrong. The good one is
+			// right on every precise query and on two of the vague ones, so the
+			// better rewrite instruction pays off only once it is installed.
+			if strings.Contains(head, "TAG-GOOD") {
+				query := promptInput(prompt, "query")
+				if question, ok := strings.CutPrefix(query, "search-"); ok {
+					return "answer: gold-" + question, nil
+				}
+				if query == "vague-q0" || query == "vague-q1" {
+					return "answer: gold-" + strings.TrimPrefix(query, "vague-"), nil
+				}
+			}
+			return "answer: wrong", nil
+		},
+	}
+	useScriptLLM(t, llm)
+
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(2), WithDepth(1)).
+		CompileExamples(context.Background(), scriptTwoStageProgram(llm), scriptQAExamples(4), nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Candidate instruction TAG-GOOD one.", out.Modules["a_rewrite"].GetSignature().Instruction)
+	assert.Equal(t, "Candidate instruction TAG-GOOD one.", out.Modules["b_answer"].GetSignature().Instruction)
+	result, err := out.Execute(context.Background(), map[string]any{"question": "q3"})
+	require.NoError(t, err)
+	assert.Equal(t, "gold-q3", result["answer"])
+}
+
+func TestCOPROCompile_RescoresOriginalPrefixAfterAnotherImproves(t *testing.T) {
+	// How many of the ten questions the answer predictor gets right, by the
+	// kind of query it receives. Its original prompt is weak; the proposed
+	// one is perfect on the original rewrite's queries.
+	correct := func(question, kind string, proposed bool) bool {
+		if len(question) != 2 {
+			return false
+		}
+		index := int(question[1] - '0')
+		limit := map[string]int{"O": 2, "X": 5}[kind]
+		if proposed {
+			limit = map[string]int{"O": 10, "X": 7}[kind]
+		}
+		return index < limit
+	}
+	llm := &scriptLLM{
+		// One proposal for each predictor: an instruction with a new prefix.
+		initial: "Candidate instruction TAG-X one. || new:",
+		refine:  "Refined instruction TAG-R1 one.",
+		behave: func(head, prompt string) (string, error) {
+			proposed, newPrefix := strings.Contains(head, "TAG-X"), strings.Contains(head, "should start with 'new:'")
+			if question := promptInput(prompt, "question"); question != "" {
+				switch {
+				case proposed && newPrefix:
+					return "new: X-" + question, nil
+				case strings.Contains(head, "TAG-REWRITE") && newPrefix:
+					// Not a candidate: the original instruction under the
+					// proposal's prefix. Useless queries.
+					return "new: B-" + question, nil
+				case strings.Contains(head, "TAG-REWRITE"):
+					return "query: O-" + question, nil
+				}
+				return "query: R-" + question, nil
+			}
+			kind, question, _ := strings.Cut(promptInput(prompt, "query"), "-")
+			switch {
+			case proposed && newPrefix && correct(question, kind, true):
+				return "new: gold-" + question, nil
+			case strings.Contains(head, "TAG-ANSWER") && !newPrefix && correct(question, kind, false):
+				return "answer: gold-" + question, nil
+			}
+			return "answer: wrong", nil
+		},
+	}
+	useScriptLLM(t, llm)
+
+	// Depth 0: the rewrite proposal wins with the weak answer prompt (0.5
+	// against 0.2), then the answer proposal wins (0.7 against 0.5). Depth 1
+	// scores the rewrite candidates again: with the new answer prompt the
+	// original rewrite prompt, under its original prefix, scores 1.0.
+	out, err := NewCOPRO(scriptExactMatch, WithBreadth(1), WithDepth(1)).
+		CompileExamples(context.Background(), scriptTwoStageProgram(llm), scriptQAExamples(10), nil)
+
+	require.NoError(t, err)
+	rewrite := out.Modules["a_rewrite"].GetSignature()
+	assert.Equal(t, "Rewrite the question into a search query TAG-REWRITE.", rewrite.Instruction)
+	assert.Equal(t, "query:", rewrite.Outputs[0].Prefix, "the original candidate keeps the prefix it was first scored with")
+	assert.Equal(t, "Candidate instruction TAG-X one.", out.Modules["b_answer"].GetSignature().Instruction)
+	result, err := out.Execute(context.Background(), map[string]any{"question": "q9"})
+	require.NoError(t, err)
+	assert.Equal(t, "gold-q9", result["answer"])
 }
