@@ -9,7 +9,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stretchr/testify v1.12.1
-	github.com/traefik/yaegi v0.16.2
+	github.com/traefik/yaegi v0.16.3
 	golang.org/x/text v0.44.0
 	google.golang.org/genai v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
