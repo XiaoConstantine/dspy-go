@@ -2,6 +2,7 @@ package optimizers
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 
@@ -68,4 +69,13 @@ func (s *serialScorer) Score(ctx context.Context, example core.Example, predicti
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.scorer.Score(ctx, example, prediction)
+}
+
+// requireRebindableProgram rejects a program whose clones would still run the
+// original modules, because an optimizer's changes to them would never execute.
+func requireRebindableProgram(program core.Program) error {
+	if len(program.Modules) > 0 && program.Forward != nil && !program.HasForwardFactory() {
+		return errors.New("program was built with core.NewProgram: its forward function keeps calling the original modules, so optimized instructions and demonstrations would have no effect; build it with core.NewProgramWithForwardFactory")
+	}
+	return nil
 }

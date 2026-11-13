@@ -628,6 +628,10 @@ func (m *MIPRO) compileExamples(
 	examples []core.Example,
 	scorer core.Scorer,
 ) (core.Program, error) {
+	if err := requireRebindableProgram(program); err != nil {
+		return program, err
+	}
+
 	// Step 1: Set aside examples for demonstrations, so that no candidate is
 	// scored on an example it was shown.
 	demoPool, examples := m.splitExamples(examples)

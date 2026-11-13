@@ -343,26 +343,29 @@ generationSig := core.NewSignature(
 retriever := modules.NewPredict(retrievalSig)
 generator := modules.NewChainOfThought(generationSig)
 
-// Compose into RAG program
-ragProgram := core.NewProgram(
+// Compose into RAG program. Optimizers change copies of the modules, so the
+// forward function is built from the modules it is given.
+ragProgram := core.NewProgramWithForwardFactory(
     map[string]core.Module{
         "retriever": retriever,
         "generator": generator,
     },
-    func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-        // Retrieval phase
-        docs, err := retriever.Process(ctx, map[string]interface{}{
-            "query": inputs["question"],
-        })
-        if err != nil {
-            return nil, err
-        }
+    func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+        return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+            // Retrieval phase
+            docs, err := bound["retriever"].Process(ctx, map[string]interface{}{
+                "query": inputs["question"],
+            })
+            if err != nil {
+                return nil, err
+            }
 
-        // Generation phase
-        return generator.Process(ctx, map[string]interface{}{
-            "question": inputs["question"],
-            "documents": docs["documents"],
-        })
+            // Generation phase
+            return bound["generator"].Process(ctx, map[string]interface{}{
+                "question": inputs["question"],
+                "documents": docs["documents"],
+            })
+        }
     },
 )
 

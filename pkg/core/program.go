@@ -107,6 +107,13 @@ func (p Program) RebindModules(modules map[string]Module) Program {
 	return rebound
 }
 
+// HasForwardFactory reports whether clones of the program run their own
+// modules. A program built with NewProgram keeps calling the modules its
+// forward function captured, so changes to a clone's modules have no effect.
+func (p Program) HasForwardFactory() bool {
+	return p.forwardFactory != nil
+}
+
 // Equal checks if two Programs are equivalent.
 func (p Program) Equal(other Program) bool {
 	if p.Forward == nil && other.Forward != nil || p.Forward != nil && other.Forward == nil {

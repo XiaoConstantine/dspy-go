@@ -191,12 +191,15 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 	)
 	predictor := modules.NewPredict(signature)
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			predictor := bound["predictor"]
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return predictor.Process(ctx, inputs)
+			}
 		},
 	)
 
@@ -274,12 +277,15 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 	)
 	predictor := modules.NewPredict(signature)
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			predictor := bound["predictor"]
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return predictor.Process(ctx, inputs)
+			}
 		},
 	)
 
@@ -353,12 +359,15 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 	)
 	predictor := modules.NewPredict(signature)
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			predictor := bound["predictor"]
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return predictor.Process(ctx, inputs)
+			}
 		},
 	)
 
@@ -433,12 +442,15 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 	)
 	predictor := modules.NewPredict(signature)
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			predictor := bound["predictor"]
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return predictor.Process(ctx, inputs)
+			}
 		},
 	)
 
@@ -513,12 +525,15 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 	)
 	predictor := modules.NewPredict(signature)
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"predictor": predictor,
 		},
-		func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-			return predictor.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+			predictor := bound["predictor"]
+			return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+				return predictor.Process(ctx, inputs)
+			}
 		},
 	)
 

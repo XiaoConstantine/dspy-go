@@ -181,6 +181,9 @@ func (c *COPRO) prepareCompile(ctx context.Context, scorer core.Scorer) (context
 }
 
 func (c *COPRO) compileExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	if err := requireRebindableProgram(program); err != nil {
+		return program, err
+	}
 	logger := logging.GetLogger()
 	ctx, span := core.StartSpan(ctx, "COPROCompilation")
 	defer core.EndSpan(ctx)

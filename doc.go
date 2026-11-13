@@ -256,10 +256,14 @@
 //	    )
 //
 //	    module := modules.NewPredict(signature)
-//	    program := core.NewProgram(
+//	    // Optimizers change copies of the modules, so the forward function
+//	    // must be built from the modules it is given.
+//	    program := core.NewProgramWithForwardFactory(
 //	        map[string]core.Module{"predictor": module},
-//	        func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
-//	            return module.Process(ctx, inputs)
+//	        func(bound map[string]core.Module) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+//	            return func(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+//	                return bound["predictor"].Process(ctx, inputs)
+//	            }
 //	        },
 //	    )
 //

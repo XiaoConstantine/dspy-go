@@ -74,24 +74,28 @@ func RunMIPROExample(apiKey string) {
 	extractor := modules.NewChainOfThought(extractorSignature).WithStructuredOutput()
 
 	// Create the program
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"cot":       cot,
 			"extractor": extractor,
 		},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			// First run chain of thought
-			cotResult, err := cot.Process(ctx, inputs)
-			if err != nil {
-				return nil, fmt.Errorf("chain of thought failed: %w", err)
-			}
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			cot := bound["cot"]
+			extractor := bound["extractor"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				// First run chain of thought
+				cotResult, err := cot.Process(ctx, inputs)
+				if err != nil {
+					return nil, fmt.Errorf("chain of thought failed: %w", err)
+				}
 
-			extractorInput := map[string]any{
-				"prompt": cotResult["completion"],
-			}
+				extractorInput := map[string]any{
+					"prompt": cotResult["completion"],
+				}
 
-			// Then extract the answer
-			return extractor.Process(ctx, extractorInput)
+				// Then extract the answer
+				return extractor.Process(ctx, extractorInput)
+			}
 		},
 	)
 
@@ -157,25 +161,29 @@ func RunMIPROExample(apiKey string) {
 	optimizedExtractor := optimizedProgram.Modules["extractor"]
 
 	// Create a new program with these modules and a proper forward function
-	finalProgram := core.NewProgram(
+	finalProgram := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"cot":       optimizedCot,
 			"extractor": optimizedExtractor,
 		},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			// First run the optimized chain of thought
-			cotResult, err := optimizedCot.Process(ctx, inputs)
-			if err != nil {
-				return nil, fmt.Errorf("chain of thought failed: %w", err)
-			}
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			optimizedCot := bound["cot"]
+			optimizedExtractor := bound["extractor"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				// First run the optimized chain of thought
+				cotResult, err := optimizedCot.Process(ctx, inputs)
+				if err != nil {
+					return nil, fmt.Errorf("chain of thought failed: %w", err)
+				}
 
-			// Map field names properly
-			extractorInput := map[string]any{
-				"prompt": cotResult["completion"],
-			}
+				// Map field names properly
+				extractorInput := map[string]any{
+					"prompt": cotResult["completion"],
+				}
 
-			// Then extract the answer
-			return optimizedExtractor.Process(ctx, extractorInput)
+				// Then extract the answer
+				return optimizedExtractor.Process(ctx, extractorInput)
+			}
 		},
 	)
 

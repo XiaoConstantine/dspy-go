@@ -2414,14 +2414,14 @@ func TestGEPACompileBasic(t *testing.T) {
 	mockModule.On("Clone").Return(mockModule).Maybe()
 
 	// Create test program
-	program := core.Program{
-		Modules: map[string]core.Module{
-			"test_module": mockModule,
+	program := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"test_module": mockModule},
+		func(map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return map[string]any{"output": "test response"}, nil
+			}
 		},
-		Forward: func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return map[string]any{"output": "test response"}, nil
-		},
-	}
+	)
 
 	// Create test dataset
 	dataset := testutil.NewMockDataset([]core.Example{

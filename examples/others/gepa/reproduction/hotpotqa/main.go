@@ -276,10 +276,13 @@ func (exp *HotpotQAReproductionExperiment) runExperiment(apiKey string) error {
 	module := modules.NewChainOfThought(*signature).WithStructuredOutput()
 
 	// Create program
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{"reasoner": module},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return module.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			module := bound["reasoner"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return module.Process(ctx, inputs)
+			}
 		},
 	)
 

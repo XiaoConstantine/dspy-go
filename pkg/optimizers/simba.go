@@ -492,6 +492,9 @@ func (s *SIMBA) prepareCompile(ctx context.Context, scorer core.Scorer) (context
 }
 
 func (s *SIMBA) compileExamples(ctx context.Context, program core.Program, examples []core.Example, scorer core.Scorer) (core.Program, error) {
+	if err := requireRebindableProgram(program); err != nil {
+		return program, err
+	}
 	ctx, span := core.StartSpan(ctx, "SIMBA.Compile")
 	defer core.EndSpan(ctx)
 

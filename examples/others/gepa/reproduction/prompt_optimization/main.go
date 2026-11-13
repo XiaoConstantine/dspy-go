@@ -195,10 +195,13 @@ func (exp *Figure2ReproductionExperiment) runFigure2Reproduction(apiKey string) 
 	signature := createMultiHopRetrievalSignature()
 	module := modules.NewChainOfThought(*signature).WithStructuredOutput()
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{"retriever": module},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return module.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			module := bound["retriever"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return module.Process(ctx, inputs)
+			}
 		},
 	)
 

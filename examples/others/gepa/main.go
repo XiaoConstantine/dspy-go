@@ -82,10 +82,13 @@ func RunGEPAExample(apiKey, datasetName string, generations int, verbose bool) {
 	module := modules.NewChainOfThought(*signature).WithStructuredOutput()
 
 	// Create the program to be optimized
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{"reasoner": module},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return module.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			module := bound["reasoner"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return module.Process(ctx, inputs)
+			}
 		},
 	)
 

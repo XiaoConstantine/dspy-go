@@ -1264,6 +1264,9 @@ func (g *GEPA) CompileWithScorer(ctx context.Context, program core.Program, exam
 }
 
 func (g *GEPA) compile(ctx context.Context, program core.Program, dataset core.Dataset, scorer core.Scorer, concurrentScoring bool) (core.Program, error) {
+	if err := requireRebindableProgram(program); err != nil {
+		return program, err
+	}
 	ctx, span := core.StartSpan(ctx, "GEPA.Compile")
 	defer core.EndSpan(ctx)
 	_ = span // Suppress unused variable warning

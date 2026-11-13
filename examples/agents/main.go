@@ -203,10 +203,13 @@ func RunEvalutorOptimizerExample(ctx context.Context, logger *logging.Logger) {
 	predict := modules.NewPredict(signature).WithStructuredOutput()
 
 	// Create program that uses predict module
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{"predict": predict},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return predict.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			predict := bound["predict"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return predict.Process(ctx, inputs)
+			}
 		},
 	)
 

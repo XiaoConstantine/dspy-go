@@ -101,6 +101,11 @@ func (b *BootstrapFewShot) metricKeeps(trainset []map[string]any) func(context.C
 // compileInternal contains the original implementation logic. keep reports
 // whether the teacher's prediction for trainset[index] becomes a demonstration.
 func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]any, keep func(ctx context.Context, index int, prediction map[string]any) bool) (core.Program, error) {
+	for _, program := range []core.Program{student, teacher} {
+		if err := requireRebindableProgram(program); err != nil {
+			return student, err
+		}
+	}
 	compiledStudent := student.Clone()
 	teacherLLM := core.GetTeacherLLM()
 	if teacherLLM == nil {

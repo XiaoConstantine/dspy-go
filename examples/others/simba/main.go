@@ -65,26 +65,29 @@ func RunSIMBAExample(apiKey string) {
 	).WithInstruction("Solve this math problem step by step, showing your reasoning clearly and providing the final numerical answer.")).WithStructuredOutput()
 
 	// Create the program
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
 			"reasoner": reasoner,
 		},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			// Process the question through our reasoner
-			result, err := reasoner.Process(ctx, inputs)
-			if err != nil {
-				return nil, fmt.Errorf("reasoning failed: %w", err)
-			}
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			reasoner := bound["reasoner"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				// Process the question through our reasoner
+				result, err := reasoner.Process(ctx, inputs)
+				if err != nil {
+					return nil, fmt.Errorf("reasoning failed: %w", err)
+				}
 
-			// Extract and clean the answer
-			if reasoning, ok := result["reasoning"].(string); ok {
-				result["reasoning"] = reasoning
-			}
-			if answer, ok := result["answer"].(string); ok {
-				result["answer"] = extractFinalAnswer(answer)
-			}
+				// Extract and clean the answer
+				if reasoning, ok := result["reasoning"].(string); ok {
+					result["reasoning"] = reasoning
+				}
+				if answer, ok := result["answer"].(string); ok {
+					result["answer"] = extractFinalAnswer(answer)
+				}
 
-			return result, nil
+				return result, nil
+			}
 		},
 	)
 

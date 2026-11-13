@@ -90,10 +90,13 @@ func createHotpotQAProgram() (core.Program, *core.Signature, func(map[string]any
 	// Use native JSON structured output for reliable multi-field extraction
 	module := modules.NewChainOfThought(signature).WithStructuredOutput()
 
-	program := core.NewProgram(
+	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{"reasoner": module},
-		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
-			return module.Process(ctx, inputs)
+		func(bound map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			module := bound["reasoner"]
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return module.Process(ctx, inputs)
+			}
 		},
 	)
 

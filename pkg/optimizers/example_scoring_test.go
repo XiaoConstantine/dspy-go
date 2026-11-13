@@ -546,3 +546,34 @@ func TestGEPAEvaluationFailures(t *testing.T) {
 		assert.Same(t, baseline, accepted)
 	})
 }
+
+// TestOptimizersRejectProgramsThatCannotBeRebound covers programs built with
+// core.NewProgram: their forward function keeps calling the original modules,
+// so an optimizer would score and return clones that never run.
+func TestOptimizersRejectProgramsThatCannotBeRebound(t *testing.T) {
+	module := modules.NewPredict(core.NewSignature(
+		[]core.InputField{{Name: "question"}},
+		[]core.OutputField{{Name: "answer"}},
+	))
+	program := core.NewProgram(map[string]core.Module{"qa": module},
+		func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+			return module.Process(ctx, inputs)
+		})
+	examples := []core.Example{{
+		Inputs:  map[string]any{"question": "2+2?"},
+		Outputs: map[string]any{"answer": "4"},
+	}}
+	metric := func(expected, actual map[string]any) float64 { return 1 }
+	accept := func(expected, actual map[string]any, _ context.Context) bool { return true }
+
+	for name, optimizer := range map[string]core.Optimizer{
+		"BootstrapFewShot": NewBootstrapFewShot(accept, 1),
+		"MIPRO":            NewMIPRO(nil),
+		"COPRO":            NewCOPRO(metric),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := optimizer.Compile(context.Background(), program, datasets.NewSimpleDataset(examples), metric)
+			require.ErrorContains(t, err, "NewProgramWithForwardFactory")
+		})
+	}
+}
