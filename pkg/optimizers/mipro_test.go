@@ -1136,3 +1136,24 @@ func TestMIPRORunsModeTrialsWithoutNumTrials(t *testing.T) {
 	require.NoError(t, err)
 	strategy.AssertExpectations(t)
 }
+
+func TestMIPRODemosHoldOnlyThePredictorsFields(t *testing.T) {
+	// The second predictor of a question -> answer -> completion program.
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.Field{Name: "answer"}}},
+		[]core.OutputField{{Field: core.Field{Name: "completion"}}},
+	)
+	examples := []core.Example{
+		{Inputs: map[string]any{"question": "q0"}, Outputs: map[string]any{"answer": "a0", "completion": "c0"}},
+		{Inputs: map[string]any{"question": "q1"}, Outputs: map[string]any{"completion": "c1"}},
+	}
+
+	demos := demosForPredictor(signature, examples)
+
+	// The predictor reads "answer" as an input, so the demo must hold it as
+	// one; left among the outputs it rendered as "answer: <nil>".
+	require.Equal(t, []core.Example{{
+		Inputs:  map[string]any{"answer": "a0"},
+		Outputs: map[string]any{"completion": "c0"},
+	}}, demos)
+}

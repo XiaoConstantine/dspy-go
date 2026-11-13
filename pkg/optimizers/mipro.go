@@ -902,11 +902,47 @@ func (m *MIPRO) createCandidateProgram(
 		}
 		if idx := choice(fmt.Sprintf("module_%d_demos", i)); idx > 0 && idx < len(demoSets) && len(demoSets[idx]) > 0 {
 			for _, predictor := range demoPredictors(module) {
-				predictor.SetDemos(append([]core.Example(nil), demoSets[idx]...))
+				if demos := demosForPredictor(predictor.GetSignature(), demoSets[idx]); len(demos) > 0 {
+					predictor.SetDemos(demos)
+				}
 			}
 		}
 	}
 	return newProgram
+}
+
+// demosForPredictor builds the demonstrations a predictor with this signature
+// can render from labeled program examples: one for each example that carries
+// all of its input fields and at least one of its output fields, holding only
+// those fields. A predictor in the middle of a program reads its inputs from the
+// example's outputs, and any other field would render as "<nil>" in its prompt.
+func demosForPredictor(signature core.Signature, examples []core.Example) []core.Example {
+	value := func(example core.Example, name string) (any, bool) {
+		if v, ok := example.Inputs[name]; ok {
+			return v, true
+		}
+		v, ok := example.Outputs[name]
+		return v, ok
+	}
+	var demos []core.Example
+	for _, example := range examples {
+		demo := core.Example{Inputs: map[string]any{}, Outputs: map[string]any{}}
+		usable := true
+		for _, field := range signature.Inputs {
+			v, ok := value(example, field.Name)
+			usable = usable && ok
+			demo.Inputs[field.Name] = v
+		}
+		for _, field := range signature.Outputs {
+			if v, ok := value(example, field.Name); ok {
+				demo.Outputs[field.Name] = v
+			}
+		}
+		if usable && len(demo.Outputs) > 0 {
+			demos = append(demos, demo)
+		}
+	}
+	return demos
 }
 
 // evaluateCandidate evaluates a candidate program.
