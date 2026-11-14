@@ -252,3 +252,26 @@ func TestOfflineTaskContract(t *testing.T) {
 		}), "held-out input leaked into training")
 	}
 }
+
+func TestOfflineSIMBARuleRequiresEvidence(t *testing.T) {
+	const analyze = "Analyze the following successful execution trajectories.\n"
+	evidence := "Input: map[prompt:ticket=9 symbols=dcba]\nExpected output: map[completion:dusk coral blue amber]\n"
+	for _, tc := range []struct {
+		name, evidence, want string
+	}{
+		{"ticket with its correct labels", evidence, offlineCorrect},
+		{"no evidence", "", offlineDecoy},
+		{"ticket with wrong labels", "Input: map[prompt:ticket=9 symbols=dcba]\nOutput: map[completion:amber amber amber amber]\n", offlineDecoy},
+		{"labels without a ticket", "Expected output: map[completion:dusk coral blue amber]\n", offlineDecoy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := newOfflineLLM()
+			rule, err := model.Generate(context.Background(), analyze+tc.evidence)
+			require.NoError(t, err)
+			refined, err := model.Generate(context.Background(),
+				fmt.Sprintf("Given the following instruction and rule, create an enhanced instruction.\n\nInstruction: %s\n%s", offlinePartial, rule.Content))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, refined.Content)
+		})
+	}
+}

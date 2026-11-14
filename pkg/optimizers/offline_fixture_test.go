@@ -116,8 +116,16 @@ func (m *offlineLLM) respond(prompt string) (string, error) {
 		}
 		return m.propose(offlinePartial), nil
 	case strings.HasPrefix(prompt, "Analyze the following successful"):
-		return "RULE: Use the observed routing labels rather than a constant label.", nil
+		// A rule is only as good as its evidence: without a real ticket and
+		// its correct labels the analysis has nothing to generalize from.
+		if !offlineHasEvidence(prompt) {
+			return "RULE: " + offlineUselessRule, nil
+		}
+		return "RULE: " + offlineUsefulRule, nil
 	case strings.HasPrefix(prompt, "Given the following instruction and rule"):
+		if !strings.Contains(prompt, offlineUsefulRule) {
+			return m.propose(offlineDecoy), nil
+		}
 		return m.propose(offlineRefine(prompt)), nil
 	case strings.HasPrefix(prompt, "Analyze the following optimization progress"):
 		return "Preserve rules supported by the examples and compare candidate accuracy.", nil
@@ -172,6 +180,29 @@ func offlineGEPARefine(prompt string) string {
 		return offlineRefine(parent)
 	}
 	return offlineDecoy
+}
+
+const (
+	offlineUsefulRule  = "Use the observed routing labels rather than a constant label."
+	offlineUselessRule = "Keep the answer short."
+)
+
+var offlineTicket = regexp.MustCompile(`ticket=\d+ symbols=([a-d]{4})`)
+
+// offlineHasEvidence reports whether prompt shows a ticket together with the
+// labels that are correct for it, as an expected output or a successful run.
+func offlineHasEvidence(prompt string) bool {
+	labels := map[byte]string{'a': "amber", 'b': "blue", 'c': "coral", 'd': "dusk"}
+	for _, match := range offlineTicket.FindAllStringSubmatch(prompt, -1) {
+		want := make([]string, len(match[1]))
+		for i := range match[1] {
+			want[i] = labels[match[1][i]]
+		}
+		if strings.Contains(prompt, strings.Join(want, " ")) {
+			return true
+		}
+	}
+	return false
 }
 
 func offlineRefine(parent string) string {
