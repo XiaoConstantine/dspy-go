@@ -20,6 +20,7 @@ type MockModule struct {
 	shouldFail     bool
 	processingTime time.Duration
 	callCount      int
+	running, peak  int // calls in flight now, and the most seen at once
 	mu             sync.Mutex
 }
 
@@ -44,7 +45,14 @@ func (m *MockModule) Process(ctx context.Context, inputs map[string]any, opts ..
 	m.mu.Lock()
 	m.callCount++
 	count := m.callCount
+	m.running++
+	m.peak = max(m.peak, m.running)
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.running--
+		m.mu.Unlock()
+	}()
 
 	// Simulate processing time
 	if m.processingTime > 0 {
@@ -71,6 +79,13 @@ func (m *MockModule) Clone() core.Module {
 		shouldFail:     m.shouldFail,
 		processingTime: m.processingTime,
 	}
+}
+
+// PeakConcurrency returns the most calls that were in flight at once.
+func (m *MockModule) PeakConcurrency() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.peak
 }
 
 func (m *MockModule) GetCallCount() int {
@@ -117,7 +132,7 @@ func TestParallelSingleInput(t *testing.T) {
 }
 
 func TestParallelBatchProcessing(t *testing.T) {
-	mockModule := NewMockModule(false, 10*time.Millisecond)
+	mockModule := NewMockModule(false, 50*time.Millisecond)
 	parallel := NewParallel(mockModule, WithMaxWorkers(3))
 
 	ctx := context.Background()
@@ -135,9 +150,7 @@ func TestParallelBatchProcessing(t *testing.T) {
 		"batch_inputs": batchInputs,
 	}
 
-	start := time.Now()
 	result, err := parallel.Process(ctx, inputs)
-	duration := time.Since(start)
 
 	require.NoError(t, err)
 
@@ -159,9 +172,11 @@ func TestParallelBatchProcessing(t *testing.T) {
 	}
 	assert.Len(t, processedItems, len(batchInputs), "should have processed all unique items")
 
-	// Check that parallel processing was faster than sequential
-	// With 3 workers and 5 items taking 10ms each, should be faster than 50ms
-	assert.Less(t, duration, 40*time.Millisecond, "Parallel processing should be faster than sequential")
+	// Items ran side by side, within the worker limit. Counting calls in
+	// flight says so directly; a wall-clock limit failed on slow CI runners.
+	peak := mockModule.PeakConcurrency()
+	assert.Greater(t, peak, 1, "items should be processed concurrently")
+	assert.LessOrEqual(t, peak, 3, "no more than MaxWorkers items at once")
 
 	// Verify all calls were made
 	assert.Equal(t, 5, mockModule.GetCallCount())
