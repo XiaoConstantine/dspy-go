@@ -902,57 +902,92 @@ func TestParallelExecutor_EmptyTaskList(t *testing.T) {
 }
 
 func TestParallelExecutor_LargeTaskLoad(t *testing.T) {
-	registry := createTestRegistry()
-	executor := NewParallelExecutor(registry, 4)
+	// Count tasks inside the tool instead of timing them: every task blocks
+	// until released, and synctest.Wait returns once the bubble is idle, so the
+	// in-flight count is exactly how many tasks the worker pool let run at once.
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			maxWorkers = 4
+			numTasks   = 50
+		)
+		var (
+			mu          sync.Mutex
+			inFlight    int
+			maxInFlight int
+			executed    int
+		)
+		release := make(chan struct{})
 
-	// Create a large number of tasks
-	numTasks := 50
-	tasks := make([]*ParallelTask, numTasks)
+		registry := createTestRegistry()
+		require.NoError(t, registry.Register(&parallelExecutorFuncTool{
+			mockProcessingTool: &mockProcessingTool{name: "load_tool"},
+			execute: func(ctx context.Context, input map[string]any) (core.ToolResult, error) {
+				mu.Lock()
+				inFlight++
+				maxInFlight = max(maxInFlight, inFlight)
+				mu.Unlock()
+				defer func() {
+					mu.Lock()
+					inFlight--
+					executed++
+					mu.Unlock()
+				}()
 
-	for i := 0; i < numTasks; i++ {
-		tasks[i] = &ParallelTask{
-			ID:         fmt.Sprintf("load_task_%d", i),
-			ToolName:   "parser",
-			Input:      map[string]any{"data": fmt.Sprintf("test%d", i)},
-			Priority:   i % 5, // Vary priorities
-			Context:    context.Background(),
-			SubmitTime: time.Now(),
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return core.ToolResult{}, ctx.Err()
+				}
+				return core.ToolResult{Data: input["data"]}, nil
+			},
+		}))
+		executor := NewParallelExecutor(registry, maxWorkers)
+
+		tasks := make([]*ParallelTask, numTasks)
+		for i := range tasks {
+			tasks[i] = &ParallelTask{
+				ID:         fmt.Sprintf("load_task_%d", i),
+				ToolName:   "load_tool",
+				Input:      map[string]any{"data": fmt.Sprintf("test%d", i)},
+				Priority:   i % 5, // Vary priorities
+				Context:    context.Background(),
+				SubmitTime: time.Now(),
+			}
 		}
-	}
 
-	ctx := context.Background()
-	start := time.Now()
-	results, err := executor.ExecuteParallel(ctx, tasks, &PriorityScheduler{})
-	duration := time.Since(start)
-
-	require.NoError(t, err)
-	assert.Len(t, results, numTasks)
-
-	// All tasks should complete successfully
-	successCount := 0
-	for _, result := range results {
-		if result.Error == nil {
-			successCount++
+		type executionResult struct {
+			results []ParallelResult
+			err     error
 		}
-	}
-	assert.Equal(t, numTasks, successCount)
+		done := make(chan executionResult, 1)
+		go func() {
+			results, err := executor.ExecuteParallel(t.Context(), tasks, &PriorityScheduler{})
+			done <- executionResult{results: results, err: err}
+		}()
 
-	// Test that parallel execution works by verifying task completion efficiency
-	// With 4 workers and 50 tasks, we should see significant parallelism
-	// Instead of timing, verify that all tasks completed and check metrics
+		// Every task is now either inside the tool or waiting for a worker.
+		synctest.Wait()
+		mu.Lock()
+		saturated := inFlight
+		mu.Unlock()
+		assert.Equal(t, maxWorkers, saturated, "tasks running at once while the pool is saturated")
+		total, active, available := executor.GetWorkerPoolStatus()
+		assert.Equal(t, maxWorkers, total)
+		assert.Equal(t, maxWorkers, active)
+		assert.Equal(t, 0, available)
 
-	// Verify all tasks completed
-	assert.Len(t, results, numTasks)
+		close(release)
+		got := <-done
 
-	// Verify tasks ran with reasonable parallelism by checking that
-	// duration is much less than sequential (50 * 10ms = 500ms)
-	sequentialTime := time.Duration(numTasks) * 10 * time.Millisecond
-	parallelismRatio := float64(duration) / float64(sequentialTime)
-
-	// With 4 workers, we expect at least 3x speedup (allowing for overhead)
-	assert.True(t, parallelismRatio < 0.4,
-		"Expected parallel speedup, got ratio %f (duration: %v vs sequential: %v)",
-		parallelismRatio, duration, sequentialTime)
-
-	t.Logf("Executed %d tasks in %v", numTasks, duration)
+		require.NoError(t, got.err)
+		require.Len(t, got.results, numTasks)
+		for i, result := range got.results {
+			assert.Equal(t, tasks[i].ID, result.TaskID)
+			assert.NoError(t, result.Error)
+			assert.Equal(t, tasks[i].Input["data"], result.Result.Data)
+		}
+		assert.Equal(t, numTasks, executed)
+		assert.Equal(t, maxWorkers, maxInFlight, "the pool must never run more than maxWorkers tasks")
+		assert.Equal(t, int64(numTasks), executor.GetMetrics().TotalExecutions)
+	})
 }
