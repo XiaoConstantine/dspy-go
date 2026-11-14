@@ -3116,3 +3116,25 @@ func TestSIMBAGetStateReturnsIndependentSnapshot(t *testing.T) {
 	assert.NotEqual(t, "changed by the caller", s.GetState().PerformanceLog[0].Introspection,
 		"a snapshot shares no step entries with the optimizer, which rewrites them while compiling")
 }
+
+func TestSIMBACompileWithScorerHonorsLLMConcurrency(t *testing.T) {
+	var mu sync.Mutex
+	running, peak := 0, 0
+	scorer := core.ScorerFunc(func(_ context.Context, _ core.Example, prediction map[string]any) (float64, error) {
+		mu.Lock()
+		running++
+		peak = max(peak, running)
+		mu.Unlock()
+		time.Sleep(2 * time.Millisecond)
+		mu.Lock()
+		running--
+		mu.Unlock()
+		return prediction["score"].(float64), nil
+	})
+	s := newSIMBAScript(func(string) string { return "ALT" }, WithSIMBAMaxSteps(2), WithSIMBANumCandidates(4), WithLLMConcurrency(2))
+
+	_, err := s.CompileWithScorer(context.Background(), simbaScoreProgram(func(string, int) float64 { return 0.5 }), simbaExamples(8), scorer)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, peak, "candidates and their examples share one limit")
+}

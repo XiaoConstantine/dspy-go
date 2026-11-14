@@ -212,6 +212,11 @@ type SIMBA struct {
 	// run concurrently when LLMConcurrency is unset.
 	concurrentFullEvaluation bool
 
+	// Set per compile, under compileGate: one slot per program run in flight,
+	// LLMConcurrency in total. Candidates and their examples run on nested
+	// pools, so a per-pool limit alone would multiply. Nil means unlimited.
+	llmSlots chan struct{}
+
 	// Thread safety
 	compileGate chan struct{}
 	mu          sync.RWMutex
@@ -482,6 +487,10 @@ func (s *SIMBA) compileScored(ctx context.Context, program core.Program, example
 		return program, err
 	}
 	s.concurrentFullEvaluation = concurrentFullEvaluation
+	s.llmSlots = nil
+	if s.config.LLMConcurrency > 0 {
+		s.llmSlots = make(chan struct{}, s.config.LLMConcurrency)
+	}
 	return s.compileExamples(ctx, program, examples, scorer)
 }
 
@@ -1266,6 +1275,13 @@ func (s *SIMBA) evaluateBatch(ctx context.Context, candidate core.Program, batch
 	p := s.createLLMPool()
 	for i, example := range batch {
 		p.Go(func() {
+			if s.llmSlots != nil {
+				select {
+				case s.llmSlots <- struct{}{}:
+					defer func() { <-s.llmSlots }()
+				case <-ctx.Done():
+				}
+			}
 			if err := ctx.Err(); err != nil {
 				errs[i] = err
 				return
