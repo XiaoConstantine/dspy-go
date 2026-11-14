@@ -626,6 +626,11 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, program core.Program, nam
 				logging.GetLogger().Error(ctx, "COPRO: Error scoring candidate: %v", err)
 				score = 0
 			}
+			if score < 0 {
+				// Zero is the score of a failed example, so it must be the lowest.
+				logging.GetLogger().Warn(ctx, "COPRO: negative score %v counts as zero", score)
+				score = 0
+			}
 			scores[idx] = score
 		})
 	}

@@ -49,8 +49,10 @@ func MetricScorer(metric Metric) Scorer {
 // several goroutines at once. A non-nil error means the prediction could not be
 // scored, such as a failed judge call. An unscorable example never raises a
 // candidate's score; each optimizer's CompileWithScorer documents whether it
-// counts as zero, rejects the candidate, or fails the run. Score should return
-// promptly once ctx is done.
+// counts as zero, rejects the candidate, or fails the run. Scores should not be
+// negative: an optimizer that counts a failed example as zero treats zero as the
+// lowest score, and GEPA and COPRO count a negative score as zero. Score should
+// return promptly once ctx is done.
 type Scorer interface {
 	Score(ctx context.Context, example Example, prediction map[string]any) (float64, error)
 }

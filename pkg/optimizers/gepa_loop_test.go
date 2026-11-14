@@ -474,6 +474,33 @@ func TestGEPACompileChargesDuplicateExamplesOnce(t *testing.T) {
 	require.EqualValues(t, 1, calls.Load(), "three copies of one example fit a budget of one metric call")
 }
 
+func TestGEPACompileUnscorableChildDoesNotBeatNegativeScore(t *testing.T) {
+	llm := &gepaLoopLLM{generate: func(string) (*core.LLMResponse, error) {
+		return &core.LLMResponse{Content: "child instruction"}, nil
+	}}
+	config := DefaultGEPAConfig()
+	config.GenerationLLM, config.ReflectionLLM = llm, llm
+	config.MaxGenerations, config.EvaluationBatchSize, config.RandomSeed = 4, 2, 1
+	optimizer, err := NewGEPA(config)
+	require.NoError(t, err)
+	scorer := core.ScorerFunc(func(_ context.Context, _ core.Example, prediction map[string]any) (float64, error) {
+		if prediction["output"] == "seed instruction" {
+			return -1, nil
+		}
+		return 0, fmt.Errorf("judge unavailable")
+	})
+	var train []core.Example
+	for i := range 4 {
+		train = append(train, core.Example{Inputs: map[string]any{"case": i}})
+	}
+
+	optimized, err := optimizer.CompileWithScorer(context.Background(), gepaInstructionProgram(), train, scorer)
+
+	require.NoError(t, err)
+	require.Equal(t, "seed instruction", optimized.Modules["alpha"].GetSignature().Instruction,
+		"a child that could not be scored never replaces a scored seed")
+}
+
 func TestGEPACompileRepeatsSeededRunOnSameOptimizer(t *testing.T) {
 	var log []string
 	var proposals int

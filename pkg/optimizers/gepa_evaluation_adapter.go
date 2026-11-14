@@ -242,6 +242,13 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 					evalCase.Score, scoreErr = adapter.scorer.Score(ctx, example, outputs)
 					switch {
 					case scoreErr == nil:
+						if evalCase.Score < 0 {
+							// Zero is the score of a failed example, so it must
+							// be the lowest: a negative score would rank below
+							// a candidate that could not be scored at all.
+							logging.GetLogger().Warn(ctx, "GEPA: negative score %v counts as zero", evalCase.Score)
+							evalCase.Score = 0
+						}
 					case ctx.Err() != nil:
 						evalCase.Err = scoreErr
 						cacheable = false
