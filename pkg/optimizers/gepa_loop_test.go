@@ -451,6 +451,29 @@ func gepaInstructionProgram() core.Program {
 		})
 }
 
+func TestGEPACompileChargesDuplicateExamplesOnce(t *testing.T) {
+	llm := &gepaLoopLLM{generate: func(string) (*core.LLMResponse, error) {
+		return &core.LLMResponse{Content: "child instruction"}, nil
+	}}
+	config := DefaultGEPAConfig()
+	config.GenerationLLM, config.ReflectionLLM = llm, llm
+	config.MaxMetricCalls, config.ConcurrencyLevel, config.RandomSeed = 1, 3, 1
+	optimizer, err := NewGEPA(config)
+	require.NoError(t, err)
+	var calls atomic.Int64
+	scorer := core.ScorerFunc(func(context.Context, core.Example, map[string]any) (float64, error) {
+		calls.Add(1)
+		time.Sleep(2 * time.Millisecond) // keep the copies in flight together
+		return 0.5, nil
+	})
+	same := core.Example{Inputs: map[string]any{"case": 0}}
+
+	_, err = optimizer.CompileWithScorer(context.Background(), gepaInstructionProgram(), []core.Example{same, same, same}, scorer)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 1, calls.Load(), "three copies of one example fit a budget of one metric call")
+}
+
 func TestGEPACompileRepeatsSeededRunOnSameOptimizer(t *testing.T) {
 	var log []string
 	var proposals int

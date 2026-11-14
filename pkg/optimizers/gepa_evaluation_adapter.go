@@ -197,7 +197,18 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 	// Scoring and feedback calls overlap only when the adapter allows it.
 	var scoring sync.Mutex
 	workers := pool.New().WithMaxGoroutines(max(g.config.ConcurrencyLevel, 1))
+	// A batch can hold the same example twice. Run it once and share the
+	// result: concurrent copies would all miss the cache and each spend a
+	// metric call the budget reserved only once.
+	first := make(map[string]int, len(adapter.batch))
+	duplicateOf := make([]int, len(adapter.batch))
 	for i, example := range adapter.batch {
+		key := evaluationCaseCacheKey(candidate, example)
+		if original, ok := first[key]; ok {
+			duplicateOf[i] = original
+			continue
+		}
+		first[key], duplicateOf[i] = i, -1
 		workers.Go(func() {
 			if ctx.Err() != nil {
 				return
@@ -264,6 +275,14 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 		})
 	}
 	workers.Wait()
+	for i, original := range duplicateOf {
+		if original >= 0 && ran[original] {
+			cases[i], ran[i] = cases[original], true
+			cases[i].Outputs = cloneStringAnyMap(cases[i].Outputs)
+			cases[i].FeedbackMetadata = cloneStringAnyMap(cases[i].FeedbackMetadata)
+			cases[i].TraceEvidence = append([]string(nil), cases[i].TraceEvidence...)
+		}
+	}
 
 	for i, evalCase := range cases {
 		if !ran[i] {
