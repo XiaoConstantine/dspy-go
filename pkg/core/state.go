@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
+	"strconv"
 )
 
 // Version is a placeholder for the dspy-go version.
@@ -49,13 +51,23 @@ type SavedExample struct {
 
 // SavedModuleState represents the serializable state of a single DSPy module.
 // Specific fields might vary depending on the module type (Predict, CoT, etc.).
+//
+// A predictor is a module without sub-modules. A predictor's state carries its
+// instruction and output prefixes, which optimizers tune. A module built from
+// other modules, such as ChainOfThought or ReAct, carries the state of every
+// predictor inside it in Predictors.
 type SavedModuleState struct {
 	Signature       string            `json:"signature"`                  // Module's signature string representation (READ-ONLY during load)
+	Instruction     *string           `json:"instruction,omitempty"`      // Predictor's instruction; absent in older files, whose instructions are not loaded
+	OutputPrefixes  map[string]string `json:"output_prefixes,omitempty"`  // Predictor's output field prefixes by field name
 	Demos           []SavedExample    `json:"demos,omitempty"`            // Saved demos, if the module provides them
 	LMIdentifier    map[string]string `json:"lm_identifier,omitempty"`    // Identifying info for the LM used (e.g., provider, model)
 	TunedParameters map[string]any    `json:"tuned_parameters,omitempty"` // Module-specific tuned parameters (e.g., k for retriever)
 	ModuleType      string            `json:"module_type"`                // Concrete type name (e.g., "Predict")
-	// TODO: Add other potential module-specific tuned parameters (e.g., k for retrievers).
+	// Predictors holds the state of each predictor nested in this module, keyed
+	// by its path of GetSubModules indexes, such as "1.0" for the first
+	// sub-module of the second sub-module.
+	Predictors map[string]SavedModuleState `json:"predictors,omitempty"`
 }
 
 // SavedProgramState represents the serializable state of an entire DSPy program.
@@ -103,69 +115,105 @@ func persistedModuleTypeName(module Module) string {
 	return typ.String()
 }
 
-// SaveProgram serializes the current state of the Program's modules to a JSON file.
+// namedPredictor is a predictor nested in a module, with its path of
+// GetSubModules indexes.
+type namedPredictor struct {
+	path   string
+	module Module
+}
+
+// nestedPredictors returns the predictors inside module, depth first, or nil
+// when module has no sub-modules and so is a predictor itself.
+func nestedPredictors(module Module) []namedPredictor {
+	provider, ok := module.(SubModuleProvider)
+	if !ok {
+		return nil
+	}
+	var predictors []namedPredictor
+	for i, sub := range provider.GetSubModules() {
+		if sub == nil {
+			continue
+		}
+		index := strconv.Itoa(i)
+		nested := nestedPredictors(sub)
+		if nested == nil {
+			predictors = append(predictors, namedPredictor{path: index, module: sub})
+			continue
+		}
+		for _, predictor := range nested {
+			predictors = append(predictors, namedPredictor{path: index + "." + predictor.path, module: predictor.module})
+		}
+	}
+	return predictors
+}
+
+// saveModuleState captures module's state and, for a module built from other
+// modules, the state of every predictor inside it.
+func saveModuleState(module Module) SavedModuleState {
+	state := SavedModuleState{
+		Signature:  module.GetSignature().String(),
+		ModuleType: persistedModuleTypeName(module),
+	}
+	if demoProvider, ok := module.(DemoProvider); ok {
+		demos := demoProvider.GetDemos()
+		state.Demos = make([]SavedExample, len(demos))
+		for i, demo := range demos {
+			state.Demos[i] = SavedExample(demo)
+		}
+	}
+	if lmProvider, ok := module.(LMConfigProvider); ok {
+		state.LMIdentifier = lmProvider.GetLLMIdentifier()
+	}
+	if paramProvider, ok := module.(ParameterProvider); ok {
+		state.TunedParameters = paramProvider.GetTunedParameters()
+	}
+
+	predictors := nestedPredictors(module)
+	if predictors == nil {
+		signature := module.GetSignature()
+		state.Instruction = &signature.Instruction
+		if len(signature.Outputs) > 0 {
+			state.OutputPrefixes = make(map[string]string, len(signature.Outputs))
+			for _, output := range signature.Outputs {
+				state.OutputPrefixes[output.Name] = output.Prefix
+			}
+		}
+		return state
+	}
+	state.Predictors = make(map[string]SavedModuleState, len(predictors))
+	for _, predictor := range predictors {
+		state.Predictors[predictor.path] = saveModuleState(predictor.module)
+	}
+	return state
+}
+
+// SaveProgram serializes the current state of the Program's modules to a JSON
+// file: each predictor's instruction, output prefixes, and demos, including
+// predictors nested in modules such as ChainOfThought and ReAct.
 func SaveProgram(p *Program, filepath string) error {
-	// 1. Create SavedProgramState instance
 	state := SavedProgramState{
 		Modules: make(map[string]SavedModuleState),
 		Metadata: map[string]string{
 			"dspy_go_version": Version,
-			// Add other metadata like optimizer used, timestamp, etc. if needed
 		},
 	}
-
-	// 2. Populate it by iterating through p.Modules, extracting state
 	for name, module := range p.Modules {
-		var demos []Example
-		// Check if the module provides demos
-		if demoProvider, ok := module.(DemoProvider); ok {
-			demos = demoProvider.GetDemos()
-		}
-
-		savedDemos := make([]SavedExample, len(demos))
-		for i, demo := range demos {
-			savedDemos[i] = SavedExample(demo)
-		}
-
-		// Get LM Identifier if module provides it
-		var lmIdentifier map[string]string
-		if lmProvider, ok := module.(LMConfigProvider); ok {
-			lmIdentifier = lmProvider.GetLLMIdentifier()
-		}
-
-		// Get Tuned Parameters
-		var tunedParams map[string]any
-		if paramProvider, ok := module.(ParameterProvider); ok {
-			tunedParams = paramProvider.GetTunedParameters()
-		}
-
-		moduleState := SavedModuleState{
-			Signature:       module.GetSignature().String(),
-			Demos:           savedDemos,
-			LMIdentifier:    lmIdentifier,
-			TunedParameters: tunedParams,
-			ModuleType:      persistedModuleTypeName(module),
-		}
-		state.Modules[name] = moduleState
+		state.Modules[name] = saveModuleState(module)
 	}
 
-	// 3. Marshal to JSON
-	jsonData, err := json.MarshalIndent(state, "", "  ") // Use MarshalIndent for readability
+	jsonData, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal program state to JSON: %w", err)
 	}
-
-	// 4. Write to file
-	err = os.WriteFile(filepath, jsonData, 0644) // Default permissions rw-r--r--
-	if err != nil {
+	if err := os.WriteFile(filepath, jsonData, 0644); err != nil {
 		return fmt.Errorf("failed to write program state to file '%s': %w", filepath, err)
 	}
-
-	return nil // Success
+	return nil
 }
 
-// LoadProgram loads program state (demos and tuned parameters) from a JSON file
-// into an existing Program instance.
+// LoadProgram loads program state from a JSON file into an existing Program
+// instance: each predictor's instruction, output prefixes, and demos, and
+// modules' tuned parameters.
 // It assumes the Program `p` has already been constructed with the correct
 // architecture (modules and signatures) and necessary LLMs configured.
 func LoadProgram(p *Program, filepath string) error {
@@ -175,20 +223,16 @@ func LoadProgram(p *Program, filepath string) error {
 // LoadProgramWithOptions loads program state and reports any non-fatal warnings
 // through the provided options instead of writing to the process logger.
 func LoadProgramWithOptions(p *Program, filepath string, opts LoadProgramOptions) error {
-	// 1. Read file
 	jsonData, err := os.ReadFile(filepath)
 	if err != nil {
 		return fmt.Errorf("failed to read program state file '%s': %w", filepath, err)
 	}
 
-	// 2. Unmarshal JSON into SavedProgramState
 	var loadedState SavedProgramState
-	err = json.Unmarshal(jsonData, &loadedState)
-	if err != nil {
+	if err := json.Unmarshal(jsonData, &loadedState); err != nil {
 		return fmt.Errorf("failed to unmarshal program state from JSON: %w", err)
 	}
 
-	// 3. Version Check
 	if savedVersion, ok := loadedState.Metadata["dspy_go_version"]; ok {
 		if savedVersion != Version {
 			opts.warnf("loading state saved with dspy-go version %q but current version is %q; compatibility is not guaranteed", savedVersion, Version)
@@ -197,82 +241,123 @@ func LoadProgramWithOptions(p *Program, filepath string, opts LoadProgramOptions
 		opts.warnf("saved state file does not contain dspy-go version information")
 	}
 
-	loadedModuleNames := make(map[string]bool)
-
-	// 4. Iterate through the program's modules and apply loaded state
 	for name, module := range p.Modules {
 		savedModuleState, ok := loadedState.Modules[name]
 		if !ok {
 			opts.warnf("no saved state found for module %q in program", name)
-			continue // Skip this module if no state was saved for it
-		}
-		loadedModuleNames[name] = true // Mark this saved state as used
-
-		// 5. Module Type Check
-		currentModuleType := persistedModuleTypeName(module)
-		if currentModuleType != savedModuleState.ModuleType {
-			opts.warnf("type mismatch for module %q: program has type %q, saved state has type %q; skipping load for this module", name, currentModuleType, savedModuleState.ModuleType)
 			continue
 		}
-
-		// 6. LM Identifier Check (Warning only)
-		if len(savedModuleState.LMIdentifier) > 0 {
-			if lmProvider, ok := module.(LMConfigProvider); ok {
-				currentIdentifier := lmProvider.GetLLMIdentifier()
-				if !reflect.DeepEqual(savedModuleState.LMIdentifier, currentIdentifier) {
-					opts.warnf("llm mismatch for module %q: saved state used %v, current module uses %v; loaded demos or params may behave differently", name, savedModuleState.LMIdentifier, currentIdentifier)
-				}
-			} else {
-				// Saved state has LM info, but current module doesn't provide it for comparison
-				opts.warnf("cannot verify llm config for module %q: module does not implement LMConfigProvider, but saved state has lm info %v", name, savedModuleState.LMIdentifier)
-			}
+		if err := loadModuleState(name, module, savedModuleState, opts); err != nil {
+			return err
 		}
-
-		// 7. Load Demos if module supports it
-		if demoConsumer, implementsDemoConsumer := module.(DemoConsumer); implementsDemoConsumer {
-			if len(savedModuleState.Demos) > 0 {
-				demosToLoad := make([]Example, len(savedModuleState.Demos))
-				for i, savedDemo := range savedModuleState.Demos {
-					// Convert SavedExample back to Example.
-					// This direct assignment is type-safe because both SavedExample and Example
-					// use map[string]any for Inputs and Outputs. json.Unmarshal has
-					// already parsed the JSON into this structure. The responsibility for handling
-					// the specific concrete types within the any values lies with the
-					// code that consumes the loaded Example later.
-					demosToLoad[i] = Example(savedDemo)
-				}
-				demoConsumer.SetDemos(demosToLoad)
-			}
-		} else if len(savedModuleState.Demos) > 0 {
-			// Saved state has demos, but the current module doesn't consume them
-			opts.warnf("saved state for module %q contains demos, but the module does not implement DemoConsumer; demos were not loaded", name)
-		}
-
-		// 8. Load Tuned Parameters if module supports it
-		if paramConsumer, implementsParamConsumer := module.(ParameterConsumer); implementsParamConsumer {
-			if len(savedModuleState.TunedParameters) > 0 {
-				err := paramConsumer.SetTunedParameters(savedModuleState.TunedParameters)
-				if err != nil {
-					// If SetTunedParameters returns an error (e.g., validation failed),
-					// wrap it and return, as this indicates a problem loading state.
-					return fmt.Errorf("error setting tuned parameters for module '%s': %w", name, err)
-				}
-			}
-		} else if len(savedModuleState.TunedParameters) > 0 {
-			// Saved state has tuned parameters, but the current module doesn't consume them
-			opts.warnf("saved state for module %q contains tuned parameters, but the module does not implement ParameterConsumer; parameters were not loaded", name)
-		}
-
-		// NOTE: Signature and full LMConfig object are not loaded from state in this version.
-		// The program structure (including signatures and LLM instances) must be defined before loading.
 	}
 
-	// 9. Check for unused saved state
 	for savedName := range loadedState.Modules {
-		if !loadedModuleNames[savedName] {
+		if _, ok := p.Modules[savedName]; !ok {
 			opts.warnf("saved state contains data for module %q, but this module was not found in the current program", savedName)
 		}
 	}
 
-	return nil // Success
+	return nil
+}
+
+// loadModuleState applies saved to module, named name in warnings and errors,
+// and then applies the saved state of each predictor nested in module.
+// Signatures other than predictors' instructions and output prefixes, and LLM
+// instances, are not loaded: the program must be constructed before loading.
+func loadModuleState(name string, module Module, saved SavedModuleState, opts LoadProgramOptions) error {
+	if currentModuleType := persistedModuleTypeName(module); currentModuleType != saved.ModuleType {
+		opts.warnf("type mismatch for module %q: program has type %q, saved state has type %q; skipping load for this module", name, currentModuleType, saved.ModuleType)
+		return nil
+	}
+
+	if len(saved.LMIdentifier) > 0 {
+		if lmProvider, ok := module.(LMConfigProvider); ok {
+			currentIdentifier := lmProvider.GetLLMIdentifier()
+			if !reflect.DeepEqual(saved.LMIdentifier, currentIdentifier) {
+				opts.warnf("llm mismatch for module %q: saved state used %v, current module uses %v; loaded demos or params may behave differently", name, saved.LMIdentifier, currentIdentifier)
+			}
+		} else {
+			opts.warnf("cannot verify llm config for module %q: module does not implement LMConfigProvider, but saved state has lm info %v", name, saved.LMIdentifier)
+		}
+	}
+
+	if demoConsumer, ok := module.(DemoConsumer); ok {
+		// A predictor saved with its instruction saved its demos too, so its
+		// empty demos clear the constructed ones. Older files omit empty demos.
+		if len(saved.Demos) > 0 || saved.Instruction != nil {
+			demos := make([]Example, len(saved.Demos))
+			for i, savedDemo := range saved.Demos {
+				// SavedExample and Example share map[string]any inputs and
+				// outputs; consumers of the demos handle the concrete values.
+				demos[i] = Example(savedDemo)
+			}
+			demoConsumer.SetDemos(demos)
+		}
+	} else if len(saved.Demos) > 0 {
+		opts.warnf("saved state for module %q contains demos, but the module does not implement DemoConsumer; demos were not loaded", name)
+	}
+
+	if paramConsumer, ok := module.(ParameterConsumer); ok {
+		if len(saved.TunedParameters) > 0 {
+			if err := paramConsumer.SetTunedParameters(saved.TunedParameters); err != nil {
+				return fmt.Errorf("error setting tuned parameters for module '%s': %w", name, err)
+			}
+		}
+	} else if len(saved.TunedParameters) > 0 {
+		opts.warnf("saved state for module %q contains tuned parameters, but the module does not implement ParameterConsumer; parameters were not loaded", name)
+	}
+
+	predictors := nestedPredictors(module)
+	if predictors == nil {
+		if len(saved.Predictors) > 0 {
+			opts.warnf("saved state for module %q contains nested predictors, but the module has no sub-modules; they were not loaded", name)
+		}
+		loadPredictorSignature(module, saved)
+		return nil
+	}
+
+	for _, predictor := range predictors {
+		predictorName := name + "." + predictor.path
+		savedPredictor, ok := saved.Predictors[predictor.path]
+		if !ok {
+			// Files saved before nested predictors were saved hold only the
+			// top-level state applied above.
+			if len(saved.Predictors) > 0 {
+				opts.warnf("no saved state found for predictor %q in program", predictorName)
+			}
+			continue
+		}
+		if err := loadModuleState(predictorName, predictor.module, savedPredictor, opts); err != nil {
+			return err
+		}
+	}
+	for path := range saved.Predictors {
+		if !slices.ContainsFunc(predictors, func(predictor namedPredictor) bool { return predictor.path == path }) {
+			opts.warnf("saved state contains data for predictor %q, but this predictor was not found in the current program", name+"."+path)
+		}
+	}
+	return nil
+}
+
+// loadPredictorSignature applies a predictor's saved instruction and output
+// prefixes. Files saved before instructions were saved leave the signature as
+// constructed.
+func loadPredictorSignature(module Module, saved SavedModuleState) {
+	if saved.Instruction == nil {
+		return
+	}
+	signature := module.GetSignature()
+	changed := signature.Instruction != *saved.Instruction
+	signature.Instruction = *saved.Instruction
+	signature.Outputs = slices.Clone(signature.Outputs)
+	for i, output := range signature.Outputs {
+		if prefix, ok := saved.OutputPrefixes[output.Name]; ok && prefix != output.Prefix {
+			signature.Outputs[i].Prefix = prefix
+			changed = true
+		}
+	}
+	if changed {
+		module.SetSignature(signature)
+	}
 }

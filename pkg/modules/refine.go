@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
-	"time"
+	"math/rand/v2"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
@@ -35,7 +34,6 @@ type Refine struct {
 	core.BaseModule
 	module core.Module
 	config RefineConfig
-	rng    *rand.Rand
 }
 
 // Ensure Refine implements required interfaces.
@@ -58,7 +56,6 @@ func NewRefine(module core.Module, config RefineConfig) *Refine {
 		BaseModule: *baseModule,
 		module:     module,
 		config:     config,
-		rng:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -96,6 +93,8 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...cor
 	var bestOutputs map[string]any
 	var bestReward = -math.Inf(1) // Start with negative infinity
 	var bestError error
+	// Optimizers observing Predict calls see only the returned attempt's calls.
+	publishBestTrace := func() {}
 	attemptCount := 0
 
 	logger.Debug(ctx, "Starting refinement with %d attempts, threshold: %.2f", r.config.N, r.config.Threshold)
@@ -111,7 +110,8 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...cor
 		attemptOpts := append(opts, core.WithGenerateOptions(core.WithTemperature(temperature)))
 
 		// Run the module with current temperature
-		outputs, err := r.module.Process(ctx, inputs, attemptOpts...)
+		attemptCtx, publishTrace := bufferPredictionTrace(ctx)
+		outputs, err := r.module.Process(attemptCtx, inputs, attemptOpts...)
 		if err != nil {
 			logger.Debug(ctx, "Attempt %d failed with error: %v", i+1, err)
 			if bestError == nil {
@@ -129,6 +129,7 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...cor
 			bestReward = reward
 			bestOutputs = outputs
 			bestError = nil
+			publishBestTrace = publishTrace
 			logger.Debug(ctx, "New best reward: %.3f (attempt %d)", reward, i+1)
 		}
 
@@ -150,6 +151,8 @@ func (r *Refine) Process(ctx context.Context, inputs map[string]any, opts ...cor
 		span.WithError(finalErr)
 		return nil, finalErr
 	}
+
+	publishBestTrace()
 
 	// Log final results
 	logger.Debug(ctx, "Refinement completed: best reward %.3f from %d attempts", bestReward, attemptCount)
@@ -195,7 +198,9 @@ func (r *Refine) generateTemperatureSequence() []float64 {
 			// For N > 3, spread temperatures across remaining range
 			base = 0.5 + float64(i-2)*0.3/float64(r.config.N-3)
 		}
-		jitter := (r.rng.Float64() - 0.5) * 0.2 // ±0.1 jitter
+		// The package-level source is safe for concurrent Process calls,
+		// which optimizers make on one module across examples.
+		jitter := (rand.Float64() - 0.5) * 0.2 // ±0.1 jitter
 		temp := base + jitter
 
 		// Clamp to reasonable bounds
@@ -235,7 +240,6 @@ func (r *Refine) Clone() core.Module {
 		BaseModule: *r.BaseModule.Clone().(*core.BaseModule),
 		module:     r.module.Clone(),
 		config:     r.config, // Config is copied by value
-		rng:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -251,6 +255,11 @@ func (r *Refine) WithDefaultOptions(opts ...core.Option) *Refine {
 // GetWrappedModule returns the underlying module being refined.
 func (r *Refine) GetWrappedModule() core.Module {
 	return r.module
+}
+
+// GetSubModules returns the refined module.
+func (r *Refine) GetSubModules() []core.Module {
+	return []core.Module{r.module}
 }
 
 // UpdateConfig allows updating the refinement configuration.
@@ -320,6 +329,11 @@ func (of *OfferFeedback) Clone() core.Module {
 		BaseModule: *of.BaseModule.Clone().(*core.BaseModule),
 		predict:    of.predict.Clone().(*Predict),
 	}
+}
+
+// GetSubModules returns the feedback predictor.
+func (of *OfferFeedback) GetSubModules() []core.Module {
+	return []core.Module{of.predict}
 }
 
 // NewTypedRefine creates a new type-safe Refine module from a typed signature.

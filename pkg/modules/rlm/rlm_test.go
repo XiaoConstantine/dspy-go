@@ -2926,3 +2926,31 @@ func TestFormatREPLStateRich(t *testing.T) {
 	assert.Contains(t, result, "→ 42")
 	// Context preview should be skipped (too large)
 }
+
+// TestRLMSaveLoadRestoresIterationPredictor checks that the iteration
+// predictor's instruction and demos survive SaveProgram, LoadProgram, and
+// later SetLLM calls, which used to rebuild the predictor from the config.
+func TestRLMSaveLoadRestoresIterationPredictor(t *testing.T) {
+	module := NewFromLLM(&mockLLM{})
+	module.iterationModule.SetSignature(module.iterationModule.GetSignature().WithInstruction("optimized iteration"))
+	demos := []core.Example{{Inputs: map[string]any{"query": "q"}, Outputs: map[string]any{"code": "c"}}}
+	module.iterationModule.SetDemos(demos)
+	program := core.NewProgram(map[string]core.Module{"rlm": module}, nil)
+	path := t.TempDir() + "/program.json"
+	require.NoError(t, core.SaveProgram(&program, path))
+
+	fresh := NewFromLLM(&mockLLM{})
+	freshProgram := core.NewProgram(map[string]core.Module{"rlm": fresh}, nil)
+	var warnings []string
+	require.NoError(t, core.LoadProgramWithOptions(&freshProgram, path, core.LoadProgramOptions{
+		WarningHandler: func(message string) { warnings = append(warnings, message) },
+	}))
+	assert.Empty(t, warnings)
+	otherLLM := &mockLLM{}
+	fresh.SetLLM(nil)
+	fresh.SetLLM(otherLLM)
+
+	assert.Equal(t, "optimized iteration", fresh.iterationModule.GetSignature().Instruction)
+	assert.Equal(t, demos, fresh.iterationModule.GetDemos())
+	assert.Same(t, otherLLM, fresh.iterationModule.LLM)
+}

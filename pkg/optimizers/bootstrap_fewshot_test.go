@@ -826,3 +826,56 @@ func TestBootstrapFewShotCompileWithScorerHidesExpectedOutputsFromTeacher(t *tes
 	assert.Empty(t, compiled.Modules["predictor"].(*modules.Predict).GetDemos(),
 		"a teacher that cannot answer from the inputs alone yields no demonstration")
 }
+
+// TestBootstrapFewShotLearnsFromRefinesReturnedAttempt checks that the
+// optimizer reaches the predictor inside a Refine, and that its demo comes from
+// the attempt Refine returns rather than from the last attempt Refine ran.
+func TestBootstrapFewShotLearnsFromRefinesReturnedAttempt(t *testing.T) {
+	setupTestMockLLM(t)
+	llm := new(testutil.MockLLM)
+	llm.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "answer: Paris"}, nil).Once()
+	llm.On("Generate", mock.Anything, mock.Anything, mock.Anything).Return(&core.LLMResponse{Content: "answer: Lyon"}, nil).Once()
+	// The teacher run replaces module LLMs with the teacher LLM.
+	core.GlobalConfig.TeacherLLM = llm
+	predict := modules.NewPredict(core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	)).WithTextOutput()
+	predict.SetLLM(llm)
+	// Neither attempt meets the threshold, so Refine runs both and returns the
+	// first, better one.
+	refine := modules.NewRefine(predict, modules.RefineConfig{
+		N:         2,
+		Threshold: 1,
+		RewardFn: func(_, outputs map[string]any) float64 {
+			if outputs["answer"] == "Paris" {
+				return 0.9
+			}
+			return 0.1
+		},
+	})
+	student := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"refine": refine},
+		func(modules map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(ctx context.Context, inputs map[string]any) (map[string]any, error) {
+				return modules["refine"].Process(ctx, inputs)
+			}
+		},
+	)
+	train := []core.Example{{Inputs: map[string]any{"question": "Capital of France?"}, Outputs: map[string]any{"answer": "Paris"}}}
+
+	compiled, err := NewBootstrapFewShot(nil, 1).CompileWithScorer(core.WithExecutionState(context.Background()), student, train,
+		core.ScorerFunc(func(_ context.Context, _ core.Example, outputs map[string]any) (float64, error) {
+			assert.Equal(t, "Paris", outputs["answer"])
+			return 1, nil
+		}))
+	require.NoError(t, err)
+
+	demos := compiled.Modules["refine"].(*modules.Refine).GetWrappedModule().(*modules.Predict).GetDemos()
+	assert.Equal(t, []core.Example{{
+		Inputs:  map[string]any{"question": "Capital of France?"},
+		Outputs: map[string]any{"answer": "Paris"},
+	}}, demos)
+	llm.AssertNumberOfCalls(t, "Generate", 2)
+	assert.Empty(t, predict.GetDemos(), "the student program must not be modified")
+}

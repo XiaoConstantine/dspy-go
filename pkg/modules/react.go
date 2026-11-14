@@ -366,6 +366,11 @@ func (r *ReAct) Clone() core.Module {
 	}
 }
 
+// GetSubModules returns the step predictor and the fallback extraction module.
+func (r *ReAct) GetSubModules() []core.Module {
+	return []core.Module{r.Predict, r.Extract}
+}
+
 // GetSignature returns the live ReAct prediction signature.
 func (r *ReAct) GetSignature() core.Signature {
 	return r.Predict.GetSignature()

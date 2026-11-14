@@ -198,6 +198,11 @@ func (m *MultiChainComparison) SetLLM(llm core.LLM) {
 	m.predict.SetLLM(llm)
 }
 
+// GetSubModules returns the predictor that compares the attempts.
+func (m *MultiChainComparison) GetSubModules() []core.Module {
+	return []core.Module{m.predict}
+}
+
 // GetSignature returns the signature of the module.
 func (m *MultiChainComparison) GetSignature() core.Signature {
 	return m.BaseModule.GetSignature()

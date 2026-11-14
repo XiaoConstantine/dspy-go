@@ -370,6 +370,11 @@ func (p *Parallel) GetInnerModule() core.Module {
 	return p.innerModule
 }
 
+// GetSubModules returns the wrapped module.
+func (p *Parallel) GetSubModules() []core.Module {
+	return []core.Module{p.innerModule}
+}
+
 // SetLLM sets the LLM for both this module and the inner module.
 func (p *Parallel) SetLLM(llm core.LLM) {
 	p.BaseModule.SetLLM(llm)

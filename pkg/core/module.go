@@ -247,6 +247,14 @@ func (bm *BaseModule) FormatOutputs(outputs map[string]any) map[string]any {
 	return formattedOutputs
 }
 
+// SubModuleProvider is implemented by modules built from other modules, such
+// as ChainOfThought or ReAct. Optimizers and SaveProgram walk sub-modules to
+// reach every predictor in a program, so GetSubModules must return the live
+// sub-modules (not copies) in the same order on every call.
+type SubModuleProvider interface {
+	GetSubModules() []Module
+}
+
 // Composable is an interface for modules that can be composed with other modules.
 type Composable interface {
 	Module
@@ -332,6 +340,11 @@ func (mc *ModuleChain) SetLLM(llm LLM) {
 			module.SetLLM(llm)
 		}
 	}
+}
+
+// GetSubModules returns the chained modules in execution order.
+func (mc *ModuleChain) GetSubModules() []Module {
+	return mc.Modules
 }
 
 // Clone deep-copies the module chain and its child modules.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/internal/testutil"
@@ -309,6 +310,30 @@ func TestGenerateTemperatureSequence(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRefineProcessIsSafeConcurrently runs one Refine from several goroutines,
+// as optimizers do across examples. With N=3 every call draws temperature
+// jitter, so `go test -race` fails if that randomness is unsynchronized.
+func TestRefineProcessIsSafeConcurrently(t *testing.T) {
+	inner := NewMockModule(false, 0)
+	refine := NewRefine(inner, RefineConfig{
+		N:         3,
+		Threshold: 2, // unreachable, so every call runs all three attempts
+		RewardFn:  func(_, _ map[string]any) float64 { return 1 },
+	})
+
+	const calls = 16
+	var wg sync.WaitGroup
+	for i := 0; i < calls; i++ {
+		wg.Go(func() {
+			_, err := refine.Process(context.Background(), map[string]any{"input": "x"})
+			assert.NoError(t, err)
+		})
+	}
+	wg.Wait()
+
+	assert.Equal(t, 3*calls, inner.callCount)
 }
 
 func TestRefineClone(t *testing.T) {

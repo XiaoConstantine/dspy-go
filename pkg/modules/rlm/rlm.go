@@ -414,6 +414,12 @@ func (r *RLM) WithOptions(opts ...Option) *RLM {
 func (r *RLM) SetLLM(llm core.LLM) {
 	r.rootLLM = llm
 	r.BaseModule.SetLLM(llm)
+	// Keep an existing iteration module, whose instruction and demos may have
+	// been optimized or loaded.
+	if r.iterationModule != nil {
+		r.iterationModule.SetLLM(llm)
+		return
+	}
 	r.rebuildIterationModule()
 }
 
@@ -1737,6 +1743,15 @@ func (r *RLM) Clone() core.Module {
 		tokenTracker:    NewTokenTracker(),
 		iterationModule: clonedIterMod,
 	}
+}
+
+// GetSubModules returns the iteration predictor, which is absent until the
+// RLM has a root LLM.
+func (r *RLM) GetSubModules() []core.Module {
+	if r.iterationModule == nil {
+		return nil
+	}
+	return []core.Module{r.iterationModule}
 }
 
 // GetTokenTracker returns the token tracker for inspecting usage.
