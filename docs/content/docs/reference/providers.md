@@ -227,7 +227,7 @@ cross-process synchronization. dspy-go does not ship interactive OAuth or a
 credential store.
 
 For static registry/CLI use, select a model such as
-`openai-codex:gpt-5.4` and provide the OAuth access token as the API key or
+`openai-codex:gpt-6.1-sol` and provide the OAuth access token as the API key or
 `OPENAI_OAUTH_TOKEN`. Account identity can come from `account_id`, an ID token,
 or compatible access-token claims.
 
