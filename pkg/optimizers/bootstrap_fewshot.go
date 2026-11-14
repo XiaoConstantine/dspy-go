@@ -36,7 +36,7 @@ func NewBootstrapFewShot(metric func(example map[string]any, prediction map[stri
 // Compile implements the core.Optimizer interface.
 func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, dataset core.Dataset, metric core.Metric) (core.Program, error) {
 	// Convert core.Dataset to trainset format
-	var trainset []map[string]any
+	var trainset, inputs []map[string]any
 	dataset.Reset()
 	for {
 		example, hasNext := dataset.Next()
@@ -52,10 +52,11 @@ func (b *BootstrapFewShot) Compile(ctx context.Context, program core.Program, da
 			trainExample[k] = v
 		}
 		trainset = append(trainset, trainExample)
+		inputs = append(inputs, example.Inputs)
 	}
 
 	// Use program as both student and teacher (self-improvement)
-	return b.compileInternal(ctx, program, program, trainset, b.metricKeeps(trainset))
+	return b.compileInternal(ctx, program, program, trainset, inputs, b.metricKeeps(trainset))
 }
 
 // CompileWithScorer bootstraps demonstrations from materialized, read-only
@@ -72,11 +73,11 @@ func (b *BootstrapFewShot) CompileWithScorer(ctx context.Context, program core.P
 	if scorer == nil {
 		return program, errors.New(errors.InvalidInput, "BootstrapFewShot requires a scorer")
 	}
-	trainset := make([]map[string]any, len(examples))
+	// The teacher must not see the expected outputs: it would copy the answer
+	// and every run would be kept as a demonstration.
+	inputs := make([]map[string]any, len(examples))
 	for i, example := range examples {
-		trainset[i] = make(map[string]any, len(example.Inputs)+len(example.Outputs))
-		maps.Copy(trainset[i], example.Inputs)
-		maps.Copy(trainset[i], example.Outputs)
+		inputs[i] = example.Inputs
 	}
 	keep := func(ctx context.Context, index int, prediction map[string]any) bool {
 		score, err := scorer.Score(ctx, examples[index], prediction)
@@ -89,12 +90,12 @@ func (b *BootstrapFewShot) CompileWithScorer(ctx context.Context, program core.P
 		}
 		return score >= b.MetricThreshold
 	}
-	return b.compileInternal(ctx, program, program, trainset, keep)
+	return b.compileInternal(ctx, program, program, inputs, inputs, keep)
 }
 
 // CompileLegacy provides backward compatibility for the old interface.
 func (b *BootstrapFewShot) CompileLegacy(ctx context.Context, student, teacher core.Program, trainset []map[string]any) (core.Program, error) {
-	return b.compileInternal(ctx, student, teacher, trainset, b.metricKeeps(trainset))
+	return b.compileInternal(ctx, student, teacher, trainset, nil, b.metricKeeps(trainset))
 }
 
 // metricKeeps decides with the constructor metric.
@@ -113,10 +114,12 @@ type bootstrapRun struct {
 }
 
 // compileInternal bootstraps demonstrations for student from teacher runs.
-// keep reports whether the teacher's run on trainset[index] is kept. Each
+// keep reports whether the teacher's run on trainset[index] is kept. The
+// teacher runs on inputs[index], which holds no expected outputs; inputs is nil
+// for CompileLegacy, whose trainset maps do not separate the two. Each
 // student predictor gets one demonstration per kept run, built from what the
 // teacher predictor of the same name received and returned in that run.
-func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset []map[string]any, keep func(ctx context.Context, index int, prediction map[string]any) bool) (core.Program, error) {
+func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher core.Program, trainset, inputs []map[string]any, keep func(ctx context.Context, index int, prediction map[string]any) bool) (core.Program, error) {
 	for _, program := range []core.Program{student, teacher} {
 		if err := requireRebindableProgram(program); err != nil {
 			return student, err
@@ -166,6 +169,9 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 		errs := make([]error, len(batch))
 		p := pool.New().WithMaxGoroutines(batchSize)
 		for i, ex := range batch {
+			if inputs != nil {
+				ex = inputs[start+i]
+			}
 			p.Go(func() {
 				exampleCtx, exampleSpan := core.StartSpan(ctx, "Example")
 				defer core.EndSpan(exampleCtx)

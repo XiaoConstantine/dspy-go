@@ -805,3 +805,24 @@ func TestBootstrapFewShotRequiresMatchingTeacherPredictors(t *testing.T) {
 		assert.Equal(t, []any{"q0", "q1"}, bootstrapQuestions(t, compiled))
 	})
 }
+
+func TestBootstrapFewShotCompileWithScorerHidesExpectedOutputsFromTeacher(t *testing.T) {
+	// The teacher copies the answer whenever it is handed one.
+	program := core.NewProgramWithForwardFactory(
+		map[string]core.Module{"predictor": modules.NewPredict(scriptQASignature("base"))},
+		func(map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(_ context.Context, inputs map[string]any) (map[string]any, error) {
+				if answer, ok := inputs["answer"]; ok {
+					return map[string]any{"answer": answer}, nil
+				}
+				return map[string]any{"answer": "unknown"}, nil
+			}
+		})
+
+	compiled, err := NewBootstrapFewShot(keepEverything, 2).
+		CompileWithScorer(context.Background(), program, scriptQAExamples(3), core.MetricScorer(scriptExactMatch))
+
+	require.NoError(t, err)
+	assert.Empty(t, compiled.Modules["predictor"].(*modules.Predict).GetDemos(),
+		"a teacher that cannot answer from the inputs alone yields no demonstration")
+}
