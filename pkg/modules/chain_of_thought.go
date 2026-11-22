@@ -57,6 +57,9 @@ func (c *ChainOfThought) GetSignature() core.Signature {
 // SetSignature sets the signature on the internal Predict module with rationale field.
 func (c *ChainOfThought) SetSignature(signature core.Signature) {
 	modifiedSignature := appendRationaleField(signature)
+	if c.Predict.GetAdapter() != nil {
+		modifiedSignature = renameOutput(modifiedSignature, rationaleField, reasoningField, true)
+	}
 	c.Predict.SetSignature(modifiedSignature)
 }
 
@@ -134,11 +137,32 @@ func (c *ChainOfThought) WithStructuredOutputConfig(config interceptors.ChainOfT
 	return c
 }
 
+// WithAdapter makes the module use a structured-output adapter, as
+// Predict.WithAdapter does. With an adapter the module asks for its reasoning
+// in a field named "reasoning", which a model with native reasoning fills from
+// its reasoning summary; without one the field is named "rationale", as before.
+// For one release the outputs of a module with an adapter also carry the
+// reasoning as "rationale". A nil adapter restores text parsing and the
+// outputs it has always returned.
+func (c *ChainOfThought) WithAdapter(adapter core.Adapter) *ChainOfThought {
+	c.Predict.WithAdapter(adapter)
+	c.structuredOutput = false
+	signature := c.Predict.GetSignature()
+	if adapter != nil {
+		signature = renameOutput(signature, rationaleField, reasoningField, true)
+	} else {
+		signature = renameOutput(signature, reasoningField, rationaleField, false)
+	}
+	c.Predict.SetSignature(signature)
+	return c
+}
+
 func (c *ChainOfThought) Process(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
 	if c.structuredOutput {
 		return c.ProcessWithInterceptors(ctx, inputs, nil, opts...)
 	}
-	return c.processCore(ctx, inputs, opts...)
+	outputs, err := c.processCore(ctx, inputs, opts...)
+	return c.withReasoningAlias(outputs), err
 }
 
 // processCore runs the prediction without the module's interceptors.
@@ -165,7 +189,14 @@ func (c *ChainOfThought) processCore(ctx context.Context, inputs map[string]any,
 }
 
 // ProcessWithInterceptors executes the module's logic with interceptor support.
-func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (outputs map[string]any, err error) {
+func (c *ChainOfThought) ProcessWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (map[string]any, error) {
+	// The alias is added after the prediction is recorded, so recorded
+	// demonstrations keep only the field the signature declares.
+	outputs, err := c.processWithInterceptors(ctx, inputs, interceptors, opts...)
+	return c.withReasoningAlias(outputs), err
+}
+
+func (c *ChainOfThought) processWithInterceptors(ctx context.Context, inputs map[string]any, interceptors []core.ModuleInterceptor, opts ...core.Option) (outputs map[string]any, err error) {
 	// Structured-output interceptors can return without calling Predict.Process.
 	if record := predictionRecorder(ctx, c.Predict, inputs); record != nil {
 		ctx = withoutPredictionTrace(ctx, c.Predict)
@@ -215,6 +246,63 @@ func NewTypedChainOfThought[TInput, TOutput any]() *ChainOfThought {
 	cot.Predict.DisplayName = fmt.Sprintf("TypedChainOfThought[%T,%T]", i, o)
 
 	return cot
+}
+
+// The reasoning output is named "rationale" without an adapter and "reasoning"
+// with one. For one release, outputs produced with an adapter also carry the
+// reasoning as "rationale", so code that reads the old name keeps working after
+// it opts in. Without an adapter the outputs are unchanged.
+const (
+	rationaleField = "rationale"
+	reasoningField = "reasoning"
+)
+
+// withReasoningAlias copies an adapter's "reasoning" output to "rationale". It
+// never overwrites a field the outputs already have, and it leaves the name
+// alone when the signature declares its own output by it, so a caller's field
+// that the model omitted stays absent.
+func (c *ChainOfThought) withReasoningAlias(outputs map[string]any) map[string]any {
+	if outputs == nil || c.Predict.GetAdapter() == nil {
+		return outputs
+	}
+	value, has := outputs[reasoningField]
+	if _, taken := outputs[rationaleField]; !has || taken {
+		return outputs
+	}
+	for _, field := range c.GetSignature().Outputs {
+		if field.Name == rationaleField {
+			return outputs
+		}
+	}
+	outputs[rationaleField] = value
+	return outputs
+}
+
+// renameOutput renames the output field from to to and sets whether a model's
+// native reasoning may fill it. A signature that already has an output named
+// to, or none named from, is returned unchanged.
+func renameOutput(signature core.Signature, from, to string, nativeReasoning bool) core.Signature {
+	index := -1
+	for i, output := range signature.Outputs {
+		switch output.Name {
+		case to:
+			return signature
+		case from:
+			index = i
+		}
+	}
+	if index < 0 {
+		return signature
+	}
+	renamed := signature
+	renamed.Outputs = append([]core.OutputField(nil), signature.Outputs...)
+	field := &renamed.Outputs[index]
+	field.Name = to
+	field.NativeReasoning = nativeReasoning
+	if field.Prefix == from+":" {
+		field.Prefix = to + ":"
+	}
+	return renamed
 }
 
 func appendRationaleField(signature core.Signature) core.Signature {

@@ -30,6 +30,11 @@ type COPRO struct {
 	// operation-local state derived from these values.
 	PromptGenerator  *LLMPromptGenerator
 	CandidateHistory []PromptCandidate
+
+	// EvalPolicy is how candidate evaluations treat output errors. NewCOPRO
+	// installs DefaultEvalPolicy; the zero value stops a run at its first
+	// output error.
+	EvalPolicy EvalPolicy
 }
 
 var (
@@ -70,6 +75,8 @@ type COPROOptions struct {
 	InitTemperature float64
 	// Deprecated: TrackStats has no effect. COPRO records no statistics.
 	TrackStats bool
+	// EvalPolicy is how candidate evaluations treat output errors.
+	EvalPolicy EvalPolicy
 }
 
 // COPROOption is a functional option for configuring COPRO.
@@ -103,6 +110,14 @@ func WithInitTemperature(temp float64) COPROOption {
 	}
 }
 
+// WithCOPROEvalPolicy sets how candidate evaluations treat output errors. The
+// default is DefaultEvalPolicy.
+func WithCOPROEvalPolicy(policy EvalPolicy) COPROOption {
+	return func(opts *COPROOptions) {
+		opts.EvalPolicy = policy
+	}
+}
+
 // WithTrackStats does nothing.
 //
 // Deprecated: COPRO records no statistics, so this option has no effect.
@@ -119,6 +134,7 @@ func NewCOPRO(metric core.Metric, options ...COPROOption) *COPRO {
 		Depth:           2,   // Match Python DSPy default
 		InitTemperature: 1.2, // Match Python DSPy default
 		TrackStats:      false,
+		EvalPolicy:      DefaultEvalPolicy(),
 	}
 
 	for _, option := range options {
@@ -132,6 +148,7 @@ func NewCOPRO(metric core.Metric, options ...COPROOption) *COPRO {
 		Depth:            opts.Depth,
 		InitTemperature:  opts.InitTemperature,
 		TrackStats:       opts.TrackStats,
+		EvalPolicy:       opts.EvalPolicy,
 		CandidateHistory: make([]PromptCandidate, 0),
 	}
 }
@@ -464,6 +481,10 @@ func (c *COPRO) newPromptState(ctx context.Context, predictor *modules.Predict) 
 		if c.PromptGenerator != nil {
 			state.generator.diversityThreshold = c.PromptGenerator.diversityThreshold
 		}
+		if adapter := predictor.GetAdapter(); adapter != nil {
+			state.generator.formatFree = true
+			logging.GetLogger().Info(ctx, "COPRO: output prefix search is off for adapter %q, which does not render prefixes", adapter.Name())
+		}
 	}
 	return state
 }
@@ -559,7 +580,8 @@ func (c *COPRO) refineCandidates(ctx context.Context, predictor *modules.Predict
 // the predictor called name. It runs a clone of the whole program, so the
 // other modules, the forward logic, and the predictor's demos and options all
 // take part. The score is the average over all examples; an example whose
-// prediction fails or cannot be scored counts as zero.
+// prediction fails or cannot be scored counts as zero, except that an output
+// error scores and is limited as c.EvalPolicy says.
 func (c *COPRO) evaluateCandidate(ctx context.Context, program core.Program, name string, candidate PromptCandidate, examples []core.Example, scorer core.Scorer) (float64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -586,6 +608,8 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, program core.Program, nam
 		})
 	}
 
+	budget := newOutputErrorBudget(c.EvalPolicy)
+
 	// Use a semaphore to limit concurrent LLM calls per candidate
 	semaphore := make(chan struct{}, 10) // Allow 10 concurrent evaluations per candidate
 
@@ -609,6 +633,9 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, program core.Program, nam
 				}
 				// A failed prediction counts as zero, so it cannot raise the average.
 				logging.GetLogger().Error(ctx, "COPRO: Error evaluating candidate: %v", err)
+				if budget.record(err) {
+					scores[idx] = c.EvalPolicy.FailureScore
+				}
 				return
 			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -640,6 +667,9 @@ func (c *COPRO) evaluateCandidate(ctx context.Context, program core.Program, nam
 		return 0, evaluationErr
 	}
 	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := budget.exceeded(); err != nil {
 		return 0, err
 	}
 
@@ -695,6 +725,21 @@ type LLMPromptGenerator struct {
 	signature          core.Signature
 	candidateCache     map[string]PromptCandidate
 	diversityThreshold float64
+
+	// formatFree is set for a predictor that uses a structured-output adapter.
+	// The adapter owns the output format and renders no prefixes, so proposals
+	// must not dictate a format or propose a prefix.
+	formatFree bool
+}
+
+// formatRequest is the proposer prompt's closing requirement: the optional
+// output prefix proposal, or, for a format-free generator, a ban on format
+// directions.
+func (lpg *LLMPromptGenerator) formatRequest() string {
+	if lpg.formatFree {
+		return "6. Describe the task only; do NOT dictate an output format, tags, JSON, or delimiters"
+	}
+	return outputPrefixRequest(lpg.signature)
 }
 
 // NewLLMPromptGenerator creates a new LLM-assisted prompt generator.
@@ -753,7 +798,7 @@ Requirements for each instruction:
 5. Each must be clearly distinct from the others
 %s
 Return EXACTLY %d instructions, one per line, no numbering:`,
-		breadth, inputFields, outputFields, taskDescription, breadth, outputPrefixRequest(lpg.signature), breadth)
+		breadth, inputFields, outputFields, taskDescription, breadth, lpg.formatRequest(), breadth)
 
 	// Use LLM to generate sophisticated instructions
 	core.RecordModelCall(ctx, lpg.llm)
@@ -821,7 +866,7 @@ Analyze what made the high-performing instructions successful and what made the 
 %s
 Return ONLY the improved instructions, one per line.`,
 		breadth, lpg.getTaskDescription(),
-		bestInstructions, worstInstructions, breadth, outputPrefixRequest(lpg.signature))
+		bestInstructions, worstInstructions, breadth, lpg.formatRequest())
 
 	core.RecordModelCall(ctx, lpg.llm)
 	output, err := lpg.llm.Generate(ctx, refinementPrompt,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -575,4 +576,68 @@ func TestOptimizersRejectProgramsThatCannotBeRebound(t *testing.T) {
 			require.ErrorContains(t, err, "NewProgramWithForwardFactory")
 		})
 	}
+}
+
+func TestMIPROEvaluateCandidateFailurePolicy(t *testing.T) {
+	previous := core.GetConcurrencyLevel()
+	core.SetConcurrencyOptions(1)
+	t.Cleanup(func() { core.SetConcurrencyOptions(previous) })
+
+	scorer := miproMetricScorer(func(_, _ map[string]any, _ context.Context) float64 { return 1 })
+	// evaluate runs n examples through a program that fails on the given
+	// example indexes, and reports how many examples were started.
+	evaluate := func(n int, failures map[int]error) (score float64, started int, err error) {
+		examples := overlapExamples(n)
+		failing := make(map[any]error, len(failures))
+		for i, failure := range failures {
+			failing[examples[i].Inputs["q"]] = failure
+		}
+		program := core.NewProgramWithForwardFactory(map[string]core.Module{
+			"alpha": newStaticCandidateTestModule("alpha"),
+		}, func(map[string]core.Module) func(context.Context, map[string]any) (map[string]any, error) {
+			return func(_ context.Context, inputs map[string]any) (map[string]any, error) {
+				started++
+				if failure := failing[inputs["q"]]; failure != nil {
+					return nil, failure
+				}
+				return map[string]any{"output": inputs["q"]}, nil
+			}
+		})
+		score, err = NewMIPRO(nil).evaluateCandidate(context.Background(), program, examples, scorer)
+		return score, started, err
+	}
+	parseFailure := func(indexes ...int) map[int]error {
+		failures := make(map[int]error, len(indexes))
+		for _, i := range indexes {
+			failures[i] = fmt.Errorf("predict: %w", &dspyerrors.ParseError{Adapter: "xml", MissingFields: []string{"answer"}})
+		}
+		return failures
+	}
+
+	t.Run("an output error scores zero and does not stop the evaluation", func(t *testing.T) {
+		score, started, err := evaluate(7, parseFailure(1, 5))
+		require.NoError(t, err)
+		assert.Equal(t, 7, started)
+		assert.InDelta(t, 5.0/7, score, 1e-12, "failed examples stay in the average")
+	})
+
+	t.Run("ten output errors are tolerated and an eleventh aborts", func(t *testing.T) {
+		score, _, err := evaluate(12, parseFailure(0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
+		require.NoError(t, err)
+		assert.InDelta(t, 2.0/12, score, 1e-12)
+
+		_, _, err = evaluate(12, parseFailure(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+		require.ErrorIs(t, err, dspyerrors.ErrParseFailed)
+		assert.ErrorContains(t, err, "max_errors")
+		assert.ErrorContains(t, err, "11 output errors")
+	})
+
+	t.Run("any other error aborts and starts no further examples", func(t *testing.T) {
+		transport := errors.New("connection reset")
+		failures := parseFailure(0)
+		failures[2] = transport
+		_, started, err := evaluate(7, failures)
+		require.ErrorIs(t, err, transport)
+		assert.Equal(t, 3, started)
+	})
 }

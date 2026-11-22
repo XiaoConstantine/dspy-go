@@ -3,9 +3,11 @@ package modules
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/adapters"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -23,6 +25,10 @@ type Predict struct {
 	xmlConfig              *interceptors.XMLConfig
 	enableXMLMode          bool
 	structuredOutputConfig *interceptors.StructuredOutputConfig
+
+	// adapter is the structured-output adapter chosen with WithAdapter. When it
+	// is nil, the module formats and parses as it did before adapters existed.
+	adapter core.Adapter
 }
 
 // Ensure Predict implements core.Module.
@@ -35,6 +41,10 @@ var _ core.DemoConsumer = (*Predict)(nil)
 
 // Ensure Predict implements LMConfigProvider for saving/loading.
 var _ core.LMConfigProvider = (*Predict)(nil)
+
+// Ensure Predict saves and restores its adapter choice.
+var _ core.AdapterProvider = (*Predict)(nil)
+var _ core.AdapterConsumer = (*Predict)(nil)
 
 func NewPredict(signature core.Signature) *Predict {
 	baseModule := core.NewModule(signature)
@@ -71,6 +81,62 @@ func (p *Predict) WithDefaultOptions(opts ...core.Option) *Predict {
 	return p
 }
 
+// WithAdapter makes the module format its prompt and parse the reply with a
+// structured-output adapter, such as adapters.NewXMLAdapter() or
+// adapters.NewJSONAdapter(). Every call then returns all required output fields
+// or a typed error from pkg/errors (ErrParseFailed, ErrTruncated, ErrRefused,
+// ErrContentFiltered); a reply that cannot be parsed is never returned as an
+// empty field or a raw "response" value.
+//
+// The adapter replaces the module's output mode. Like WithTextOutput and
+// WithStructuredOutput, it removes every interceptor on the module, so add
+// interceptors after calling it. A nil adapter restores text parsing.
+func (p *Predict) WithAdapter(adapter core.Adapter) *Predict {
+	p.WithTextOutput()
+	p.adapter = adapter
+	return p
+}
+
+// GetAdapter returns the adapter chosen with WithAdapter, or nil.
+func (p *Predict) GetAdapter() core.Adapter {
+	return p.adapter
+}
+
+// GetAdapterInfo implements core.AdapterProvider. It returns empty strings
+// when no adapter is set, so the saved program records none.
+func (p *Predict) GetAdapterInfo() (string, string) {
+	if p.adapter == nil {
+		return "", ""
+	}
+	return p.adapter.Name(), p.adapter.Version()
+}
+
+// SetAdapterByName implements core.AdapterConsumer: it restores the adapter a
+// saved program recorded.
+func (p *Predict) SetAdapterByName(name string, _ string) error {
+	adapter, err := builtinAdapter(name)
+	if err != nil || adapter == nil {
+		return err
+	}
+	p.WithAdapter(adapter)
+	return nil
+}
+
+// builtinAdapter returns the built-in adapter a saved program names, or nil
+// for an empty name. The version is not consulted: each has one version.
+func builtinAdapter(name string) (core.Adapter, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "":
+		return nil, nil
+	case "xml":
+		return adapters.NewXMLAdapter(), nil
+	case "json":
+		return adapters.NewJSONAdapter(), nil
+	default:
+		return nil, fmt.Errorf("unknown adapter %q", name)
+	}
+}
+
 // IsXMLModeEnabled returns true if XML mode is enabled for this module.
 func (p *Predict) IsXMLModeEnabled() bool {
 	return p.enableXMLMode
@@ -81,6 +147,7 @@ func (p *Predict) IsXMLModeEnabled() bool {
 func (p *Predict) WithXMLOutput(config interceptors.XMLConfig) *Predict {
 	p.enableXMLMode = true
 	p.structuredOutputConfig = nil
+	p.adapter = nil
 	p.xmlConfig = &config
 
 	// Apply the combined XML interceptor (format + parse)
@@ -120,6 +187,7 @@ func (p *Predict) WithStructuredOutput() *Predict {
 func (p *Predict) WithStructuredOutputConfig(config interceptors.StructuredOutputConfig) *Predict {
 	p.enableXMLMode = false
 	p.xmlConfig = nil
+	p.adapter = nil
 	p.structuredOutputConfig = &config
 	// Predict executes JSON mode explicitly so its complete prompt state (notably
 	// demonstrations) is available and fallback cannot inherit XML raw mode.
@@ -154,6 +222,7 @@ func (p *Predict) WithTextOutput() *Predict {
 	p.enableXMLMode = false
 	p.xmlConfig = nil
 	p.structuredOutputConfig = nil
+	p.adapter = nil
 
 	// WARNING: This clears ALL interceptors, not just XML ones
 	// See TODO above for future improvement
@@ -169,6 +238,9 @@ func (p *Predict) Process(ctx context.Context, inputs map[string]any, opts ...co
 	}
 	if record := predictionRecorder(ctx, p, inputs); record != nil {
 		defer func() { record(outputs, err) }()
+	}
+	if p.adapter != nil {
+		return p.executeAdapterGeneration(ctx, inputs, opts...)
 	}
 	if p.structuredOutputConfig != nil {
 		return p.executeStructuredGeneration(ctx, inputs, opts...)
@@ -242,20 +314,124 @@ func (p *Predict) ProcessWithInterceptors(ctx context.Context, inputs map[string
 	if interceptors == nil {
 		interceptors = p.GetInterceptors()
 	}
+	// The demonstrations and the adapter are part of what the module asks the
+	// model, so interceptors that key on the module, such as the caching one,
+	// can tell an optimized or reconfigured module from the original.
 	info := core.NewModuleInfo(p.GetDisplayName(), p.GetModuleType(), p.GetSignature()).
 		WithLLM(p.LLM).
-		WithDefaultOptions(p.defaultOptions)
+		WithDefaultOptions(p.defaultOptions).
+		WithDemos(p.Demos)
+	if p.adapter != nil {
+		info = info.WithMetadata("adapter", p.adapter.Name()).
+			WithMetadata("adapter_version", p.adapter.Version())
+	}
 	return core.ChainModuleInterceptors(interceptors...)(ctx, inputs, info, p.processCore, opts...)
 }
 
 // processCore handles the core prediction logic for interceptor pipeline.
 // When called via ProcessWithInterceptors, XML interceptors handle response parsing.
 func (p *Predict) processCore(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	if p.adapter != nil {
+		return p.executeAdapterGeneration(ctx, inputs, opts...)
+	}
 	if p.structuredOutputConfig != nil {
 		return p.executeStructuredGeneration(ctx, inputs, opts...)
 	}
 	// For XML mode via interceptors, return raw response for XML interceptor to parse
 	return p.executeGeneration(ctx, inputs, p.enableXMLMode, opts...)
+}
+
+// executeAdapterGeneration runs one call through the adapter chosen with
+// WithAdapter, which formats the request, calls the model, and parses and
+// validates the reply.
+func (p *Predict) executeAdapterGeneration(ctx context.Context, inputs map[string]any, opts ...core.Option) (map[string]any, error) {
+	callOptions := &core.ModuleOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(callOptions)
+		}
+	}
+	finalOptions := p.defaultOptions.MergeWith(callOptions)
+
+	displayName := p.GetDisplayName()
+	if displayName == "" || displayName == "BaseModule" {
+		displayName = "Predict"
+	}
+	adapter := p.adapter
+	metadata := map[string]any{
+		"module_type":     p.GetModuleType(),
+		"module_config":   p.GetSignature().String(),
+		"adapter":         adapter.Name(),
+		"adapter_version": adapter.Version(),
+	}
+	ctx, span := core.StartSpanWithContext(ctx, "Predict", displayName, metadata)
+	defer core.EndSpan(ctx)
+	span.WithAnnotation("inputs", inputs)
+
+	if err := p.ValidateInputs(inputs); err != nil {
+		span.WithError(err)
+		return nil, errors.WithFields(
+			errors.Wrap(err, errors.ValidationFailed, "input validation failed"),
+			errors.Fields{
+				"module": "Predict",
+				"inputs": inputs,
+			})
+	}
+
+	llm, err := p.resolveLLM(ctx)
+	if err != nil {
+		span.WithError(err)
+		return nil, err
+	}
+
+	var adapterOpts core.AdapterCallOptions
+	if finalOptions != nil {
+		adapterOpts.GenerateOptions = finalOptions.GenerateOptions
+		adapterOpts.StreamHandler = finalOptions.StreamHandler
+	}
+
+	res, err := adapter.Call(ctx, llm, p.GetSignature(), p.Demos, inputs, adapterOpts)
+	if err != nil {
+		annotateAdapterError(span, err)
+		span.WithError(err)
+		return nil, err
+	}
+
+	if res.Usage != nil {
+		recordTokenUsage(ctx, &core.TokenUsage{
+			PromptTokens:     res.Usage.PromptTokens,
+			CompletionTokens: res.Usage.CompletionTokens,
+			TotalTokens:      res.Usage.TotalTokens,
+		})
+	}
+
+	span.WithAnnotation("adapter", res.AdapterName)
+	span.WithAnnotation("fallback_used", res.FallbackUsed)
+	if res.SchemaEnforcement != "" {
+		span.WithAnnotation("schema_enforcement", res.SchemaEnforcement)
+	}
+	span.WithAnnotation("cache_hit", res.CacheHit)
+	span.WithAnnotation("outputs", res.Outputs)
+
+	recordPredictionTraceMeta(ctx, p, inputs, res.Outputs, PredictionTraceMeta{
+		AdapterName:       res.AdapterName,
+		AdapterVersion:    res.AdapterVersion,
+		FallbackUsed:      res.FallbackUsed,
+		SchemaEnforcement: res.SchemaEnforcement,
+		CacheHit:          res.CacheHit,
+	})
+
+	return res.Outputs, nil
+}
+
+func annotateAdapterError(span *core.Span, err error) {
+	if span == nil || err == nil {
+		return
+	}
+	span.WithAnnotation("parse_error", stderrors.Is(err, errors.ErrParseFailed))
+	span.WithAnnotation("truncated", stderrors.Is(err, errors.ErrTruncated))
+	span.WithAnnotation("content_filtered", stderrors.Is(err, errors.ErrContentFiltered))
+	span.WithAnnotation("refused", stderrors.Is(err, errors.ErrRefused))
 }
 
 // executeGeneration contains the shared generation logic for both Process and processCore.
@@ -426,6 +602,7 @@ func (p *Predict) Clone() core.Module {
 		Demos:          append([]core.Example{}, p.Demos...),
 		defaultOptions: p.defaultOptions.Clone(),
 		enableXMLMode:  p.enableXMLMode,
+		adapter:        p.adapter,
 	}
 
 	// Deep copy XML config if present

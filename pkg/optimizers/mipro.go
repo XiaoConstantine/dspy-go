@@ -275,6 +275,9 @@ type MIPRO struct {
 	maxBootstrappedDemos int
 	numCandidates        int
 
+	// evalPolicy is how candidate evaluations treat output errors.
+	evalPolicy EvalPolicy
+
 	// rng drives the demonstration split, demonstration sets and minibatches.
 	rng *rand.Rand
 
@@ -293,6 +296,14 @@ var (
 type MIPROOption func(*MIPRO)
 
 // WithMode sets the optimization mode.
+// WithMIPROEvalPolicy sets how candidate evaluations treat output errors. The
+// default is DefaultEvalPolicy.
+func WithMIPROEvalPolicy(policy EvalPolicy) MIPROOption {
+	return func(m *MIPRO) {
+		m.evalPolicy = policy
+	}
+}
+
 func WithMode(mode RunMode) MIPROOption {
 	return func(m *MIPRO) {
 		m.config.Mode = mode
@@ -407,6 +418,7 @@ func NewMIPRO(
 			PromptEffectiveness: make(map[string]float64),
 		},
 		logger:               logging.GetLogger(),
+		evalPolicy:           DefaultEvalPolicy(),
 		numCandidates:        3, // Default to 3 candidates
 		maxBootstrappedDemos: 3, // Default to 3 bootstrapped demos
 	}
@@ -956,19 +968,8 @@ func (m *MIPRO) evaluateCandidate(
 		return 0, fmt.Errorf("no examples evaluated")
 	}
 
-	var totalScore float64
-	for _, result := range m.scoreExamples(ctx, program, examples, scorer, true) {
-		if result.Err != nil {
-			return 0, fmt.Errorf("failed to evaluate example: %w", result.Err)
-		}
-		totalScore += result.Score
-	}
-	// Examples skipped after cancellation carry no error of their own.
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-
-	return totalScore / float64(len(examples)), nil
+	results := m.scoreExamples(ctx, program, examples, scorer, true)
+	return aggregateEvalScores(ctx, results, m.evalPolicy)
 }
 
 func (m *MIPRO) evaluateOnMinibatch(
@@ -984,18 +985,25 @@ func (m *MIPRO) evaluateOnMinibatch(
 	batchSize = min(batchSize, len(examples))
 	batch := examples[:batchSize]
 
-	// Evaluate on the minibatch
 	results := m.scoreExamples(ctx, program, batch, scorer, false)
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	budget := newOutputErrorBudget(m.evalPolicy)
 	var totalScore float64
 	for _, result := range results {
 		if result.Err != nil {
+			if budget.record(result.Err) {
+				totalScore += m.evalPolicy.FailureScore
+				continue
+			}
 			m.logger.Warn(ctx, "Failed to evaluate example: %v", result.Err)
 			continue
 		}
 		totalScore += result.Score
+	}
+	if err := budget.exceeded(); err != nil {
+		return 0, err
 	}
 
 	return totalScore / float64(len(batch)), nil

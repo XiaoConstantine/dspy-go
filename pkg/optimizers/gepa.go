@@ -3,6 +3,7 @@ package optimizers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -61,6 +63,11 @@ func DefaultMultiObjectiveWeights() map[string]float64 {
 
 // GEPAConfig contains configuration options for GEPA optimizer.
 type GEPAConfig struct {
+	// EvalPolicy is how candidate evaluations treat output errors.
+	// DefaultGEPAConfig installs DefaultEvalPolicy; the zero value stops a run
+	// at its first output error.
+	EvalPolicy EvalPolicy `json:"eval_policy"`
+
 	// Evolutionary parameters
 	MaxGenerations int     `json:"max_generations"` // Safety cap including seed validation; default: 1000; 0 disables.
 	MutationRate   float64 `json:"mutation_rate"`   // Per-selected-component proposal probability; default: 1.0
@@ -106,6 +113,7 @@ type GEPAConfig struct {
 // DefaultGEPAConfig returns the default configuration for GEPA.
 func DefaultGEPAConfig() *GEPAConfig {
 	return &GEPAConfig{
+		EvalPolicy:           DefaultEvalPolicy(),
 		MaxGenerations:       1000,
 		MutationRate:         1.0, // The single-candidate loop should attempt an update on every iteration
 		ReflectionDepth:      3,
@@ -848,6 +856,19 @@ type GEPA struct {
 
 	// Random number generator
 	rng *rand.Rand
+
+	// stopRun cancels the current compilation with a cause. It is set only
+	// while compile runs.
+	stopRun atomic.Pointer[context.CancelCauseFunc]
+}
+
+// evalPolicy returns the configured policy, or DefaultEvalPolicy for an
+// optimizer without a config.
+func (g *GEPA) evalPolicy() EvalPolicy {
+	if g == nil || g.config == nil {
+		return DefaultEvalPolicy()
+	}
+	return g.config.EvalPolicy
 }
 
 // MultiObjectiveFitness stores diagnostic objectives for external evaluators.
@@ -1295,9 +1316,20 @@ func (g *GEPA) compile(ctx context.Context, program core.Program, dataset core.D
 	// Initialize GEPA state in context
 	ctx = g.withGEPAState(ctx)
 
+	// A candidate evaluation that exceeds EvalPolicy.MaxErrors stops the run by
+	// cancelling ctx with that error as the cause.
+	ctx, stopRun := context.WithCancelCause(ctx)
+	defer stopRun(nil)
+	g.stopRun.Store(&stopRun)
+	defer g.stopRun.Store(nil)
+
 	// Install interceptors on the program
 	optimizedProgram := g.installInterceptors(program)
 	err = g.runIterativeOptimizationLoop(ctx, optimizedProgram, dataset, scorer, concurrentScoring)
+	var maxErrors *maxErrorsError
+	if errors.As(context.Cause(ctx), &maxErrors) {
+		return program, maxErrors
+	}
 	if err != nil {
 		return program, err
 	}

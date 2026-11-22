@@ -39,6 +39,22 @@ func (d *BaseDecorator) GenerateWithTools(ctx context.Context, messages []ChatMe
 	return chatLLM.GenerateWithTools(ctx, messages, tools, opts...)
 }
 
+func (d *BaseDecorator) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	chatLLM, ok := d.LLM.(ChatLLM)
+	if !ok {
+		return nil, fmt.Errorf("wrapped llm %s does not support ChatLLM", d.ModelID())
+	}
+	return chatLLM.Chat(ctx, req)
+}
+
+func (d *BaseDecorator) StreamChat(ctx context.Context, req ChatRequest) (*StreamResponse, error) {
+	chatLLM, ok := d.LLM.(ChatLLM)
+	if !ok {
+		return nil, fmt.Errorf("wrapped llm %s does not support ChatLLM", d.ModelID())
+	}
+	return chatLLM.StreamChat(ctx, req)
+}
+
 func (d *ModelContextDecorator) Generate(ctx context.Context, prompt string, options ...GenerateOption) (*LLMResponse, error) {
 	RecordLLMCall(ctx, d.LLM)
 	return d.LLM.Generate(ctx, prompt, options...)
@@ -47,6 +63,16 @@ func (d *ModelContextDecorator) Generate(ctx context.Context, prompt string, opt
 func (d *ModelContextDecorator) GenerateWithTools(ctx context.Context, messages []ChatMessage, tools []map[string]any, opts ...GenerateOption) (map[string]any, error) {
 	RecordLLMCall(ctx, d.LLM)
 	return d.BaseDecorator.GenerateWithTools(ctx, messages, tools, opts...)
+}
+
+func (d *ModelContextDecorator) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	RecordLLMCall(ctx, d.LLM)
+	return d.BaseDecorator.Chat(ctx, req)
+}
+
+func (d *ModelContextDecorator) StreamChat(ctx context.Context, req ChatRequest) (*StreamResponse, error) {
+	RecordLLMCall(ctx, d.LLM)
+	return d.BaseDecorator.StreamChat(ctx, req)
 }
 
 // Deprecated: prefer explicit RecordLLMCall calls at LLM boundaries instead of

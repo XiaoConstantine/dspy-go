@@ -43,11 +43,39 @@ type SignatureMetadata struct {
 type FieldMetadata struct {
 	Name        string       // Field name from struct tag or field name
 	GoFieldName string       // Original Go struct field name for direct lookup
-	Required    bool         // Whether field is required
+	Required    bool         // Whether typed validation rejects a zero value; set by the `required` tag
 	Description string       // Field description
 	Prefix      string       // Output prefix for LLM generation
 	Type        FieldType    // Field type (text, image, audio)
 	GoType      reflect.Type // The actual Go type
+
+	// Optional reports whether a structured-output adapter may omit the field:
+	// true for pointer fields and fields tagged `dspy:",optional"`. It does not
+	// affect typed validation, which Required alone controls.
+	Optional bool
+
+	// enum holds the values of the `enum` tag as a JSON array, as Field does.
+	enum string
+}
+
+// EnumValues returns the allowed string values from the `enum` tag, or nil.
+func (m FieldMetadata) EnumValues() []string {
+	return decodeEnum(m.enum)
+}
+
+// legacyField converts the metadata to a legacy signature field. The Go type,
+// optionality, and enum values are carried for structured-output adapters; the
+// prompt and parsing of a Predict without an adapter do not read them.
+func (m FieldMetadata) legacyField() Field {
+	return Field{
+		Name:        m.Name,
+		Description: m.Description,
+		Prefix:      m.Prefix,
+		Type:        m.Type,
+		Optional:    m.Optional,
+		GoType:      m.GoType,
+		enum:        m.enum,
+	}
 }
 
 // typedSignatureImpl implements TypedSignature.
@@ -156,22 +184,12 @@ func (ts *typedSignatureImpl[TInput, TOutput]) ToLegacySignature() Signature {
 	// Convert typed signature to legacy format
 	inputs := make([]InputField, len(ts.metadata.Inputs))
 	for i, field := range ts.metadata.Inputs {
-		inputs[i] = InputField{
-			Name:        field.Name,
-			Description: field.Description,
-			Prefix:      field.Prefix,
-			Type:        field.Type,
-		}
+		inputs[i] = InputField{Field: field.legacyField()}
 	}
 
 	outputs := make([]OutputField, len(ts.metadata.Outputs))
 	for i, field := range ts.metadata.Outputs {
-		outputs[i] = OutputField{
-			Name:        field.Name,
-			Description: field.Description,
-			Prefix:      field.Prefix,
-			Type:        field.Type,
-		}
+		outputs[i] = OutputField{Field: field.legacyField()}
 	}
 
 	signature := NewSignature(inputs, outputs)
@@ -238,6 +256,7 @@ func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 		Type:        FieldTypeText, // Default to text
 		Required:    false,         // Default to optional
 		Description: field.Name,    // Auto-generate description from field name
+		Optional:    field.Type.Kind() == reflect.Pointer,
 	}
 
 	// Parse dspy struct tag: `dspy:"fieldname,required"` (optional overrides)
@@ -252,8 +271,22 @@ func parseFieldMetadata(field reflect.StructField, isInput bool) FieldMetadata {
 			switch strings.TrimSpace(part) {
 			case "required":
 				metadata.Required = true
+				metadata.Optional = false
+			case "optional":
+				metadata.Optional = true
 			}
 		}
+	}
+
+	// Parse the enum tag: `enum:"positive,negative,neutral"`.
+	if enumTag := field.Tag.Get("enum"); enumTag != "" {
+		var values []string
+		for _, item := range strings.Split(enumTag, ",") {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				values = append(values, trimmed)
+			}
+		}
+		metadata.enum = encodeEnum(values)
 	}
 
 	// Parse description tag (overrides auto-generated description)
@@ -353,6 +386,14 @@ func validateStruct(value any, expectedFields []FieldMetadata, fieldType string)
 }
 
 // Backward compatibility: convert legacy signature to typed.
+// legacyGoType returns the field's Go type, which defaults to string.
+func legacyGoType(field Field) reflect.Type {
+	if field.GoType != nil {
+		return field.GoType
+	}
+	return reflect.TypeOf("")
+}
+
 func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[string]any] {
 	metadata := SignatureMetadata{
 		Instruction: sig.Instruction,
@@ -366,8 +407,10 @@ func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[strin
 			Description: input.Description,
 			Prefix:      input.Prefix,
 			Type:        input.Type,
-			Required:    false,              // Default to optional for backward compatibility
-			GoType:      reflect.TypeOf(""), // Default to string
+			Required:    false, // Default to optional for backward compatibility
+			GoType:      legacyGoType(input.Field),
+			Optional:    input.Optional,
+			enum:        input.enum,
 		})
 	}
 
@@ -379,8 +422,10 @@ func FromLegacySignature(sig Signature) TypedSignature[map[string]any, map[strin
 			Description: output.Description,
 			Prefix:      output.Prefix,
 			Type:        output.Type,
-			Required:    false,              // Outputs are generally not "required"
-			GoType:      reflect.TypeOf(""), // Default to string
+			Required:    false, // Outputs are generally not "required"
+			GoType:      legacyGoType(output.Field),
+			Optional:    output.Optional,
+			enum:        output.enum,
 		})
 	}
 

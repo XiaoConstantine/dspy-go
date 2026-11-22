@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
 // CacheEntry represents a cached result with expiration.
@@ -515,13 +516,78 @@ func CircuitBreakerToolInterceptor(cb *CircuitBreaker) core.ToolInterceptor {
 // Helper functions
 
 // generateModuleCacheKey creates a cache key for module results.
+// It hashes module identity, effective signature (instruction, fields, types,
+// optionality), demonstrations, model identifier, and inputs so optimized
+// programs never serve stale entries.
 func generateModuleCacheKey(inputs map[string]any, info *core.ModuleInfo) string {
 	hasher := sha256.New()
 
-	// Add module info
 	hasher.Write([]byte(info.ModuleName))
+	hasher.Write([]byte{0})
 	hasher.Write([]byte(info.ModuleType))
+	hasher.Write([]byte{0})
 	hasher.Write([]byte(info.Version))
+	hasher.Write([]byte{0})
+
+	// Effective signature (instruction + inputs/outputs/types/optionality).
+	hasher.Write([]byte(info.Signature.Instruction))
+	hasher.Write([]byte{0})
+	for _, f := range info.Signature.Inputs {
+		hasher.Write([]byte(f.Name))
+		hasher.Write([]byte(":"))
+		hasher.Write([]byte(f.Type))
+		hasher.Write([]byte(":"))
+		hasher.Write([]byte(f.Description))
+		if f.Optional {
+			hasher.Write([]byte(":opt"))
+		}
+		hasher.Write([]byte{0})
+	}
+	for _, f := range info.Signature.Outputs {
+		hasher.Write([]byte(f.Name))
+		hasher.Write([]byte(":"))
+		hasher.Write([]byte(f.Type))
+		hasher.Write([]byte(":"))
+		hasher.Write([]byte(f.Description))
+		hasher.Write([]byte(":"))
+		hasher.Write([]byte(f.Prefix))
+		if f.Optional {
+			hasher.Write([]byte(":opt"))
+		}
+		if f.GoType != nil {
+			hasher.Write([]byte(":"))
+			hasher.Write([]byte(f.GoType.String()))
+		}
+		if len(f.Schema) > 0 {
+			hasher.Write([]byte(":"))
+			hasher.Write([]byte(f.Schema))
+		}
+		hasher.Write([]byte{0})
+	}
+
+	// Demonstrations.
+	if len(info.Demos) > 0 {
+		if demosJSON, err := json.Marshal(info.Demos); err == nil {
+			hasher.Write(demosJSON)
+		}
+		hasher.Write([]byte{0})
+	}
+
+	// Model identity.
+	if info.LLM != nil {
+		hasher.Write([]byte(info.LLM.ProviderName()))
+		hasher.Write([]byte("/"))
+		hasher.Write([]byte(info.LLM.ModelID()))
+		hasher.Write([]byte{0})
+	}
+
+	// Metadata (e.g. adapter name/version if attached).
+	if len(info.Metadata) > 0 {
+		if metaJSON, err := json.Marshal(info.Metadata); err == nil {
+			hasher.Write(metaJSON)
+		}
+		hasher.Write([]byte{0})
+	}
 
 	// Add inputs (in a deterministic way)
 	inputsJSON, err := json.Marshal(inputs)
@@ -579,6 +645,12 @@ func RetryModuleInterceptor(config RetryConfig) core.ModuleInterceptor {
 			}
 
 			lastErr = err
+			// Replaying the same request cannot repair a refusal or a reply that
+			// was filtered, truncated, or unparseable. Every other error is
+			// retried as before.
+			if dspyerrors.IsOutputError(err) {
+				return nil, err
+			}
 
 			// Don't retry on the last attempt
 			if attempt == config.MaxAttempts {
@@ -616,6 +688,12 @@ func RetryAgentInterceptor(config RetryConfig) core.AgentInterceptor {
 			}
 
 			lastErr = err
+			// Replaying the same request cannot repair a refusal or a reply that
+			// was filtered, truncated, or unparseable. Every other error is
+			// retried as before.
+			if dspyerrors.IsOutputError(err) {
+				return nil, err
+			}
 
 			// Don't retry on the last attempt
 			if attempt == config.MaxAttempts {

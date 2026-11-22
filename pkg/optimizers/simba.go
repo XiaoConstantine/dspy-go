@@ -66,6 +66,10 @@ type SIMBAConfig struct {
 	EarlyStoppingPatience  int     `json:"early_stopping_patience"`  // Default: 0 (disabled)
 	EarlyStoppingThreshold float64 `json:"early_stopping_threshold"` // Default: 0.01
 
+	// EvalPolicy is how evaluations treat output errors. Default:
+	// DefaultEvalPolicy(); the zero value stops a run at its first output error.
+	EvalPolicy EvalPolicy `json:"eval_policy"`
+
 	// Fast mode configuration for Python compatibility
 	FastMode                       bool `json:"fast_mode"`                        // Default: false
 	DisableTrajectoryTracking      bool `json:"disable_trajectory_tracking"`      // Default: false
@@ -232,6 +236,14 @@ var (
 type SIMBAOption func(*SIMBA)
 
 // WithSIMBABatchSize sets the mini-batch size.
+// WithSIMBAEvalPolicy sets how evaluations treat output errors. The default is
+// DefaultEvalPolicy.
+func WithSIMBAEvalPolicy(policy EvalPolicy) SIMBAOption {
+	return func(s *SIMBA) {
+		s.config.EvalPolicy = policy
+	}
+}
+
 func WithSIMBABatchSize(size int) SIMBAOption {
 	return func(s *SIMBA) {
 		s.config.BatchSize = size
@@ -416,6 +428,7 @@ func NewSIMBA(opts ...SIMBAOption) *SIMBA {
 			PipelineBufferSize:     2,
 			EarlyStoppingPatience:  0, // Disabled by default
 			EarlyStoppingThreshold: 0.01,
+			EvalPolicy:             DefaultEvalPolicy(),
 		},
 		state: &SIMBAState{
 			CurrentStep:      0,
@@ -731,11 +744,16 @@ func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Prog
 		return 0, err
 	}
 
+	budget := newOutputErrorBudget(s.config.EvalPolicy)
 	var totalScore float64
 	failed := false
 	for _, result := range results {
 		if result.Err != nil {
 			s.logger.Debug(ctx, "Program evaluation failed for example: %v", result.Err)
+			if budget.record(result.Err) {
+				totalScore += s.config.EvalPolicy.FailureScore
+				continue
+			}
 			failed = true
 			continue
 		}
@@ -744,6 +762,9 @@ func (s *SIMBA) evaluateProgramOnExamples(ctx context.Context, program core.Prog
 
 	if len(results) == 0 {
 		return 0, nil
+	}
+	if err := budget.exceeded(); err != nil {
+		return 0, err
 	}
 	if failed {
 		return math.Inf(-1), nil
@@ -1318,12 +1339,22 @@ func (s *SIMBA) evaluateBatch(ctx context.Context, candidate core.Program, batch
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err
 	}
+	// An output error scores as the policy says. Any other failure makes the
+	// candidate unusable, as it always has.
+	budget := newOutputErrorBudget(s.config.EvalPolicy)
 	var total float64
 	for i, err := range errs {
-		if err != nil {
+		switch {
+		case err == nil:
+			total += scores[i]
+		case budget.record(err):
+			total += s.config.EvalPolicy.FailureScore
+		default:
 			return math.Inf(-1), trajectories, nil
 		}
-		total += scores[i]
+	}
+	if err := budget.exceeded(); err != nil {
+		return 0, nil, err
 	}
 	return total / float64(len(batch)), trajectories, nil
 }

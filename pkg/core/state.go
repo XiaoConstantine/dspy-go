@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,14 @@ import (
 
 // Version is a placeholder for the dspy-go version.
 const Version = "0.0.0-dev"
+
+// DefaultMaxSavedMediaBytes caps total raw media bytes serialized across demos
+// in a saved program state (10 MiB).
+const DefaultMaxSavedMediaBytes = 10 * 1024 * 1024
+
+// savedMediaEnvelopeType marks a demo value that holds an image or audio
+// block with its bytes as base64. ContentBlock.Data itself stays json:"-".
+const savedMediaEnvelopeType = "__dspy_media_v1__"
 
 // DemoProvider is an interface that modules can optionally implement
 // to allow their demos to be retrieved.
@@ -60,6 +69,8 @@ type SavedModuleState struct {
 	Signature       string            `json:"signature"`                  // Module's signature string representation (READ-ONLY during load)
 	Instruction     *string           `json:"instruction,omitempty"`      // Predictor's instruction; absent in older files, whose instructions are not loaded
 	OutputPrefixes  map[string]string `json:"output_prefixes,omitempty"`  // Predictor's output field prefixes by field name
+	Adapter         string            `json:"adapter,omitempty"`          // Structured-output adapter name (e.g. "xml", "json")
+	AdapterVersion  string            `json:"adapter_version,omitempty"`  // Adapter format version
 	Demos           []SavedExample    `json:"demos,omitempty"`            // Saved demos, if the module provides them
 	LMIdentifier    map[string]string `json:"lm_identifier,omitempty"`    // Identifying info for the LM used (e.g., provider, model)
 	TunedParameters map[string]any    `json:"tuned_parameters,omitempty"` // Module-specific tuned parameters (e.g., k for retriever)
@@ -149,16 +160,19 @@ func nestedPredictors(module Module) []namedPredictor {
 
 // saveModuleState captures module's state and, for a module built from other
 // modules, the state of every predictor inside it.
-func saveModuleState(module Module) SavedModuleState {
+func saveModuleState(module Module, totalMediaBytes *int) SavedModuleState {
 	state := SavedModuleState{
 		Signature:  module.GetSignature().String(),
 		ModuleType: persistedModuleTypeName(module),
+	}
+	if adapterProvider, ok := module.(AdapterProvider); ok {
+		state.Adapter, state.AdapterVersion = adapterProvider.GetAdapterInfo()
 	}
 	if demoProvider, ok := module.(DemoProvider); ok {
 		demos := demoProvider.GetDemos()
 		state.Demos = make([]SavedExample, len(demos))
 		for i, demo := range demos {
-			state.Demos[i] = SavedExample(demo)
+			state.Demos[i] = encodeSavedExample(demo, totalMediaBytes)
 		}
 	}
 	if lmProvider, ok := module.(LMConfigProvider); ok {
@@ -182,14 +196,93 @@ func saveModuleState(module Module) SavedModuleState {
 	}
 	state.Predictors = make(map[string]SavedModuleState, len(predictors))
 	for _, predictor := range predictors {
-		state.Predictors[predictor.path] = saveModuleState(predictor.module)
+		state.Predictors[predictor.path] = saveModuleState(predictor.module, totalMediaBytes)
 	}
 	return state
 }
 
+func encodeSavedExample(demo Example, totalMediaBytes *int) SavedExample {
+	return SavedExample{
+		Inputs:  encodeSavedFields(demo.Inputs, totalMediaBytes),
+		Outputs: encodeSavedFields(demo.Outputs, totalMediaBytes),
+	}
+}
+
+// encodeSavedFields stores the bytes of image and audio blocks as base64 while
+// the program's total stays within DefaultMaxSavedMediaBytes. A block with no
+// bytes, or one that would exceed the cap, is saved as before: without bytes.
+func encodeSavedFields(fields map[string]any, totalMediaBytes *int) map[string]any {
+	if fields == nil {
+		return nil
+	}
+	encoded := make(map[string]any, len(fields))
+	for k, v := range fields {
+		block, ok := v.(ContentBlock)
+		if ok && block.Type != FieldTypeText && len(block.Data) > 0 &&
+			*totalMediaBytes+len(block.Data) <= DefaultMaxSavedMediaBytes {
+			*totalMediaBytes += len(block.Data)
+			encoded[k] = map[string]any{
+				"__kind":    savedMediaEnvelopeType,
+				"type":      string(block.Type),
+				"mime_type": block.MimeType,
+				"data_b64":  base64.StdEncoding.EncodeToString(block.Data),
+				"metadata":  block.Metadata,
+			}
+			continue
+		}
+		encoded[k] = v
+	}
+	return encoded
+}
+
+func decodeSavedExample(saved SavedExample) (Example, bool, string) {
+	inputs, okIn, reasonIn := decodeSavedFields(saved.Inputs)
+	if !okIn {
+		return Example{}, false, reasonIn
+	}
+	outputs, okOut, reasonOut := decodeSavedFields(saved.Outputs)
+	if !okOut {
+		return Example{}, false, reasonOut
+	}
+	return Example{Inputs: inputs, Outputs: outputs}, true, ""
+}
+
+func decodeSavedFields(fields map[string]any) (map[string]any, bool, string) {
+	if fields == nil {
+		return nil, true, ""
+	}
+	decoded := make(map[string]any, len(fields))
+	for k, v := range fields {
+		m, isMap := v.(map[string]any)
+		if !isMap {
+			decoded[k] = v
+			continue
+		}
+		if kind, _ := m["__kind"].(string); kind == savedMediaEnvelopeType {
+			b64, _ := m["data_b64"].(string)
+			data, err := base64.StdEncoding.DecodeString(b64)
+			if err != nil || len(data) == 0 {
+				return nil, false, fmt.Sprintf("invalid or empty media bytes in field %q", k)
+			}
+			typ, _ := m["type"].(string)
+			mime, _ := m["mime_type"].(string)
+			meta, _ := m["metadata"].(map[string]any)
+			decoded[k] = ContentBlock{
+				Type:     FieldType(typ),
+				Data:     data,
+				MimeType: mime,
+				Metadata: meta,
+			}
+			continue
+		}
+		decoded[k] = v
+	}
+	return decoded, true, ""
+}
+
 // SaveProgram serializes the current state of the Program's modules to a JSON
-// file: each predictor's instruction, output prefixes, and demos, including
-// predictors nested in modules such as ChainOfThought and ReAct.
+// file: each predictor's instruction, output prefixes, adapter, and demos,
+// including predictors nested in modules such as ChainOfThought and ReAct.
 func SaveProgram(p *Program, filepath string) error {
 	state := SavedProgramState{
 		Modules: make(map[string]SavedModuleState),
@@ -197,8 +290,9 @@ func SaveProgram(p *Program, filepath string) error {
 			"dspy_go_version": Version,
 		},
 	}
+	totalMediaBytes := 0
 	for name, module := range p.Modules {
-		state.Modules[name] = saveModuleState(module)
+		state.Modules[name] = saveModuleState(module, &totalMediaBytes)
 	}
 
 	jsonData, err := json.MarshalIndent(state, "", "  ")
@@ -286,16 +380,27 @@ func loadModuleState(name string, module Module, saved SavedModuleState, opts Lo
 		// A predictor saved with its instruction saved its demos too, so its
 		// empty demos clear the constructed ones. Older files omit empty demos.
 		if len(saved.Demos) > 0 || saved.Instruction != nil {
-			demos := make([]Example, len(saved.Demos))
+			demos := make([]Example, 0, len(saved.Demos))
 			for i, savedDemo := range saved.Demos {
-				// SavedExample and Example share map[string]any inputs and
-				// outputs; consumers of the demos handle the concrete values.
-				demos[i] = Example(savedDemo)
+				decoded, keep, reason := decodeSavedExample(savedDemo)
+				if !keep {
+					opts.warnf("dropping demo %d for module %q: %s", i, name, reason)
+					continue
+				}
+				demos = append(demos, decoded)
 			}
 			demoConsumer.SetDemos(demos)
 		}
 	} else if len(saved.Demos) > 0 {
 		opts.warnf("saved state for module %q contains demos, but the module does not implement DemoConsumer; demos were not loaded", name)
+	}
+
+	// A file that records no adapter was saved by a module without one, so the
+	// module keeps the output mode it was built with.
+	if adapterConsumer, ok := module.(AdapterConsumer); ok && saved.Adapter != "" {
+		if err := adapterConsumer.SetAdapterByName(saved.Adapter, saved.AdapterVersion); err != nil {
+			opts.warnf("could not restore adapter %q (%s) for module %q: %v; using current adapter", saved.Adapter, saved.AdapterVersion, name, err)
+		}
 	}
 
 	if paramConsumer, ok := module.(ParameterConsumer); ok {

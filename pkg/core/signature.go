@@ -1,13 +1,15 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 )
 
-// FieldType represents the type of data a field can contain.
+// FieldType represents the modality of data a field can contain.
 type FieldType string
 
 const (
@@ -18,10 +20,50 @@ const (
 
 // Field represents a single field in a signature.
 type Field struct {
-	Name        string
-	Description string
-	Prefix      string
-	Type        FieldType // Default is FieldTypeText for backward compatibility
+	Name            string
+	Description     string
+	Prefix          string
+	Type            FieldType    // Modality: text, image, audio. Default is FieldTypeText.
+	Optional        bool         // False (zero value) means required. Read by adapters only.
+	GoType          reflect.Type // Optional Go type for schema derivation and coercion.
+	Schema          string       // Optional explicit ordered JSON Schema for this field, as JSON text.
+	NativeReasoning bool         // True when this field may be satisfied by model native reasoning.
+
+	// enum holds the allowed string values as a JSON array. It is a string, as
+	// Schema is, so that Field stays comparable with ==.
+	enum string
+}
+
+// EnumValues returns the allowed string values set by WithEnum, or nil.
+func (f Field) EnumValues() []string {
+	return decodeEnum(f.enum)
+}
+
+func encodeEnum(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+func decodeEnum(encoded string) []string {
+	if encoded == "" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(encoded), &values); err != nil {
+		return nil
+	}
+	return values
+}
+
+// IsRequired reports whether the field is required.
+func (f Field) IsRequired() bool {
+	return !f.Optional
 }
 
 // NewField creates a new Field with smart defaults.
@@ -65,10 +107,53 @@ func WithNoPrefix() FieldOption {
 	}
 }
 
-// WithFieldType sets the field type.
+// WithFieldType sets the field modality type.
 func WithFieldType(fieldType FieldType) FieldOption {
 	return func(f *Field) {
 		f.Type = fieldType
+	}
+}
+
+// WithOptional marks the field as optional (nullable in strict JSON schemas).
+func WithOptional() FieldOption {
+	return func(f *Field) {
+		f.Optional = true
+	}
+}
+
+// WithRequired explicitly sets whether the field is required.
+func WithRequired(required bool) FieldOption {
+	return func(f *Field) {
+		f.Optional = !required
+	}
+}
+
+// WithGoType attaches a Go reflect.Type for ordered JSON Schema derivation and coercion.
+func WithGoType(t reflect.Type) FieldOption {
+	return func(f *Field) {
+		f.GoType = t
+	}
+}
+
+// WithSchema attaches an explicit ordered JSON Schema for this field.
+func WithSchema(schema json.RawMessage) FieldOption {
+	return func(f *Field) {
+		f.Schema = string(schema)
+	}
+}
+
+// WithEnum restricts a string field to the given allowed values.
+func WithEnum(values ...string) FieldOption {
+	return func(f *Field) {
+		f.enum = encodeEnum(values)
+	}
+}
+
+// WithNativeReasoning marks an output field (such as ChainOfThought's reasoning)
+// so adapters satisfy it via native model reasoning when supported.
+func WithNativeReasoning() FieldOption {
+	return func(f *Field) {
+		f.NativeReasoning = true
 	}
 }
 

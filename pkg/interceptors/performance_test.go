@@ -3,11 +3,13 @@ package interceptors
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
@@ -473,6 +475,97 @@ func TestRetryModuleInterceptor(t *testing.T) {
 			t.Errorf("Expected 3 attempts, got %d", attemptCount)
 		}
 	})
+}
+
+func TestCachingModuleInterceptor_MissesAfterProgramChanges(t *testing.T) {
+	interceptor := CachingModuleInterceptor(NewMemoryCache(), time.Minute)
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question")}},
+		[]core.OutputField{{Field: core.NewField("answer")}},
+	).WithInstruction("Answer briefly.")
+	inputs := map[string]any{"question": "q"}
+	calls := 0
+	run := func(info *core.ModuleInfo) {
+		t.Helper()
+		_, err := interceptor(context.Background(), inputs, info,
+			func(context.Context, map[string]any, ...core.Option) (map[string]any, error) {
+				calls++
+				return map[string]any{"answer": calls}, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := func() *core.ModuleInfo { return core.NewModuleInfo("qa", "Predict", signature) }
+
+	run(base())
+	run(base())
+	if calls != 1 {
+		t.Fatalf("an unchanged module must hit the cache; handler ran %d times", calls)
+	}
+
+	// Each change an optimizer or caller can make must miss the cache.
+	changed := map[string]*core.ModuleInfo{
+		"instruction": core.NewModuleInfo("qa", "Predict", signature.WithInstruction("Answer at length.")),
+		"demos": base().WithDemos([]core.Example{{
+			Inputs: map[string]any{"question": "d"}, Outputs: map[string]any{"answer": "a"},
+		}}),
+		"adapter": base().WithMetadata("adapter", "json"),
+		"output fields": core.NewModuleInfo("qa", "Predict", core.NewSignature(
+			signature.Inputs,
+			append([]core.OutputField{{Field: core.NewField("reasoning")}}, signature.Outputs...),
+		).WithInstruction(signature.Instruction)),
+	}
+	for name, info := range changed {
+		before := calls
+		run(info)
+		if calls != before+1 {
+			t.Errorf("changed %s: expected a cache miss", name)
+		}
+	}
+}
+
+func TestRetryModuleInterceptor_StopsOnlyOnOutputErrors(t *testing.T) {
+	interceptor := RetryModuleInterceptor(RetryConfig{MaxAttempts: 3, Delay: time.Millisecond, Backoff: 1})
+	info := core.NewModuleInfo("TestModule", "TestType", core.Signature{})
+	attemptsFor := func(failure error) (int, error) {
+		attempts := 0
+		_, err := interceptor(context.Background(), map[string]any{}, info,
+			func(context.Context, map[string]any, ...core.Option) (map[string]any, error) {
+				attempts++
+				return nil, failure
+			})
+		return attempts, err
+	}
+
+	parseErr := &dspyerrors.ParseError{Adapter: "xml", MissingFields: []string{"answer"}}
+	for name, outputErr := range map[string]error{
+		"parse failure":  parseErr,
+		"wrapped parse":  fmt.Errorf("predict: %w", parseErr),
+		"refusal":        &dspyerrors.RefusalError{Reason: "no"},
+		"truncation":     &dspyerrors.TruncatedError{},
+		"content filter": &dspyerrors.ContentFilterError{},
+	} {
+		attempts, err := attemptsFor(outputErr)
+		if attempts != 1 {
+			t.Errorf("%s: expected 1 attempt, got %d", name, attempts)
+		}
+		if !errors.Is(err, outputErr) || strings.Contains(err.Error(), "failed after") {
+			t.Errorf("%s: expected the output error itself, got %v", name, err)
+		}
+	}
+
+	// Errors that were retried before output errors existed still are.
+	for name, other := range map[string]error{
+		"plain error":        errors.New("boom"),
+		"generation failure": dspyerrors.New(dspyerrors.LLMGenerationFailed, "service unavailable"),
+		"validation failure": dspyerrors.New(dspyerrors.ValidationFailed, "bad input"),
+		"deadline":           context.DeadlineExceeded,
+	} {
+		if attempts, _ := attemptsFor(other); attempts != 3 {
+			t.Errorf("%s: expected 3 attempts, got %d", name, attempts)
+		}
+	}
 }
 
 func TestRetryAgentInterceptor(t *testing.T) {

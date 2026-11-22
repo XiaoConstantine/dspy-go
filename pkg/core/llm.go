@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -23,10 +24,31 @@ type LLMResponse struct {
 }
 
 type StreamChunk struct {
-	Content string     // The text content of this chunk
-	Done    bool       // Indicates if this is the final chunk
-	Error   error      // Any error that occurred during streaming
-	Usage   *TokenInfo // Optional token usage information (may be nil)
+	Content          string          // The text content of this chunk
+	Field            string          // Optional output field name for field-scoped streaming
+	Done             bool            // Indicates if this is the final chunk
+	Error            error           // Any error that occurred during streaming
+	Usage            *TokenInfo      // Optional token usage information (may be nil)
+	FinishReason     FinishReason    // Final finish reason (typically set on the terminal chunk)
+	Refusal          *string         // Optional refusal delta or message
+	ReasoningSummary string          // Optional native reasoning summary delta
+	Chat             *ChatStreamData // Optional tool calls and provider state from a chat stream
+}
+
+// ChatStreamData is the part of a chat stream chunk that is neither text nor
+// reasoning. StreamChunk holds it by pointer so that StreamChunk stays
+// comparable with ==.
+type ChatStreamData struct {
+	ToolCalls    []ToolCall      // Completed tool calls emitted on the stream
+	ProviderData json.RawMessage // Opaque provider continuation state
+}
+
+// StreamToolCalls returns the tool calls the chunk carries, if any.
+func (c StreamChunk) StreamToolCalls() []ToolCall {
+	if c.Chat == nil {
+		return nil
+	}
+	return c.Chat.ToolCalls
 }
 
 // StreamResponse encapsulates a streaming response.
@@ -45,6 +67,8 @@ const (
 
 	// Advanced capabilities.
 	CapabilityJSON        Capability = "json"
+	CapabilityJSONSchema  Capability = "json-schema"
+	CapabilityReasoning   Capability = "reasoning"
 	CapabilityStreaming   Capability = "streaming"
 	CapabilityToolCalling Capability = "tool-calling"
 	// New multimodal capabilities.
@@ -104,13 +128,15 @@ func (cb ContentBlock) String() string {
 }
 
 // ChatMessage represents a single message in a multi-turn conversation.
-// Used by ToolCallingChatLLM for true native tool-use loops.
+// Used by ChatLLM and ToolCallingChatLLM for native chat and tool-use loops.
 type ChatMessage struct {
-	Role         string          `json:"role"`                    // "system"|"user"|"assistant"|"tool"
-	Content      []ContentBlock  `json:"content"`                 // reuse existing multimodal blocks from llm.go
-	ToolCalls    []ToolCall      `json:"tool_calls,omitempty"`    // for assistant messages requesting tool calls
-	ToolResult   *ChatToolResult `json:"tool_result,omitempty"`   // for tool role messages
-	ProviderData map[string]any  `json:"provider_data,omitempty"` // opaque continuation state owned by a provider
+	Role            string           `json:"role"`                        // "system"|"user"|"assistant"|"tool"
+	Content         []ContentBlock   `json:"content"`                     // reuse existing multimodal blocks from llm.go
+	ToolCalls       []ToolCall       `json:"tool_calls,omitempty"`        // for assistant messages requesting tool calls
+	ToolResult      *ChatToolResult  `json:"tool_result,omitempty"`       // single tool result (legacy compatibility)
+	ToolResults     []ChatToolResult `json:"tool_results,omitempty"`      // one or more tool results for tool role messages
+	ProviderData    map[string]any   `json:"provider_data,omitempty"`     // legacy map representation of provider state
+	RawProviderData json.RawMessage  `json:"raw_provider_data,omitempty"` // opaque continuation state owned by a provider
 }
 
 // ChatToolResult carries the result of a single tool execution in a chat message.

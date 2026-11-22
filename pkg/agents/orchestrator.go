@@ -326,6 +326,10 @@ func (f *FlexibleOrchestrator) analyzeTasks(ctx context.Context, task string, co
 			logger.Debug(attemptCtx, "Analysis attempt %d failed: %v", attempt+1, err)
 			core.EndSpan(attemptCtx)
 
+			if errors.IsOutputError(err) {
+				break
+			}
+
 			// Calculate backoff duration if configured
 			if f.config.RetryConfig != nil && attempt < maxAttempts-1 {
 				backoff := time.Duration(float64(time.Second) *

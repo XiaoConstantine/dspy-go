@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	jsonv1 "encoding/json"
 	jsonv2 "encoding/json/v2"
+	stderrors "errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
 	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -291,14 +293,24 @@ func (g *GEPA) evaluateCandidateWithAdapter(ctx context.Context, candidate *GEPA
 		}
 	}
 
+	policy := g.evalPolicy()
+	budget := newOutputErrorBudget(policy)
 	for i, evalCase := range cases {
 		if !ran[i] {
 			continue
 		}
-		if evalCase.Err == nil {
+		switch {
+		case evalCase.Err == nil:
 			result.TotalScore += evalCase.Score
+		case budget.record(evalCase.Err):
+			result.TotalScore += policy.FailureScore
 		}
 		result.Cases = append(result.Cases, evalCase)
+	}
+	if err := budget.exceeded(); err != nil && g != nil {
+		if stopRun := g.stopRun.Load(); stopRun != nil {
+			(*stopRun)(err)
+		}
 	}
 	spentMetricCalls := int(spent.Load())
 
@@ -345,7 +357,7 @@ func (g *GEPA) populateEvaluationCaseFeedback(ctx context.Context, candidate *GE
 		))
 	}
 
-	if evalCase.Err != nil && g.config.AddFormatFailureAsFeedback {
+	if evalCase.Err != nil && (g.config.AddFormatFailureAsFeedback || dspyerrors.IsOutputError(evalCase.Err)) {
 		target := ""
 		if feedback != nil {
 			target = feedback.TargetComponent
@@ -354,7 +366,7 @@ func (g *GEPA) populateEvaluationCaseFeedback(ctx context.Context, candidate *GE
 			target = strings.TrimSpace(candidate.ModuleName)
 		}
 
-		failureFeedback := "Execution failure: " + strings.TrimSpace(evalCase.Err.Error())
+		failureFeedback := formatGEPAFailureFeedback(evalCase.Err)
 		switch {
 		case feedback == nil:
 			feedback = &GEPAFeedback{
@@ -491,4 +503,19 @@ func cloneStringAnyMap(values map[string]any) map[string]any {
 	}
 
 	return cloned
+}
+
+func formatGEPAFailureFeedback(err error) string {
+	var pe *dspyerrors.ParseError
+	if stderrors.As(err, &pe) {
+		msg := "Structured output parse failure: " + strings.TrimSpace(pe.Error())
+		if raw := strings.TrimSpace(pe.Raw); raw != "" {
+			if len(raw) > 400 {
+				raw = raw[:400] + "..."
+			}
+			msg += "\nRaw model reply:\n" + raw
+		}
+		return msg
+	}
+	return "Execution failure: " + strings.TrimSpace(err.Error())
 }

@@ -22,6 +22,13 @@ type BootstrapFewShot struct {
 	// scores above zero, so a threshold of exactly zero cannot be expressed; a
 	// negative threshold also keeps predictions that score zero.
 	MetricThreshold float64
+
+	// EvalPolicy limits the teacher's output errors: compilation stops once
+	// more than EvalPolicy.MaxErrors teacher runs end in one. FailureScore is
+	// not used, because a failed teacher run yields no demonstration either
+	// way. NewBootstrapFewShot installs DefaultEvalPolicy; the zero value stops
+	// compilation at the first such run.
+	EvalPolicy EvalPolicy
 }
 
 var _ core.ScorerCompiler = (*BootstrapFewShot)(nil)
@@ -30,6 +37,7 @@ func NewBootstrapFewShot(metric func(example map[string]any, prediction map[stri
 	return &BootstrapFewShot{
 		Metric:          metric,
 		MaxBootstrapped: maxBootstrapped,
+		EvalPolicy:      DefaultEvalPolicy(),
 	}
 }
 
@@ -108,9 +116,10 @@ func (b *BootstrapFewShot) metricKeeps(trainset []map[string]any) func(context.C
 // bootstrapRun is one teacher run the metric kept: the example, the program's
 // prediction, and the last call of each teacher predictor by name.
 type bootstrapRun struct {
-	example    map[string]any
-	prediction map[string]any
-	calls      map[string]core.Example
+	example      map[string]any
+	prediction   map[string]any
+	calls        map[string]core.Example
+	fallbackUsed bool
 }
 
 // compileInternal bootstraps demonstrations for student from teacher runs.
@@ -159,11 +168,13 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 	// time, until enough runs are kept. Stopping at the first
 	// MaxBootstrapped examples would return too few demonstrations whenever
 	// some of them fail the metric.
-	var runs []bootstrapRun
+	var cleanRuns []bootstrapRun
+	var fallbackRuns []bootstrapRun
 	var teacherErr error
 	teacherSucceeded := false
+	outputErrors := newOutputErrorBudget(b.EvalPolicy)
 	batchSize := max(core.GetConcurrencyLevel(), 1)
-	for start := 0; start < len(trainset) && len(runs) < b.MaxBootstrapped; start += batchSize {
+	for start := 0; start < len(trainset) && len(cleanRuns) < b.MaxBootstrapped; start += batchSize {
 		batch := trainset[start:min(start+batchSize, len(trainset))]
 		kept := make([]*bootstrapRun, len(batch))
 		errs := make([]error, len(batch))
@@ -177,7 +188,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				defer core.EndSpan(exampleCtx)
 
 				exampleSpan.WithAnnotation("Example", ex)
-				prediction, calls, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
+				prediction, calls, usedFallback, err := b.predictWithTeacher(exampleCtx, teacher, teacherLLM, ex)
 				if err != nil {
 					exampleSpan.WithError(err)
 					errs[i] = err
@@ -186,7 +197,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 				exampleSpan.WithAnnotation("prediction", prediction)
 
 				if keep(exampleCtx, start+i, prediction) {
-					kept[i] = &bootstrapRun{example: ex, prediction: prediction, calls: calls}
+					kept[i] = &bootstrapRun{example: ex, prediction: prediction, calls: calls, fallbackUsed: usedFallback}
 				}
 			})
 		}
@@ -208,12 +219,36 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 			if teacherErr == nil {
 				teacherErr = err
 			}
+			outputErrors.record(err)
+		}
+		if err := outputErrors.exceeded(); err != nil {
+			span.WithError(err)
+			return compiledStudent, fmt.Errorf("error during compilation: %w", err)
 		}
 		for _, run := range kept {
-			if run != nil && len(runs) < b.MaxBootstrapped {
-				runs = append(runs, *run)
+			if run == nil {
+				continue
+			}
+			if !run.fallbackUsed {
+				cleanRuns = append(cleanRuns, *run)
+			} else {
+				fallbackRuns = append(fallbackRuns, *run)
 			}
 		}
+	}
+	// Prefer clean (non-fallback) traces first, filling remaining slots with fallback traces if needed.
+	runs := make([]bootstrapRun, 0, max(b.MaxBootstrapped, 0))
+	for _, r := range cleanRuns {
+		if len(runs) >= b.MaxBootstrapped {
+			break
+		}
+		runs = append(runs, r)
+	}
+	for _, r := range fallbackRuns {
+		if len(runs) >= b.MaxBootstrapped {
+			break
+		}
+		runs = append(runs, r)
 	}
 	// A teacher that never works is a broken setup, not a hard example.
 	if teacherErr != nil && !teacherSucceeded {
@@ -267,7 +302,7 @@ func (b *BootstrapFewShot) compileInternal(ctx context.Context, student, teacher
 
 // predictWithTeacher runs a clone of teacher on example. It returns the
 // program's prediction and the last successful call of each predictor by name.
-func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]any) (map[string]any, map[string]core.Example, error) {
+func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.Program, teacherLLM core.LLM, example map[string]any) (map[string]any, map[string]core.Example, bool, error) {
 	// Clone the teacher program; a configured teacher LLM replaces its modules' LLMs.
 	teacherClone := teacher.Clone()
 	if teacherLLM != nil {
@@ -292,6 +327,7 @@ func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.
 	}
 	var mu sync.Mutex
 	calls := make(map[string]core.Example)
+	fallbackUsed := false
 	ctx = modules.WithPredictionObserver(ctx, func(predictor *modules.Predict, inputs, outputs map[string]any) {
 		name, ok := nameOf[predictor]
 		if !ok {
@@ -301,18 +337,25 @@ func (b *BootstrapFewShot) predictWithTeacher(ctx context.Context, teacher core.
 		defer mu.Unlock()
 		calls[name] = core.Example{Inputs: maps.Clone(inputs), Outputs: maps.Clone(outputs)}
 	})
+	ctx = modules.WithPredictionTraceObserver(ctx, func(_ *modules.Predict, _, _ map[string]any, meta modules.PredictionTraceMeta) {
+		if meta.FallbackUsed {
+			mu.Lock()
+			fallbackUsed = true
+			mu.Unlock()
+		}
+	})
 
 	span.WithAnnotation("Example", example)
 	outputs, err := teacherClone.Execute(ctx, example)
 	if err != nil {
 		span.WithError(err)
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	span.WithAnnotation("outputs", outputs)
 	mu.Lock()
 	defer mu.Unlock()
-	return outputs, maps.Clone(calls), nil
+	return outputs, maps.Clone(calls), fallbackUsed, nil
 }
 
 // demoPredictors returns the Predict modules that hold module's demonstrations,

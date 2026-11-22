@@ -7,6 +7,24 @@ import (
 )
 
 type predictionObserverKey struct{}
+type predictionMetaObserverKey struct{}
+
+// PredictionTraceMeta carries adapter execution metadata for a Predict call.
+type PredictionTraceMeta struct {
+	AdapterName       string
+	AdapterVersion    string
+	FallbackUsed      bool
+	SchemaEnforcement string
+	CacheHit          bool
+}
+
+// WithPredictionTraceObserver observes successful Predict calls made through
+// an adapter (WithAdapter), along with adapter metadata such as whether the
+// JSON fallback was used. It is not called for a Predict without an adapter;
+// WithPredictionObserver observes those too.
+func WithPredictionTraceObserver(ctx context.Context, observer func(*Predict, map[string]any, map[string]any, PredictionTraceMeta)) context.Context {
+	return context.WithValue(ctx, predictionMetaObserverKey{}, observer)
+}
 
 // WithPredictionObserver observes successful Predict calls, including parsed XML,
 // structured JSON, and calls inside composite modules. The callback receives the
@@ -68,4 +86,12 @@ func predictionRecorder(ctx context.Context, predictor *Predict, inputs map[stri
 			observer(predictor, inputs, maps.Clone(outputs))
 		}
 	}
+}
+
+func recordPredictionTraceMeta(ctx context.Context, predictor *Predict, inputs, outputs map[string]any, meta PredictionTraceMeta) {
+	observer, _ := ctx.Value(predictionMetaObserverKey{}).(func(*Predict, map[string]any, map[string]any, PredictionTraceMeta))
+	if observer == nil {
+		return
+	}
+	observer(predictor, maps.Clone(inputs), maps.Clone(outputs), meta)
 }

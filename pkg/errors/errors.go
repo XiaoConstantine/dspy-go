@@ -31,6 +31,12 @@ const (
 	WorkflowExecutionFailed
 	StepExecutionFailed
 	InvalidWorkflowState
+
+	// Structured output errors.
+	Refused
+	ContentFiltered
+	Truncated
+	ParseFailed
 )
 
 // Error represents a structured error with context.

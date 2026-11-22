@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
+	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentloop"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -28,6 +29,11 @@ type ReAct struct {
 	Registry  *tools.InMemoryToolRegistry
 	MaxIters  int
 	XMLConfig *interceptors.XMLConfig // Optional XML config for enhanced parsing
+
+	// adapter is set by WithAdapter; originalSignature is the caller's
+	// signature, whose outputs become the arguments of the submit tool.
+	adapter           core.Adapter
+	originalSignature core.Signature
 }
 
 // NewReAct creates a new ReAct module.
@@ -35,8 +41,9 @@ type ReAct struct {
 func NewReAct(signature core.Signature, registry *tools.InMemoryToolRegistry, maxIters int) *ReAct {
 	// Create the ReAct instance first so we can call the instance method
 	react := &ReAct{
-		Registry: registry,
-		MaxIters: maxIters,
+		Registry:          registry,
+		MaxIters:          maxIters,
+		originalSignature: signature,
 	}
 
 	// Now modify the signature using the instance method
@@ -111,6 +118,14 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 	trace := &ReActTrace{
 		Input: maps.Clone(inputs),
 		Steps: make([]ReActTraceStep, 0, r.MaxIters),
+	}
+
+	if r.adapter != nil {
+		if llm, err := r.Predict.resolveLLM(ctx); err == nil {
+			if _, hasChat := core.ResolveChatLLM(llm); hasChat && core.HasCapability(llm, core.CapabilityToolCalling) {
+				return r.processNativeSubmitLoop(ctx, llm, inputs, trace, startTime, opts...)
+			}
+		}
 	}
 
 	// Create working state that we'll update through iterations
@@ -363,7 +378,112 @@ func (r *ReAct) Clone() core.Module {
 		Registry:   r.Registry,
 		MaxIters:   r.MaxIters,
 		XMLConfig:  r.XMLConfig, // Share the XML config (it's read-only)
+
+		adapter:           r.adapter,
+		originalSignature: r.originalSignature,
 	}
+}
+
+// WithAdapter makes ReAct run the model's native tool-calling loop and finish
+// through a reserved submit tool whose arguments are the signature's output
+// fields, validated against their schema. The adapter renders the first
+// request. A missing or invalid submit is an errors.ErrParseFailed, never a
+// result with empty fields.
+//
+// This needs a model that implements core.ChatLLM and reports
+// core.CapabilityToolCalling. On any other model, and with a nil adapter, ReAct
+// keeps its text loop.
+func (r *ReAct) WithAdapter(adapter core.Adapter) *ReAct {
+	r.adapter = adapter
+	return r
+}
+
+func (r *ReAct) processNativeSubmitLoop(
+	ctx context.Context,
+	llm core.LLM,
+	inputs map[string]any,
+	trace *ReActTrace,
+	startTime time.Time,
+	opts ...core.Option,
+) (map[string]any, *ReActTrace, error) {
+	sig := r.originalSignature
+	if len(sig.Outputs) == 0 {
+		sig = r.GetSignature()
+	}
+	// Carry forward any optimized instruction from Predict.
+	if predInstr := r.Predict.GetSignature().Instruction; predInstr != "" && sig.Instruction == "" {
+		sig.Instruction = predInstr
+	}
+
+	callOptions := &core.ModuleOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(callOptions)
+		}
+	}
+	finalOptions := r.Predict.defaultOptions.MergeWith(callOptions)
+	var genOpts []core.GenerateOption
+	if finalOptions != nil {
+		genOpts = finalOptions.GenerateOptions
+	}
+
+	var registeredTools []core.Tool
+	if r.Registry != nil {
+		registeredTools = r.Registry.List()
+	}
+
+	initialMessages, err := r.adapter.Format(sig, r.Predict.GetDemos(), inputs)
+	if err != nil {
+		trace.ProcessingTime = time.Since(startTime)
+		trace.TerminationCause = "format_error"
+		trace.Error = err.Error()
+		return nil, trace, err
+	}
+	// Prepend concise agent tool-use instructions to the system message.
+	if len(initialMessages) > 0 && initialMessages[0].Role == "system" && len(initialMessages[0].Content) > 0 {
+		initialMessages[0].Content[0].Text += "\n\nUse the provided tools when you need more information. When ready, call `submit` with all required output fields."
+	}
+
+	loopRes, err := agentloop.Run(ctx, llm, initialMessages, agentloop.Config{
+		Signature:        sig,
+		Tools:            registeredTools,
+		MaxTurns:         r.MaxIters,
+		ForceFinalSubmit: true,
+		Options:          genOpts,
+	})
+	trace.ProcessingTime = time.Since(startTime)
+	if loopRes != nil {
+		if loopRes.Usage != nil {
+			recordTokenUsage(ctx, &core.TokenUsage{
+				PromptTokens:     loopRes.Usage.PromptTokens,
+				CompletionTokens: loopRes.Usage.CompletionTokens,
+				TotalTokens:      loopRes.Usage.TotalTokens,
+			})
+		}
+		for i, step := range loopRes.Steps {
+			trace.Steps = append(trace.Steps, ReActTraceStep{
+				Index:       i + 1,
+				Thought:     step.Thought,
+				ActionRaw:   fmt.Sprintf("%s(%v)", step.Tool, step.Arguments),
+				Tool:        step.Tool,
+				Arguments:   maps.Clone(step.Arguments),
+				Observation: step.Observation,
+				Duration:    step.Duration,
+				Success:     step.Success,
+				Error:       step.Error,
+			})
+		}
+		trace.TerminationCause = loopRes.TerminationCause
+	}
+	if err != nil {
+		trace.Error = err.Error()
+		if trace.TerminationCause == "" {
+			trace.TerminationCause = "error"
+		}
+		return nil, trace, err
+	}
+	trace.Output = maps.Clone(loopRes.Outputs)
+	return loopRes.Outputs, trace, nil
 }
 
 // GetSubModules returns the step predictor and the fallback extraction module.

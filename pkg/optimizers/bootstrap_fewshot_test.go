@@ -879,3 +879,16 @@ func TestBootstrapFewShotLearnsFromRefinesReturnedAttempt(t *testing.T) {
 	llm.AssertNumberOfCalls(t, "Generate", 2)
 	assert.Empty(t, predict.GetDemos(), "the student program must not be modified")
 }
+
+func TestBootstrapFewShotNegativeMaxBootstrappedAddsNoDemos(t *testing.T) {
+	mockLLM := setupTestMockLLM(t)
+	train := []core.Example{{Inputs: map[string]any{"question": "q0"}, Outputs: map[string]any{"answer": "Paris"}}}
+	scorer := core.ScorerFunc(func(context.Context, core.Example, map[string]any) (float64, error) { return 1, nil })
+
+	compiled, err := NewBootstrapFewShot(nil, -1).CompileWithScorer(
+		core.WithExecutionState(context.Background()), createProgram(), train, scorer)
+	require.NoError(t, err)
+
+	assert.Empty(t, compiled.Modules["predict"].(*modules.Predict).GetDemos())
+	mockLLM.AssertNumberOfCalls(t, "Generate", 0)
+}

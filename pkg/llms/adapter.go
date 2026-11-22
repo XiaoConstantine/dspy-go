@@ -15,6 +15,7 @@ import (
 	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/utils"
 	llm "github.com/XiaoConstantine/llm-go"
+	llmopenai "github.com/XiaoConstantine/llm-go/openai"
 )
 
 // GeneratorLLM adapts llm-go's provider-neutral Generator to dspy-go's legacy
@@ -35,7 +36,7 @@ func adapt(generator llm.Generator, endpoint *core.EndpointConfig, client *http.
 		return nil, dspyerrors.New(dspyerrors.InvalidInput, "llm-go generator is required")
 	}
 	info := generator.Info()
-	capabilities := coreCapabilities(info.Capabilities)
+	capabilities := coreCapabilitiesForInfo(info)
 	if embedder != nil {
 		capabilities = append(capabilities, core.CapabilityEmbedding)
 	}
@@ -137,7 +138,8 @@ func (l *GeneratorLLM) StreamGenerate(
 	prompt string,
 	options ...core.GenerateOption,
 ) (*core.StreamResponse, error) {
-	return l.stream(ctx, []llm.Message{userMessage([]llm.Part{{Text: prompt}})}, options)
+	req := canonicalRequest([]llm.Message{userMessage([]llm.Part{{Text: prompt}})}, options, l.generator.Info())
+	return l.streamRequest(ctx, req, false)
 }
 
 func (l *GeneratorLLM) StreamGenerateWithContent(
@@ -149,7 +151,67 @@ func (l *GeneratorLLM) StreamGenerateWithContent(
 	if err != nil {
 		return nil, err
 	}
-	return l.stream(ctx, []llm.Message{userMessage(parts)}, options)
+	req := canonicalRequest([]llm.Message{userMessage(parts)}, options, l.generator.Info())
+	return l.streamRequest(ctx, req, false)
+}
+
+// Chat executes one typed multi-turn chat generation request via llm-go.
+func (l *GeneratorLLM) Chat(ctx context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+	llmReq, err := l.buildChatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	response, err := l.generator.Generate(ctx, llmReq)
+	if err != nil {
+		return nil, err
+	}
+	if response == nil {
+		return nil, dspyerrors.New(dspyerrors.InvalidResponse, "llm-go returned a nil response")
+	}
+	return chatResponseFromLLM(response)
+}
+
+// StreamChat executes a streaming typed multi-turn chat generation request via llm-go.
+func (l *GeneratorLLM) StreamChat(ctx context.Context, req core.ChatRequest) (*core.StreamResponse, error) {
+	llmReq, err := l.buildChatRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	return l.streamRequest(ctx, llmReq, true)
+}
+
+func (l *GeneratorLLM) buildChatRequest(req core.ChatRequest) (llm.Request, error) {
+	messages, err := canonicalMessages(req.Messages)
+	if err != nil {
+		return llm.Request{}, err
+	}
+	tools, err := canonicalChatTools(req.Tools)
+	if err != nil {
+		return llm.Request{}, err
+	}
+	llmReq := canonicalRequest(messages, req.Options, l.generator.Info())
+	llmReq.Tools = tools
+	llmReq.ToolChoice = llm.ToolChoice{
+		Mode: llm.ToolChoiceMode(req.ToolChoice.Mode),
+		Name: req.ToolChoice.Name,
+	}
+	llmReq.ParallelToolCalls = req.ParallelToolCalls
+	llmReq.ReasoningEffort = llm.ReasoningEffort(req.ReasoningEffort)
+	llmReq.ReasoningBudgetTokens = req.ReasoningBudgetTokens
+
+	switch req.ResponseFormat {
+	case core.ResponseFormatText:
+		llmReq.ResponseFormat = llm.ResponseFormatText
+	case core.ResponseFormatJSONObject:
+		llmReq.ResponseFormat = llm.ResponseFormatJSON
+	case core.ResponseFormatJSONSchema:
+		// llm-go v0.5.1 does not yet expose ResponseFormatJSONSchema; once
+		// CapabilityJSONSchema is implemented in llm-go, forward ResponseSchema here.
+		return llm.Request{}, dspyerrors.New(dspyerrors.UnsupportedOperation, "provider does not support native json_schema response format")
+	default:
+		return llm.Request{}, dspyerrors.New(dspyerrors.InvalidInput, fmt.Sprintf("unsupported response format mode: %d", req.ResponseFormat))
+	}
+	return llmReq, nil
 }
 
 func (l *GeneratorLLM) CreateEmbedding(
@@ -194,13 +256,17 @@ func (l *GeneratorLLM) generate(
 	return response, nil
 }
 
-func (l *GeneratorLLM) stream(
+// streamRequest streams request as chunks. Text streams (chat false) forward
+// only text, as they always have. Chat streams also forward reasoning
+// summaries and tool calls, and report the finish reason, any refusal, and the
+// provider's continuation state on the final chunk.
+func (l *GeneratorLLM) streamRequest(
 	ctx context.Context,
-	messages []llm.Message,
-	options []core.GenerateOption,
+	request llm.Request,
+	chat bool,
 ) (*core.StreamResponse, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
-	stream, err := l.generator.Stream(streamCtx, canonicalRequest(messages, options, l.generator.Info()))
+	stream, err := l.generator.Stream(streamCtx, request)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -222,6 +288,9 @@ func (l *GeneratorLLM) stream(
 		defer cancel()
 
 		var usage *core.TokenInfo
+		var lastFinish core.FinishReason
+		var lastRefusal *string
+		var lastProviderData jsonv1.RawMessage
 		for {
 			chunk, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -231,7 +300,17 @@ func (l *GeneratorLLM) stream(
 				} else if closeErr != nil {
 					recvErr = errors.Join(recvErr, closeErr)
 				}
+				if lastRefusal != nil && (lastFinish == "" || lastFinish == core.FinishReasonStop) {
+					lastFinish = core.FinishReasonRefusal
+				}
 				terminal := core.StreamChunk{Done: true, Error: recvErr, Usage: usage}
+				if chat {
+					terminal.FinishReason = lastFinish
+					terminal.Refusal = lastRefusal
+					if len(lastProviderData) != 0 {
+						terminal.Chat = &core.ChatStreamData{ProviderData: lastProviderData}
+					}
+				}
 				select {
 				case chunks <- terminal:
 				case <-userDone:
@@ -242,12 +321,37 @@ func (l *GeneratorLLM) stream(
 			if chunk.Usage != nil {
 				usage = tokenInfo(chunk.Usage)
 			}
-			content := canonicalText(chunk.Content)
-			if content == "" {
+			if chunk.FinishReason != "" {
+				lastFinish = core.FinishReason(chunk.FinishReason)
+			}
+			if len(chunk.ProviderData) != 0 {
+				lastProviderData = append(jsonv1.RawMessage(nil), chunk.ProviderData...)
+				if refusal := extractOpenAIRefusal(chunk.ProviderData); refusal != nil {
+					lastRefusal = refusal
+				}
+			}
+
+			outChunk := core.StreamChunk{Content: canonicalText(chunk.Content)}
+			if chat {
+				toolCalls, tcErr := coreToolCalls(chunk.ToolCalls)
+				if tcErr != nil {
+					_ = stream.Close()
+					select {
+					case chunks <- core.StreamChunk{Done: true, Error: tcErr, Usage: usage}:
+					case <-userDone:
+					}
+					return
+				}
+				outChunk.ReasoningSummary = chunk.ReasoningSummary
+				if len(toolCalls) != 0 {
+					outChunk.Chat = &core.ChatStreamData{ToolCalls: toolCalls}
+				}
+			}
+			if outChunk == (core.StreamChunk{}) {
 				continue
 			}
 			select {
-			case chunks <- core.StreamChunk{Content: content}:
+			case chunks <- outChunk:
 			case <-streamCtx.Done():
 				// Recv will expose parent-context cancellation on the next pass.
 			case <-userDone:
@@ -324,7 +428,22 @@ func canonicalMessages(messages []core.ChatMessage) ([]llm.Message, error) {
 				})
 			}
 		}
-		if message.ToolResult != nil {
+		if len(message.ToolResults) != 0 {
+			canonical.Content = nil
+			canonical.ToolResults = make([]llm.ToolResult, 0, len(message.ToolResults))
+			for rIdx, tr := range message.ToolResults {
+				resultContent, err := canonicalParts(tr.Content)
+				if err != nil {
+					return nil, fmt.Errorf("messages[%d] tool results[%d]: %w", index, rIdx, err)
+				}
+				canonical.ToolResults = append(canonical.ToolResults, llm.ToolResult{
+					CallID:  tr.ToolCallID,
+					Name:    tr.Name,
+					Content: resultContent,
+					IsError: tr.IsError,
+				})
+			}
+		} else if message.ToolResult != nil {
 			resultContent, err := canonicalParts(message.ToolResult.Content)
 			if err != nil {
 				return nil, fmt.Errorf("messages[%d] tool result: %w", index, err)
@@ -337,7 +456,9 @@ func canonicalMessages(messages []core.ChatMessage) ([]llm.Message, error) {
 				IsError: message.ToolResult.IsError,
 			}}
 		}
-		if len(message.ProviderData) != 0 {
+		if len(message.RawProviderData) != 0 {
+			canonical.ProviderData = append(jsonv1.RawMessage(nil), message.RawProviderData...)
+		} else if len(message.ProviderData) != 0 {
 			providerData, err := jsonv2.Marshal(message.ProviderData, jsonv1.DefaultOptionsV1())
 			if err != nil {
 				return nil, fmt.Errorf("messages[%d] provider data: %w", index, err)
@@ -567,6 +688,102 @@ func hasCapability(capabilities []llm.Capability, expected llm.Capability) bool 
 	return false
 }
 
+func canonicalChatTools(tools []core.ChatTool) ([]llm.Tool, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	converted := make([]llm.Tool, 0, len(tools))
+	for index, tool := range tools {
+		if strings.TrimSpace(tool.Name) == "" {
+			return nil, dspyerrors.WithFields(
+				dspyerrors.New(dspyerrors.InvalidInput, "tool requires a non-empty name"),
+				dspyerrors.Fields{"index": index},
+			)
+		}
+		schema := append(jsonv1.RawMessage(nil), tool.InputSchema...)
+		if len(schema) == 0 {
+			schema = jsonv1.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		converted = append(converted, llm.Tool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: schema,
+			Strict:      tool.Strict,
+			Strictness:  llm.ToolStrictness(tool.Strictness),
+		})
+	}
+	return converted, nil
+}
+
+func chatResponseFromLLM(response *llm.Response) (*core.ChatResponse, error) {
+	toolCalls, err := coreToolCalls(response.Message.ToolCalls)
+	if err != nil {
+		return nil, err
+	}
+	finish := core.FinishReason(response.FinishReason)
+	refusal := extractOpenAIRefusal(response.Message.ProviderData)
+	if refusal != nil && (finish == "" || finish == core.FinishReasonStop) {
+		finish = core.FinishReasonRefusal
+	}
+	var providerData jsonv1.RawMessage
+	if len(response.Message.ProviderData) != 0 {
+		providerData = append(jsonv1.RawMessage(nil), response.Message.ProviderData...)
+	}
+	return &core.ChatResponse{
+		ID:               response.ID,
+		Model:            response.Model,
+		Content:          response.Text(),
+		ContentBlocks:    legacyParts(response.Message.Content),
+		ToolCalls:        toolCalls,
+		FinishReason:     finish,
+		Refusal:          refusal,
+		ReasoningSummary: response.ReasoningSummary,
+		ProviderData:     providerData,
+		Usage:            tokenInfo(response.Usage),
+		Metadata:         responseMetadata(response),
+	}, nil
+}
+
+func coreToolCalls(calls []llm.ToolCall) ([]core.ToolCall, error) {
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	converted := make([]core.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		arguments := map[string]any{}
+		if len(call.Arguments) != 0 {
+			if err := jsonv2.Unmarshal(call.Arguments, &arguments); err != nil {
+				return nil, dspyerrors.WithFields(
+					dspyerrors.Wrap(err, dspyerrors.InvalidResponse, "tool arguments must be a JSON object"),
+					dspyerrors.Fields{"tool_name": call.Name},
+				)
+			}
+		}
+		converted = append(converted, core.ToolCall{ID: call.ID, Name: call.Name, Arguments: arguments})
+	}
+	return converted, nil
+}
+
+func extractOpenAIRefusal(providerData []byte) *string {
+	if len(providerData) == 0 {
+		return nil
+	}
+	data, err := llmopenai.ParseMessageData(llm.Message{ProviderData: providerData})
+	if err != nil || data.Refusal == nil {
+		return nil
+	}
+	refusal := *data.Refusal
+	return &refusal
+}
+
+func coreCapabilitiesForInfo(info llm.ModelInfo) []core.Capability {
+	converted := coreCapabilities(info.Capabilities)
+	if info.Reasoning {
+		converted = appendCapability(converted, core.CapabilityReasoning)
+	}
+	return converted
+}
+
 func coreCapabilities(capabilities []llm.Capability) []core.Capability {
 	converted := []core.Capability{core.CapabilityCompletion, core.CapabilityChat}
 	for _, capability := range capabilities {
@@ -600,4 +817,5 @@ func appendCapability(capabilities []core.Capability, capability core.Capability
 var (
 	_ core.LLM                = (*GeneratorLLM)(nil)
 	_ core.ToolCallingChatLLM = (*GeneratorLLM)(nil)
+	_ core.ChatLLM            = (*GeneratorLLM)(nil)
 )

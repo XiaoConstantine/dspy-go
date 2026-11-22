@@ -105,7 +105,7 @@ func configEqual(a, b CacheConfig) bool {
 
 // Generate implements core.LLM with caching.
 func (c *CachedLLM) Generate(ctx context.Context, prompt string, options ...core.GenerateOption) (*core.LLMResponse, error) {
-	if !c.enabled || c.cache == nil {
+	if !c.enabled || c.cache == nil || core.ReplyCacheBypassed(ctx) {
 		return c.LLM.Generate(ctx, prompt, options...)
 	}
 
@@ -124,7 +124,7 @@ func (c *CachedLLM) Generate(ctx context.Context, prompt string, options ...core
 
 // GenerateWithJSON implements core.LLM with caching for JSON responses.
 func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options ...core.GenerateOption) (map[string]any, error) {
-	if !c.enabled || c.cache == nil {
+	if !c.enabled || c.cache == nil || core.ReplyCacheBypassed(ctx) {
 		return c.LLM.GenerateWithJSON(ctx, prompt, options...)
 	}
 
@@ -161,7 +161,7 @@ func (c *CachedLLM) GenerateWithJSON(ctx context.Context, prompt string, options
 
 // GenerateWithFunctions implements core.LLM with caching for function calls.
 func (c *CachedLLM) GenerateWithFunctions(ctx context.Context, prompt string, functions []map[string]any, options ...core.GenerateOption) (map[string]any, error) {
-	if !c.enabled || c.cache == nil {
+	if !c.enabled || c.cache == nil || core.ReplyCacheBypassed(ctx) {
 		return c.LLM.GenerateWithFunctions(ctx, prompt, functions, options...)
 	}
 
@@ -208,9 +208,28 @@ func (c *CachedLLM) GenerateWithTools(ctx context.Context, messages []core.ChatM
 	return chatLLM.GenerateWithTools(ctx, messages, tools, options...)
 }
 
+// Chat forwards typed chat calls to the wrapped ChatLLM without caching raw
+// unvalidated replies; validated output caching is owned by the adapter layer.
+func (c *CachedLLM) Chat(ctx context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+	chatLLM, ok := c.LLM.(core.ChatLLM)
+	if !ok {
+		return nil, fmt.Errorf("wrapped llm %s does not support ChatLLM", c.ModelID())
+	}
+	return chatLLM.Chat(ctx, req)
+}
+
+// StreamChat forwards streaming chat calls to the wrapped ChatLLM.
+func (c *CachedLLM) StreamChat(ctx context.Context, req core.ChatRequest) (*core.StreamResponse, error) {
+	chatLLM, ok := c.LLM.(core.ChatLLM)
+	if !ok {
+		return nil, fmt.Errorf("wrapped llm %s does not support ChatLLM", c.ModelID())
+	}
+	return chatLLM.StreamChat(ctx, req)
+}
+
 // GenerateWithContent implements core.LLM with caching for multimodal content.
 func (c *CachedLLM) GenerateWithContent(ctx context.Context, content []core.ContentBlock, options ...core.GenerateOption) (*core.LLMResponse, error) {
-	if !c.enabled || c.cache == nil {
+	if !c.enabled || c.cache == nil || core.ReplyCacheBypassed(ctx) {
 		return c.LLM.GenerateWithContent(ctx, content, options...)
 	}
 
@@ -389,6 +408,22 @@ func (c *CachedLLM) withCache(ctx context.Context, key string, fn func() (*core.
 // Unwrap returns the underlying LLM instance.
 func (c *CachedLLM) Unwrap() core.LLM {
 	return c.LLM
+}
+
+// ValidatedOutputCache returns the store, key namespace, and entry lifetime a
+// structured-output adapter uses for this model. An adapter bypasses the raw
+// replies this wrapper caches (core.WithoutReplyCache) and caches the outputs
+// it has validated there instead. ok is false when caching is off or the
+// model's routing identity cannot be keyed.
+func (c *CachedLLM) ValidatedOutputCache() (store Cache, namespace string, ttl time.Duration, ok bool) {
+	if !c.IsCacheEnabled() {
+		return nil, "", 0, false
+	}
+	namespace = c.cacheNamespace()
+	if namespace == "" {
+		return nil, "", 0, false
+	}
+	return c.cache, namespace, c.ttl, true
 }
 
 // SetCacheEnabled enables/disables caching for this LLM instance.
