@@ -13,7 +13,7 @@ require (
 	golang.org/x/text v0.44.0
 	google.golang.org/genai v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
