@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,21 +68,46 @@ func testProviderFactory(ctx context.Context, config core.ProviderConfig, modelI
 }
 
 func TestNewLLMRegistry_CreateLLM(t *testing.T) {
-	registry := NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
-	require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
-		"mock": {
-			Name: "mock",
-			Models: map[string]core.ModelConfig{
-				"test-model": {ID: "test-model"},
+	t.Run("CreateLLM success", func(t *testing.T) {
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+		require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
+			"mock": {
+				Name: "mock",
+				Models: map[string]core.ModelConfig{
+					"test-model": {ID: "test-model"},
+				},
 			},
-		},
-	}))
+		}))
 
-	llm, err := registry.CreateLLM(context.Background(), "test-key", core.ModelID("test-model"))
-	require.NoError(t, err)
-	require.Equal(t, "mock", llm.ProviderName())
-	require.Equal(t, "test-model", llm.ModelID())
+		llm, err := registry.CreateLLM(context.Background(), "test-key", core.ModelID("test-model"))
+		require.NoError(t, err)
+		require.Equal(t, "mock", llm.ProviderName())
+
+		require.Equal(t, "test-model", llm.ModelID())
+	})
+
+	t.Run("model not supported", func(t *testing.T) {
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+
+		_, err := registry.CreateLLM(context.Background(), "apikey", core.ModelID("unknown"))
+
+		var e *errors.Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, errors.ModelNotSupported, e.Code())
+	})
+
+	t.Run("provider not registered", func(t *testing.T) {
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+
+		_, err := registry.CreateLLM(context.Background(), "apikey", core.ModelID("gpt-5"))
+
+		var e *errors.Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, errors.ProviderNotFound, e.Code())
+	})
 }
 
 func TestNewLLMRegistry_GetProviderConfigClones(t *testing.T) {
@@ -110,4 +137,189 @@ func TestNewLLMRegistry_GetProviderConfigClones(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, 0.9, reloaded.Params["top_p"])
 	require.Equal(t, "original", reloaded.Models["test-model"].Params["mode"])
+}
+
+func TestNewLLMRegistry_RegisterProvider(t *testing.T) {
+	t.Run("provider name cannot be empty", func(t *testing.T) {
+		registry := NewLLMRegistry()
+
+		err := registry.RegisterProvider("", testProviderFactory)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "name cannot be empty")
+	})
+
+	t.Run("factory cannot be nil", func(t *testing.T) {
+		registry := NewLLMRegistry()
+
+		err := registry.RegisterProvider("name", nil)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "provider factory cannot be nil")
+	})
+}
+
+func TestNewLLMRegistry_UnregistryProvider(t *testing.T) {
+	registry := NewLLMRegistry()
+
+	require.NoError(t, registry.RegisterProvider("one", testProviderFactory))
+	require.NoError(t, registry.RegisterProvider("two", testProviderFactory))
+
+	require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
+		"one": {
+			Name: "one",
+			Models: map[string]core.ModelConfig{
+				"test-one": {ID: "test-one"},
+			},
+		},
+	}))
+	require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
+		"two": {
+			Name: "two",
+			Models: map[string]core.ModelConfig{
+				"test-two": {ID: "test-two"},
+			},
+		},
+	}))
+
+	require.NoError(t, registry.UnregisterProvider("one"))
+
+	providers := registry.ListProviders()
+	require.Equal(t, []string{"two"}, providers)
+}
+
+func TestNewLLMRegistry_CreateLLMWithConfig(t *testing.T) {
+	t.Run("provider not found", func(t *testing.T) {
+		registry := NewLLMRegistry()
+
+		_, err := registry.CreateLLMWithConfig(context.Background(), core.ProviderConfig{Name: "missing"}, core.ModelID("model"))
+
+		var e *errors.Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, errors.ProviderNotFound, e.Code())
+	})
+
+	t.Run("uses passed config", func(t *testing.T) {
+		var config core.ProviderConfig
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("mock", func(ctx context.Context, input core.ProviderConfig, modelID core.ModelID) (core.LLM, error) {
+			config = input
+			input.Params["top_p"] = 0.1
+			return newTestLLM(config.Name, string(modelID)), nil
+		}))
+		require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
+			"mock": {Name: "mock", APIKey: "apikey"},
+		}))
+
+		passed := core.ProviderConfig{Name: "mock", APIKey: "passed-apikey", Params: map[string]any{
+			"top_p": 0.9,
+		}}
+		_, err := registry.CreateLLMWithConfig(context.Background(), passed, core.ModelID("not-present"))
+
+		require.NoError(t, err)
+		require.Equal(t, "passed-apikey", config.APIKey)
+		require.Equal(t, 0.9, passed.Params["top_p"])
+	})
+}
+
+func TestNewLLMRegistry_IsModelSupported(t *testing.T) {
+	registry := NewLLMRegistry()
+	require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+	require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
+		"mock": {Name: "mock", Models: map[string]core.ModelConfig{"test": {ID: "test"}}},
+	}))
+
+	tests := []struct {
+		name    string
+		modelID core.ModelID
+		want    bool
+	}{
+		{"configured", "test", true},
+		{"inferred", "gpt-5", true},
+		{"unknown", "unknown", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, registry.IsModelSupported(tt.modelID))
+		})
+	}
+}
+
+func TestNewLLMRegistry_GetModelProvider(t *testing.T) {
+	registry := NewLLMRegistry()
+	require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+	require.NoError(t, registry.LoadFromConfig(context.Background(), map[string]core.ProviderConfig{
+		"mock": {Name: "mock", Models: map[string]core.ModelConfig{
+			"test":   {ID: "test"},
+			"gpt-4o": {ID: "gpt-4o"},
+		}},
+	}))
+
+	tests := []struct {
+		name         string
+		modelID      core.ModelID
+		wantProvider string
+		wantOK       bool
+	}{
+		{"configured", "test", "mock", true},
+		{"configured preferred", "gpt-4o", "mock", true},
+		{"inferred", "gpt-4", "openai", true},
+		{"unknown", "unknown", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, ok := registry.GetModelProvider(tt.modelID)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.wantProvider, provider)
+		})
+	}
+}
+
+func TestNewLLMRegistry_SetDefaultProvider(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+
+		require.NoError(t, registry.SetDefaultProvider("mock"))
+	})
+
+	t.Run("provider not found", func(t *testing.T) {
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("mock", testProviderFactory))
+
+		err := registry.SetDefaultProvider("unknown")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "provider not found")
+	})
+}
+
+func TestNewLLMRegistry_RefreshProvider(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("success", func(t *testing.T) {
+		registry := NewLLMRegistry()
+
+		err := registry.RefreshProvider(ctx, "missing", core.ProviderConfig{Name: "missing"})
+
+		var e *errors.Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, errors.ProviderNotFound, e.Code())
+	})
+
+	t.Run("keep other models", func(t *testing.T) {
+		registry := NewLLMRegistry()
+		require.NoError(t, registry.RegisterProvider("one", testProviderFactory))
+		require.NoError(t, registry.RegisterProvider("two", testProviderFactory))
+		require.NoError(t, registry.LoadFromConfig(ctx, map[string]core.ProviderConfig{
+			"one": {Name: "one", Models: map[string]core.ModelConfig{"model-one": {ID: "model-one"}}},
+			"two": {Name: "two", Models: map[string]core.ModelConfig{"model-two": {ID: "model-two"}}},
+		}))
+
+		require.NoError(t, registry.RefreshProvider(ctx, "one", core.ProviderConfig{Name: "one"}))
+
+		require.False(t, registry.IsModelSupported("model-one"))
+		p, ok := registry.GetModelProvider("model-two")
+		require.True(t, ok)
+		require.Equal(t, "two", p)
+	})
 }
