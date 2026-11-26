@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/interceptors"
 	"github.com/XiaoConstantine/dspy-go/pkg/internal/agentloop"
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
@@ -213,9 +214,13 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 			logger.Debug(ctx, "Received FINISH action in iteration %d", i+1)
 			step.Success = true
 			trace.Steps = append(trace.Steps, step)
-			trace.Output = maps.Clone(prediction)
 			trace.ProcessingTime = time.Since(startTime)
 			trace.TerminationCause = "finish"
+			if err := r.missingOutputsError(r.finishSignature(), prediction); err != nil {
+				trace.Error = err.Error()
+				return nil, trace, err
+			}
+			trace.Output = maps.Clone(prediction)
 			return prediction, trace, nil // End with success
 		}
 
@@ -259,12 +264,51 @@ func (r *ReAct) ProcessWithTrace(ctx context.Context, inputs map[string]any, opt
 	result, err := r.extractFromTrajectory(ctx, inputs, conversationContext, opts...)
 	trace.ProcessingTime = time.Since(startTime)
 	trace.TerminationCause = "max_iterations"
+	if err == nil {
+		// The Extract module answers the signature ReAct was built with.
+		err = r.missingOutputsError(r.originalSignature, result)
+	}
 	if err != nil {
 		trace.Error = err.Error()
 		return nil, trace, err
 	}
 	trace.Output = maps.Clone(result)
 	return result, trace, nil
+}
+
+// missingOutputsError enforces the output contract on the text loop once an
+// adapter is chosen: a result that lacks an output of signature is a parse
+// error, not a success with a nil field. Without an adapter it reports nothing.
+func (r *ReAct) missingOutputsError(signature core.Signature, outputs map[string]any) error {
+	if r.adapter == nil {
+		return nil
+	}
+	missing := signature.MissingOutputs(outputs)
+	if len(missing) == 0 {
+		return nil
+	}
+	return &errors.ParseError{
+		Adapter:       "react",
+		MissingFields: missing,
+		Message:       "the loop ended without every output field",
+	}
+}
+
+// finishSignature is the step predictor's current signature without the
+// fields of a single step, which a Finish reply may leave empty. It follows
+// SetSignature.
+func (r *ReAct) finishSignature() core.Signature {
+	signature := r.Predict.GetSignature()
+	var outputs []core.OutputField
+	for _, field := range signature.Outputs {
+		switch field.Name {
+		case "thought", "action", "observation":
+		default:
+			outputs = append(outputs, field)
+		}
+	}
+	signature.Outputs = outputs
+	return signature
 }
 
 // extractFromTrajectory uses the Extract module to produce an answer from the accumulated trajectory.
@@ -391,11 +435,31 @@ func (r *ReAct) Clone() core.Module {
 // result with empty fields.
 //
 // This needs a model that implements core.ChatLLM and reports
-// core.CapabilityToolCalling. On any other model, and with a nil adapter, ReAct
-// keeps its text loop.
+// core.CapabilityToolCalling. On any other model ReAct keeps its text loop, and
+// a result that lacks an output field is the same error.
 func (r *ReAct) WithAdapter(adapter core.Adapter) *ReAct {
 	r.adapter = adapter
 	return r
+}
+
+// GetAdapterInfo implements core.AdapterProvider, so a saved program records
+// the adapter chosen with WithAdapter. It returns empty strings without one.
+func (r *ReAct) GetAdapterInfo() (string, string) {
+	if r.adapter == nil {
+		return "", ""
+	}
+	return r.adapter.Name(), r.adapter.Version()
+}
+
+// SetAdapterByName implements core.AdapterConsumer: it restores the adapter a
+// saved program recorded.
+func (r *ReAct) SetAdapterByName(name string, _ string) error {
+	adapter, err := builtinAdapter(name)
+	if err != nil || adapter == nil {
+		return err
+	}
+	r.WithAdapter(adapter)
+	return nil
 }
 
 func (r *ReAct) processNativeSubmitLoop(

@@ -206,6 +206,23 @@ func (s Signature) GetSignature() Signature {
 	return s
 }
 
+// MissingOutputs returns, in declaration order, the required output fields
+// that outputs lacks: the key is absent or its value is nil. A blank string is
+// a value, so it is not missing. A successful call with a missing output is a
+// silent failure.
+func (s Signature) MissingOutputs(outputs map[string]any) []string {
+	var missing []string
+	for _, field := range s.Outputs {
+		if !field.IsRequired() {
+			continue
+		}
+		if value, ok := outputs[field.Name]; !ok || value == nil {
+			missing = append(missing, field.Name)
+		}
+	}
+	return missing
+}
+
 // WithInstruction adds an instruction to the Signature.
 func (s Signature) WithInstruction(instruction string) Signature {
 	s.Instruction = instruction

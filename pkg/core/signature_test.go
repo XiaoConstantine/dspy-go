@@ -416,3 +416,19 @@ func TestHelperFunctions(t *testing.T) {
 		assert.Equal(t, "field2", fields[1].Name)
 	})
 }
+
+func TestSignatureMissingOutputs(t *testing.T) {
+	signature := NewSignature(nil, []OutputField{
+		{Field: NewField("reasoning")},
+		{Field: NewField("answer")},
+		{Field: NewField("note", WithOptional())},
+	})
+
+	assert.Empty(t, signature.MissingOutputs(map[string]any{"reasoning": "", "answer": 0}),
+		"a blank string and a zero are values, and an optional field may be absent")
+	assert.Equal(t, []string{"reasoning", "answer"}, signature.MissingOutputs(map[string]any{"response": "raw text"}),
+		"an output map that holds only the raw reply is missing every field")
+	assert.Equal(t, []string{"answer"}, signature.MissingOutputs(map[string]any{"reasoning": "r", "answer": nil, "note": nil}),
+		"a nil value is missing")
+	assert.Equal(t, []string{"reasoning", "answer"}, signature.MissingOutputs(nil))
+}

@@ -3,16 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/adapters"
 	"github.com/XiaoConstantine/dspy-go/pkg/cache"
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/datasets"
+	dspyerrors "github.com/XiaoConstantine/dspy-go/pkg/errors"
 	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/XiaoConstantine/dspy-go/pkg/modules"
 	"github.com/XiaoConstantine/dspy-go/pkg/optimizers"
@@ -68,6 +73,8 @@ func (cm *ComparisonMetrics) GetTotalTime() float64 {
 type OptimizerComparison struct {
 	ModelName string
 	LLM       core.LLM
+	// Adapter is "none", "xml" or "json"; see newPredictor.
+	Adapter string
 
 	BootstrapMetrics *ComparisonMetrics
 	MIPROMetrics     *ComparisonMetrics
@@ -76,29 +83,47 @@ type OptimizerComparison struct {
 	GEPAMetrics      *ComparisonMetrics
 }
 
-func NewOptimizerComparison(modelName string) *OptimizerComparison {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Fatalf("GEMINI_API_KEY environment variable is required")
+// resolveModel returns the model to run, its label in the results, and its
+// credential. An empty model is Gemini Flash, as before the -model flag
+// existed. A model with the "openai-codex:" prefix runs on a ChatGPT
+// subscription and reads its OAuth access token from OPENAI_OAUTH_TOKEN.
+func resolveModel(model string) (core.ModelID, string, string) {
+	modelID, label, keyVar := core.ModelID(model), model, "GEMINI_API_KEY"
+	switch {
+	case model == "":
+		modelID, label = core.ModelGoogleGeminiFlash, "gemini-2.0-flash"
+	case strings.HasPrefix(model, "openai-codex:"):
+		keyVar = "OPENAI_OAUTH_TOKEN"
+	case strings.HasPrefix(model, "gpt-"), strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"):
+		keyVar = "OPENAI_API_KEY"
 	}
+	apiKey := os.Getenv(keyVar)
+	if apiKey == "" {
+		log.Fatalf("%s environment variable is required", keyVar)
+	}
+	return modelID, label, apiKey
+}
+
+func NewOptimizerComparison(model string) *OptimizerComparison {
+	modelID, modelName, apiKey := resolveModel(model)
 
 	// Initialize factory
 	llms.EnsureFactory()
 
 	// Configure default LLM
-	err := core.ConfigureDefaultLLM(apiKey, core.ModelGoogleGeminiFlash)
+	err := core.ConfigureDefaultLLM(apiKey, modelID)
 	if err != nil {
 		log.Fatalf("Failed to configure default LLM: %v", err)
 	}
 
 	// Configure teacher LLM for optimization
-	err = core.ConfigureTeacherLLM(apiKey, core.ModelGoogleGeminiFlash)
+	err = core.ConfigureTeacherLLM(apiKey, modelID)
 	if err != nil {
 		log.Fatalf("Failed to configure teacher LLM: %v", err)
 	}
 
 	// Get the configured LLM for reference
-	llm, err := llms.NewLLM(apiKey, core.ModelGoogleGeminiFlash)
+	llm, err := llms.NewLLM(apiKey, modelID)
 	if err != nil {
 		log.Fatalf("Failed to create LLM: %v", err)
 	}
@@ -150,10 +175,144 @@ func (oc *OptimizerComparison) CreateSampleDataset(size int) []core.Example {
 
 // scorer adapts AccuracyMetric for CompileWithScorer. AccuracyMetric keeps no
 // state, so optimizers may call it concurrently.
-func (oc *OptimizerComparison) scorer() core.Scorer {
+func (oc *OptimizerComparison) scorer(counts *outputCounts, signature core.Signature) core.Scorer {
 	return core.ScorerFunc(func(ctx context.Context, example core.Example, prediction map[string]interface{}) (float64, error) {
+		counts.recordScored(signature, prediction)
 		return oc.AccuracyMetric(example.Outputs, prediction, ctx), nil
 	})
+}
+
+// newPredictor builds the program's predictor with the adapter chosen by the
+// -adapter flag. With "none" it is a plain Predict, as before the flag existed.
+func (oc *OptimizerComparison) newPredictor(signature core.Signature) *modules.Predict {
+	predictor := modules.NewPredict(signature)
+	switch oc.Adapter {
+	case "xml":
+		return predictor.WithAdapter(adapters.NewXMLAdapter())
+	case "json":
+		return predictor.WithAdapter(adapters.NewJSONAdapter())
+	}
+	return predictor
+}
+
+// replyRecorder keeps the text of the model's latest Generate reply.
+type replyRecorder struct {
+	core.LLM
+	mu    sync.Mutex
+	reply string
+}
+
+func (r *replyRecorder) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
+	response, err := r.LLM.Generate(ctx, prompt, opts...)
+	if err == nil && response != nil {
+		r.mu.Lock()
+		r.reply = response.Content
+		r.mu.Unlock()
+	}
+	return response, err
+}
+
+func (r *replyRecorder) last() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reply
+}
+
+// outputCounts records how one optimizer's program calls ended. A silent
+// failure is a call that returned no error and lacks a declared output.
+type outputCounts struct {
+	mu sync.Mutex
+
+	// Held-out evaluation calls.
+	calls, silentFailures, blankOutputs, outputErrors, otherErrors int
+	// Predictions the optimizer scored while compiling. Calls that failed
+	// while compiling never reach the scorer, so they are not counted.
+	compileScored, compileSilentFailures int
+	// Baseline runs only: successful calls that used the adapter's fallback
+	// request, and the tokens the model reported.
+	fallbacks, promptTokens, completionTokens int
+}
+
+func (c *outputCounts) recordFallback(used bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if used {
+		c.fallbacks++
+	}
+}
+
+func (c *outputCounts) recordTokens(usage *core.TokenUsage) {
+	if usage == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.promptTokens += usage.PromptTokens
+	c.completionTokens += usage.CompletionTokens
+}
+
+// recordCall counts one held-out call and returns how it ended: "ok",
+// "blank" (every output present, a text one empty), "silent_failure",
+// "output_error" or "error".
+func (c *outputCounts) recordCall(signature core.Signature, prediction map[string]interface{}, err error) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	switch {
+	case dspyerrors.IsOutputError(err):
+		c.outputErrors++
+		return "output_error"
+	case err != nil:
+		c.otherErrors++
+		return "error"
+	case len(signature.MissingOutputs(prediction)) > 0:
+		c.silentFailures++
+		return "silent_failure"
+	}
+	// A blank answer is not a silent failure, but without an adapter the
+	// parser returns nil for it and with one it returns "". Counting it keeps
+	// the two comparable.
+	for _, field := range signature.Outputs {
+		if text, ok := prediction[field.Name].(string); ok && strings.TrimSpace(text) == "" {
+			c.blankOutputs++
+			return "blank"
+		}
+	}
+	return "ok"
+}
+
+func (c *outputCounts) recordScored(signature core.Signature, prediction map[string]interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.compileScored++
+	if len(signature.MissingOutputs(prediction)) > 0 {
+		c.compileSilentFailures++
+	}
+}
+
+func (c *outputCounts) report() map[string]interface{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rate := func(part, whole int) float64 {
+		if whole == 0 {
+			return 0
+		}
+		return float64(part) / float64(whole)
+	}
+	return map[string]interface{}{
+		"calls":                       c.calls,
+		"silent_failures":             c.silentFailures,
+		"silent_failure_rate":         rate(c.silentFailures, c.calls),
+		"blank_outputs":               c.blankOutputs,
+		"output_errors":               c.outputErrors,
+		"other_errors":                c.otherErrors,
+		"compile_scored":              c.compileScored,
+		"compile_silent_failures":     c.compileSilentFailures,
+		"compile_silent_failure_rate": rate(c.compileSilentFailures, c.compileScored),
+		"fallbacks":                   c.fallbacks,
+		"prompt_tokens":               c.promptTokens,
+		"completion_tokens":           c.completionTokens,
+	}
 }
 
 func (oc *OptimizerComparison) AccuracyMetric(example, prediction map[string]interface{}, ctx context.Context) float64 {
@@ -181,6 +340,90 @@ func (oc *OptimizerComparison) AccuracyMetric(example, prediction map[string]int
 	return 0.0
 }
 
+// CreateHotpotQADataset returns the first size HotpotQA validation questions.
+// It downloads the dataset on first use.
+func (oc *OptimizerComparison) CreateHotpotQADataset(size int) ([]core.Example, error) {
+	rows, err := datasets.LoadHotpotQA()
+	if err != nil {
+		return nil, err
+	}
+	if size > len(rows) {
+		return nil, fmt.Errorf("HotpotQA has %d questions, fewer than the %d requested", len(rows), size)
+	}
+	examples := make([]core.Example, size)
+	for i, row := range rows[:size] {
+		examples[i] = core.Example{
+			Inputs: map[string]interface{}{
+				"question": row.Question,
+				"prompt":   row.Question, // MIPRO reads the prompt field
+			},
+			Outputs: map[string]interface{}{"answer": row.Answer},
+		}
+	}
+	return examples, nil
+}
+
+// TestBaseline runs the unoptimized predictor over the whole dataset. It makes
+// one model call per example, so it is the cheapest way to measure the output
+// contract on a live model.
+func (oc *OptimizerComparison) TestBaseline(ctx context.Context, dataset []core.Example) map[string]interface{} {
+	log.Println("Testing unoptimized Predict")
+
+	signature := core.NewSignature(
+		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
+		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
+	)
+	predictor := oc.newPredictor(signature)
+	counts := &outputCounts{}
+	// Keep each raw reply, to log the ones that yield no answer.
+	recorder := &replyRecorder{LLM: core.GetDefaultLLM()}
+	if oc.Adapter == "none" {
+		predictor.SetLLM(recorder)
+	}
+
+	// Count the calls that needed the adapter's fallback request.
+	ctx = modules.WithPredictionTraceObserver(ctx, func(_ *modules.Predict, _, _ map[string]any, meta modules.PredictionTraceMeta) {
+		counts.recordFallback(meta.FallbackUsed)
+	})
+
+	startTime := time.Now()
+	totalScore := 0.0
+	examples := make([]map[string]interface{}, 0, len(dataset))
+	for _, example := range dataset {
+		// A fresh execution state per call, so its token usage is this call's.
+		callCtx := core.WithExecutionState(ctx)
+		prediction, err := predictor.Process(callCtx, example.Inputs)
+		outcome := counts.recordCall(signature, prediction, err)
+		counts.recordTokens(core.GetExecutionState(callCtx).GetTokenUsage())
+		score := 0.0
+		switch outcome {
+		case "output_error", "error":
+			log.Printf("Error during evaluation: %v", err)
+			var parseErr *dspyerrors.ParseError
+			if errors.As(err, &parseErr) {
+				log.Printf("Rejected reply: %q", parseErr.Raw)
+			}
+		case "silent_failure", "blank":
+			log.Printf("No answer (%s) from reply %q; outputs %v", outcome, recorder.last(), prediction)
+		default:
+			score = oc.AccuracyMetric(example.Outputs, prediction, ctx)
+		}
+		totalScore += score
+		examples = append(examples, map[string]interface{}{"outcome": outcome, "score": score})
+	}
+
+	results := map[string]interface{}{
+		"optimizer":       "Baseline",
+		"evaluation_time": time.Since(startTime).Seconds(),
+		"average_score":   totalScore / float64(len(dataset)),
+		"output_contract": counts.report(),
+		"total_examples":  len(dataset),
+		"examples":        examples,
+	}
+	log.Printf("Baseline results: %+v", results)
+	return results
+}
+
 func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset []core.Example, maxBootstrappedDemos int) (core.Program, map[string]interface{}) {
 	log.Println("Testing BootstrapFewShot optimizer")
 
@@ -189,7 +432,8 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
 		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
 	)
-	predictor := modules.NewPredict(signature)
+	predictor := oc.newPredictor(signature)
+	counts := &outputCounts{}
 
 	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
@@ -228,7 +472,7 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer(counts, signature))
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -242,6 +486,7 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 	totalScore := 0.0
 	for _, example := range valset {
 		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		counts.recordCall(signature, prediction, err)
 		if err != nil {
 			log.Printf("Error during evaluation: %v", err)
 			continue
@@ -258,6 +503,7 @@ func (oc *OptimizerComparison) TestBootstrapFewShot(ctx context.Context, dataset
 		"optimizer":              "BootstrapFewShot",
 		"compilation_time":       compilationTime,
 		"average_score":          avgScore,
+		"output_contract":        counts.report(),
 		"total_examples":         len(valset),
 		"max_bootstrapped_demos": maxBootstrappedDemos,
 		"demonstrations":         oc.extractDemonstrations(optimizedProgram),
@@ -275,7 +521,8 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
 		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
 	)
-	predictor := modules.NewPredict(signature)
+	predictor := oc.newPredictor(signature)
+	counts := &outputCounts{}
 
 	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
@@ -309,7 +556,7 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer(counts, signature))
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -323,6 +570,7 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 	totalScore := 0.0
 	for _, example := range valset {
 		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		counts.recordCall(signature, prediction, err)
 		if err != nil {
 			log.Printf("Error during evaluation: %v", err)
 			continue
@@ -339,6 +587,7 @@ func (oc *OptimizerComparison) TestMIPRO(ctx context.Context, dataset []core.Exa
 		"optimizer":              "MIPRO",
 		"compilation_time":       compilationTime,
 		"average_score":          avgScore,
+		"output_contract":        counts.report(),
 		"total_examples":         len(valset),
 		"num_trials":             numTrials,
 		"max_bootstrapped_demos": maxBootstrappedDemos,
@@ -357,7 +606,8 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
 		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
 	)
-	predictor := modules.NewPredict(signature)
+	predictor := oc.newPredictor(signature)
+	counts := &outputCounts{}
 
 	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
@@ -392,7 +642,7 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := coproOptimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
+	optimizedProgram, err := coproOptimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer(counts, signature))
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -406,6 +656,7 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 	totalScore := 0.0
 	for _, example := range valset {
 		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		counts.recordCall(signature, prediction, err)
 		if err != nil {
 			log.Printf("Error during evaluation: %v", err)
 			continue
@@ -422,6 +673,7 @@ func (oc *OptimizerComparison) TestCOPRO(ctx context.Context, dataset []core.Exa
 		"optimizer":        "COPRO",
 		"compilation_time": compilationTime,
 		"average_score":    avgScore,
+		"output_contract":  counts.report(),
 		"total_examples":   len(valset),
 		"breadth":          breadth,
 		"depth":            depth,
@@ -440,7 +692,8 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
 		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
 	)
-	predictor := modules.NewPredict(signature)
+	predictor := oc.newPredictor(signature)
+	counts := &outputCounts{}
 
 	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
@@ -475,7 +728,7 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
+	optimizedProgram, err := optimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer(counts, signature))
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -489,6 +742,7 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 	totalScore := 0.0
 	for _, example := range valset {
 		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		counts.recordCall(signature, prediction, err)
 		if err != nil {
 			log.Printf("Error during evaluation: %v", err)
 			continue
@@ -505,6 +759,7 @@ func (oc *OptimizerComparison) TestSIMBA(ctx context.Context, dataset []core.Exa
 		"optimizer":        "SIMBA",
 		"compilation_time": compilationTime,
 		"average_score":    avgScore,
+		"output_contract":  counts.report(),
 		"total_examples":   len(valset),
 		"batch_size":       batchSize,
 		"max_steps":        maxSteps,
@@ -523,7 +778,8 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 		[]core.InputField{{Field: core.NewField("question", core.WithDescription("The question to answer"))}},
 		[]core.OutputField{{Field: core.NewField("answer", core.WithDescription("The answer to the question"))}},
 	)
-	predictor := modules.NewPredict(signature)
+	predictor := oc.newPredictor(signature)
+	counts := &outputCounts{}
 
 	program := core.NewProgramWithForwardFactory(
 		map[string]core.Module{
@@ -563,7 +819,7 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 
 	// Compile program
 	startTime := time.Now()
-	optimizedProgram, err := gepaOptimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer())
+	optimizedProgram, err := gepaOptimizer.CompileWithScorer(ctx, program, trainExamples, oc.scorer(counts, signature))
 	compilationTime := time.Since(startTime).Seconds()
 
 	if err != nil {
@@ -577,6 +833,7 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 	totalScore := 0.0
 	for _, example := range valset {
 		prediction, err := optimizedProgram.Execute(ctx, example.Inputs)
+		counts.recordCall(signature, prediction, err)
 		if err != nil {
 			log.Printf("Error during evaluation: %v", err)
 			continue
@@ -593,6 +850,7 @@ func (oc *OptimizerComparison) TestGEPA(ctx context.Context, dataset []core.Exam
 		"optimizer":        "GEPA",
 		"compilation_time": compilationTime,
 		"average_score":    avgScore,
+		"output_contract":  counts.report(),
 		"total_examples":   len(valset),
 		"max_generations":  maxGenerations,
 		"demonstrations":   oc.extractDemonstrations(optimizedProgram),
@@ -689,12 +947,18 @@ func (oc *OptimizerComparison) SaveResults(results map[string]interface{}, filen
 }
 
 func main() {
-	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, copro, gepa, or all")
+	var optimizer = flag.String("optimizer", "all", "Optimizer to test: bootstrap, mipro, simba, copro, gepa, or all; baseline runs the unoptimized predictor")
 	var datasetSize = flag.Int("dataset-size", 20, "Dataset size for testing")
 	var enableCache = flag.Bool("enable-cache", false, "Enable caching for performance comparison")
 	var cacheType = flag.String("cache-type", "memory", "Cache type: memory or sqlite")
 	var withoutCache = flag.Bool("without-cache", false, "Run without cache for baseline comparison")
+	var adapter = flag.String("adapter", "none", "Output adapter for the program's predictor: none, xml, or json")
+	var model = flag.String("model", "", "Model to run; empty is Gemini Flash. Use the openai-codex: prefix for a ChatGPT subscription, such as openai-codex:gpt-6-luna")
+	var datasetName = flag.String("dataset", "sample", "Dataset: sample (10 built-in questions, repeated) or hotpotqa")
 	flag.Parse()
+	if *adapter != "none" && *adapter != "xml" && *adapter != "json" {
+		log.Fatalf("unknown -adapter %q: use none, xml, or json", *adapter)
+	}
 
 	ctx := context.Background()
 
@@ -722,7 +986,8 @@ func main() {
 	}
 
 	// Initialize comparison
-	comparison := NewOptimizerComparison("gemini-2.0-flash")
+	comparison := NewOptimizerComparison(*model)
+	comparison.Adapter = *adapter
 
 	// Log cache status
 	if *enableCache && !*withoutCache {
@@ -734,12 +999,30 @@ func main() {
 	}
 
 	// Create dataset
-	dataset := comparison.CreateSampleDataset(*datasetSize)
+	var dataset []core.Example
+	switch *datasetName {
+	case "sample":
+		dataset = comparison.CreateSampleDataset(*datasetSize)
+	case "hotpotqa":
+		var err error
+		if dataset, err = comparison.CreateHotpotQADataset(*datasetSize); err != nil {
+			log.Fatalf("Failed to load HotpotQA: %v", err)
+		}
+	default:
+		log.Fatalf("unknown -dataset %q: use sample or hotpotqa", *datasetName)
+	}
 
 	results := map[string]interface{}{
+		"dataset":          *datasetName,
 		"dataset_size":     *datasetSize,
 		"model":            comparison.ModelName,
 		"optimizer_tested": *optimizer,
+		"adapter":          *adapter,
+	}
+
+	if *optimizer == "baseline" {
+		fmt.Println("Testing unoptimized Predict...")
+		results["baseline"] = comparison.TestBaseline(ctx, dataset)
 	}
 
 	// Test individual optimizers based on parameter

@@ -222,7 +222,17 @@ go build -o go_comparison go_comparison.go
 
 # Test specific optimizer
 ./go_comparison --optimizer simba --dataset-size 30
+
+# Run the program's predictor through an output adapter (none, xml, or json)
+./go_comparison --optimizer bootstrap --adapter xml
+
+# Run the unoptimized predictor on HotpotQA with a ChatGPT (Codex) subscription.
+# OPENAI_OAUTH_TOKEN is the access token from `codex login`.
+./go_comparison --optimizer baseline --dataset hotpotqa --dataset-size 100 \
+  --model openai-codex:gpt-6-luna --adapter xml
 ```
+
+Without `--model` the Go side runs Gemini Flash and needs `GEMINI_API_KEY`. A `gpt-` model needs `OPENAI_API_KEY`, and an `openai-codex:` model needs `OPENAI_OAUTH_TOKEN`.
 
 #### 3. Compare Results
 ```bash
@@ -240,6 +250,12 @@ python compare_results.py
 - **Accuracy**: Simple substring matching
 - **Compilation Time**: Time to optimize the program
 - **Demonstrations**: Number of generated examples
+- **Output contract** (Go only): each optimizer's result has an `output_contract` object.
+  - `silent_failures` and `silent_failure_rate`: held-out calls that returned no error and lacked a declared output field. The target is 0.
+  - `blank_outputs`: held-out calls that returned every field with a text field empty. Without an adapter the parser returns nil for an empty answer, which counts as a silent failure; with one it returns `""`, which counts here. Compare the sum of the two across adapters.
+  - `output_errors`: held-out calls that failed with a typed output error (a reply that could not be parsed, a truncated reply, a refusal). Only adapters raise these.
+  - `other_errors`: held-out calls that failed for any other reason.
+  - `compile_silent_failures` and `compile_silent_failure_rate`: the same check on the predictions the optimizer scored while compiling. Calls that failed while compiling are not counted.
 
 ### Optimizers Tested
 
